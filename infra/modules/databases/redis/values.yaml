@@ -1,0 +1,6 @@
+master:
+  extraFlags:
+    - "--maxmemory 512mb"
+    - "--maxmemory-policy allkeys-lru"
+    # - "--appendonly yes" # если нужно
+  configmap: redis-config
