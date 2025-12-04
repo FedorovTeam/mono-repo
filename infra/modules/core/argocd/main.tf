@@ -37,22 +37,23 @@ resource "helm_release" "argocd" {
         domain = var.domain
       }
 
-      # Отключаем Dex, используем чистый OIDC
+      # --- отключаем Dex, используем чистый OIDC ---
       dex = {
         enabled = false
       }
 
+      # --- configs.* -> argocd-* ConfigMaps/Secret ---
       configs = {
         # argocd-cm
         cm = {
-          # URL инстанса ArgoCD (как открываешь в браузере)
+          # URL ArgoCD
           url = "https://${var.domain}"
 
           # OIDC-конфиг для Authentik
           "oidc.config" = <<-EOT
             name: Authentik
-            issuer: https://auth.tech.fedorov-team.tech/application/o/argocd/
-            clientID: argocd
+            issuer: ${var.authentik_issuer_url}
+            clientID: ${var.authentik_client_id}
             clientSecret: $oidc.authentik.clientSecret
             requestedScopes: ["openid", "profile", "email", "groups"]
           EOT
@@ -60,23 +61,18 @@ resource "helm_release" "argocd" {
 
         # argocd-rbac-cm
         rbac = {
-          # Раздаём права по группам, которые вернёт Authentik
           "policy.csv" = <<-EOT
             g, argocd-admins, role:admin
             g, argocd-readonly, role:readonly
           EOT
 
-          # По умолчанию — только чтение
           "policy.default" = "role:readonly"
-
-          # Какие scope читаем из токена
-          scopes = "[groups, email]"
+          scopes           = "[groups, email]"
         }
 
         # argocd-secret
         secret = {
           extra = {
-            # Секрет клиента Authentik для ArgoCD
             "oidc.authentik.clientSecret" = var.authentik_client_secret
           }
         }
@@ -102,7 +98,7 @@ resource "helm_release" "argocd" {
           ]
         }
 
-        # Встроенный ingress в чарте нам не нужен — мы делаем свой через kubernetes_manifest
+        # встроенный ingress не используем, свой манифест ниже
         ingress = {
           enabled          = false
           ingressClassName = "traefik"
@@ -114,27 +110,9 @@ resource "helm_release" "argocd" {
           servicePort = var.server_ingress_service_port
         }
 
+        # тут только url, без dex.config
         config = {
           url = "https://${var.domain}"
-
-          # Конфиг Dex с Authentik как OIDC-провайдером
-          # по гайду authentik: https://integrations.goauthentik.io/infrastructure/argocd/
-          "dex.config" = <<-EOT
-            connectors:
-              - type: oidc
-                id: authentik
-                name: Authentik
-                config:
-                  issuer: ${var.authentik_issuer_url}
-                  clientID: ${var.authentik_client_id}
-                  clientSecret: $dex.authentik.clientSecret
-                  insecureEnableGroups: true
-                  scopes:
-                    - openid
-                    - profile
-                    - email
-                    - groups
-          EOT
         }
       }
 
@@ -150,29 +128,9 @@ resource "helm_release" "argocd" {
           }
         ]
       }
-
-      # --- configs.* идут в argocd-* ConfigMaps/Secrets ---
-      configs = {
-        # argocd-secret: добавляем clientSecret для Dex/Authenitk
-        secret = {
-          extra = {
-            # будет доступно как $dex.authentik.clientSecret
-            "dex.authentik.clientSecret" = var.authentik_client_secret
-          }
-        }
-
-        # argocd-rbac-cm: простейший RBAC по группам
-        rbac = {
-          "policy.csv" = <<-EOT
-            g, ArgoCD Admins, role:admin
-            g, ArgoCD Viewers, role:readonly
-          EOT
-        }
-      }
     })
   ]
 }
-
 
 resource "kubernetes_manifest" "argocd_ingress_override" {
   manifest = {
