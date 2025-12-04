@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-mono-repo
+  namespace: argocd
+  labels:
+    # Очень важно: говорит ArgoCD, что это секрет с настройками репозитория
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  # Должен в точности совпадать с .spec.source.repoURL в Application
+  url: git@github.com:FedorovTeam/mono-repo.git
+  sshPrivateKey: |-
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    ТУТ_ТВОЙ_ПРИВАТНЫЙ_КЛЮЧ_из_argocd-mono-repo
+    -----END OPENSSH PRIVATE KEY-----
+  # Опционально, просто человекочитаемое имя
+  name: mono-repo
