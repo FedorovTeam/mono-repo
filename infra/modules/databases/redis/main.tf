@@ -31,7 +31,7 @@ resource "helm_release" "redis" {
   namespace        = var.namespace
   repository       = "https://charts.bitnami.com/bitnami"
   chart            = "redis"
-  version          = "18.5.0"
+  version          = "24.0.0"
   create_namespace = true
 
   # Все бывшие set {} собраны в один список

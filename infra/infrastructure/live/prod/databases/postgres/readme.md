@@ -3,6 +3,7 @@ Prot forwarding:
 kubectl port-forward -n postgres svc/postgres-postgresql 5432:5432
 ```
 
+# Сначала нужно установить пароль для Postgres
 ```shell
 kubectl create secret generic postgres-secret \
   --from-literal=postgres-password=postgres_pass \
