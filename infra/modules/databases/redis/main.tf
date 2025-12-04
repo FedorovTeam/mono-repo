@@ -1,6 +1,4 @@
-terraform {
-  backend "local" {}
-}
+# modules/databases/redis/main.tf
 
 variable "kubeconfig" {
   type = string
@@ -11,6 +9,15 @@ variable "namespace" {
   default = "redis"
 }
 
+terraform {
+  required_providers {
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 2.10.1"
+    }
+  }
+}
+
 provider "helm" {
   kubernetes = {
     config_path = var.kubeconfig
@@ -18,12 +25,11 @@ provider "helm" {
 }
 
 resource "helm_release" "redis" {
-  name       = "redis"
-  namespace  = var.namespace
-  repository = "https://charts.bitnami.com/bitnami"
-  chart      = "redis"
-  version    = "18.5.0" # проверено, поддерживает конфиг и memory policy
-
+  name             = "redis"
+  namespace        = var.namespace
+  repository       = "https://charts.bitnami.com/bitnami"
+  chart            = "redis"
+  version          = "18.5.0"
   create_namespace = true
 
   set {
@@ -56,6 +62,6 @@ resource "helm_release" "redis" {
     value = "100m"
   }
 
-  # Подключим наш конфиг через configMap
+  # Подключаем configMap из values.yaml в этом модуле
   values = [file("${path.module}/values.yaml")]
 }

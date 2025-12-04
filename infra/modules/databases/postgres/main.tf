@@ -13,6 +13,15 @@ variable "namespace" {
   default = "postgres"
 }
 
+terraform {
+  required_providers {
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 2.10.1"
+    }
+  }
+}
+
 provider "helm" {
   kubernetes = {
     config_path = var.kubeconfig
@@ -20,15 +29,14 @@ provider "helm" {
 }
 
 resource "helm_release" "postgres" {
-  name       = "postgres"
-  namespace  = var.namespace
-  chart      = "postgresql"
-  repository = "https://charts.bitnami.com/bitnami"
-  version    = "12.1.5"
-
+  name             = "postgres"
+  namespace        = var.namespace
+  chart            = "postgresql"
+  repository       = "https://charts.bitnami.com/bitnami"
+  version          = "12.1.5"
   create_namespace = true
 
-  # Используем заранее созданный Kubernetes Secret с валидным именем
+  # Используем заранее созданный Kubernetes Secret
   set {
     name  = "auth.existingSecret"
     value = "postgres-secret"
@@ -44,7 +52,7 @@ resource "helm_release" "postgres" {
     value = "app"
   }
 
-  # Переопределим имя ресурса (чтобы было predictable и без заглавных)
+  # Переопределим имя ресурсов чарта
   set {
     name  = "nameOverride"
     value = "postgresql"
@@ -70,6 +78,7 @@ resource "helm_release" "postgres" {
     value = "100m"
   }
 
+  # Параметры PostgreSQL (зависят от версии чарта, но оставим как есть)
   set {
     name  = "postgresql.parameters[0].name"
     value = "max_connections"
@@ -89,5 +98,4 @@ resource "helm_release" "postgres" {
     name  = "postgresql.parameters[1].value"
     value = "5"
   }
-
 }

@@ -1,3 +1,5 @@
+# infrastructure/live/prod/databases/redis/terragrunt.hcl
+
 terraform {
   source = "../../../../../modules/databases/redis"
 }
