@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: git@github.com:FedorovTeam/mono-repo.git
     targetRevision: main
-    path: argocd
+    path: infra/argocd
     directory:
       recurse: true
   destination:
