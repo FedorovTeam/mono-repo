@@ -80,6 +80,8 @@ spec:
               value: "true"
             - name: S3_REGION
               value: "us-east-1"
+            - name: DEFAULT_WORKSPACE_PLAN
+              value: "UNLIMITED"
           ports:
             - containerPort: 3000
 ---
@@ -174,6 +176,8 @@ spec:
               value: "true"
             - name: S3_REGION
               value: "us-east-1"
+            - name: DEFAULT_WORKSPACE_PLAN
+              value: "UNLIMITED"
           ports:
             - containerPort: 3000
 ---
