@@ -1,5 +1,9 @@
 # modules/databases/redis/main.tf
 
+terraform {
+  backend "local" {}
+}
+
 variable "kubeconfig" {
   type = string
 }
