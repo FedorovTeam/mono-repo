@@ -35,7 +35,7 @@ spec:
             - name: ENCRYPTION_SECRET
               value: "b362abb9f63b14047697e51ef6fdda36"
             - name: DATABASE_URL
-              value: "postgresql://typebot:typebot_pass@postgres-postgresql.postgres.svc.cluster.local:5432/typebot"
+              value: "postgresql://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/typebot"
             - name: REDIS_URL
               value: "redis://redis-master.redis.svc.cluster.local:6379"
             - name: NEXTAUTH_URL
@@ -131,7 +131,7 @@ spec:
             - name: ENCRYPTION_SECRET
               value: "b362abb9f63b14047697e51ef6fdda36"
             - name: DATABASE_URL
-              value: "postgresql://typebot:typebot_pass@postgres-postgresql.postgres.svc.cluster.local:5432/typebot"
+              value: "postgresql://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/typebot"
             - name: REDIS_URL
               value: "redis://redis-master.redis.svc.cluster.local:6379"
             - name: NEXTAUTH_URL
