@@ -45,6 +45,9 @@ terragrunt apply
 
 ```bash
 cd ../traefik
+kubectl get ingressclass -A # если уже имеется Ингрес - нужно удалить
+kubectl delete ingressclass traefik -n kube-system
+# потом применить
 terragrunt apply
 ```
 
