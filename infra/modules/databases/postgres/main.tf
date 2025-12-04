@@ -33,7 +33,7 @@ resource "helm_release" "postgres" {
   namespace        = var.namespace
   chart            = "postgresql"
   repository       = "https://charts.bitnami.com/bitnami"
-  version          = "12.1.5"
+  version          = "18.1.13"
   create_namespace = true
 
   set = [
