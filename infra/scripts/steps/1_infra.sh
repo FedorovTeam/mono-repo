@@ -33,4 +33,4 @@ kubectl get ipaddresspools.metallb.io -n metallb-system
 kubectl get l2advertisements.metallb.io -n metallb-system
 
 # Применяем тестовый ингрес контроллер
-kubectl apply -f ../../../../manifests/whoami-ingress.yaml
+kubectl apply -f ../../../../manifests/whoami/whoami-ingress.yaml
