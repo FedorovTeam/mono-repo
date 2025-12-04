@@ -36,8 +36,10 @@ resource "helm_release" "argocd" {
       global = {
         domain = var.domain
       }
+
       server = {
         extraArgs = ["--insecure"]
+
         service = {
           ports = [
             {
@@ -52,6 +54,7 @@ resource "helm_release" "argocd" {
             }
           ]
         }
+
         ingress = {
           enabled          = false
           ingressClassName = "traefik"
@@ -60,12 +63,35 @@ resource "helm_release" "argocd" {
             "cert-manager.io/cluster-issuer"                   = "letsencrypt"
             "traefik.ingress.kubernetes.io/router.entrypoints" = "websecure"
           }
-          servicePort = "http" # игнорируется
+          servicePort = var.server_ingress_service_port
         }
+
+        # argocd-cm (ConfigMap) — сюда уйдёт url и dex.config
         config = {
           url = "https://${var.domain}"
+
+          # Конфиг Dex с Authentik как OIDC-провайдером
+          # по гайду authentik: https://integrations.goauthentik.io/infrastructure/argocd/
+          "dex.config" = <<-EOT
+            connectors:
+              - type: oidc
+                id: authentik
+                name: Authentik
+                config:
+                  issuer: ${var.authentik_issuer_url}
+                  clientID: ${var.authentik_client_id}
+                  clientSecret: $dex.authentik.clientSecret
+                  insecureEnableGroups: true
+                  scopes:
+                    - openid
+                    - profile
+                    - email
+                    - groups
+          EOT
         }
       }
+
+      # Repo-server env как у тебя было
       repoServer = {
         env = [
           {
@@ -78,9 +104,29 @@ resource "helm_release" "argocd" {
           }
         ]
       }
+
+      # --- configs.* идут в argocd-* ConfigMaps/Secrets ---
+      configs = {
+        # argocd-secret: добавляем clientSecret для Dex/Authenitk
+        secret = {
+          extra = {
+            # будет доступно как $dex.authentik.clientSecret
+            "dex.authentik.clientSecret" = var.authentik_client_secret
+          }
+        }
+
+        # argocd-rbac-cm: простейший RBAC по группам
+        rbac = {
+          "policy.csv" = <<-EOT
+            g, ArgoCD Admins, role:admin
+            g, ArgoCD Viewers, role:readonly
+          EOT
+        }
+      }
     })
   ]
 }
+
 
 resource "kubernetes_manifest" "argocd_ingress_override" {
   manifest = {

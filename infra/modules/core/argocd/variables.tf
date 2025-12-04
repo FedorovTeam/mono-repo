@@ -19,3 +19,18 @@ variable "server_ingress_service_port" {
   default     = "http"
 }
 
+variable "authentik_issuer_url" {
+  description = "OIDC issuer URL from Authentik"
+  type        = string
+}
+
+variable "authentik_client_id" {
+  description = "OIDC client ID for ArgoCD in Authentik"
+  type        = string
+}
+
+variable "authentik_client_secret" {
+  description = "OIDC client secret for ArgoCD in Authentik"
+  type        = string
+  sensitive   = true
+}
