@@ -1,0 +1,12 @@
+server:
+  port: 8080
+security:
+  apiKey: "secret"
+documentService:
+  address: "localhost:50051"
+temporal:
+  address: "localhost:7233"
+  namespace: "knowledge"
+  taskQueue: "knowledge-documents"
+logging:
+  level: "info"

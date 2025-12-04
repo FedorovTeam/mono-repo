@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package backend.document.v1;
+
+option go_package = "backend-gateway-service/proto/backend/document/v1;pb";
+
+enum DocumentStatus {
+  DOCUMENT_STATUS_UPLOADED = 0;
+  DOCUMENT_STATUS_STORED_ORIGINAL = 1;
+  DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN = 2;
+  DOCUMENT_STATUS_PUBLISHED_TO_GITHUB = 3;
+  DOCUMENT_STATUS_FAILED = 4;
+}
+
+message Document {
+  string id = 1;
+  string file_name = 2;
+  string repository = 3;
+  string branch = 4;
+  string path = 5;
+  DocumentStatus status = 6;
+  string workflow_id = 7;
+  string error = 8;
+}
+
+message CreateDocumentRequest {
+  string file_name = 1;
+  string content_base64 = 2;
+  string repository = 3;
+  string branch = 4;
+  string path = 5;
+  string correlation_id = 6;
+}
+
+message GetDocumentRequest {
+  string id = 1;
+}
+
+message RetryProcessingRequest {
+  string id = 1;
+  string correlation_id = 2;
+}
+
+message ListDocumentsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  DocumentStatus status_filter = 3;
+  bool filter_by_status = 4;
+  string repository = 5;
+}
+
+message ListDocumentsResponse {
+  repeated Document documents = 1;
+  int64 total_count = 2;
+}
+
+service DocumentService {
+  rpc CreateDocument(CreateDocumentRequest) returns (Document);
+  rpc GetDocument(GetDocumentRequest) returns (Document);
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
+  rpc RetryProcessing(RetryProcessingRequest) returns (Document);
+}
