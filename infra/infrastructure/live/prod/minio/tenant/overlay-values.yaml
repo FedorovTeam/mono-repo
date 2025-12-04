@@ -1,0 +1,18 @@
+# infrastructure/live/prod/minio/tenant/overlay-values.yaml
+# Переопределяем только то, что нужно:
+tenant:
+  console:
+    enabled: true
+    replicas: 1
+    image:
+      repository: quay.io/minio/console
+      tag: v0.30.0
+    env:
+      - name: CONSOLE_MINIO_SERVER
+        value: https://minio-tenant-prod-hl:9000
+      - name: CONSOLE_TLS_SKIP_VERIFY
+        value: "true"
+
+  exposeServices:
+    console: true
+    minio: true

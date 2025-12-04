@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: minio-tenant-console-cert
+  namespace: minio
+spec:
+  secretName: minio-console-tls
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  commonName: console.minio.tech.fedorov-team.tech
+  dnsNames:
+    - console.minio.tech.fedorov-team.tech
