@@ -36,6 +36,10 @@ resource "helm_release" "postgres" {
   version          = "18.1.13"
   create_namespace = true
 
+  values = [
+    file("${path.module}/values-postgres.yaml")
+  ]
+
   set = [
     # Используем заранее созданный Kubernetes Secret
     {

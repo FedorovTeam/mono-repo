@@ -1,0 +1,4 @@
+primary:
+  extendedConfiguration: |
+    max_connections = 1000
+    superuser_reserved_connections = 10
