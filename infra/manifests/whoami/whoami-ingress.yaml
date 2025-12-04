@@ -32,3 +32,30 @@ spec:
           image: traefik/whoami  # Используем официальный образ whoami от Traefik
           ports:
             - containerPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami
+  namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    # Traefik: какие entrypoints использовать
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - whoami.fedorov-team.tech
+      secretName: whoami-tls
+  rules:
+    - host: whoami.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  number: 80
