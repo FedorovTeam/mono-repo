@@ -36,6 +36,8 @@ http:
 ingressClass:
   enabled: true
   isDefaultClass: true
+  name: traefik
+  namespace: traefik
 
 ports:
   web:
