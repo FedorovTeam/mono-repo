@@ -35,4 +35,7 @@ data:
     - type: git
       name: mono-repo
       url: git@github.com:FedorovTeam/mono-repo.git
+    - type: helm
+      name: temporalio
+      url: https://go.temporal.io/helm-charts
   accounts.ci: apiKey, login
