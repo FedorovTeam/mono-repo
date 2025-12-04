@@ -29,7 +29,7 @@ provider "helm" {
 }
 
 resource "helm_release" "postgres" {
-  name             = "postgres-${timestamp()}"
+  name             = "postgres-v2"
   namespace        = var.namespace
   chart            = "postgresql"
   repository       = "https://charts.bitnami.com/bitnami"
