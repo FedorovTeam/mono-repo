@@ -64,11 +64,11 @@ resource "helm_release" "postgres" {
     },
     {
       name  = "primary.resources.requests.memory"
-      value = "256Mi"
+      value = "512Mi"
     },
     {
       name  = "primary.resources.requests.cpu"
-      value = "100m"
+      value = "200m"
     },
     {
       name  = "postgresql.parameters[0].name"
@@ -76,7 +76,7 @@ resource "helm_release" "postgres" {
     },
     {
       name  = "postgresql.parameters[0].value"
-      value = "500"
+      value = "1000"
     },
     {
       name  = "postgresql.parameters[1].name"
@@ -84,7 +84,7 @@ resource "helm_release" "postgres" {
     },
     {
       name  = "postgresql.parameters[1].value"
-      value = "5"
+      value = "10"
     },
   ]
 }
