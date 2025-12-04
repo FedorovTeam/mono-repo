@@ -7,8 +7,8 @@ metadata:
   namespace: temporal
 type: Opaque
 stringData:
-  client-id: "<AUTHENTIK_CLIENT_ID>"
-  client-secret: "<AUTHENTIK_CLIENT_SECRET>"
+  client-id: "ZgByqX8FrI7Q98XdHRY8xPfKusgfUhpzkxbJzLdN"
+  client-secret: "pHUvruDGjK4pkDaYM0hWDfcBaac2nBPislzoKHufFYuB75ZENgFT8OWCHppIEujyUYaeFFHmWaUE93MClrHPGiFSt77cFGDIKqkOeFjbAhtFnc5szZLhuWdp3UdB2z8V"
 ---
 # Secret с доступом к уже существующей БД Postgres
 # использует того же пользователя/пароль, что и Authentik
@@ -168,10 +168,10 @@ spec:
             - name: TEMPORAL_AUTH_PROVIDER_URL
               # URL авторизационного/issuer endpoint Authentik (провайдера)
               # например: https://auth.tech.fedorov-team.tech/application/o/temporal/
-              value: "https://auth.tech.fedorov-team.tech/application/o/<slug>/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/temporal/"
             - name: TEMPORAL_AUTH_ISSUER_URL
               # точный issuer из .well-known/openid-configuration
-              value: "https://auth.tech.fedorov-team.tech/application/o/<slug>/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/temporal/.well-known/openid-configuration"
             - name: TEMPORAL_AUTH_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -183,7 +183,7 @@ spec:
                   name: temporal-authentik-oidc
                   key: client-secret
             - name: TEMPORAL_AUTH_CALLBACK_URL
-              value: "https://temporal.tech.fedorov-team.tech/auth/sso/callback"
+              value: "https://temporal.tech.fedorov-team.tech/auth/callback"
             - name: TEMPORAL_AUTH_SCOPES
               value: "openid,profile,email"
           resources:
