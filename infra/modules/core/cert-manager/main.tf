@@ -1,7 +1,9 @@
 # modules/cert-manager/main.tf
 # OpenTofu/Terraform модуль для установки cert-manager через Helm
 
-variable "kubeconfig" { type = string }
+variable "kubeconfig" {
+  type = string
+}
 
 terraform {
   required_providers {
@@ -13,7 +15,7 @@ terraform {
 }
 
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     config_path = var.kubeconfig
   }
 }

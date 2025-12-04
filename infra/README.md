@@ -32,7 +32,7 @@ kubectl get nodes
 ### Этап 1 — Установка cert-manager
 
 ```bash
-cd infrastructure/live/prod/cert-manager
+cd infrastructure/live/prod/core/cert-manager
 terragrunt apply
 ```
 
