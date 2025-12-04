@@ -1,0 +1,16 @@
+level: info
+encoding: json
+outputPaths: ["stdout"]
+errorOutputPaths: ["stderr"]
+encoderConfig:
+  messageKey: message
+  levelKey: level
+  levelEncoder: lowercase
+  timeKey: time
+  timeEncoder: iso8601
+  callerKey: caller
+  stacktraceKey: stacktrace
+  nameKey: logger
+  lineEnding: ""
+  encodeDuration: ""
+  encodeCaller: short

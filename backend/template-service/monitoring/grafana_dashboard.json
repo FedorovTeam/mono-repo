@@ -1,0 +1,46 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Template Service Overview",
+    "tags": ["template-service"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "type": "graph",
+        "title": "HTTP 5xx Error Rate",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"template-service\",code=~\"5..\"}[5m])",
+            "legendFormat": "5xx errors"
+          }
+        ],
+        "datasource": null,
+        "id": 1
+      },
+      {
+        "type": "graph",
+        "title": "Request Rate",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"template-service\"}[1m])",
+            "legendFormat": "req/sec"
+          }
+        ],
+        "datasource": null,
+        "id": 2
+      },
+      {
+        "type": "stat",
+        "title": "Service Up",
+        "targets": [
+          {
+            "expr": "up{job=\"template-service\"}"
+          }
+        ],
+        "id": 3
+      }
+    ],
+    "schemaVersion": 27,
+    "version": 1
+  }
+}

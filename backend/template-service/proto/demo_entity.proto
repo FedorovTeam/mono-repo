@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package template;
+
+option go_package = "./templatepb";
+
+service DemoEntityService {
+  rpc CreateDemoEntity (CreateDemoEntityRequest) returns (CreateDemoEntityResponse);
+  rpc GetDemoEntity (GetDemoEntityRequest) returns (GetDemoEntityResponse);
+}
+
+message CreateDemoEntityRequest {
+  string bucket_id = 1;
+  string region_id = 2;
+  string value = 3;
+  string user_id = 4; // для DEMO/B2C/B2B, используется для генерации bucket_id
+}
+
+message CreateDemoEntityResponse {
+  string id = 1;
+  string bucket_id = 2;
+  string region_id = 3;
+}
+
+message GetDemoEntityRequest {
+  string id = 1;
+}
+
+message GetDemoEntityResponse {
+  string id = 1;
+  string bucket_id = 2;
+  string region_id = 3;
+  string value = 4;
+}

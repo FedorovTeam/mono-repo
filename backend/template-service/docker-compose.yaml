@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  template-service:
+    build: .
+    container_name: template-service
+    ports:
+      - "8080:8080"
+      - "9090:9090" # gRPC
+    environment:
+      - SERVICE_NAME=template-service
+      - SERVICE_PORT=8080
+      - GRPC_PORT=9090
+      - SERVICE_REGION=local
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+    command: ["./template-service"]

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "template-service.fullname" . }}
+  labels:
+    {{- include "template-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "template-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "template-service.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+            - containerPort: {{ .Values.service.grpcPort }}
+          env:
+            - name: SERVICE_NAME
+              value: {{ .Values.env.SERVICE_NAME | quote }}
+            - name: SERVICE_PORT
+              value: {{ .Values.env.SERVICE_PORT | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.env.GRPC_PORT | quote }}
+            - name: SERVICE_REGION
+              value: {{ .Values.env.SERVICE_REGION | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

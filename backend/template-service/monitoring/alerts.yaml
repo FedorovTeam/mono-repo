@@ -1,0 +1,20 @@
+groups:
+  - name: template-service.rules
+    rules:
+      - alert: TemplateServiceDown
+        expr: up{job="template-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Template Service is down"
+          description: "No heartbeat from template-service for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{job="template-service",code=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate on Template Service"
+          description: "More than 5% of requests are failing with 5xx errors."

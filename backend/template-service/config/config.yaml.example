@@ -1,0 +1,46 @@
+# Пример конфигурационного файла для template-service
+service:
+  name: template-service
+  port: 8080
+  grpc_port: 9090
+  region:  ru-msk-1
+
+region_id: ru-msk-1
+
+yugabyte:
+  host: yb-tserver-service.yugabyte.svc.cluster.local
+  port: 5433
+  user: yugabyte
+  password: yugabyte
+  db: template_service
+
+minio:
+  endpoint: minio:9000
+  access_key: minio
+  secret_key: minio123
+  bucket: template-bucket
+
+redis:
+  addr: redis-master.redis.svc.cluster.local:6379
+  password: ""
+  db: 0
+
+nats:
+  url: nats://nats.nats.svc.cluster.local:4222
+  demo_subject: template.demo-event.v1
+  demo_dlq_subject: template.demo-event.dlq.v1
+
+clickhouse:
+  addr: clickhouse:9000
+  user: default
+  password: ""
+  db: analytics
+
+prometheus:
+  enabled: true
+
+tracing:
+  endpoint: tempo:4317
+
+logging:
+  level: info
