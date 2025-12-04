@@ -1,0 +1,51 @@
+type Query {
+  knowledgeDocument(id: ID!): KnowledgeDocument
+  knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!
+}
+
+type Mutation {
+  uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): KnowledgeDocument!
+  retryProcessing(documentId: ID!): KnowledgeDocument!
+}
+
+type KnowledgeDocumentConnection {
+  nodes: [KnowledgeDocument!]!
+  totalCount: Int!
+}
+
+type KnowledgeDocument {
+  id: ID!
+  fileName: String!
+  repository: String!
+  branch: String!
+  path: String!
+  status: KnowledgeDocumentStatus!
+  workflowId: String
+  error: String
+}
+
+enum KnowledgeDocumentStatus {
+  UPLOADED
+  STORED_ORIGINAL
+  CONVERTED_TO_MARKDOWN
+  PUBLISHED_TO_GITHUB
+  FAILED
+}
+
+input UploadKnowledgeDocumentInput {
+  fileName: String!
+  contentBase64: String!
+  repository: String!
+  branch: String!
+  path: String!
+}
+
+input KnowledgeDocumentFilter {
+  status: KnowledgeDocumentStatus
+  repository: String
+}
+
+input Pagination {
+  limit: Int = 10
+  offset: Int = 0
+}
