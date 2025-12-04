@@ -1,0 +1,240 @@
+# manifests/typebot/resources/typebot.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: typebot-builder
+  namespace: typebot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: typebot-builder
+  template:
+    metadata:
+      labels:
+        app: typebot-builder
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: typebot-builder
+      containers:
+        - name: typebot-builder
+          image: baptistearno/typebot-builder:latest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+          env:
+            - name: ENCRYPTION_SECRET
+              value: "b362abb9f63b14047697e51ef6fdda36"
+            - name: DATABASE_URL
+              value: "postgresql://typebot:typebot_pass@postgres-postgresql.postgres.svc.cluster.local:5432/typebot"
+            - name: REDIS_URL
+              value: "redis://redis-master.redis.svc.cluster.local:6379"
+            - name: NEXTAUTH_URL
+              value: "https://builder.typebot.fedorov-team.ru"
+            - name: NEXT_PUBLIC_VIEWER_URL
+              value: "https://forms.fedorov-team.ru"
+            - name: ADMIN_EMAIL
+              value: "ogoyukin93@gmail.com"
+            - name: CUSTOM_OAUTH_NAME
+              value: "Authentik"
+            - name: CUSTOM_OAUTH_CLIENT_ID
+              value: "8YU3OomsFxoxJVC9M9a5sgIQDJU8nGixz4pUItIy"
+            - name: CUSTOM_OAUTH_CLIENT_SECRET
+              value: "J4liEHlXpBZJ0s2jLej7LVXGOKfxiUFcBxexMacSWXpI6MtZ2YT4AIKBbMKTsw20nFhCj1MNAARsJwYqn2VFYftngZFdyXWkcygQ61N6h0LimCzNjWrOiW3nOWL8KcWf"
+            - name: CUSTOM_OAUTH_WELL_KNOWN_URL
+              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/.well-known/openid-configuration"
+            - name: CUSTOM_OAUTH_ISSUER
+              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+            - name: NEXTAUTH_ISSUER
+              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+            - name: CUSTOM_OAUTH_USER_ID_PATH
+              value: "sub"
+            - name: CUSTOM_OAUTH_USER_NAME_PATH
+              value: "name"
+            - name: CUSTOM_OAUTH_USER_EMAIL_PATH
+              value: "email"
+            - name: CUSTOM_OAUTH_USER_IMAGE_PATH
+              value: "sub"
+            - name: CUSTOM_OAUTH_SCOPE
+              value: "openid profile email"
+            - name: DISABLE_SIGNUP
+              value: "false"
+            - name: S3_ACCESS_KEY
+              value: "oOdl3fxkJrXwfeqFA4N7"
+            - name: S3_SECRET_KEY
+              value: "kq09KL2BdAEJxuPCmr0SpSycan5cC8z9Sm68wAgo"
+            - name: S3_BUCKET
+              value: "typebot"
+            - name: S3_ENDPOINT
+              value: "api.minio.tech.fedorov-team.ru"
+            - name: S3_SSL
+              value: "true"
+            - name: S3_REGION
+              value: "us-east-1"
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: typebot-builder
+  namespace: typebot
+spec:
+  selector:
+    app: typebot-builder
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: typebot-viewer
+  namespace: typebot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: typebot-viewer
+  template:
+    metadata:
+      labels:
+        app: typebot-viewer
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: typebot-viewer
+      containers:
+        - name: typebot-viewer
+          image: baptistearno/typebot-viewer:latest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+          env:
+            - name: ENCRYPTION_SECRET
+              value: "b362abb9f63b14047697e51ef6fdda36"
+            - name: DATABASE_URL
+              value: "postgresql://typebot:typebot_pass@postgres-postgresql.postgres.svc.cluster.local:5432/typebot"
+            - name: REDIS_URL
+              value: "redis://redis-master.redis.svc.cluster.local:6379"
+            - name: NEXTAUTH_URL
+              value: "https://forms.fedorov-team.ru"
+            - name: NEXT_PUBLIC_VIEWER_URL
+              value: "https://forms.fedorov-team.ru"
+            - name: ADMIN_EMAIL
+              value: "ogoyukin93@gmail.com"
+            - name: CUSTOM_OAUTH_NAME
+              value: "Authentik"
+            - name: CUSTOM_OAUTH_CLIENT_ID
+              value: "8YU3OomsFxoxJVC9M9a5sgIQDJU8nGixz4pUItIy"
+            - name: CUSTOM_OAUTH_CLIENT_SECRET
+              value: "J4liEHlXpBZJ0s2jLej7LVXGOKfxiUFcBxexMacSWXpI6MtZ2YT4AIKBbMKTsw20nFhCj1MNAARsJwYqn2VFYftngZFdyXWkcygQ61N6h0LimCzNjWrOiW3nOWL8KcWf"
+            - name: CUSTOM_OAUTH_WELL_KNOWN_URL
+              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/.well-known/openid-configuration"
+            - name: CUSTOM_OAUTH_USER_ID_PATH
+              value: "sub"
+            - name: CUSTOM_OAUTH_ISSUER
+              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+            - name: NEXTAUTH_ISSUER
+              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+            - name: CUSTOM_OAUTH_USER_NAME_PATH
+              value: "name"
+            - name: CUSTOM_OAUTH_USER_EMAIL_PATH
+              value: "email"
+            - name: CUSTOM_OAUTH_USER_IMAGE_PATH
+              value: "sub"
+            - name: CUSTOM_OAUTH_SCOPE
+              value: "openid profile email"
+            - name: S3_ACCESS_KEY
+              value: "oOdl3fxkJrXwfeqFA4N7"
+            - name: S3_SECRET_KEY
+              value: "kq09KL2BdAEJxuPCmr0SpSycan5cC8z9Sm68wAgo"
+            - name: S3_BUCKET
+              value: "typebot"
+            - name: S3_ENDPOINT
+              value: "api.minio.tech.fedorov-team.ru"
+            - name: S3_SSL
+              value: "true"
+            - name: S3_REGION
+              value: "us-east-1"
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: typebot-viewer
+  namespace: typebot
+spec:
+  selector:
+    app: typebot-viewer
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: typebot-builder
+  namespace: typebot
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - builder.typebot.fedorov-team.ru
+      secretName: typebot-builder-tls
+  rules:
+    - host: builder.typebot.fedorov-team.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: typebot-builder
+                port:
+                  number: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: typebot-viewer
+  namespace: typebot
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - forms.fedorov-team.ru
+      secretName: typebot-viewer-tls
+  rules:
+    - host: forms.fedorov-team.ru
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: typebot-viewer
+                port:
+                  number: 3000

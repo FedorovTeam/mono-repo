@@ -15,7 +15,7 @@ kubectl get pods -n postgres
 kubectl run psql-client --rm -it --restart=Never \
   --namespace postgres \
   --image=bitnami/postgresql:15 \
-  --env="PGPASSWORD=3tAL5bf38yfx" \
+  --env="PGPASSWORD='3&!tAL5bf38yfx'" \
   -- psql -h postgresql -U postgres -d app
 
 ```
