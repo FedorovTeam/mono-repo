@@ -1,0 +1,75 @@
+# charts/traefik/values.yaml
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+middlewares:
+  redirect-to-https:
+    redirectScheme:
+      scheme: https
+      permanent: true
+      port: "443"
+
+http:
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+        port: "443"
+    # Исключение для /.well-known/acme-challenge/
+    redirect-except-challenge:
+      chain:
+        middlewares:
+          - name: challenge-exception
+          - name: redirect-to-https
+    challenge-exception:
+      replacePathRegex:
+        regex: "^/.well-known/acme-challenge/(.*)"
+        replacement: "/.well-known/acme-challenge/$1"
+    global-rate-limit:
+      rateLimit:
+        average: 100    # в среднем 100 запросов в секунду
+        burst: 50       # допускаем «взрывной» буст до 50 дополнительных запросов
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+
+ports:
+  web:
+    expose:
+      enabled: true
+  websecure:
+    expose:
+      enabled: true
+      tls:
+        enabled: true
+
+additionalArguments:
+  - "--log.level=INFO"
+  - "--accesslog=true"
+  - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+  - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+  - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
+  - "--api.dashboard=true"
+  - "--metrics.prometheus=true"
+  - "--entrypoints.metrics.address=:9100"
+
+persistence:
+  enabled: true
+  storageClass: "local-path"
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  path: /data
+
+service:
+  type: LoadBalancer
+
+dashboard:
+  enabled: true
+  ingressRoute:
+    dashboard:
+      enabled: true
+      entryPoints: ["websecure"]

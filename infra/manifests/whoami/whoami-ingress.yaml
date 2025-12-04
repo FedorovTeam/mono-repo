@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami-ingress
+  namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"  # Указываем кластерный Issuer (или его название) для cert-manager
+spec:
+  tls:
+    - hosts:
+        - whoami.fedorov-team.tech  # Указываем хост, для которого будем генерировать сертификат
+      secretName: whoami-tls-secret  # Имя секрета, куда будет сохранен сертификат
+  rules:
+    - host: whoami.fedorov-team.tech  # Указываем домен
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami  # Имя вашего сервиса whoami
+                port:
+                  number: 80  # Порт, на котором работает сервис (HTTP)

@@ -1,0 +1,8 @@
+.idea
+*/.cache-*
+*/.terragrunt-cache
+*/.terraform.lock.hcl
+
+# Generated kubeconfig files
+.kubeconfig_dev
+.kubeconfig_prod
