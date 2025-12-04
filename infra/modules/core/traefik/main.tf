@@ -1,8 +1,13 @@
 # modules/traefik/main.tf
 # OpenTofu/Terraform модуль для установки Traefik через Helm
 
-variable "kubeconfig" { type = string }
-variable "values_file" { type = string }
+variable "kubeconfig" {
+  type = string
+}
+
+variable "values_file" {
+  type = string
+}
 
 terraform {
   required_providers {
@@ -14,7 +19,7 @@ terraform {
 }
 
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     config_path = var.kubeconfig
   }
 }
@@ -25,5 +30,5 @@ resource "helm_release" "traefik" {
   chart            = "traefik"
   namespace        = "traefik"
   create_namespace = true
-  values           = [file(var.values_file)]
+  values           = [file(var.values_file)]  # Используем список файлов для значений
 }
