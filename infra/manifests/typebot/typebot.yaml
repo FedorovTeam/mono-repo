@@ -47,9 +47,9 @@ spec:
             - name: CUSTOM_OAUTH_NAME
               value: "Authentik"
             - name: CUSTOM_OAUTH_CLIENT_ID
-              value: "8YU3OomsFxoxJVC9M9a5sgIQDJU8nGixz4pUItIy"
+              value: "ljRO0IMhFWhhwiiPVqbVCUjdvG6x1sl1FM33uf2u"
             - name: CUSTOM_OAUTH_CLIENT_SECRET
-              value: "J4liEHlXpBZJ0s2jLej7LVXGOKfxiUFcBxexMacSWXpI6MtZ2YT4AIKBbMKTsw20nFhCj1MNAARsJwYqn2VFYftngZFdyXWkcygQ61N6h0LimCzNjWrOiW3nOWL8KcWf"
+              value: "wgmRXJGfLR4kmgovvsUerByj01xyYAHjalD0OHXShc164YqOvuFnvqaHfxkSSHvRVAva875uJX3lqkCGSdSIiCWtCdsqiMn49wxU8XsJjZSzZhWqA4YzX6scO14ZofuR"
             - name: CUSTOM_OAUTH_WELL_KNOWN_URL
               value: "https://auth.tech.fedorov-team.tech/application/o/typebot/.well-known/openid-configuration"
             - name: CUSTOM_OAUTH_ISSUER
@@ -143,9 +143,9 @@ spec:
             - name: CUSTOM_OAUTH_NAME
               value: "Authentik"
             - name: CUSTOM_OAUTH_CLIENT_ID
-              value: "8YU3OomsFxoxJVC9M9a5sgIQDJU8nGixz4pUItIy"
+              value: "ljRO0IMhFWhhwiiPVqbVCUjdvG6x1sl1FM33uf2u"
             - name: CUSTOM_OAUTH_CLIENT_SECRET
-              value: "J4liEHlXpBZJ0s2jLej7LVXGOKfxiUFcBxexMacSWXpI6MtZ2YT4AIKBbMKTsw20nFhCj1MNAARsJwYqn2VFYftngZFdyXWkcygQ61N6h0LimCzNjWrOiW3nOWL8KcWf"
+              value: "wgmRXJGfLR4kmgovvsUerByj01xyYAHjalD0OHXShc164YqOvuFnvqaHfxkSSHvRVAva875uJX3lqkCGSdSIiCWtCdsqiMn49wxU8XsJjZSzZhWqA4YzX6scO14ZofuR"
             - name: CUSTOM_OAUTH_WELL_KNOWN_URL
               value: "https://auth.tech.fedorov-team.tech/application/o/typebot/.well-known/openid-configuration"
             - name: CUSTOM_OAUTH_USER_ID_PATH
