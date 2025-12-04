@@ -1,6 +1,13 @@
 # modules/databases/redis/main.tf
 
 terraform {
+  required_providers {
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 3.0.0"
+    }
+  }
+
   backend "local" {}
 }
 
@@ -11,15 +18,6 @@ variable "kubeconfig" {
 variable "namespace" {
   type    = string
   default = "redis"
-}
-
-terraform {
-  required_providers {
-    helm = {
-      source  = "hashicorp/helm"
-      version = ">= 2.10.1"
-    }
-  }
 }
 
 provider "helm" {
@@ -36,36 +34,34 @@ resource "helm_release" "redis" {
   version          = "18.5.0"
   create_namespace = true
 
-  set {
-    name  = "architecture"
-    value = "standalone"
-  }
+  # Все бывшие set {} собраны в один список
+  set = [
+    {
+      name  = "architecture"
+      value = "standalone"
+    },
+    {
+      name  = "auth.enabled"
+      value = "false"
+    },
+    {
+      name  = "master.persistence.enabled"
+      value = "true"
+    },
+    {
+      name  = "master.persistence.size"
+      value = "1Gi"
+    },
+    {
+      name  = "master.resources.requests.memory"
+      value = "256Mi"
+    },
+    {
+      name  = "master.resources.requests.cpu"
+      value = "100m"
+    },
+  ]
 
-  set {
-    name  = "auth.enabled"
-    value = "false"
-  }
-
-  set {
-    name  = "master.persistence.enabled"
-    value = "true"
-  }
-
-  set {
-    name  = "master.persistence.size"
-    value = "1Gi"
-  }
-
-  set {
-    name  = "master.resources.requests.memory"
-    value = "256Mi"
-  }
-
-  set {
-    name  = "master.resources.requests.cpu"
-    value = "100m"
-  }
-
-  # Подключаем configMap из values.yaml в этом модуле
+  # Подключаем configMap / дополнительные настройки
   values = [file("${path.module}/values.yaml")]
 }
