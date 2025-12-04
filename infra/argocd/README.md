@@ -4,7 +4,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: moiqr-app-of-apps
+  name: fedorov-team-app-of-apps
   namespace: argocd
 spec:
   project: default
@@ -103,14 +103,14 @@ kubectl apply -f manifests/argocd/repo-mono-repo.yaml
 Если ты ещё не применял сам `Application`:
 
 ```bash
-kubectl apply -f manifests/argocd/moiqr-app-of-apps.yaml
+kubectl apply -f manifests/argocd/app-of-apps.yaml
 ```
 
 Дальше:
 
 - заходишь в ArgoCD UI на `https://argocd.tech.fedorov-team.tech`,
 - логинишься (`admin` + пароль из секрета `argocd-initial-admin-secret`),
-- видишь приложение `moiqr-app-of-apps`,
+- видишь приложение `fedorov-team-app-of-apps`,
 - нажимаешь **Sync** (если авто-синк не сработал первой).
 
 ---

@@ -1,9 +1,9 @@
-# ArgoCD App of Apps pattern for moiqr
+# ArgoCD App of Apps pattern for fedorov-team
 
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: moiqr-app-of-apps
+  name: fedorov-team-app-of-apps
   namespace: argocd
 spec:
   project: default

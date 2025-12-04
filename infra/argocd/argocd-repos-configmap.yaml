@@ -33,6 +33,6 @@ data:
       name: ovpn-admin
       url: https://github.com/palark/ovpn-admin.git
     - type: git
-      name: backend-mono-repo
-      url: git@github.com:moiqr/backend-mono-repo.git
+      name: mono-repo
+      url: git@github.com:FedorovTeam/mono-repo.git
   accounts.ci: apiKey, login
