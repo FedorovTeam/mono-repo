@@ -1,0 +1,201 @@
+---
+# Secret с доступом к уже существующей БД Postgres
+# использует того же пользователя/пароль, что и Authentik
+apiVersion: v1
+kind: Secret
+metadata:
+  name: temporal-postgres
+  namespace: temporal
+type: Opaque
+stringData:
+  POSTGRES_USER: postgres
+  POSTGRES_PWD: "3&!tAL5bf38yfx"  # поменяй тут, если сменишь пароль
+---
+# Dynamic config для Temporal (минимальный)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-dynamic-config
+  namespace: temporal
+data:
+  development.yaml: |
+    # Можно оставить пустым или добавить настройки позже
+    frontend.enableServerVersionCheck:
+      - value: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-server
+  namespace: temporal
+  labels:
+    app: temporal-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-server
+  template:
+    metadata:
+      labels:
+        app: temporal-server
+    spec:
+      containers:
+        - name: temporal
+          image: temporalio/auto-setup:1.26.3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7233
+              name: grpc
+          env:
+            # Тип БД — Postgres
+            - name: DB
+              value: "postgres12"
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_SEEDS
+              value: "postgres-postgresql.postgres.svc.cluster.local"
+
+            # Пользователь/пароль берём из Secret
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-postgres
+                  key: POSTGRES_USER
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-postgres
+                  key: POSTGRES_PWD
+
+            # Имена баз (auto-setup сам создаст, если есть права)
+            - name: DBNAME
+              value: "temporal"
+            - name: VISIBILITY_DBNAME
+              value: "temporal_visibility"
+
+            # dynamic config
+            - name: DYNAMIC_CONFIG_FILE_PATH
+              value: "config/dynamicconfig/development.yaml"
+
+            # Слушать на всех интерфейсах
+            - name: BIND_ON_IP
+              value: "0.0.0.0"
+
+          volumeMounts:
+            - name: dynamic-config
+              mountPath: /etc/temporal/config/dynamicconfig
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+      volumes:
+        - name: dynamic-config
+          configMap:
+            name: temporal-dynamic-config
+            items:
+              - key: development.yaml
+                path: development.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-frontend
+  namespace: temporal
+  labels:
+    app: temporal-server
+spec:
+  selector:
+    app: temporal-server
+  ports:
+    - name: grpc
+      port: 7233
+      targetPort: 7233
+  type: ClusterIP
+---
+# Temporal UI
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  namespace: temporal
+  labels:
+    app: temporal-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-ui
+  template:
+    metadata:
+      labels:
+        app: temporal-ui
+    spec:
+      containers:
+        - name: temporal-ui
+          image: temporalio/ui:2.36.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            # UI ходит к gRPC сервису внутри кластера
+            - name: TEMPORAL_ADDRESS
+              value: "temporal-frontend.temporal.svc.cluster.local:7233"
+            - name: TEMPORAL_UI_PORT
+              value: "8080"
+            - name: TEMPORAL_DEFAULT_NAMESPACE
+              value: "default"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  namespace: temporal
+  labels:
+    app: temporal-ui
+spec:
+  selector:
+    app: temporal-ui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+---
+# Ingress для Temporal UI через Traefik + cert-manager
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: temporal-ui
+  namespace: temporal
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - temporal.tech.fedorov-team.tech
+      secretName: temporal-ui-tls
+  rules:
+    - host: temporal.tech.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: temporal-ui
+                port:
+                  number: 8080
