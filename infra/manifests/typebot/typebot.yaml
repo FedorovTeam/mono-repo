@@ -39,9 +39,9 @@ spec:
             - name: REDIS_URL
               value: "redis://redis-master.redis.svc.cluster.local:6379"
             - name: NEXTAUTH_URL
-              value: "https://builder.typebot.fedorov-team.ru"
+              value: "https://builder.typebot.fedorov-team.tech"
             - name: NEXT_PUBLIC_VIEWER_URL
-              value: "https://forms.fedorov-team.ru"
+              value: "https://forms.fedorov-team.tech"
             - name: ADMIN_EMAIL
               value: "ogoyukin93@gmail.com"
             - name: CUSTOM_OAUTH_NAME
@@ -51,11 +51,11 @@ spec:
             - name: CUSTOM_OAUTH_CLIENT_SECRET
               value: "J4liEHlXpBZJ0s2jLej7LVXGOKfxiUFcBxexMacSWXpI6MtZ2YT4AIKBbMKTsw20nFhCj1MNAARsJwYqn2VFYftngZFdyXWkcygQ61N6h0LimCzNjWrOiW3nOWL8KcWf"
             - name: CUSTOM_OAUTH_WELL_KNOWN_URL
-              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/.well-known/openid-configuration"
+              value: "https://auth.tech.fedorov-team.tech/application/o/typebot/.well-known/openid-configuration"
             - name: CUSTOM_OAUTH_ISSUER
-              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/typebot/"
             - name: NEXTAUTH_ISSUER
-              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/typebot/"
             - name: CUSTOM_OAUTH_USER_ID_PATH
               value: "sub"
             - name: CUSTOM_OAUTH_USER_NAME_PATH
@@ -75,7 +75,7 @@ spec:
             - name: S3_BUCKET
               value: "typebot"
             - name: S3_ENDPOINT
-              value: "api.minio.tech.fedorov-team.ru"
+              value: "api.minio.tech.fedorov-team.tech"
             - name: S3_SSL
               value: "true"
             - name: S3_REGION
@@ -135,9 +135,9 @@ spec:
             - name: REDIS_URL
               value: "redis://redis-master.redis.svc.cluster.local:6379"
             - name: NEXTAUTH_URL
-              value: "https://forms.fedorov-team.ru"
+              value: "https://forms.fedorov-team.tech"
             - name: NEXT_PUBLIC_VIEWER_URL
-              value: "https://forms.fedorov-team.ru"
+              value: "https://forms.fedorov-team.tech"
             - name: ADMIN_EMAIL
               value: "ogoyukin93@gmail.com"
             - name: CUSTOM_OAUTH_NAME
@@ -147,13 +147,13 @@ spec:
             - name: CUSTOM_OAUTH_CLIENT_SECRET
               value: "J4liEHlXpBZJ0s2jLej7LVXGOKfxiUFcBxexMacSWXpI6MtZ2YT4AIKBbMKTsw20nFhCj1MNAARsJwYqn2VFYftngZFdyXWkcygQ61N6h0LimCzNjWrOiW3nOWL8KcWf"
             - name: CUSTOM_OAUTH_WELL_KNOWN_URL
-              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/.well-known/openid-configuration"
+              value: "https://auth.tech.fedorov-team.tech/application/o/typebot/.well-known/openid-configuration"
             - name: CUSTOM_OAUTH_USER_ID_PATH
               value: "sub"
             - name: CUSTOM_OAUTH_ISSUER
-              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/typebot/"
             - name: NEXTAUTH_ISSUER
-              value: "https://auth.tech.fedorov-team.ru/application/o/typebot/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/typebot/"
             - name: CUSTOM_OAUTH_USER_NAME_PATH
               value: "name"
             - name: CUSTOM_OAUTH_USER_EMAIL_PATH
@@ -163,13 +163,13 @@ spec:
             - name: CUSTOM_OAUTH_SCOPE
               value: "openid profile email"
             - name: S3_ACCESS_KEY
-              value: "oOdl3fxkJrXwfeqFA4N7"
+              value: "439lTHTkImgkbjrnCTEw"
             - name: S3_SECRET_KEY
-              value: "kq09KL2BdAEJxuPCmr0SpSycan5cC8z9Sm68wAgo"
+              value: "DcyptTWbIsNC7NliM2TWyXPrRUYczaCFBaj9cfq6"
             - name: S3_BUCKET
               value: "typebot"
             - name: S3_ENDPOINT
-              value: "api.minio.tech.fedorov-team.ru"
+              value: "api.minio.tech.fedorov-team.tech"
             - name: S3_SSL
               value: "true"
             - name: S3_REGION
@@ -200,10 +200,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - builder.typebot.fedorov-team.ru
+        - builder.typebot.fedorov-team.tech
       secretName: typebot-builder-tls
   rules:
-    - host: builder.typebot.fedorov-team.ru
+    - host: builder.typebot.fedorov-team.tech
       http:
         paths:
           - path: /
@@ -225,10 +225,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - forms.fedorov-team.ru
+        - forms.fedorov-team.tech
       secretName: typebot-viewer-tls
   rules:
-    - host: forms.fedorov-team.ru
+    - host: forms.fedorov-team.tech
       http:
         paths:
           - path: /

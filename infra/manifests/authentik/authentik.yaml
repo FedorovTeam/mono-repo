@@ -1,0 +1,198 @@
+# manifests/authentik/authentik.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik-server
+  namespace: authentik
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentik-server
+  template:
+    metadata:
+      labels:
+        app: authentik-server
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: authentik-server
+      containers:
+        - name: authentik-server
+          image: ghcr.io/goauthentik/server:2024.12.1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 600Mi
+            limits:
+              cpu: 200m
+              memory: 800Mi
+          args:
+            - server
+          env:
+            - name: AUTHENTIK_SECRET_KEY
+              value: "1c633c47248d710ddd34e67697d023406ed76b7a665d62777ab873bdf8e78a60"
+            - name: AUTHENTIK_REDIS__HOST
+              value: "redis-master.redis.svc.cluster.local"
+            - name: AUTHENTIK_POSTGRESQL__HOST
+              value: "postgres-postgresql.postgres.svc.cluster.local"
+            - name: AUTHENTIK_POSTGRESQL__USER
+              value: "postgres"
+            - name: AUTHENTIK_POSTGRESQL__NAME
+              value: "authentik"
+            - name: AUTHENTIK_POSTGRESQL__PASSWORD
+              value: "3&!tAL5bf38yfx"
+            - name: AUTHENTIK_POSTGRESQL__CONN_MAX_AGE
+              value: "60"
+            - name: AUTHENTIK_EMAIL__HOST
+              value: "smtp.mail.ru"
+            - name: AUTHENTIK_EMAIL__PORT
+              value: "465"
+            - name: AUTHENTIK_EMAIL__USERNAME
+              value: "growth-story@mail.ru"
+            - name: AUTHENTIK_EMAIL__PASSWORD
+              value: "pass"
+            - name: AUTHENTIK_EMAIL__USE_TLS
+              value: "false"
+            - name: AUTHENTIK_EMAIL__USE_SSL
+              value: "true"
+            - name: AUTHENTIK_EMAIL__TIMEOUT
+              value: "10"
+            - name: AUTHENTIK_EMAIL__FROM
+              value: "growth-story@mail.ru"
+          ports:
+            - containerPort: 9000
+          volumeMounts:
+            - name: media
+              mountPath: /media
+            - name: templates
+              mountPath: /templates
+      volumes:
+        - name: media
+          emptyDir: {}
+        - name: templates
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik-worker
+  namespace: authentik
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentik-worker
+  template:
+    metadata:
+      labels:
+        app: authentik-worker
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: authentik-worker
+      containers:
+        - name: authentik-worker
+          image: ghcr.io/goauthentik/server:2024.12.1
+          resources:
+            requests:
+              cpu: 30m
+              memory: 300Mi
+            limits:
+              cpu: 150m
+              memory: 512Mi
+          args:
+            - worker
+          env:
+            - name: AUTHENTIK_SECRET_KEY
+              value: "1c633c47248d710ddd34e67697d023406ed76b7a665d62777ab873bdf8e78a60"
+            - name: AUTHENTIK_REDIS__HOST
+              value: "redis-master.redis.svc.cluster.local"
+            - name: AUTHENTIK_POSTGRESQL__HOST
+              value: "postgres-postgresql.postgres.svc.cluster.local"
+            - name: AUTHENTIK_POSTGRESQL__USER
+              value: "postgres"
+            - name: AUTHENTIK_POSTGRESQL__NAME
+              value: "authentik"
+            - name: AUTHENTIK_POSTGRESQL__PASSWORD
+              value: "3&!tAL5bf38yfx"
+            - name: AUTHENTIK_POSTGRESQL__CONN_MAX_AGE
+              value: "60"
+            - name: AUTHENTIK_EMAIL__HOST
+              value: "smtp.mail.ru"
+            - name: AUTHENTIK_EMAIL__PORT
+              value: "465"
+            - name: AUTHENTIK_EMAIL__USERNAME
+              value: "growth-story@mail.ru"
+            - name: AUTHENTIK_EMAIL__PASSWORD
+              value: "pass"
+            - name: AUTHENTIK_EMAIL__USE_TLS
+              value: "false"
+            - name: AUTHENTIK_EMAIL__USE_SSL
+              value: "true"
+            - name: AUTHENTIK_EMAIL__TIMEOUT
+              value: "10"
+            - name: AUTHENTIK_EMAIL__FROM
+              value: "growth-story@mail.ru"
+          volumeMounts:
+            - name: media
+              mountPath: /media
+            - name: certs
+              mountPath: /certs
+            - name: templates
+              mountPath: /templates
+          securityContext:
+            runAsUser: 0
+      volumes:
+        - name: media
+          emptyDir: {}
+        - name: certs
+          emptyDir: {}
+        - name: templates
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authentik
+  namespace: authentik
+spec:
+  selector:
+    app: authentik-server
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: authentik
+  namespace: authentik
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - auth.tech.fedorov-team.tech
+      secretName: authentik-tls
+  rules:
+    - host: auth.tech.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: authentik
+                port:
+                  number: 9000

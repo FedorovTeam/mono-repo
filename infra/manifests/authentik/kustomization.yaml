@@ -1,0 +1,3 @@
+# manifests/authentik/kustomization.yaml
+resources:
+  - authentik.yaml
