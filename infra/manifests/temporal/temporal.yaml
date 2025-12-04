@@ -171,7 +171,7 @@ spec:
               value: "https://auth.tech.fedorov-team.tech/application/o/temporal/"
             - name: TEMPORAL_AUTH_ISSUER_URL
               # точный issuer из .well-known/openid-configuration
-              value: "https://auth.tech.fedorov-team.tech/application/o/temporal/.well-known/openid-configuration"
+              value: "https://auth.tech.fedorov-team.tech/application/o/temporal/"
             - name: TEMPORAL_AUTH_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -183,7 +183,7 @@ spec:
                   name: temporal-authentik-oidc
                   key: client-secret
             - name: TEMPORAL_AUTH_CALLBACK_URL
-              value: "https://temporal.tech.fedorov-team.tech/auth/callback"
+              value: "https://temporal.tech.fedorov-team.tech/auth/sso/callback"
             - name: TEMPORAL_AUTH_SCOPES
               value: "openid,profile,email"
           resources:
