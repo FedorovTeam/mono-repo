@@ -18,7 +18,7 @@ terragrunt apply
 # kubectl get svc -n traefik
 
 # Установить helm-чарт + CRD
-cd infrastructure/live/prod/metallb-install
+cd infrastructure/live/prod/core/metallb-install
 terragrunt apply
 
 # Проверить, что CRD появились:
