@@ -3,15 +3,15 @@ service:
   grpc_port: 9092
 
 docling:
-  endpoint: http://docling-service:8080
+  endpoint: https://docling.tech.fedorov-team.tech
 
 minio:
-  endpoint: http://minio:9000
+  endpoint: api.minio.tech.fedorov-team.tech
   access_key: minio-access-key
   secret_key: minio-secret-key
   bucket: docling-transformations
   region: us-east-1
 
 temporal:
-  address: temporal.example.com:7233
+  address: temporal-frontend.temporal.svc.cluster.local:7233
   namespace: knowledge-base

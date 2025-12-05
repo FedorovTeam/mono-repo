@@ -10,9 +10,9 @@
 - Выдача presigned PUT ссылки через RPC `GenerateUploadURL` (получает `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds`) с установкой `x-amz-meta-correlation-id` в MinIO.
 
 ## Конфигурация
-Основные параметры лежат в `config/config.yaml`:
+Обязательные параметры задаются в `config/config.yaml` и читаются через `CONFIG_PATH`:
 - `service.grpc_port` — порт gRPC-сервера.
-- `minio.endpoint` / `access_key` / `secret_key` / `use_ssl` — доступ к MinIO.
+- `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — ключи доступа, `minio.use_ssl=true`.
 - `minio.buckets.knowledge_docx` — приватный бакет для оригиналов и загрузки через signed URL.
 - `minio.buckets.knowledge_md` — приватный бакет для Markdown.
 

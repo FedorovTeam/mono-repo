@@ -4,7 +4,7 @@ service:
 
 github:
   base_url: https://api.github.com
-  owner: example-org
+  owner: FedorovTeam
   repository: knowledge-base
   token: ghp_example_token
   default_branch: main

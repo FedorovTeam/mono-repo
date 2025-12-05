@@ -10,13 +10,11 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - Минимальные unit- и e2e-тесты против заглушки Docling.
 
 ## Конфигурация
-Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл).
-
-Основные блоки:
-- `service.grpc_port` — порт gRPC сервера.
-- `docling.endpoint` — HTTP-endpoint Docling-конвертера (POST `/convert`) и источник для заголовка `X-Docling-Endpoint`.
-- `minio.*` — доступы и bucket для результатов конвертации.
-- `temporal.*` — namespace и адрес для будущих воркеров/клиентов Temporal.
+Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл). Обязательные поля и их рекомендованные значения:
+- `service.name` и `service.grpc_port` — идентификатор сервиса и порт gRPC (9092).
+- `docling.endpoint` — HTTPS endpoint Docling: `https://docling.tech.fedorov-team.tech`.
+- `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — учётные данные, `minio.bucket` — обязательный бакет для результата, `minio.region` — регион.
+- `temporal.address` — `temporal-frontend.temporal.svc.cluster.local:7233`, `temporal.namespace` — `knowledge-base`.
 
 ## Локальный запуск
 ```bash
