@@ -7,6 +7,15 @@
 - MinIO — хранение оригинала и конвертированного Markdown (только ключи на стороне сервиса).
 - gRPC — внутренний API `proto/backend/document/document.proto`.
 
+## Конфигурация
+Все обязательные параметры находятся в `config.yaml` (путь передается через `CONFIG_PATH`). Значения по умолчанию настроены под инфраструктурные домены и DNS-шаблон `<context>.backend.svc.cluster.local`:
+- `server.addr` — адрес gRPC сервера (по умолчанию `:50051`).
+- `postgres.dsn` — строка подключения к PostgreSQL.
+- `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — креденшелы, `minio.use_ssl=true`, `minio.original_bucket` / `minio.markdown_bucket` / `minio.bucket_prefix` — обязательные имена бакетов/префикса.
+- `temporal.address` — `temporal-frontend.temporal.svc.cluster.local:7233`, `temporal.namespace` — `knowledge-base`, `temporal.task_queue` — имя task queue.
+- `services.storage_service` — `storage.backend.svc.cluster.local:50052`, `services.transformer_service` — `transformer.backend.svc.cluster.local:9092`, `services.github_publisher_service` — `github-publisher.backend.svc.cluster.local:9097`.
+- `github.repository` — целевой репозиторий (по умолчанию `FedorovTeam/knowledge-base`), `github.branch` — рабочая ветка.
+
 ## Быстрый старт
 1. Запустите PostgreSQL и MinIO (см. `infrastructure.md`).
 2. Выполните миграции: `go run ./cmd/server --migrate`.

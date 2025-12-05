@@ -3,12 +3,12 @@ server:
 security:
   apiKey: "secret"
 documentService:
-  address: "localhost:50051"
+  address: "document.backend.svc.cluster.local:50051"
 storageService:
-  address: "localhost:50052"
+  address: "storage.backend.svc.cluster.local:50052"
 temporal:
-  address: "localhost:7233"
-  namespace: "knowledge"
+  address: "temporal-frontend.temporal.svc.cluster.local:7233"
+  namespace: "knowledge-base"
   taskQueue: "knowledge-documents"
 uploads:
   maxSizeBytes: 10485760

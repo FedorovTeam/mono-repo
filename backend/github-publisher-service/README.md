@@ -9,6 +9,16 @@
 4. Выполните тесты: `go test ./...`.
 5. Примеры ручных сценариев см. в `test.md`.
 
+## Конфигурация
+Все параметры читаются из `config/config.yaml` (можно переопределить через `CONFIG_PATH`). Обязательные поля:
+- `service.name` / `service.grpc_port` — идентификатор и порт gRPC сервера.
+- `github.base_url` — `https://api.github.com`.
+- `github.owner` и `github.repository` — организация и репозиторий (по умолчанию `FedorovTeam/knowledge-base`).
+- `github.token` — токен с правами на коммиты/PR.
+- `github.default_branch` — целевая ветка (по умолчанию `main`).
+- `github.author_name` / `github.author_email` — метаданные коммита.
+- `github.correlation_header` — заголовок для прокидывания correlation-id.
+
 ## Структура
 - `cmd/server` — точка входа gRPC сервера.
 - `internal/config` — загрузка конфигурации из YAML.

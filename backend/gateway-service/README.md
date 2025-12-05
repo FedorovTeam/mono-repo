@@ -20,14 +20,14 @@
 gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds` и возвращает bucket/object_key/TTL + presigned PUT URL. Корреляционный идентификатор пробрасывается в заголовок `x-amz-meta-correlation-id`, чтобы MinIO сохранил его в метаданных объекта.
 
 ## Конфигурация
-Файл `config/config.yaml` содержит:
+Файл `config/config.yaml` обязателен к заполнению (читается по `CONFIG_PATH`). Ключевые поля по умолчанию используют DNS-имена в формате `<context>.backend.svc.cluster.local`:
 - `server.port` — порт HTTP GraphQL сервера.
 - `security.apiKey` — ожидаемое значение заголовка `X-API-Key`.
-- `documentService.address` — адрес gRPC документ-сервиса.
-- `storageService.address` — адрес gRPC `storage-service` для выдачи signed URL.
-- `uploads.maxSizeBytes`, `uploads.allowedExtensions`, `uploads.signedUrlTtlSeconds` — серверная валидация и TTL для presigned ссылок.
-- `temporal` — namespace и task queue для workflow.
-- `observability.otlpEndpoint`/`observability.serviceName` — конфигурация OTLP-экспортера метрик и трейсинга.
+- `documentService.address` — `document.backend.svc.cluster.local:50051`.
+- `storageService.address` — `storage.backend.svc.cluster.local:50052`.
+- `uploads.maxSizeBytes`, `uploads.allowedExtensions`, `uploads.signedUrlTtlSeconds` — лимиты загрузки и TTL presigned ссылок.
+- `temporal.address` — `temporal-frontend.temporal.svc.cluster.local:7233`, `temporal.namespace` — `knowledge-base`, `temporal.taskQueue` — очередь воркеров.
+- `observability.otlpEndpoint`/`observability.serviceName` — адрес OTLP-коллектора и сервисное имя.
 - `logging.level` — уровень логирования.
 
 ## Локальный запуск
