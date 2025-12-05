@@ -45,7 +45,7 @@ func main() {
 	log.Printf("инициализированы бакеты: docx=%s, md=%s", cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD)
 
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(correlationLoggingInterceptor()))
-	storagev1.RegisterStorageServiceServer(grpcServer, grpcserver.New(minioAPI, keyGenerator, cfg.Minio.Buckets.KnowledgeDocx))
+	storagev1.RegisterStorageServiceServer(grpcServer, grpcserver.New(minioAPI, keyGenerator, cfg.Minio.Buckets.KnowledgeDocx, storageService))
 
 	listener, err := net.Listen("tcp", cfg.Service.GRPCPort)
 	if err != nil {
