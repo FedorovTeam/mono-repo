@@ -17,6 +17,8 @@
 - **storage-service** — выдача signed URL для загрузки оригиналов.
 - **OTLP endpoint/collector** — приём трассировок и метрик от gateway.
 
+gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds` и возвращает bucket/object_key/TTL + presigned PUT URL. Корреляционный идентификатор пробрасывается в заголовок `x-amz-meta-correlation-id`, чтобы MinIO сохранил его в метаданных объекта.
+
 ## Конфигурация
 Файл `config/config.yaml` содержит:
 - `server.port` — порт HTTP GraphQL сервера.
