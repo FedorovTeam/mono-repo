@@ -161,14 +161,17 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
         `, version.ID, version.DocumentID, version.Version, version.OriginalObjectKey, version.MarkdownObjectKey, version.CreatedAt, version.UpdatedAt); err != nil {
 			return nil, err
 		}
+		if version.OriginalObjectKey != "" {
+			doc.OriginalObjectKey = version.OriginalObjectKey
+		}
 		doc.MarkdownObjectKey = version.MarkdownObjectKey
 		updated = true
 	}
 
 	if updated {
 		if _, err = tx.ExecContext(ctx, `
-            UPDATE documents SET status=$1, markdown_object_key=$2, updated_at=$3 WHERE id=$4
-        `, string(to), doc.MarkdownObjectKey, now, id); err != nil {
+            UPDATE documents SET status=$1, original_object_key=$2, markdown_object_key=$3, updated_at=$4 WHERE id=$5
+        `, string(to), doc.OriginalObjectKey, doc.MarkdownObjectKey, now, id); err != nil {
 			return nil, err
 		}
 		log := model.DocumentStatusLog{

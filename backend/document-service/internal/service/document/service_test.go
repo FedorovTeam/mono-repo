@@ -65,18 +65,18 @@ func (failingKey) GenerateKeys(ctx context.Context) (storage.KeyPair, error) {
 }
 
 func TestCreateDocumentValidation(t *testing.T) {
-	svc := New(&repoMock{}, keyMock{})
+	svc := New(&repoMock{}, keyMock{}, nil, "", nil)
 	_, err := svc.CreateDocument(context.Background(), CreateInput{})
 	require.Error(t, err)
 
-	_, err = svc.CreateDocument(context.Background(), CreateInput{Name: "a", OriginalBucket: "", MarkdownBucket: "md"})
+	_, err = svc.CreateDocument(context.Background(), CreateInput{Name: "a", OriginalBucket: "", MarkdownBucket: "md", OriginalContent: []byte("doc")})
 	require.Error(t, err)
 }
 
 func TestCreateDocumentSuccess(t *testing.T) {
 	repo := &repoMock{}
-	svc := New(repo, keyMock{})
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{Name: "name", OriginalBucket: "orig", MarkdownBucket: "md"})
+	svc := New(repo, keyMock{}, nil, "", nil)
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{Name: "name", OriginalBucket: "orig", MarkdownBucket: "md", OriginalContent: []byte("doc"), FilenameExt: "docx"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
 	require.Equal(t, model.StatusUploaded, doc.Status)
@@ -84,14 +84,14 @@ func TestCreateDocumentSuccess(t *testing.T) {
 }
 
 func TestUpdateStatusValidation(t *testing.T) {
-	svc := New(&repoMock{doc: &model.Document{ID: uuid.NewString()}}, keyMock{})
+	svc := New(&repoMock{doc: &model.Document{ID: uuid.NewString()}}, keyMock{}, nil, "", nil)
 	_, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: "bad", Status: model.StatusFailed})
 	require.Error(t, err)
 }
 
 func TestUpdateStatusDelegates(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
-	svc := New(repo, keyMock{})
+	svc := New(repo, keyMock{}, nil, "", nil)
 	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusStoredOriginal})
 	require.NoError(t, err)
 	require.Equal(t, model.StatusStoredOriginal, doc.Status)
@@ -99,7 +99,7 @@ func TestUpdateStatusDelegates(t *testing.T) {
 }
 
 func TestCreateDocumentKeyFailure(t *testing.T) {
-	svc := New(&repoMock{}, failingKey{})
-	_, err := svc.CreateDocument(context.Background(), CreateInput{Name: "name", OriginalBucket: "a", MarkdownBucket: "b"})
+	svc := New(&repoMock{}, failingKey{}, nil, "", nil)
+	_, err := svc.CreateDocument(context.Background(), CreateInput{Name: "name", OriginalBucket: "a", MarkdownBucket: "b", OriginalContent: []byte("doc")})
 	require.Error(t, err)
 }

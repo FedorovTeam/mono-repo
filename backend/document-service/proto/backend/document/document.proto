@@ -51,6 +51,9 @@ message CreateDocumentRequest {
   string name = 1;
   string original_bucket = 2;
   string markdown_bucket = 3;
+  bytes original_content = 4;
+  string filename_extension = 5;
+  string publish_path = 6;
 }
 
 message GetDocumentRequest {

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.temporal.io/sdk/client"
 
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/storage"
@@ -22,16 +23,21 @@ type Repository interface {
 type Service struct {
 	repo       Repository
 	keyManager storage.KeyManager
+	temporal   WorkflowStarter
+	taskQueue  string
 }
 
-func New(repo Repository, keyManager storage.KeyManager) *Service {
-	return &Service{repo: repo, keyManager: keyManager}
+func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarter, taskQueue string, activities *Activities) *Service {
+	return &Service{repo: repo, keyManager: keyManager, temporal: temporal, taskQueue: taskQueue}
 }
 
 type CreateInput struct {
-	Name           string
-	OriginalBucket string
-	MarkdownBucket string
+	Name            string
+	OriginalBucket  string
+	MarkdownBucket  string
+	OriginalContent []byte
+	FilenameExt     string
+	PublishPath     string
 }
 
 type UpdateStatusInput struct {
@@ -49,6 +55,9 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	}
 	if in.OriginalBucket == "" || in.MarkdownBucket == "" {
 		return nil, errors.New("buckets are required")
+	}
+	if len(in.OriginalContent) == 0 {
+		return nil, errors.New("original content is required")
 	}
 	pair, err := s.keyManager.GenerateKeys(ctx)
 	if err != nil {
@@ -69,7 +78,27 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 		MarkdownObjectKey: pair.MarkdownObjectKey,
 	}
 	log := &model.DocumentStatusLog{ToStatus: model.StatusUploaded}
-	return s.repo.CreateDocument(ctx, doc, version, log)
+	created, err := s.repo.CreateDocument(ctx, doc, version, log)
+	if err != nil {
+		return nil, err
+	}
+	if s.temporal != nil {
+		opts := client.StartWorkflowOptions{ID: created.ID, TaskQueue: s.taskQueue}
+		input := WorkflowInput{
+			DocumentID:        created.ID,
+			OriginalBucket:    created.OriginalBucket,
+			MarkdownBucket:    created.MarkdownBucket,
+			OriginalObjectKey: created.OriginalObjectKey,
+			FilenameExt:       in.FilenameExt,
+			PublishPath:       in.PublishPath,
+			OriginalContent:   in.OriginalContent,
+			Version:           version.Version,
+		}
+		if _, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input); err != nil {
+			return nil, fmt.Errorf("start workflow: %w", err)
+		}
+	}
+	return created, nil
 }
 
 func (s *Service) GetDocument(ctx context.Context, id string) (*model.Document, error) {
