@@ -1,10 +1,16 @@
+"""Запросы статуса и списка документов знаний."""
 type Query {
+  """Возвращает документ и его текущий статус по идентификатору Temporal/БД."""
   knowledgeDocument(id: ID!): KnowledgeDocument
+  """Список документов с поддержкой фильтрации по статусу и репозиторию."""
   knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!
 }
 
+"""Мутации, отражающие цепочку Upload → Convert → Publish."""
 type Mutation {
+  """Инициирует загрузку DOC/DOCX: выдаёт signed URL и создаёт запись в document-service."""
   uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!
+  """Перезапускает обработку документа в Temporal workflow по его идентификатору."""
   retryProcessing(documentId: ID!): KnowledgeDocument!
 }
 

@@ -46,26 +46,29 @@ func (c *GRPCClient) Close() error {
 	return nil
 }
 
-func withCorrelation(ctx context.Context) context.Context {
+func withMetadata(ctx context.Context) context.Context {
 	correlationID := ctxutils.CorrelationID(ctx)
 	if correlationID != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-correlation-id", correlationID)
+	}
+	if apiKey := ctxutils.APIKey(ctx); apiKey != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", apiKey)
 	}
 	return ctx
 }
 
 func (c *GRPCClient) CreateDocument(ctx context.Context, in *pb.CreateDocumentRequest, opts ...grpc.CallOption) (*pb.Document, error) {
-	return c.DocumentServiceClient.CreateDocument(withCorrelation(ctx), in, opts...)
+	return c.DocumentServiceClient.CreateDocument(withMetadata(ctx), in, opts...)
 }
 
 func (c *GRPCClient) GetDocument(ctx context.Context, in *pb.GetDocumentRequest, opts ...grpc.CallOption) (*pb.Document, error) {
-	return c.DocumentServiceClient.GetDocument(withCorrelation(ctx), in, opts...)
+	return c.DocumentServiceClient.GetDocument(withMetadata(ctx), in, opts...)
 }
 
 func (c *GRPCClient) ListDocuments(ctx context.Context, in *pb.ListDocumentsRequest, opts ...grpc.CallOption) (*pb.ListDocumentsResponse, error) {
-	return c.DocumentServiceClient.ListDocuments(withCorrelation(ctx), in, opts...)
+	return c.DocumentServiceClient.ListDocuments(withMetadata(ctx), in, opts...)
 }
 
 func (c *GRPCClient) RetryProcessing(ctx context.Context, in *pb.RetryProcessingRequest, opts ...grpc.CallOption) (*pb.Document, error) {
-	return c.DocumentServiceClient.RetryProcessing(withCorrelation(ctx), in, opts...)
+	return c.DocumentServiceClient.RetryProcessing(withMetadata(ctx), in, opts...)
 }

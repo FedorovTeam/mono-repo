@@ -12,6 +12,9 @@ import (
 func TestAPIKeyMiddleware(t *testing.T) {
 	logger := zap.NewNop()
 	handler := APIKeyMiddleware("secret", logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ctxutils.APIKey(r.Context()) != "secret" {
+			t.Fatalf("api key was not stored in context")
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 
