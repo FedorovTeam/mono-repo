@@ -1,24 +1,25 @@
 package graph
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"backend-gateway-service/graph/model"
 	pb "backend-gateway-service/proto/backend/document/v1"
 )
 
-func validateUploadInput(input model.UploadKnowledgeDocumentInput) error {
+// UploadValidationConfig описывает ограничения на входные данные загрузки.
+type UploadValidationConfig struct {
+	MaxSizeBytes        int64
+	AllowedExtensions   []string
+	SignedURLTTLSeconds int64
+}
+
+func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadValidationConfig) error {
 	if strings.TrimSpace(input.FileName) == "" {
 		return errors.New("fileName is required")
-	}
-	if strings.TrimSpace(input.ContentBase64) == "" {
-		return errors.New("contentBase64 is required")
-	}
-	if _, err := base64.StdEncoding.DecodeString(input.ContentBase64); err != nil {
-		return fmt.Errorf("contentBase64 must be base64: %w", err)
 	}
 	if strings.TrimSpace(input.Repository) == "" {
 		return errors.New("repository is required")
@@ -28,6 +29,28 @@ func validateUploadInput(input model.UploadKnowledgeDocumentInput) error {
 	}
 	if strings.TrimSpace(input.Path) == "" {
 		return errors.New("path is required")
+	}
+	if input.FileSizeBytes <= 0 {
+		return errors.New("fileSizeBytes must be positive")
+	}
+	if cfg.MaxSizeBytes > 0 && int64(input.FileSizeBytes) > cfg.MaxSizeBytes {
+		return fmt.Errorf("fileSizeBytes exceeds limit %d", cfg.MaxSizeBytes)
+	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(input.FileName), "."))
+	if ext == "" {
+		return errors.New("file extension is required")
+	}
+	if len(cfg.AllowedExtensions) > 0 {
+		allowed := false
+		for _, candidate := range cfg.AllowedExtensions {
+			if strings.EqualFold(candidate, ext) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("extension %s is not allowed", ext)
+		}
 	}
 	return nil
 }

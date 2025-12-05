@@ -71,10 +71,16 @@ type ComplexityRoot struct {
 		KnowledgeDocument  func(childComplexity int, id string) int
 		KnowledgeDocuments func(childComplexity int, filter *model.KnowledgeDocumentFilter, pagination *model.Pagination) int
 	}
+
+	UploadKnowledgeDocumentPayload struct {
+		Document     func(childComplexity int) int
+		UploadMethod func(childComplexity int) int
+		UploadURL    func(childComplexity int) int
+	}
 }
 
 type MutationResolver interface {
-	UploadKnowledgeDocument(ctx context.Context, input model.UploadKnowledgeDocumentInput) (*model.KnowledgeDocument, error)
+	UploadKnowledgeDocument(ctx context.Context, input model.UploadKnowledgeDocumentInput) (*model.UploadKnowledgeDocumentPayload, error)
 	RetryProcessing(ctx context.Context, documentID string) (*model.KnowledgeDocument, error)
 }
 type QueryResolver interface {
@@ -219,6 +225,27 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.Query.KnowledgeDocuments(childComplexity, args["filter"].(*model.KnowledgeDocumentFilter), args["pagination"].(*model.Pagination)), true
 
+	case "UploadKnowledgeDocumentPayload.document":
+		if e.complexity.UploadKnowledgeDocumentPayload.Document == nil {
+			break
+		}
+
+		return e.complexity.UploadKnowledgeDocumentPayload.Document(childComplexity), true
+
+	case "UploadKnowledgeDocumentPayload.uploadMethod":
+		if e.complexity.UploadKnowledgeDocumentPayload.UploadMethod == nil {
+			break
+		}
+
+		return e.complexity.UploadKnowledgeDocumentPayload.UploadMethod(childComplexity), true
+
+	case "UploadKnowledgeDocumentPayload.uploadUrl":
+		if e.complexity.UploadKnowledgeDocumentPayload.UploadURL == nil {
+			break
+		}
+
+		return e.complexity.UploadKnowledgeDocumentPayload.UploadURL(childComplexity), true
+
 	}
 	return 0, false
 }
@@ -333,8 +360,14 @@ var sources = []*ast.Source{
 }
 
 type Mutation {
-  uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): KnowledgeDocument!
+  uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!
   retryProcessing(documentId: ID!): KnowledgeDocument!
+}
+
+type UploadKnowledgeDocumentPayload {
+  document: KnowledgeDocument!
+  uploadUrl: String!
+  uploadMethod: String!
 }
 
 type KnowledgeDocumentConnection {
@@ -363,7 +396,7 @@ enum KnowledgeDocumentStatus {
 
 input UploadKnowledgeDocumentInput {
   fileName: String!
-  contentBase64: String!
+  fileSizeBytes: Int!
   repository: String!
   branch: String!
   path: String!
@@ -1123,9 +1156,9 @@ func (ec *executionContext) _Mutation_uploadKnowledgeDocument(ctx context.Contex
 		}
 		return graphql.Null
 	}
-	res := resTmp.(*model.KnowledgeDocument)
+	res := resTmp.(*model.UploadKnowledgeDocumentPayload)
 	fc.Result = res
-	return ec.marshalNKnowledgeDocument2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐKnowledgeDocument(ctx, field.Selections, res)
+	return ec.marshalNUploadKnowledgeDocumentPayload2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadKnowledgeDocumentPayload(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Mutation_uploadKnowledgeDocument(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -1136,24 +1169,14 @@ func (ec *executionContext) fieldContext_Mutation_uploadKnowledgeDocument(ctx co
 		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
-			case "id":
-				return ec.fieldContext_KnowledgeDocument_id(ctx, field)
-			case "fileName":
-				return ec.fieldContext_KnowledgeDocument_fileName(ctx, field)
-			case "repository":
-				return ec.fieldContext_KnowledgeDocument_repository(ctx, field)
-			case "branch":
-				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
-			case "path":
-				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
-			case "status":
-				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
-			case "workflowId":
-				return ec.fieldContext_KnowledgeDocument_workflowId(ctx, field)
-			case "error":
-				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "document":
+				return ec.fieldContext_UploadKnowledgeDocumentPayload_document(ctx, field)
+			case "uploadUrl":
+				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadUrl(ctx, field)
+			case "uploadMethod":
+				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadMethod(ctx, field)
 			}
-			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
+			return nil, fmt.Errorf("no field named %q was found under type UploadKnowledgeDocumentPayload", field.Name)
 		},
 	}
 	defer func() {
@@ -1498,6 +1521,156 @@ func (ec *executionContext) fieldContext_Query___schema(_ context.Context, field
 				return ec.fieldContext___Schema_directives(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type __Schema", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _UploadKnowledgeDocumentPayload_document(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_UploadKnowledgeDocumentPayload_document(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.Document, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(*model.KnowledgeDocument)
+	fc.Result = res
+	return ec.marshalNKnowledgeDocument2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐKnowledgeDocument(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UploadKnowledgeDocumentPayload",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_KnowledgeDocument_id(ctx, field)
+			case "fileName":
+				return ec.fieldContext_KnowledgeDocument_fileName(ctx, field)
+			case "repository":
+				return ec.fieldContext_KnowledgeDocument_repository(ctx, field)
+			case "branch":
+				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
+			case "path":
+				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
+			case "status":
+				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
+			case "workflowId":
+				return ec.fieldContext_KnowledgeDocument_workflowId(ctx, field)
+			case "error":
+				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _UploadKnowledgeDocumentPayload_uploadUrl(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_UploadKnowledgeDocumentPayload_uploadUrl(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.UploadURL, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_uploadUrl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UploadKnowledgeDocumentPayload",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _UploadKnowledgeDocumentPayload_uploadMethod(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_UploadKnowledgeDocumentPayload_uploadMethod(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.UploadMethod, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalNString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_uploadMethod(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UploadKnowledgeDocumentPayload",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -3358,7 +3531,7 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"fileName", "contentBase64", "repository", "branch", "path"}
+	fieldsInOrder := [...]string{"fileName", "fileSizeBytes", "repository", "branch", "path"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -3372,13 +3545,13 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 				return it, err
 			}
 			it.FileName = data
-		case "contentBase64":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("contentBase64"))
-			data, err := ec.unmarshalNString2string(ctx, v)
+		case "fileSizeBytes":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fileSizeBytes"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
 			if err != nil {
 				return it, err
 			}
-			it.ContentBase64 = data
+			it.FileSizeBytes = data
 		case "repository":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("repository"))
 			data, err := ec.unmarshalNString2string(ctx, v)
@@ -3650,6 +3823,55 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___schema(ctx, field)
 			})
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var uploadKnowledgeDocumentPayloadImplementors = []string{"UploadKnowledgeDocumentPayload"}
+
+func (ec *executionContext) _UploadKnowledgeDocumentPayload(ctx context.Context, sel ast.SelectionSet, obj *model.UploadKnowledgeDocumentPayload) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, uploadKnowledgeDocumentPayloadImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("UploadKnowledgeDocumentPayload")
+		case "document":
+			out.Values[i] = ec._UploadKnowledgeDocumentPayload_document(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "uploadUrl":
+			out.Values[i] = ec._UploadKnowledgeDocumentPayload_uploadUrl(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "uploadMethod":
+			out.Values[i] = ec._UploadKnowledgeDocumentPayload_uploadMethod(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -4144,6 +4366,20 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 func (ec *executionContext) unmarshalNUploadKnowledgeDocumentInput2backendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadKnowledgeDocumentInput(ctx context.Context, v interface{}) (model.UploadKnowledgeDocumentInput, error) {
 	res, err := ec.unmarshalInputUploadKnowledgeDocumentInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNUploadKnowledgeDocumentPayload2backendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadKnowledgeDocumentPayload(ctx context.Context, sel ast.SelectionSet, v model.UploadKnowledgeDocumentPayload) graphql.Marshaler {
+	return ec._UploadKnowledgeDocumentPayload(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNUploadKnowledgeDocumentPayload2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadKnowledgeDocumentPayload(ctx context.Context, sel ast.SelectionSet, v *model.UploadKnowledgeDocumentPayload) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._UploadKnowledgeDocumentPayload(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalN__Directive2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirective(ctx context.Context, sel ast.SelectionSet, v introspection.Directive) graphql.Marshaler {

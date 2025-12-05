@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package backend.storage.v1;
+
+option go_package = "backend-gateway-service/proto/backend/storage/v1;storagepb";
+
+// StorageService предоставляет вспомогательные операции для загрузки файлов в MinIO.
+service StorageService {
+  // GenerateUploadURL возвращает подписанную ссылку для прямой загрузки файла в приватный бакет.
+  rpc GenerateUploadURL(GenerateUploadURLRequest) returns (GenerateUploadURLResponse);
+}
+
+message GenerateUploadURLRequest {
+  string document_id = 1;
+  string file_name = 2;
+  int64 content_length = 3;
+  string correlation_id = 4;
+  int64 expires_in_seconds = 5;
+}
+
+message GenerateUploadURLResponse {
+  string upload_url = 1;
+  string bucket = 2;
+  string object_key = 3;
+  int64 expires_in_seconds = 4;
+}

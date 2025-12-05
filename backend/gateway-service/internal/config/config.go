@@ -18,11 +18,23 @@ type Config struct {
 	DocumentService struct {
 		Address string `yaml:"address"`
 	} `yaml:"documentService"`
+	StorageService struct {
+		Address string `yaml:"address"`
+	} `yaml:"storageService"`
 	Temporal struct {
 		Address   string `yaml:"address"`
 		Namespace string `yaml:"namespace"`
 		TaskQueue string `yaml:"taskQueue"`
 	} `yaml:"temporal"`
+	Uploads struct {
+		MaxSizeBytes       int64    `yaml:"maxSizeBytes"`
+		AllowedExtensions  []string `yaml:"allowedExtensions"`
+		SignedURLTTLSecond int64    `yaml:"signedUrlTtlSeconds"`
+	} `yaml:"uploads"`
+	Observability struct {
+		OTLPEndpoint string `yaml:"otlpEndpoint"`
+		ServiceName  string `yaml:"serviceName"`
+	} `yaml:"observability"`
 	Logging struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
@@ -48,8 +60,23 @@ func Load(path string) (Config, error) {
 	if cfg.DocumentService.Address == "" {
 		return Config{}, fmt.Errorf("documentService.address is required")
 	}
+	if cfg.StorageService.Address == "" {
+		return Config{}, fmt.Errorf("storageService.address is required")
+	}
 	if cfg.Temporal.TaskQueue == "" {
 		return Config{}, fmt.Errorf("temporal.taskQueue is required")
+	}
+	if cfg.Uploads.MaxSizeBytes <= 0 {
+		return Config{}, fmt.Errorf("uploads.maxSizeBytes must be positive")
+	}
+	if len(cfg.Uploads.AllowedExtensions) == 0 {
+		return Config{}, fmt.Errorf("uploads.allowedExtensions is required")
+	}
+	if cfg.Uploads.SignedURLTTLSecond <= 0 {
+		cfg.Uploads.SignedURLTTLSecond = 900
+	}
+	if cfg.Observability.ServiceName == "" {
+		cfg.Observability.ServiceName = "backend-gateway-service"
 	}
 
 	return cfg, nil

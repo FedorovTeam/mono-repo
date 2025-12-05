@@ -4,8 +4,14 @@ type Query {
 }
 
 type Mutation {
-  uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): KnowledgeDocument!
+  uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!
   retryProcessing(documentId: ID!): KnowledgeDocument!
+}
+
+type UploadKnowledgeDocumentPayload {
+  document: KnowledgeDocument!
+  uploadUrl: String!
+  uploadMethod: String!
 }
 
 type KnowledgeDocumentConnection {
@@ -34,7 +40,7 @@ enum KnowledgeDocumentStatus {
 
 input UploadKnowledgeDocumentInput {
   fileName: String!
-  contentBase64: String!
+  fileSizeBytes: Int!
   repository: String!
   branch: String!
   path: String!

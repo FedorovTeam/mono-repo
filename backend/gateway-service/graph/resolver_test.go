@@ -18,6 +18,7 @@ import (
 	"backend-gateway-service/internal/ctxutils"
 	"backend-gateway-service/internal/middleware"
 	pb "backend-gateway-service/proto/backend/document/v1"
+	storagepb "backend-gateway-service/proto/backend/storage/v1"
 )
 
 type mockDocumentClient struct {
@@ -55,8 +56,18 @@ func (m *mockTemporalClient) StartUploadWorkflow(ctx context.Context, input temp
 
 func (m *mockTemporalClient) Close() {}
 
+type mockStorageClient struct {
+	generateFunc func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error)
+}
+
+func (m *mockStorageClient) GenerateUploadURL(ctx context.Context, in *storagepb.GenerateUploadURLRequest, _ ...grpc.CallOption) (*storagepb.GenerateUploadURLResponse, error) {
+	return m.generateFunc(ctx, in)
+}
+
+func (m *mockStorageClient) Close() error { return nil }
+
 func TestUploadValidation(t *testing.T) {
-	resolver := &Resolver{DocumentClient: &mockDocumentClient{}, TemporalClient: &mockTemporalClient{}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: &mockDocumentClient{}, TemporalClient: &mockTemporalClient{}, StorageClient: &mockStorageClient{}, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024, AllowedExtensions: []string{"docx"}}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	_, err := mr.UploadKnowledgeDocument(context.Background(), model.UploadKnowledgeDocumentInput{})
@@ -75,9 +86,24 @@ func TestUploadHappyPath(t *testing.T) {
 		if in.CorrelationId != "corr-test" {
 			t.Fatalf("correlation id not propagated")
 		}
+		if in.ContentLength != 1024 {
+			t.Fatalf("unexpected content length: %d", in.ContentLength)
+		}
 		return &pb.Document{Id: "123", FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil }, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
+	}}
+
+	storageCalled := false
+	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
+		storageCalled = true
+		if in.CorrelationId != "corr-test" {
+			t.Fatalf("storage correlation id missing")
+		}
+		if in.ExpiresInSeconds != 600 {
+			t.Fatalf("unexpected ttl: %d", in.ExpiresInSeconds)
+		}
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: "docs/123.docx", ExpiresInSeconds: 900}, nil
 	}}
 
 	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
@@ -85,18 +111,18 @@ func TestUploadHappyPath(t *testing.T) {
 		if input.CorrelationId != "corr-test" {
 			t.Fatalf("workflow correlation id missing")
 		}
-		if input.DocumentId != "123" {
-			t.Fatalf("unexpected document id: %s", input.DocumentId)
+		if input.DocumentId != "123" || input.UploadBucket != "docs" || input.UploadObjectKey != "docs/123.docx" || input.UploadURL == "" || input.FileSizeBytes != 1024 {
+			t.Fatalf("unexpected workflow input: %+v", input)
 		}
 		return "wf-1", nil
 	}}
 
-	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2 * 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
-	result, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{
+	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{
 		FileName:      "demo.docx",
-		ContentBase64: "ZHVtbXk=",
+		FileSizeBytes: 1024,
 		Repository:    "org/repo",
 		Branch:        "main",
 		Path:          "docs/demo.md",
@@ -104,11 +130,14 @@ func TestUploadHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !docCalled || !temporalCalled {
+	if !docCalled || !temporalCalled || !storageCalled {
 		t.Fatalf("expected downstream calls")
 	}
-	if result.WorkflowID == nil || *result.WorkflowID != "wf-1" {
+	if payload.Document.WorkflowID == nil || *payload.Document.WorkflowID != "wf-1" {
 		t.Fatalf("workflow id not returned")
+	}
+	if payload.UploadURL == "" || payload.UploadMethod == "" {
+		t.Fatalf("payload missing upload info: %+v", payload)
 	}
 }
 
@@ -159,16 +188,26 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 		return "wf-99", nil
 	}}
 
-	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, Logger: logger}
+	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
+		if in.CorrelationId != "corr-integration" {
+			t.Fatalf("correlation id missing in storage")
+		}
+		if in.ExpiresInSeconds != 900 {
+			t.Fatalf("unexpected expires ttl: %d", in.ExpiresInSeconds)
+		}
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/signed", Bucket: "docx", ObjectKey: "docx/doc-1.docx", ExpiresInSeconds: 600}, nil
+	}}
+
+	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
 	gqlServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
 	reqBody := map[string]interface{}{
-		"query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ id status workflowId } }",
+		"query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status workflowId } } }",
 		"variables": map[string]interface{}{
 			"input": map[string]interface{}{
 				"fileName":      "demo.docx",
-				"contentBase64": "ZHVtbXk=",
+				"fileSizeBytes": 2048,
 				"repository":    "org/repo",
 				"branch":        "main",
 				"path":          "docs/demo.md",
@@ -190,9 +229,13 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	var resp struct {
 		Data struct {
 			UploadKnowledgeDocument struct {
-				ID         string  `json:"id"`
-				Status     string  `json:"status"`
-				WorkflowID *string `json:"workflowId"`
+				UploadURL    string `json:"uploadUrl"`
+				UploadMethod string `json:"uploadMethod"`
+				Document     struct {
+					ID         string  `json:"id"`
+					Status     string  `json:"status"`
+					WorkflowID *string `json:"workflowId"`
+				} `json:"document"`
 			} `json:"uploadKnowledgeDocument"`
 		} `json:"data"`
 		Errors []interface{} `json:"errors"`
@@ -203,7 +246,10 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	if len(resp.Errors) > 0 {
 		t.Fatalf("unexpected graphql errors: %+v", resp.Errors)
 	}
-	if resp.Data.UploadKnowledgeDocument.ID != "doc-1" || resp.Data.UploadKnowledgeDocument.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.WorkflowID != "wf-99" {
+	if resp.Data.UploadKnowledgeDocument.Document.ID != "doc-1" || resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != "wf-99" {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
+	}
+	if resp.Data.UploadKnowledgeDocument.UploadURL == "" || resp.Data.UploadKnowledgeDocument.UploadMethod == "" {
+		t.Fatalf("upload url not returned: %+v", resp.Data.UploadKnowledgeDocument)
 	}
 }

@@ -1,24 +1,29 @@
 package temporal
 
 import (
-	"context"
-	"fmt"
+        "context"
+        "fmt"
 
-	temporalClient "go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/workflow"
+        "go.opentelemetry.io/otel"
+        "go.opentelemetry.io/otel/attribute"
+        temporalClient "go.temporal.io/sdk/client"
+        "go.temporal.io/sdk/workflow"
 
-	"backend-gateway-service/internal/ctxutils"
+        "backend-gateway-service/internal/ctxutils"
 )
 
 // UploadWorkflowInput входные данные для workflow.
 type UploadWorkflowInput struct {
-	DocumentId    string
-	FileName      string
-	ContentBase64 string
-	Repository    string
-	Branch        string
-	Path          string
-	CorrelationId string
+        DocumentId    string
+        FileName      string
+        Repository    string
+        Branch        string
+        Path          string
+        UploadBucket  string
+        UploadObjectKey string
+        UploadURL     string
+        FileSizeBytes int
+        CorrelationId string
 }
 
 // Client интерфейс над Temporal SDK.
@@ -41,13 +46,16 @@ func NewSDKClient(address, namespace, taskQueue string) (Client, error) {
 }
 
 func (c *SDKClient) StartUploadWorkflow(ctx context.Context, input UploadWorkflowInput) (string, error) {
-	correlationID := ctxutils.CorrelationID(ctx)
-	if correlationID == "" {
-		correlationID = input.CorrelationId
-	}
-	options := temporalClient.StartWorkflowOptions{
-		TaskQueue: c.taskQueue,
-		Memo: map[string]interface{}{
+        correlationID := ctxutils.CorrelationID(ctx)
+        if correlationID == "" {
+                correlationID = input.CorrelationId
+        }
+        ctx, span := otel.Tracer("gateway.temporal").Start(ctx, "StartUploadWorkflow")
+        span.SetAttributes(attribute.String("correlation_id", correlationID), attribute.String("document_id", input.DocumentId))
+        defer span.End()
+        options := temporalClient.StartWorkflowOptions{
+                TaskQueue: c.taskQueue,
+                Memo: map[string]interface{}{
 			"correlation_id": correlationID,
 		},
 	}
