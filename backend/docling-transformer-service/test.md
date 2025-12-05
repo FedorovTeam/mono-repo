@@ -17,5 +17,5 @@ grpcurl -plaintext -d '{"docxContent":"ZmlsZSBiYXRlcyA="}' localhost:9092 backen
 
 ### Интеграция с Docling-заглушкой
 1. Поднять локальный HTTP-сервис, отвечающий на POST `/convert` статической строкой Markdown.
-2. Указать его адрес в `pandoc.endpoint` (Docling-конвертер) и при необходимости добавить `docling.endpoint` для трассировки.
+2. Указать его адрес в `docling.endpoint`.
 3. Вызвать gRPC метод — тело запроса должно дойти до заглушки, а в ответе gRPC вернётся Markdown из неё.

@@ -5,9 +5,9 @@
 graph TD
     Client[Gateway/Activity] -->|gRPC| API[TransformerService]
     API --> INT[LoggingInterceptor]
-    API --> CONV[PandocConverter]
-    CONV --> PANDOC[Pandoc HTTP Stub]
-    CONV -. headers .-> DOC[Docling endpoint]
+    API --> CONV[DoclingConverter]
+    CONV --> DOC[Docling HTTP Stub]
+    CONV -. headers .-> DOC
 ```
 
 ## Логическая связка с хранилищем

@@ -20,17 +20,17 @@ import (
 
 const bufSize = 1024 * 1024
 
-func TestE2EConversionAgainstPandocStub(t *testing.T) {
+func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	var receivedBody []byte
-	pandoc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	docling := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		receivedBody = body
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("## converted by pandoc"))
+		_, _ = w.Write([]byte("## converted by docling"))
 	}))
-	defer pandoc.Close()
+	defer docling.Close()
 
-	conv := converter.NewPandocConverter(pandoc.URL, "http://docling-stub")
+	conv := converter.NewDoclingConverter(docling.URL)
 	logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
@@ -58,10 +58,10 @@ func TestE2EConversionAgainstPandocStub(t *testing.T) {
 	}
 
 	if string(receivedBody) != "docx stub" {
-		t.Fatalf("unexpected body sent to pandoc: %s", string(receivedBody))
+		t.Fatalf("unexpected body sent to docling: %s", string(receivedBody))
 	}
 
-	if resp.GetMarkdown() != "## converted by pandoc" {
+	if resp.GetMarkdown() != "## converted by docling" {
 		t.Fatalf("unexpected markdown: %s", resp.GetMarkdown())
 	}
 }

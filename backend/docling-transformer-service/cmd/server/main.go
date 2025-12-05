@@ -25,7 +25,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	conv := converter.NewPandocConverter(cfg.Pandoc.Endpoint, cfg.Docling.Endpoint)
+	conv := converter.NewDoclingConverter(cfg.Docling.Endpoint)
 
 	if err := server.Run(ctx, logger, conv, cfg.Service.GRPCPort); err != nil {
 		logger.Fatal("server failed", zap.Error(err))

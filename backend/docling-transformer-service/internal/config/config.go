@@ -7,10 +7,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config описывает параметры для gRPC сервера, подключения к Pandoc/Docling и инфраструктурных сервисов.
+// Config описывает параметры для gRPC сервера, подключения к Docling и инфраструктурных сервисов.
 type Config struct {
 	Service  ServiceConfig  `yaml:"service"`
-	Pandoc   PandocConfig   `yaml:"pandoc"`
 	Docling  DoclingConfig  `yaml:"docling"`
 	Minio    MinioConfig    `yaml:"minio"`
 	Temporal TemporalConfig `yaml:"temporal"`
@@ -22,12 +21,7 @@ type ServiceConfig struct {
 	GRPCPort int    `yaml:"grpc_port"`
 }
 
-// PandocConfig содержит URL HTTP-обёртки Pandoc.
-type PandocConfig struct {
-	Endpoint string `yaml:"endpoint"`
-}
-
-// DoclingConfig описывает URL Docling, который используется для дополнительной валидации документов.
+// DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.
 type DoclingConfig struct {
 	Endpoint string `yaml:"endpoint"`
 }
