@@ -11,3 +11,9 @@ github:
   author_name: Knowledge Bot
   author_email: bot@example.org
   correlation_header: X-Correlation-ID
+
+minio:
+  endpoint: minio:9000
+  access_key: access_key
+  secret_key: secret_key
+  secure: false

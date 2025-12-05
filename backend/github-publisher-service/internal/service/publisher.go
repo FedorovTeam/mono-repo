@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"log"
 	"strings"
 
 	"backend-github-publisher-service/internal/config"
 	githubclient "backend-github-publisher-service/internal/github"
+	"backend-github-publisher-service/internal/storage"
 	githubpublisherv1 "backend-github-publisher-service/proto/backend/githubpublisher/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -17,12 +19,13 @@ type PublisherServer struct {
 	githubpublisherv1.UnimplementedGithubPublisherServiceServer
 
 	httpClient githubclient.HTTPClient
+	storage    storage.MarkdownLoader
 	cfg        *config.Config
 }
 
 // NewPublisherServer создаёт сервер публикации.
-func NewPublisherServer(cfg *config.Config, httpClient githubclient.HTTPClient) *PublisherServer {
-	return &PublisherServer{cfg: cfg, httpClient: httpClient}
+func NewPublisherServer(cfg *config.Config, httpClient githubclient.HTTPClient, storage storage.MarkdownLoader) *PublisherServer {
+	return &PublisherServer{cfg: cfg, httpClient: httpClient, storage: storage}
 }
 
 // PublishMarkdown сохраняет Markdown в GitHub и, при необходимости, открывает Pull Request.
@@ -30,12 +33,11 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 	if req.GetPath() == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
 	}
-	if req.GetContent() == "" {
-		return nil, status.Error(codes.InvalidArgument, "content is required")
-	}
 	if req.GetCommitMessage() == "" {
 		return nil, status.Error(codes.InvalidArgument, "commit message is required")
 	}
+
+	correlationID := s.pickCorrelationID(ctx, req.GetCorrelationId())
 
 	owner := req.GetOwner()
 	if owner == "" {
@@ -46,7 +48,24 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		repository = s.cfg.GitHub.Repository
 	}
 
-	correlationID := s.pickCorrelationID(ctx, req.GetCorrelationId())
+	content := req.GetContent()
+	if content == "" {
+		if s.storage == nil {
+			log.Printf("correlation_id=%s storage client is not configured", correlationID)
+			return nil, status.Error(codes.FailedPrecondition, "storage client is not configured")
+		}
+		bucket := req.GetBucket()
+		key := req.GetObjectKey()
+		if bucket == "" || key == "" {
+			return nil, status.Error(codes.InvalidArgument, "bucket and object_key are required when content is empty")
+		}
+		data, err := s.storage.LoadMarkdown(ctx, bucket, key)
+		if err != nil {
+			log.Printf("correlation_id=%s load markdown error: %v", correlationID, err)
+			return nil, status.Errorf(codes.FailedPrecondition, "load markdown: %v", err)
+		}
+		content = string(data)
+	}
 
 	branch := req.GetBranch()
 	baseBranch := req.GetBaseBranch()
@@ -57,21 +76,17 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		baseBranch = s.cfg.GitHub.DefaultBranch
 	}
 
-	client := githubclient.New(
+	client := githubclient.NewFromConfig(
 		s.httpClient,
-		s.cfg.GitHub.BaseURL,
-		s.cfg.GitHub.Token,
+		s.cfg.GitHub,
 		owner,
 		repository,
-		s.cfg.GitHub.DefaultBranch,
-		s.cfg.GitHub.CorrelationHeader,
-		s.cfg.GitHub.AuthorName,
-		s.cfg.GitHub.AuthorEmail,
 	)
 
-	commitSHA, err := client.CommitMarkdown(ctx, req.GetPath(), req.GetContent(), req.GetCommitMessage(), branch, correlationID, req.GetAuthorName(), req.GetAuthorEmail())
+	commitSHA, err := client.CommitMarkdown(ctx, req.GetPath(), content, req.GetCommitMessage(), branch, correlationID, req.GetAuthorName(), req.GetAuthorEmail())
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "commit markdown: %v", err)
+		log.Printf("correlation_id=%s commit markdown error: %v", correlationID, err)
+		return nil, status.Errorf(codes.FailedPrecondition, "commit markdown: %v", err)
 	}
 
 	var prNumber int64
@@ -79,7 +94,8 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 	if req.GetCreatePr() {
 		prNumber, prURL, err = client.CreatePullRequest(ctx, branch, baseBranch, req.GetPrTitle(), req.GetPrBody(), correlationID)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "create pull request: %v", err)
+			log.Printf("correlation_id=%s create pr error: %v", correlationID, err)
+			return nil, status.Errorf(codes.FailedPrecondition, "create pull request: %v", err)
 		}
 	}
 

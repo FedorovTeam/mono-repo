@@ -1,0 +1,55 @@
+---
+version: 1
+interactions:
+- request:
+    body: '{"branch":"feature/doc","committer":{"email":"bot@example.org","name":"Bot"},"content":"IyBIaQ==","message":"Add
+      doc"}'
+    form: {}
+    headers:
+      Accept:
+      - application/vnd.github+json
+      Authorization:
+      - Bearer token
+      X-Correlation-Id:
+      - corr-int
+    url: http://127.0.0.1:44639/repos/owner/repo/contents/docs/a.md
+    method: PUT
+  response:
+    body: |
+      {"commit":{"sha":"abc123"}}
+    headers:
+      Content-Length:
+      - "28"
+      Content-Type:
+      - application/json
+      Date:
+      - Fri, 05 Dec 2025 10:12:05 GMT
+    status: 200 OK
+    code: 200
+    duration: ""
+- request:
+    body: '{"base":"main","body":"Automated","head":"feature/doc","title":"Publish
+      doc"}'
+    form: {}
+    headers:
+      Accept:
+      - application/vnd.github+json
+      Authorization:
+      - Bearer token
+      X-Correlation-Id:
+      - corr-int
+    url: http://127.0.0.1:44639/repos/owner/repo/pulls
+    method: POST
+  response:
+    body: |
+      {"html_url":"https://example.com/pr/7","number":7}
+    headers:
+      Content-Length:
+      - "51"
+      Content-Type:
+      - text/plain; charset=utf-8
+      Date:
+      - Fri, 05 Dec 2025 10:12:05 GMT
+    status: 201 Created
+    code: 201
+    duration: ""
