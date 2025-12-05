@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package backend.storage.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "backend-storage-service/proto/backend/storage/v1;storagev1";
+
+// StorageService отвечает за прием и выдачу объектов MinIO.
+// Ключи формируются по шаблону
+// org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>.
+service StorageService {
+  // UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-docx.
+  rpc UploadOriginal(UploadOriginalRequest) returns (UploadObjectResponse);
+
+  // UploadMarkdown сохраняет Markdown-версию документа в приватный бакет knowledge-md.
+  rpc UploadMarkdown(UploadMarkdownRequest) returns (UploadObjectResponse);
+
+  // GetObject отдает содержимое ранее загруженного объекта.
+  rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
+}
+
+// UploadOriginalRequest описывает загрузку исходного документа.
+message UploadOriginalRequest {
+  string org_slug = 1;
+  string project_slug = 2;
+  string document_id = 3;
+  string filename_extension = 4; // Например: docx, pdf.
+  bytes content = 5;
+}
+
+// UploadMarkdownRequest описывает загрузку преобразованного Markdown.
+message UploadMarkdownRequest {
+  string org_slug = 1;
+  string project_slug = 2;
+  string document_id = 3;
+  bytes content = 4;
+}
+
+// UploadObjectResponse возвращает информацию о размещении файла.
+message UploadObjectResponse {
+  string bucket = 1;
+  string object_key = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+// GetObjectRequest описывает чтение ранее загруженного объекта.
+message GetObjectRequest {
+  // bucket определяет, откуда читать: knowledge-docx или knowledge-md.
+  string bucket = 1;
+  string object_key = 2;
+}
+
+// GetObjectResponse возвращает байты и метаданные объекта.
+message GetObjectResponse {
+  string bucket = 1;
+  string object_key = 2;
+  bytes content = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
