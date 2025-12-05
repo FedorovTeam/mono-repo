@@ -18,6 +18,9 @@ service StorageService {
 
   // GetObject отдает содержимое ранее загруженного объекта.
   rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
+
+  // GenerateUploadURL возвращает подписанную ссылку для прямой загрузки файла в приватный бакет.
+  rpc GenerateUploadURL(GenerateUploadURLRequest) returns (GenerateUploadURLResponse);
 }
 
 // UploadOriginalRequest описывает загрузку исходного документа.
@@ -57,4 +60,19 @@ message GetObjectResponse {
   string object_key = 2;
   bytes content = 3;
   google.protobuf.Timestamp updated_at = 4;
+}
+
+message GenerateUploadURLRequest {
+  string document_id = 1;
+  string file_name = 2;
+  int64 content_length = 3;
+  string correlation_id = 4;
+  int64 expires_in_seconds = 5;
+}
+
+message GenerateUploadURLResponse {
+  string upload_url = 1;
+  string bucket = 2;
+  string object_key = 3;
+  int64 expires_in_seconds = 4;
 }

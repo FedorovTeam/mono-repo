@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -15,6 +17,13 @@ type mockClient struct {
 	buckets     map[string]bool
 	storedData  map[string]map[string][]byte
 	lastPutOpts minio.PutObjectOptions
+	lastPresign struct {
+		method  string
+		bucket  string
+		object  string
+		expires time.Duration
+		headers http.Header
+	}
 }
 
 func newMockClient(buckets ...string) *mockClient {
@@ -60,6 +69,16 @@ func (m *mockClient) GetObject(_ context.Context, bucketName, objectName string)
 	}
 
 	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (m *mockClient) PresignHeader(_ context.Context, method, bucketName, objectName string, expires time.Duration, _ url.Values, headers http.Header) (*url.URL, error) {
+	m.lastPresign.method = method
+	m.lastPresign.bucket = bucketName
+	m.lastPresign.object = objectName
+	m.lastPresign.expires = expires
+	m.lastPresign.headers = headers
+
+	return url.Parse("http://example.com/presigned")
 }
 
 func TestObjectKeyGenerator_BuildKey(t *testing.T) {

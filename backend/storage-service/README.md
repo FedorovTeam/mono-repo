@@ -5,13 +5,15 @@
 ## Назначение
 - Прием исходных файлов (knowledge-docx) и Markdown (knowledge-md).
 - Генерация ключей по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>`.
+- Для выдачи presigned ссылок используются дефолтные `org_slug=knowledge` и `project_slug=documents`, чтобы сохранять единый путь размещения объектов.
 - Выдача сохраненных объектов по ключу.
+- Выдача presigned PUT ссылки через RPC `GenerateUploadURL` (получает `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds`) с установкой `x-amz-meta-correlation-id` в MinIO.
 
 ## Конфигурация
 Основные параметры лежат в `config/config.yaml`:
 - `service.grpc_port` — порт gRPC-сервера.
 - `minio.endpoint` / `access_key` / `secret_key` / `use_ssl` — доступ к MinIO.
-- `minio.buckets.knowledge_docx` — приватный бакет для оригиналов.
+- `minio.buckets.knowledge_docx` — приватный бакет для оригиналов и загрузки через signed URL.
 - `minio.buckets.knowledge_md` — приватный бакет для Markdown.
 
 ## Локальный запуск

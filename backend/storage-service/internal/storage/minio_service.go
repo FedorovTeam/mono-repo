@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 )
@@ -15,6 +18,7 @@ type Client interface {
 	BucketExists(ctx context.Context, bucketName string) (bool, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) error
 	GetObject(ctx context.Context, bucketName, objectName string) (io.ReadCloser, error)
+	PresignHeader(ctx context.Context, method, bucketName, objectName string, expires time.Duration, reqParams url.Values, extraHeaders http.Header) (*url.URL, error)
 }
 
 // MinioAPI адаптирует minio.Client к локальному интерфейсу.
@@ -45,6 +49,11 @@ func (m *MinioAPI) GetObject(ctx context.Context, bucketName, objectName string)
 		return nil, err
 	}
 	return object, nil
+}
+
+// PresignHeader проксирует вызов к minio.Client с сохранением всех подписываемых заголовков.
+func (m *MinioAPI) PresignHeader(ctx context.Context, method, bucketName, objectName string, expires time.Duration, reqParams url.Values, extraHeaders http.Header) (*url.URL, error) {
+	return m.client.PresignHeader(ctx, method, bucketName, objectName, expires, reqParams, extraHeaders)
 }
 
 // Service инкапсулирует работу с MinIO и генерацией ключей.

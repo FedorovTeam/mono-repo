@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,9 +12,13 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/test/bufconn"
 
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/graph/model"
+	storageclient "backend-gateway-service/internal/clients/storage"
 	"backend-gateway-service/internal/clients/temporal"
 	"backend-gateway-service/internal/ctxutils"
 	"backend-gateway-service/internal/middleware"
@@ -252,4 +257,139 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	if resp.Data.UploadKnowledgeDocument.UploadURL == "" || resp.Data.UploadKnowledgeDocument.UploadMethod == "" {
 		t.Fatalf("upload url not returned: %+v", resp.Data.UploadKnowledgeDocument)
 	}
+}
+
+func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
+	lis := bufconn.Listen(1024 * 1024)
+	storageServer := &storageServiceStub{t: t}
+	grpcServer := grpc.NewServer()
+	storagepb.RegisterStorageServiceServer(grpcServer, storageServer)
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		lis.Close()
+	})
+
+	dialer := func(ctx context.Context, _ string) (net.Conn, error) {
+		return lis.Dial()
+	}
+
+	storageClient, err := storageclient.NewGRPCClient("bufnet", grpc.WithContextDialer(dialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("cannot create storage client: %v", err)
+	}
+	t.Cleanup(func() { _ = storageClient.Close() })
+
+	logger := zap.NewNop()
+	docClient := &mockDocumentClient{
+		createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
+			return &pb.Document{Id: "doc-1", FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		},
+		getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
+		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
+			return &pb.ListDocumentsResponse{}, nil
+		},
+		retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil },
+	}
+	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
+		if input.CorrelationId != "corr-grpc" {
+			t.Fatalf("correlation id missing in workflow")
+		}
+		if input.UploadURL != "http://minio/presigned" {
+			t.Fatalf("unexpected upload url: %s", input.UploadURL)
+		}
+		return "wf-42", nil
+	}}
+
+	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
+	gqlServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
+	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
+
+	reqBody := map[string]interface{}{
+		"query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status workflowId } } }",
+		"variables": map[string]interface{}{
+			"input": map[string]interface{}{
+				"fileName":      "demo.docx",
+				"fileSizeBytes": 2048,
+				"repository":    "org/repo",
+				"branch":        "main",
+				"path":          "docs/demo.md",
+			},
+		},
+	}
+	payload, _ := json.Marshal(reqBody)
+	r := httptest.NewRequest(http.MethodPost, "/query", bytes.NewBuffer(payload))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-API-Key", "secret")
+	r.Header.Set("X-Correlation-ID", "corr-grpc")
+
+	rr := httptest.NewRecorder()
+	handlerWithMiddleware.ServeHTTP(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var resp struct {
+		Data struct {
+			UploadKnowledgeDocument struct {
+				UploadURL    string `json:"uploadUrl"`
+				UploadMethod string `json:"uploadMethod"`
+				Document     struct {
+					ID         string  `json:"id"`
+					Status     string  `json:"status"`
+					WorkflowID *string `json:"workflowId"`
+				} `json:"document"`
+			} `json:"uploadKnowledgeDocument"`
+		} `json:"data"`
+		Errors []interface{} `json:"errors"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("cannot unmarshal response: %v", err)
+	}
+	if len(resp.Errors) > 0 {
+		t.Fatalf("unexpected graphql errors: %+v", resp.Errors)
+	}
+	if storageServer.calls != 1 {
+		t.Fatalf("storage service should be called once, got %d", storageServer.calls)
+	}
+	if resp.Data.UploadKnowledgeDocument.Document.ID != "doc-1" || resp.Data.UploadKnowledgeDocument.UploadURL != "http://minio/presigned" {
+		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
+	}
+	if storageServer.lastCorrelation != "corr-grpc" {
+		t.Fatalf("correlation id not forwarded to storage service: %s", storageServer.lastCorrelation)
+	}
+}
+
+type storageServiceStub struct {
+	storagepb.UnimplementedStorageServiceServer
+	t               *testing.T
+	calls           int
+	lastCorrelation string
+}
+
+func (s *storageServiceStub) GenerateUploadURL(ctx context.Context, req *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
+	s.calls++
+	s.lastCorrelation = req.GetCorrelationId()
+
+	if req.GetDocumentId() == "" {
+		s.t.Fatalf("document id is required")
+	}
+	if req.GetExpiresInSeconds() != 900 {
+		s.t.Fatalf("unexpected ttl: %d", req.GetExpiresInSeconds())
+	}
+
+	md, _ := metadata.FromIncomingContext(ctx)
+	if cid := md.Get("x-correlation-id"); len(cid) == 0 || cid[0] != req.GetCorrelationId() {
+		s.t.Fatalf("correlation id not propagated in metadata")
+	}
+
+	return &storagepb.GenerateUploadURLResponse{
+		UploadUrl:        "http://minio/presigned",
+		Bucket:           "docx",
+		ObjectKey:        "docx/" + req.GetDocumentId() + ".docx",
+		ExpiresInSeconds: req.GetExpiresInSeconds(),
+	}, nil
 }

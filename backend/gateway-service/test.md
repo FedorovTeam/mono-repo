@@ -43,6 +43,8 @@ curl -X PUT "<uploadUrl из ответа>" \
   --data-binary @./demo.docx
 ```
 
+storage-service возвращает `bucket`, `objectKey` и `expiresInSeconds`, которые gateway прокидывает в Temporal workflow. Заголовок `X-Correlation-ID` автоматически попадает в presigned URL через метаданные `x-amz-meta-correlation-id`.
+
 ### Получение одного документа
 ```
 curl -X POST "$HOST" \
