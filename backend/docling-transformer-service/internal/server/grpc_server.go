@@ -37,7 +37,7 @@ func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transfo
 		return nil, status.Error(codes.InvalidArgument, "docx_content is required")
 	}
 
-	markdown, err := s.converter.Convert(ctx, converter.ConvertRequest{
+	markdown, err := s.converter.Convert(ctx, converter.DoclingConvertRequest{
 		FileName:    req.GetFileName(),
 		Content:     req.GetDocxContent(),
 		ContentType: req.GetContentType(),

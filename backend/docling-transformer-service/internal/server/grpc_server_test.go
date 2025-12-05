@@ -25,7 +25,7 @@ type fakeConverter struct {
 	ctx      context.Context
 }
 
-func (f *fakeConverter) Convert(ctx context.Context, _ converter.ConvertRequest) (string, error) {
+func (f *fakeConverter) Convert(ctx context.Context, _ converter.DoclingConvertRequest) (string, error) {
 	f.ctx = ctx
 	return f.response, f.err
 }
