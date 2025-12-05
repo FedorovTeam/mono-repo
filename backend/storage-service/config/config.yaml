@@ -1,0 +1,11 @@
+service:
+  grpc_port: ":50052"
+
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minio-access-key"
+  secret_key: "minio-secret-key"
+  use_ssl: false
+  buckets:
+    knowledge_docx: "knowledge-docx"
+    knowledge_md: "knowledge-md"

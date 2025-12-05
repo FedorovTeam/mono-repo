@@ -1,0 +1,24 @@
+# storage-service
+
+Сервис отвечает за хранение исходных документов и их Markdown-версий в приватных бакетах MinIO. Публичный контракт описан в `proto/backend/storage/v1/storage.proto`.
+
+## Назначение
+- Прием исходных файлов (knowledge-docx) и Markdown (knowledge-md).
+- Генерация ключей по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>`.
+- Выдача сохраненных объектов по ключу.
+
+## Конфигурация
+Основные параметры лежат в `config/config.yaml`:
+- `service.grpc_port` — порт gRPC-сервера.
+- `minio.endpoint` / `access_key` / `secret_key` / `use_ssl` — доступ к MinIO.
+- `minio.buckets.knowledge_docx` — приватный бакет для оригиналов.
+- `minio.buckets.knowledge_md` — приватный бакет для Markdown.
+
+## Локальный запуск
+1. Поднимите MinIO (например, через `docker-compose` шаблона template-service) и создайте бакеты `knowledge-docx` и `knowledge-md` с приватной политикой.
+2. Обновите `config/config.yaml` при необходимости.
+3. Сгенерируйте gRPC-код при помощи `protoc` (директория `proto`).
+4. Запустите сервис: `go run ./cmd`.
+
+## Тесты
+В модуле предусмотрены unit-тесты для генерации ключей и взаимодействия с MinIO через mock-клиент: `go test ./...`.
