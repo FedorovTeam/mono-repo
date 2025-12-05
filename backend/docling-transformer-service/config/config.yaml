@@ -2,9 +2,6 @@ service:
   name: docling-transformer-service
   grpc_port: 9092
 
-pandoc:
-  endpoint: http://pandoc-transformer:8080
-
 docling:
   endpoint: http://docling-service:8080
 

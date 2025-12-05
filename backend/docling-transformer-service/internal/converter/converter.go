@@ -24,26 +24,24 @@ type Converter interface {
 	Convert(ctx context.Context, req ConvertRequest) (string, error)
 }
 
-// PandocConverter вызывает HTTP-обёртку Pandoc, прокидывая correlation-id.
-type PandocConverter struct {
-	pandocEndpoint  string
-	doclingEndpoint string
-	client          *http.Client
+// DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
+type DoclingConverter struct {
+	endpoint string
+	client   *http.Client
 }
 
-// NewPandocConverter создаёт конвертер с таймаутом по умолчанию.
-func NewPandocConverter(pandocEndpoint, doclingEndpoint string) *PandocConverter {
-	return &PandocConverter{
-		pandocEndpoint:  pandocEndpoint,
-		doclingEndpoint: doclingEndpoint,
+// NewDoclingConverter создаёт конвертер с таймаутом по умолчанию.
+func NewDoclingConverter(endpoint string) *DoclingConverter {
+	return &DoclingConverter{
+		endpoint: endpoint,
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
 	}
 }
 
-// Convert выполняет HTTP-вызов в Pandoc-сервис и возвращает Markdown.
-func (c *PandocConverter) Convert(ctx context.Context, req ConvertRequest) (string, error) {
+// Convert выполняет HTTP-вызов в Docling-сервис и возвращает Markdown.
+func (c *DoclingConverter) Convert(ctx context.Context, req ConvertRequest) (string, error) {
 	if len(req.Content) == 0 {
 		return "", errors.New("empty document")
 	}
@@ -55,7 +53,7 @@ func (c *PandocConverter) Convert(ctx context.Context, req ConvertRequest) (stri
 		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	}
 
-	endpoint := fmt.Sprintf("%s/convert", c.pandocEndpoint)
+	endpoint := fmt.Sprintf("%s/convert", c.endpoint)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(req.Content))
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
@@ -66,23 +64,23 @@ func (c *PandocConverter) Convert(ctx context.Context, req ConvertRequest) (stri
 	if req.FileName != "" {
 		httpReq.Header.Set("X-Source-Filename", req.FileName)
 	}
-	if c.doclingEndpoint != "" {
-		httpReq.Header.Set("X-Docling-Endpoint", c.doclingEndpoint)
+	if c.endpoint != "" {
+		httpReq.Header.Set("X-Docling-Endpoint", c.endpoint)
 	}
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("call pandoc endpoint: %w", err)
+		return "", fmt.Errorf("call docling endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read pandoc response: %w", err)
+		return "", fmt.Errorf("read docling response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("pandoc returned status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("docling returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	return string(body), nil

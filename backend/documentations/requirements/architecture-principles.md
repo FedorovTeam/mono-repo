@@ -22,7 +22,7 @@
 
 1. Принимает от пользователя файлы **DOC/DOCX** через публичный API.
 2. Сохраняет оригинал в **MinIO**.
-3. Конвертирует документ в **Markdown** с помощью **Pandoc-сервиса** (HTTP/gRPC).
+3. Конвертирует документ в **Markdown** с помощью **Docling-конвертера** (HTTP/gRPC).
 4. Сохраняет результат в MinIO.
 5. Публикует Markdown в **GitHub-репозиторий**.
 6. Отдаёт пользователю **статусы** всех этапов (upload → convert → publish).
@@ -44,7 +44,7 @@
 | 2 | **Workflow-Oriented Orchestration** | Долгие процессы (upload → convert → publish) моделируются как **Temporal Workflow** с шагами-активити. Отдельная шина событий (NATS и т.п.) не используется. |
 | 3 | **CQRS по необходимости** | Базовая модель — обычный CRUD поверх PostgreSQL. При росте нагрузки допускается выделение read-модели для списков документов. |
 | 4 | **Self-Contained Service** | Каждый сервис владеет своей схемой PostgreSQL (если БД ему нужна) и своим набором bucket’ов в MinIO. Код других сервисов не импортируется. |
-| 5 | **Consumer Owns Integration** | Адаптеры внешних API (GitHub, Pandoc) живут в соответствующих сервисах (`github-publisher-service`, `pandoc-transformer-service`) и не протекают в core-домен. |
+| 5 | **Consumer Owns Integration** | Адаптеры внешних API (GitHub, Docling) живут в соответствующих сервисах (`github-publisher-service`, `docling-transformer-service`) и не протекают в core-домен. |
 | 6 | **Security by Default** | Все публичные GraphQL-мутации требуют аутентификации. |
 | 7 | **Observability First** | Все сервисы поддерживают логирование, метрики и tracing (OpenTelemetry). Везде прокидывается `Correlation-ID` / Workflow-ID. |
 
@@ -111,7 +111,7 @@ docling:
    - Складывает оригинал и конвертированный Markdown в разные bucket’ы.
    - Инкапсулирует работу с S3-совместимым API.
 4. **`docling-transformer-service`**
-   - HTTP/gRPC-обёртка над Pandoc.
+   - HTTP/gRPC-обёртка над Docling.
    - Принимает путь/байты DOCX, возвращает Markdown.
    - Stateless, легко масштабируется и перезапускается.
 5. **`github-publisher-service`**

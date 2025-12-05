@@ -14,8 +14,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 
 Основные блоки:
 - `service.grpc_port` — порт gRPC сервера.
-- `pandoc.endpoint` — HTTP-endpoint Docling-конвертера (историческое имя ключа, принимает POST `/convert`).
-- `docling.endpoint` — URL Docling, прокидывается в заголовке `X-Docling-Endpoint`.
+- `docling.endpoint` — HTTP-endpoint Docling-конвертера (POST `/convert`) и источник для заголовка `X-Docling-Endpoint`.
 - `minio.*` — доступы и bucket для результатов конвертации.
 - `temporal.*` — namespace и адрес для будущих воркеров/клиентов Temporal.
 
@@ -31,7 +30,7 @@ go test ./...
 ```
 
 ## Интеграции и зависимости
-- **Docling**: HTTP POST `/convert` на `pandoc.endpoint`, на вход сырые байты DOCX, на выход — Markdown.
+- **Docling**: HTTP POST `/convert` на `docling.endpoint`, на вход сырые байты DOCX, на выход — Markdown.
 - **MinIO**: планируется для хранения исходников и результата (bucket `docling-transformations`).
 - **Temporal**: подключение как клиент к namespace `knowledge-base`.
 

@@ -6,7 +6,7 @@ graph LR
         TR[docling-transformer-service]
     end
     TR -->|gRPC 9092| GW[Gateway/Workflows]
-    TR -->|HTTP /convert\nX-Correlation-Id| PD[Pandoc Wrapper]
+    TR -->|HTTP /convert\nX-Correlation-Id| DL[Docling Wrapper]
     TR -->|S3 API| MN[(MinIO bucket docling-transformations)]
     TR -->|Client| TMP[Temporal Cloud]
     TR -->|Logs/Tracing| OBS[OTel Collector]
