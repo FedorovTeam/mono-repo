@@ -22,7 +22,32 @@ const bufSize = 1024 * 1024
 
 func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	var receivedBody []byte
-	docling := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var docling *httptest.Server
+	docling = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("Docling expects POST, got %s", r.Method)
+		}
+
+		if r.URL.Path != "/convert" {
+			t.Fatalf("unexpected Docling path: %s", r.URL.Path)
+		}
+
+		if r.Header.Get("X-Correlation-Id") != "integration-1" {
+			t.Fatalf("Docling header mismatch: %s", r.Header.Get("X-Correlation-Id"))
+		}
+
+		if r.Header.Get("X-Docling-Endpoint") != docling.URL {
+			t.Fatalf("Docling endpoint header missing: %s", r.Header.Get("X-Docling-Endpoint"))
+		}
+
+		if r.Header.Get("Content-Type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+			t.Fatalf("Docling content-type mismatch: %s", r.Header.Get("Content-Type"))
+		}
+
+		if source := r.Header.Get("X-Docling-Source-Filename"); source != "" {
+			t.Fatalf("unexpected source filename header: %s", source)
+		}
+
 		body, _ := io.ReadAll(r.Body)
 		receivedBody = body
 		w.WriteHeader(http.StatusOK)
