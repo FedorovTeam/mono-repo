@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"backend-github-publisher-service/internal/config"
 )
 
 // HTTPClient определяет интерфейс минимального HTTP-клиента.
@@ -42,6 +44,28 @@ func New(httpClient HTTPClient, baseURL, token, owner, repository, defaultBranch
 		authorName:        authorName,
 		authorEmail:       authorEmail,
 	}
+}
+
+// NewFromConfig создаёт GitHub клиент, используя значения из конфигурации и опциональные переопределения owner/repository.
+func NewFromConfig(httpClient HTTPClient, cfg config.GitHubConfig, owner, repository string) *Client {
+	if owner == "" {
+		owner = cfg.Owner
+	}
+	if repository == "" {
+		repository = cfg.Repository
+	}
+
+	return New(
+		httpClient,
+		cfg.BaseURL,
+		cfg.Token,
+		owner,
+		repository,
+		cfg.DefaultBranch,
+		cfg.CorrelationHeader,
+		cfg.AuthorName,
+		cfg.AuthorEmail,
+	)
 }
 
 // CommitMarkdown создаёт или обновляет Markdown-файл в репозитории и возвращает SHA коммита.

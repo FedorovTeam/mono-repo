@@ -18,6 +18,8 @@ message PublishMarkdownRequest {
   string correlation_id = 11;
   string author_name = 12;
   string author_email = 13;
+  string bucket = 14;
+  string object_key = 15;
 }
 
 message PublishMarkdownResponse {

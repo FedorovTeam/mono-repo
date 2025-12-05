@@ -13,6 +13,7 @@ const defaultConfigPath = "config/config.yaml"
 type Config struct {
 	Service ServiceConfig `yaml:"service"`
 	GitHub  GitHubConfig  `yaml:"github"`
+	Minio   MinioConfig   `yaml:"minio"`
 }
 
 // ServiceConfig содержит основные параметры запуска.
@@ -31,6 +32,14 @@ type GitHubConfig struct {
 	AuthorName        string `yaml:"author_name"`
 	AuthorEmail       string `yaml:"author_email"`
 	CorrelationHeader string `yaml:"correlation_header"`
+}
+
+// MinioConfig описывает параметры доступа к MinIO.
+type MinioConfig struct {
+	Endpoint  string `yaml:"endpoint"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+	Secure    bool   `yaml:"secure"`
 }
 
 // Load загружает конфигурацию из CONFIG_PATH или файла по умолчанию.

@@ -3,7 +3,7 @@
 Сервис публикует Markdown-файлы в GitHub-репозиторий через gRPC-метод `PublishMarkdown`. Он коммитит содержимое в указанную ветку, при необходимости открывает Pull Request и прокидывает `correlation-id` во все запросы к GitHub API.
 
 ## Быстрый старт
-1. Сформируйте конфигурацию `config/config.yaml` с токеном GitHub и параметрами репозитория.
+1. Сформируйте конфигурацию `config/config.yaml` с токеном GitHub, параметрами репозитория и доступом к MinIO.
 2. Сгенерируйте gRPC код: `./proto/generate.sh`.
 3. Запустите сервис: `go run ./cmd/server` (порт настраивается в конфиге).
 4. Выполните тесты: `go test ./...`.
@@ -18,6 +18,7 @@
 - `github.default_branch` — целевая ветка (по умолчанию `main`).
 - `github.author_name` / `github.author_email` — метаданные коммита.
 - `github.correlation_header` — заголовок для прокидывания correlation-id.
+- `minio.*` — endpoint, ключи доступа и флаг `secure` для скачивания Markdown по bucket/key.
 
 ## Структура
 - `cmd/server` — точка входа gRPC сервера.
