@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/client"
+	"google.golang.org/grpc/metadata"
 
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/storage"
@@ -50,6 +51,8 @@ type UpdateStatusInput struct {
 }
 
 func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Document, error) {
+	ctx, correlationID := EnsureCorrelationID(ctx)
+	ctx = metadata.AppendToOutgoingContext(ctx, CorrelationIDHeader, correlationID)
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, errors.New("name is required")
 	}
@@ -93,6 +96,7 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 			PublishPath:       in.PublishPath,
 			OriginalContent:   in.OriginalContent,
 			Version:           version.Version,
+			CorrelationID:     correlationID,
 		}
 		if _, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input); err != nil {
 			return nil, fmt.Errorf("start workflow: %w", err)

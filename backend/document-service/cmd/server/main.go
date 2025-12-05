@@ -26,6 +26,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 	"google.golang.org/grpc"
 )
 
@@ -68,7 +69,8 @@ func main() {
 	repo := repository.New(db)
 	keyManager := storage.NewMinioKeyManager(minioClient, cfg.Minio.BucketPrefix, cfg.Minio.OriginalBucket, cfg.Minio.MarkdownBucket)
 
-	temporalClient, err := client.Dial(client.Options{HostPort: cfg.Temporal.Address, Namespace: cfg.Temporal.Namespace})
+	propagator := docservice.NewCorrelationIDPropagator()
+	temporalClient, err := client.Dial(client.Options{HostPort: cfg.Temporal.Address, Namespace: cfg.Temporal.Namespace, ContextPropagators: []workflow.ContextPropagator{propagator}})
 	if err != nil {
 		log.Fatalf("temporal client: %v", err)
 	}
