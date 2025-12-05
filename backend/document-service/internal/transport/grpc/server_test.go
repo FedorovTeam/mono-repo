@@ -10,7 +10,7 @@ import (
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/service/document"
 	"backend-document-service/internal/storage"
-	documentv1 "backend-document-service/proto/backend/document"
+	documentv1 "backend-document-service/proto/backend/document/v1"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -148,48 +149,72 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 	}
 
 	now := time.Now().UTC()
-	updated := doc.Status != to
+	statusChanged := doc.Status != to
+	docUpdated := statusChanged
+	versionInserted := false
 
 	if version != nil {
-		version.ID = uuid.NewString()
-		version.DocumentID = id
-		version.CreatedAt = now
-		version.UpdatedAt = now
-		if _, err = tx.ExecContext(ctx, `
+		existing, err := r.getVersionTx(ctx, tx, id, version.Version)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if existing != nil {
+			if (version.MarkdownObjectKey != "" && existing.MarkdownObjectKey != version.MarkdownObjectKey) ||
+				(version.OriginalObjectKey != "" && existing.OriginalObjectKey != version.OriginalObjectKey) {
+				return nil, fmt.Errorf("version %d already stored with different object keys", version.Version)
+			}
+			version = existing
+		} else {
+			version.ID = uuid.NewString()
+			version.DocumentID = id
+			version.CreatedAt = now
+			version.UpdatedAt = now
+			if _, err = tx.ExecContext(ctx, `
             INSERT INTO document_versions (id, document_id, version, original_object_key, markdown_object_key, created_at, updated_at)
             VALUES ($1,$2,$3,$4,$5,$6,$7)
         `, version.ID, version.DocumentID, version.Version, version.OriginalObjectKey, version.MarkdownObjectKey, version.CreatedAt, version.UpdatedAt); err != nil {
-			return nil, err
+				return nil, err
+			}
+			versionInserted = true
 		}
-		if version.OriginalObjectKey != "" {
+		if version.OriginalObjectKey != "" && doc.OriginalObjectKey != version.OriginalObjectKey {
 			doc.OriginalObjectKey = version.OriginalObjectKey
+			docUpdated = true
 		}
-		doc.MarkdownObjectKey = version.MarkdownObjectKey
-		updated = true
+		if version.MarkdownObjectKey != "" && doc.MarkdownObjectKey != version.MarkdownObjectKey {
+			doc.MarkdownObjectKey = version.MarkdownObjectKey
+			docUpdated = true
+		}
+		if versionInserted && !docUpdated {
+			docUpdated = true
+		}
 	}
 
-	if updated {
+	if docUpdated {
+		previousStatus := doc.Status
+		doc.Status = to
+		doc.UpdatedAt = now
 		if _, err = tx.ExecContext(ctx, `
             UPDATE documents SET status=$1, original_object_key=$2, markdown_object_key=$3, updated_at=$4 WHERE id=$5
-        `, string(to), doc.OriginalObjectKey, doc.MarkdownObjectKey, now, id); err != nil {
+        `, string(doc.Status), doc.OriginalObjectKey, doc.MarkdownObjectKey, doc.UpdatedAt, id); err != nil {
 			return nil, err
 		}
-		log := model.DocumentStatusLog{
-			ID:         uuid.NewString(),
-			DocumentID: id,
-			FromStatus: doc.Status,
-			ToStatus:   to,
-			Reason:     reason,
-			CreatedAt:  now,
-		}
-		if _, err = tx.ExecContext(ctx, `
+		if statusChanged || versionInserted || reason != "" {
+			log := model.DocumentStatusLog{
+				ID:         uuid.NewString(),
+				DocumentID: id,
+				FromStatus: previousStatus,
+				ToStatus:   to,
+				Reason:     reason,
+				CreatedAt:  now,
+			}
+			if _, err = tx.ExecContext(ctx, `
             INSERT INTO document_status_logs (id, document_id, from_status, to_status, reason, created_at)
             VALUES ($1,$2,$3,$4,$5,$6)
         `, log.ID, log.DocumentID, string(log.FromStatus), string(log.ToStatus), log.Reason, log.CreatedAt); err != nil {
-			return nil, err
+				return nil, err
+			}
 		}
-		doc.Status = to
-		doc.UpdatedAt = now
 	}
 
 	versions, err := r.fetchVersionsTx(ctx, tx, id)
@@ -222,6 +247,18 @@ func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]mo
 		versions = append(versions, v)
 	}
 	return versions, nil
+}
+
+func (r *Repository) getVersionTx(ctx context.Context, tx *sql.Tx, documentID string, version int32) (*model.DocumentVersion, error) {
+	row := tx.QueryRowContext(ctx, `
+        SELECT id, document_id, version, original_object_key, markdown_object_key, created_at, updated_at
+        FROM document_versions WHERE document_id=$1 AND version=$2
+    `, documentID, version)
+	var v model.DocumentVersion
+	if err := row.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 
 func (r *Repository) fetchVersionsTx(ctx context.Context, tx *sql.Tx, documentID string) ([]model.DocumentVersion, error) {

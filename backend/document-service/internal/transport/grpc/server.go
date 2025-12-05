@@ -7,7 +7,7 @@ import (
 
 	"backend-document-service/internal/model"
 	svc "backend-document-service/internal/service/document"
-	documentv1 "backend-document-service/proto/backend/document"
+	documentv1 "backend-document-service/proto/backend/document/v1"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
