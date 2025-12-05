@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package backend.storage.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "backend-document-service/proto/backend/storage/v1;storagev1";
+
+service StorageService {
+  rpc UploadOriginal(UploadOriginalRequest) returns (UploadObjectResponse);
+  rpc UploadMarkdown(UploadMarkdownRequest) returns (UploadObjectResponse);
+  rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
+  rpc GenerateUploadURL(GenerateUploadURLRequest) returns (GenerateUploadURLResponse);
+}
+
+message UploadOriginalRequest {
+  string org_slug = 1;
+  string project_slug = 2;
+  string document_id = 3;
+  string filename_extension = 4;
+  bytes content = 5;
+}
+
+message UploadMarkdownRequest {
+  string org_slug = 1;
+  string project_slug = 2;
+  string document_id = 3;
+  bytes content = 4;
+}
+
+message UploadObjectResponse {
+  string bucket = 1;
+  string object_key = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message GetObjectRequest {
+  string bucket = 1;
+  string object_key = 2;
+}
+
+message GetObjectResponse {
+  string bucket = 1;
+  string object_key = 2;
+  bytes content = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message GenerateUploadURLRequest {
+  string document_id = 1;
+  string file_name = 2;
+  int64 content_length = 3;
+  string correlation_id = 4;
+  int64 expires_in_seconds = 5;
+}
+
+message GenerateUploadURLResponse {
+  string upload_url = 1;
+  string bucket = 2;
+  string object_key = 3;
+  int64 expires_in_seconds = 4;
+}

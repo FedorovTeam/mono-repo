@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package backend.githubpublisher.v1;
+
+option go_package = "backend-document-service/proto/backend/githubpublisher/v1;githubpublisherv1";
+
+service GithubPublisherService {
+  rpc PublishMarkdown(PublishMarkdownRequest) returns (PublishMarkdownResponse);
+}
+
+message PublishMarkdownRequest {
+  string repository = 1;
+  string branch = 2;
+  string path = 3;
+  bytes content = 4;
+}
+
+message PublishMarkdownResponse {
+  string commit_sha = 1;
+  string url = 2;
+}

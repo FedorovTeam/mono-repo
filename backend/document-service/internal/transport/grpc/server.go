@@ -41,9 +41,12 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocumentRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "CreateDocument")
 	doc, err := s.service.CreateDocument(ctx, svc.CreateInput{
-		Name:           req.GetName(),
-		OriginalBucket: req.GetOriginalBucket(),
-		MarkdownBucket: req.GetMarkdownBucket(),
+		Name:            req.GetName(),
+		OriginalBucket:  req.GetOriginalBucket(),
+		MarkdownBucket:  req.GetMarkdownBucket(),
+		OriginalContent: req.GetOriginalContent(),
+		FilenameExt:     req.GetFilenameExtension(),
+		PublishPath:     req.GetPublishPath(),
 	})
 	if err != nil {
 		return nil, err

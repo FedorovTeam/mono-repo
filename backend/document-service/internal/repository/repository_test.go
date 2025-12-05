@@ -64,7 +64,7 @@ func TestUpdateStatusFlow(t *testing.T) {
 			AddRow("doc-1", "name", model.StatusUploaded, "orig", "orig/key", "md", "md/key", now, now))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO document_versions")).
 		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE documents SET status=$1, markdown_object_key=$2, updated_at=$3 WHERE id=$4")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE documents SET status=$1, original_object_key=$2, markdown_object_key=$3, updated_at=$4 WHERE id=$5")).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO document_status_logs")).
 		WillReturnResult(sqlmock.NewResult(1, 1))

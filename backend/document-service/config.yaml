@@ -1,0 +1,23 @@
+server:
+  addr: ":50051"
+postgres:
+  dsn: "postgres://postgres:postgres@localhost:5432/document?sslmode=disable"
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  use_ssl: false
+  original_bucket: "backend-original"
+  markdown_bucket: "backend-md"
+  bucket_prefix: "documents"
+temporal:
+  address: "localhost:7233"
+  namespace: "default"
+  task_queue: "document-processing"
+services:
+  storage_service: "localhost:6001"
+  transformer_service: "localhost:6002"
+  github_publisher_service: "localhost:6003"
+github:
+  repository: "org/repo"
+  branch: "main"

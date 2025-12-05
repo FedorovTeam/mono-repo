@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package backend.transformer.v1;
+
+option go_package = "backend-document-service/proto/backend/transformer/v1;transformerv1";
+
+service TransformerService {
+  rpc ConvertDocxToMarkdown(ConvertDocxToMarkdownRequest) returns (ConvertDocxToMarkdownResponse);
+}
+
+message ConvertDocxToMarkdownRequest {
+  bytes content = 1;
+  string filename_extension = 2;
+}
+
+message ConvertDocxToMarkdownResponse {
+  bytes markdown_content = 1;
+  string media_type = 2;
+}
