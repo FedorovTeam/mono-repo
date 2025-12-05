@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"path/filepath"
+	"strings"
 
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
+	"github.com/mono-repo/docling-transformer-service/internal/storage"
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
 	"go.uber.org/zap"
@@ -18,48 +21,90 @@ import (
 // TransformerAPI реализует gRPC-контракт TransformerService.
 type TransformerAPI struct {
 	transformerv1.UnimplementedTransformerServiceServer
-	converter converter.Converter
-	logger    *zap.Logger
+	converter      converter.Converter
+	storage        storage.ObjectStorage
+	markdownBucket string
+	logger         *zap.Logger
 }
 
 // NewTransformerAPI конструирует обработчик с переданным конвертером.
-func NewTransformerAPI(conv converter.Converter, logger *zap.Logger) *TransformerAPI {
-	return &TransformerAPI{converter: conv, logger: logger}
+func NewTransformerAPI(conv converter.Converter, storage storage.ObjectStorage, markdownBucket string, logger *zap.Logger) *TransformerAPI {
+	return &TransformerAPI{converter: conv, storage: storage, markdownBucket: markdownBucket, logger: logger}
 }
 
 // ConvertDocxToMarkdown выполняет преобразование документа через конвертер.
 func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
-        ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
-        s.logger.Info("ConvertDocxToMarkdown started", zap.String("correlation_id", correlationID))
+	s.logger.Info("ConvertDocxToMarkdown started", zap.String("correlation_id", correlationID),
+		zap.String("document_id", req.GetDocumentId()),
+		zap.String("original_bucket", req.GetOriginalBucket()),
+		zap.String("original_object_key", req.GetOriginalObjectKey()))
 
-        if len(req.GetContent()) == 0 {
-                return nil, status.Error(codes.InvalidArgument, "content is required")
-        }
+	if req.GetDocumentId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "document_id is required")
+	}
+	if req.GetOriginalBucket() == "" || req.GetOriginalObjectKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "original bucket and key are required")
+	}
 
-        fileName := ""
-        if ext := req.GetFilenameExtension(); ext != "" {
-                fileName = fmt.Sprintf("document.%s", ext)
-        }
+	markdownBucket := req.GetMarkdownBucket()
+	if markdownBucket == "" {
+		markdownBucket = s.markdownBucket
+	}
+	if markdownBucket == "" {
+		return nil, status.Error(codes.InvalidArgument, "markdown bucket is required")
+	}
 
-        result, err := s.converter.Convert(ctx, converter.DoclingConvertRequest{
-                FileName: fileName,
-                Content:  req.GetContent(),
-        })
-        if err != nil {
-                s.logger.Error("conversion failed", zap.String("correlation_id", correlationID), zap.Error(err))
-                return nil, status.Errorf(codes.Internal, "conversion error: %v", err)
-        }
+	originalContent, err := s.storage.Download(ctx, req.GetOriginalBucket(), req.GetOriginalObjectKey())
+	if err != nil {
+		s.logger.Error("download original failed", zap.String("correlation_id", correlationID), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "download original: %v", err)
+	}
 
-        s.logger.Info("ConvertDocxToMarkdown completed", zap.String("correlation_id", correlationID))
+	result, err := s.converter.Convert(ctx, converter.DoclingConvertRequest{
+		FileName: filepath.Base(req.GetOriginalObjectKey()),
+		Content:  originalContent,
+	})
+	if err != nil {
+		s.logger.Error("conversion failed", zap.String("correlation_id", correlationID), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "conversion error: %v", err)
+	}
 
-        return &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: result.Content, MediaType: result.MediaType}, nil
+	markdownKey := req.GetMarkdownObjectKey()
+	if markdownKey == "" {
+		markdownKey = buildMarkdownKey(req.GetOriginalObjectKey())
+	}
+
+	contentType := result.MediaType
+	if contentType == "" {
+		contentType = "text/markdown"
+	}
+
+	if err := s.storage.Upload(ctx, markdownBucket, markdownKey, contentType, result.Content); err != nil {
+		s.logger.Error("upload markdown failed", zap.String("correlation_id", correlationID), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "upload markdown: %v", err)
+	}
+
+	s.logger.Info("ConvertDocxToMarkdown completed", zap.String("correlation_id", correlationID), zap.String("markdown_bucket", markdownBucket), zap.String("markdown_key", markdownKey))
+
+	return &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: result.Content, MediaType: result.MediaType, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}, nil
+}
+
+func buildMarkdownKey(originalKey string) string {
+	ext := filepath.Ext(originalKey)
+	base := strings.TrimSuffix(originalKey, ext)
+	if base == "" {
+		return originalKey + ".md"
+	}
+
+	return base + ".md"
 }
 
 // Run запускает gRPC сервер на указанном порте.
-func Run(ctx context.Context, logger *zap.Logger, conv converter.Converter, port int) error {
+func Run(ctx context.Context, logger *zap.Logger, conv converter.Converter, storage storage.ObjectStorage, markdownBucket string, port int) error {
 	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, storage, markdownBucket, logger))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {

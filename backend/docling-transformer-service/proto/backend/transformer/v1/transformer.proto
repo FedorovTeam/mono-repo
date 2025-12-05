@@ -9,11 +9,16 @@ service TransformerService {
 }
 
 message ConvertDocxToMarkdownRequest {
-  bytes content = 1;
-  string filename_extension = 2;
+  string document_id = 1;
+  string original_bucket = 2;
+  string original_object_key = 3;
+  string markdown_bucket = 4;
+  string markdown_object_key = 5;
 }
 
 message ConvertDocxToMarkdownResponse {
   bytes markdown_content = 1;
   string media_type = 2;
+  string markdown_bucket = 3;
+  string markdown_object_key = 4;
 }

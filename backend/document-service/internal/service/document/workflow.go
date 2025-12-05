@@ -30,6 +30,7 @@ type WorkflowInput struct {
 	OriginalBucket    string
 	MarkdownBucket    string
 	OriginalObjectKey string
+	MarkdownObjectKey string
 	FilenameExt       string
 	PublishPath       string
 	OriginalContent   []byte
@@ -44,10 +45,12 @@ type uploadOriginalInput struct {
 }
 
 type convertInput struct {
-	DocumentID      string
-	FilenameExt     string
-	OriginalContent []byte
-	Version         int32
+	DocumentID        string
+	OriginalBucket    string
+	MarkdownBucket    string
+	OriginalObjectKey string
+	MarkdownObjectKey string
+	Version           int32
 }
 
 type publishInput struct {
@@ -58,9 +61,9 @@ type publishInput struct {
 }
 
 type convertResult struct {
-        MarkdownContent []byte
-        MarkdownKey     string
-        MediaType       string
+	MarkdownContent []byte
+	MarkdownKey     string
+	MediaType       string
 }
 
 type Activities struct {
@@ -105,10 +108,12 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 	}
 
 	convArg := convertInput{
-		DocumentID:      input.DocumentID,
-		FilenameExt:     input.FilenameExt,
-		OriginalContent: input.OriginalContent,
-		Version:         uploadArg.Version + 1,
+		DocumentID:        input.DocumentID,
+		OriginalBucket:    input.OriginalBucket,
+		MarkdownBucket:    input.MarkdownBucket,
+		OriginalObjectKey: input.OriginalObjectKey,
+		MarkdownObjectKey: input.MarkdownObjectKey,
+		Version:           uploadArg.Version + 1,
 	}
 	var convRes convertResult
 	if err := workflow.ExecuteActivity(ctx, ActivityConvertToMarkdownName, convArg).Get(ctx, &convRes); err != nil {
@@ -145,29 +150,25 @@ func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInp
 }
 
 func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) (convertResult, error) {
-	if a.transformer == nil || a.storage == nil {
-		return convertResult{}, fmt.Errorf("transformer or storage client is not configured")
+	if a.transformer == nil {
+		return convertResult{}, fmt.Errorf("transformer client is not configured")
 	}
-        resp, err := a.transformer.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
-                Content:           input.OriginalContent,
-                FilenameExtension: input.FilenameExt,
-        })
-        if err != nil {
+	resp, err := a.transformer.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
+		DocumentId:        input.DocumentID,
+		OriginalBucket:    input.OriginalBucket,
+		OriginalObjectKey: input.OriginalObjectKey,
+		MarkdownBucket:    input.MarkdownBucket,
+		MarkdownObjectKey: input.MarkdownObjectKey,
+	})
+	if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("convert: %v", err))
 		return convertResult{}, err
 	}
-	upload, err := a.storage.UploadMarkdown(ctx, &storagev1.UploadMarkdownRequest{
-		DocumentId: input.DocumentID,
-		Content:    resp.MarkdownContent,
-	})
-	if err != nil {
-		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("upload markdown: %v", err))
+
+	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: resp.MarkdownObjectKey}); err != nil {
 		return convertResult{}, err
 	}
-        if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: upload.ObjectKey}); err != nil {
-                return convertResult{}, err
-        }
-        return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: upload.ObjectKey, MediaType: resp.MediaType}, nil
+	return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: resp.MarkdownObjectKey, MediaType: resp.MediaType}, nil
 }
 
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {

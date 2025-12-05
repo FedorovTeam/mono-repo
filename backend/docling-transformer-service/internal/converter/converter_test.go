@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"go.uber.org/zap"
 )
 
 func TestDoclingConverterSuccess(t *testing.T) {
@@ -32,7 +35,7 @@ func TestDoclingConverterSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(server.URL)
+	conv := NewDoclingConverter(server.URL, zap.NewNop())
 
 	result, err := conv.Convert(context.Background(), DoclingConvertRequest{
 		FileName:    "sample.docx",
@@ -71,7 +74,7 @@ func TestDoclingConverterErrorStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(server.URL)
+	conv := NewDoclingConverter(server.URL, zap.NewNop())
 	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("docx")})
 	if err == nil {
 		t.Fatalf("expected error from Docling")
@@ -83,9 +86,40 @@ func TestDoclingConverterErrorStatus(t *testing.T) {
 }
 
 func TestDoclingConverterEmptyContent(t *testing.T) {
-	conv := NewDoclingConverter("http://docling")
+	conv := NewDoclingConverter("http://docling", zap.NewNop())
 	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: nil})
 	if err == nil {
 		t.Fatalf("expected validation error")
+	}
+}
+
+func TestDoclingConverterRetryOnFailure(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			http.Error(w, "temporary", http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(server.URL, zap.NewNop())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result, err := conv.Convert(ctx, DoclingConvertRequest{Content: []byte("docx")})
+	if err != nil {
+		t.Fatalf("unexpected error after retry: %v", err)
+	}
+
+	if string(result.Content) != "ok" {
+		t.Fatalf("unexpected content: %s", string(result.Content))
+	}
+
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
 	}
 }

@@ -89,6 +89,7 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 			OriginalBucket:    created.OriginalBucket,
 			MarkdownBucket:    created.MarkdownBucket,
 			OriginalObjectKey: created.OriginalObjectKey,
+			MarkdownObjectKey: created.MarkdownObjectKey,
 			FilenameExt:       in.FilenameExt,
 			PublishPath:       in.PublishPath,
 			OriginalContent:   in.OriginalContent,

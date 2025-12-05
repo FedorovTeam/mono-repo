@@ -10,6 +10,7 @@ import (
 
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/server"
+	"github.com/mono-repo/docling-transformer-service/internal/storage"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -19,6 +20,22 @@ import (
 )
 
 const bufSize = 1024 * 1024
+
+type stubStorage struct {
+	download []byte
+	uploaded []byte
+}
+
+var _ storage.ObjectStorage = (*stubStorage)(nil)
+
+func (s *stubStorage) Download(context.Context, string, string) ([]byte, error) {
+	return s.download, nil
+}
+
+func (s *stubStorage) Upload(_ context.Context, _, _ string, _ string, content []byte) error {
+	s.uploaded = content
+	return nil
+}
 
 func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	var receivedBody []byte
@@ -44,7 +61,7 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 			t.Fatalf("Docling content-type mismatch: %s", r.Header.Get("Content-Type"))
 		}
 
-		if source := r.Header.Get("X-Docling-Source-Filename"); source != "" {
+		if source := r.Header.Get("X-Docling-Source-Filename"); source != "file.docx" {
 			t.Fatalf("unexpected source filename header: %s", source)
 		}
 
@@ -55,12 +72,13 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	}))
 	defer docling.Close()
 
-	conv := converter.NewDoclingConverter(docling.URL)
+	conv := converter.NewDoclingConverter(docling.URL, zap.NewNop())
+	memStorage := &stubStorage{download: []byte("docx stub from storage")}
 	logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer(grpc.UnaryInterceptor(server.LoggingInterceptor(logger)))
-	transformerv1.RegisterTransformerServiceServer(srv, server.NewTransformerAPI(conv, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, server.NewTransformerAPI(conv, memStorage, "md", logger))
 
 	go func() {
 		_ = srv.Serve(lis)
@@ -77,16 +95,26 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{Content: []byte("docx stub")})
+	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
+		DocumentId:        "doc-1",
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "dest/file.md",
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(receivedBody) != "docx stub" {
+	if string(receivedBody) != "docx stub from storage" {
 		t.Fatalf("unexpected body sent to docling: %s", string(receivedBody))
 	}
 
 	if string(resp.GetMarkdownContent()) != "## converted by docling" {
 		t.Fatalf("unexpected markdown: %s", string(resp.GetMarkdownContent()))
+	}
+
+	if string(memStorage.uploaded) != "## converted by docling" {
+		t.Fatalf("markdown was not uploaded to storage")
 	}
 }

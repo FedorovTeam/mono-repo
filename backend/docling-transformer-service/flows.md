@@ -1,11 +1,11 @@
 # Flows
 
 ## Конвертация DOCX → Markdown
-1. Gateway/Temporal вызывает gRPC метод `ConvertDocxToMarkdown` с байтами DOCX и `x-correlation-id`.
+1. Gateway/Temporal вызывает gRPC метод `ConvertDocxToMarkdown` с `document_id`, `original_bucket`, `original_object_key` и `x-correlation-id` (опционально `markdown_bucket`/`markdown_object_key`).
 2. Интерсептор сохраняет/генерирует correlation-id и пишет входные метаданные в лог.
-3. `DoclingConverter` отправляет POST `${docling.endpoint}/convert` в Docling-конвертер, прокидывая `X-Correlation-Id`, `X-Source-Filename` и `X-Docling-Endpoint`.
-4. Docling возвращает Markdown-текст.
-5. gRPC-слой отдаёт `markdown` вызывающей стороне; correlation-id используется для стыковки со шагами хранения в MinIO и публикации в GitHub (в перспективе через Temporal workflow).
+3. Сервис скачивает исходный DOCX из MinIO (через MinIO SDK), после чего `DoclingConverter` отправляет POST `${docling.endpoint}/convert`, прокидывая `X-Correlation-Id`, `X-Source-Filename` и `X-Docling-Endpoint`.
+4. Docling возвращает Markdown-текст; сервис загружает его в бакет Markdown (по умолчанию из `config.yaml`).
+5. gRPC-слой отдаёт `markdown`, `markdown_bucket` и `markdown_object_key` вызывающей стороне; correlation-id используется для стыковки со шагами публикации в GitHub (в перспективе через Temporal workflow).
 
 ## Управление конфигурацией
 1. При старте `cmd/server` читает `config.yaml` (или путь из `CONFIG_PATH`).
