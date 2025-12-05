@@ -1,20 +1,21 @@
 # Docling Transformer Service
 
-Docling Transformer Service — gRPC-обёртка над Pandoc/Docling для конвертации DOCX в Markdown с обязательным прокидыванием `x-correlation-id`. Сервис повторяет структуру `template-service` и конфигурируется через один `config.yaml`.
+Docling Transformer Service — gRPC-обёртка над Docling для конвертации DOCX в Markdown с обязательным прокидыванием `x-correlation-id`. Сервис повторяет структуру `template-service` и конфигурируется через один `config.yaml`.
 
 ## Возможности
 - gRPC метод `ConvertDocxToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto`.
+- HTTP-запрос к Docling-конвертеру для получения Markdown.
 - Проксирование correlation-id во все внешние вызовы.
-- Настройки Pandoc/Docling, MinIO и Temporal в одном конфигурационном файле.
-- Минимальные unit- и e2e-тесты против заглушки Pandoc.
+- Настройки Docling, MinIO и Temporal в одном конфигурационном файле.
+- Минимальные unit- и e2e-тесты против заглушки Docling.
 
 ## Конфигурация
 Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл).
 
 Основные блоки:
 - `service.grpc_port` — порт gRPC сервера.
-- `pandoc.endpoint` — URL HTTP-обёртки Pandoc.
-- `docling.endpoint` — URL Docling (прокидывается в заголовках как источник).
+- `pandoc.endpoint` — HTTP-endpoint Docling-конвертера (историческое имя ключа, принимает POST `/convert`).
+- `docling.endpoint` — URL Docling, прокидывается в заголовке `X-Docling-Endpoint`.
 - `minio.*` — доступы и bucket для результатов конвертации.
 - `temporal.*` — namespace и адрес для будущих воркеров/клиентов Temporal.
 
@@ -30,15 +31,14 @@ go test ./...
 ```
 
 ## Интеграции и зависимости
-- **Pandoc**: HTTP POST `/convert`, на вход сырые байты DOCX, на выход — Markdown.
-- **Docling**: endpoint прокидывается для трассировки/валидации.
+- **Docling**: HTTP POST `/convert` на `pandoc.endpoint`, на вход сырые байты DOCX, на выход — Markdown.
 - **MinIO**: планируется для хранения исходников и результата (bucket `docling-transformations`).
 - **Temporal**: подключение как клиент к namespace `knowledge-base`.
 
 ## Структура проекта
 - `cmd/server` — точка входа, загрузка конфига и запуск gRPC.
 - `internal/config` — чтение `config.yaml`.
-- `internal/converter` — HTTP-клиент Pandoc с correlation-id.
+- `internal/converter` — HTTP-клиент Docling с прокидыванием correlation-id.
 - `internal/server` — gRPC сервер и интерсептор логирования.
 - `internal/telemetry` — утилиты correlation-id.
 - `proto/backend/transformer/v1` — контракт и сгенерированные gRPC артефакты.
