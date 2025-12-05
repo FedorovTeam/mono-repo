@@ -1,0 +1,13 @@
+service:
+  name: github-publisher-service
+  grpc_port: 9097
+
+github:
+  base_url: https://api.github.com
+  owner: example-org
+  repository: knowledge-base
+  token: ghp_example_token
+  default_branch: main
+  author_name: Knowledge Bot
+  author_email: bot@example.org
+  correlation_header: X-Correlation-ID
