@@ -144,6 +144,10 @@ func (m *mockPresignClient) BucketExists(_ context.Context, _ string) (bool, err
 	return m.bucketExists, nil
 }
 
+func (m *mockPresignClient) MakeBucket(context.Context, string, minio.MakeBucketOptions) error {
+	return errors.New("not implemented")
+}
+
 func (m *mockPresignClient) PutObject(context.Context, string, string, io.Reader, int64, minio.PutObjectOptions) error {
 	return errors.New("not implemented")
 }
@@ -176,6 +180,11 @@ func newMockClient(buckets ...string) *mockClient {
 
 func (m *mockClient) BucketExists(_ context.Context, bucketName string) (bool, error) {
 	return m.buckets[bucketName], nil
+}
+
+func (m *mockClient) MakeBucket(_ context.Context, bucketName string, _ minio.MakeBucketOptions) error {
+	m.buckets[bucketName] = true
+	return nil
 }
 
 func (m *mockClient) PutObject(_ context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, _ minio.PutObjectOptions) error {

@@ -128,7 +128,8 @@ func (s *Server) GetObject(ctx context.Context, req *storagev1.GetObjectRequest)
 		return nil, status.Error(codes.InvalidArgument, "bucket и object_key должны быть заполнены")
 	}
 
-	s.attachResponseMetadata(ctx, s.correlationID(ctx, ""), s.resolveOrgSlug(ctx, ""), s.resolveProjectSlug(ctx, ""))
+	correlationID := s.correlationID(ctx, "")
+	s.attachResponseMetadata(ctx, correlationID, s.resolveOrgSlug(ctx, ""), s.resolveProjectSlug(ctx, ""))
 
 	content, err := s.service.DownloadObject(ctx, req.GetBucket(), req.GetObjectKey())
 	if err != nil {
@@ -171,8 +172,11 @@ func (s *Server) GenerateUploadURL(ctx context.Context, req *storagev1.GenerateU
 		return nil, status.Errorf(codes.InvalidArgument, "cannot build object key: %v", err)
 	}
 
+	correlationID := s.correlationID(ctx, req.GetCorrelationId())
+	s.attachResponseMetadata(ctx, correlationID, s.orgSlug, s.projectSlug)
+
 	headers := http.Header{}
-	if correlationID := s.correlationID(ctx, req.GetCorrelationId()); correlationID != "" {
+	if correlationID != "" {
 		headers.Set("x-amz-meta-correlation-id", correlationID)
 	}
 
@@ -244,11 +248,17 @@ func (s *Server) resolveProjectSlug(ctx context.Context, requestValue string) st
 }
 
 func (s *Server) attachResponseMetadata(ctx context.Context, correlationID, orgSlug, projectSlug string) {
-	md := metadata.Pairs(
+	pairs := []string{
 		"x-correlation-id", correlationID,
 		"org-slug", orgSlug,
 		"project-slug", projectSlug,
-	)
+	}
+
+	if correlationID != "" {
+		pairs = append(pairs, "x-amz-meta-correlation-id", correlationID)
+	}
+
+	md := metadata.Pairs(pairs...)
 	_ = grpc.SetHeader(ctx, md)
 }
 

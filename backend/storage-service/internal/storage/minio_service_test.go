@@ -38,6 +38,11 @@ func (m *mockClient) BucketExists(_ context.Context, bucketName string) (bool, e
 	return m.buckets[bucketName], nil
 }
 
+func (m *mockClient) MakeBucket(_ context.Context, bucketName string, _ minio.MakeBucketOptions) error {
+	m.buckets[bucketName] = true
+	return nil
+}
+
 func (m *mockClient) PutObject(_ context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) error {
 	if !m.buckets[bucketName] {
 		return minio.ErrorResponse{Code: "NoSuchBucket"}
