@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: docling
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:FedorovTeam/mono-repo.git
+    targetRevision: HEAD
+    path: infra/manifests/docling
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: docling
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docling-serve
+  namespace: docling
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docling-serve
+  template:
+    metadata:
+      labels:
+        app: docling-serve
+    spec:
+      containers:
+        - name: docling-serve
+          image: quay.io/docling-project/docling-serve-cpu:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DOCLING_SERVE_ENABLE_UI
+              value: "1"
+            # при желании сюда можно добавить другие env из .env.example
+          ports:
+            - containerPort: 5001
+              name: http
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "8Gi"
+          # Если потребуется доступ к модели/кэшу на диске – сюда можно добавить volumeMounts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docling
+  namespace: docling
+spec:
+  selector:
+    app: docling-serve
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5001
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: docling
+  namespace: docling
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - docling.tech.fedorov-team.tech
+      secretName: docling-tls
+  rules:
+    - host: docling.tech.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: docling
+                port:
+                  number: 80
