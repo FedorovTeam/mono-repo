@@ -7,7 +7,7 @@
 2. **Сервис хранилища подтверждает загрузку оригинала**
    - После успешной записи в MinIO вызывает `UpdateDocumentStatus` со статусом `StoredOriginal`.
 
-3. **Pandoc-конвертер завершил обработку**
+3. **docling-конвертер завершил обработку**
    - Передаёт ключ Markdown и вызывает `UpdateDocumentStatus` → `ConvertedToMarkdown`.
 
 4. **GitHub публикует статью**
