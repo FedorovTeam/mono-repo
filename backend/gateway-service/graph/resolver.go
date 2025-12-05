@@ -4,6 +4,7 @@ import (
 	"go.uber.org/zap"
 
 	"backend-gateway-service/internal/clients/document"
+	"backend-gateway-service/internal/clients/storage"
 	"backend-gateway-service/internal/clients/temporal"
 )
 
@@ -11,5 +12,7 @@ import (
 type Resolver struct {
 	DocumentClient document.Client
 	TemporalClient temporal.Client
+	StorageClient  storage.Client
+	UploadConfig   UploadValidationConfig
 	Logger         *zap.Logger
 }

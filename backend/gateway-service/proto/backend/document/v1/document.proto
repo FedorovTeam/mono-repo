@@ -21,6 +21,8 @@ message Document {
   DocumentStatus status = 6;
   string workflow_id = 7;
   string error = 8;
+  string upload_bucket = 9;
+  string upload_object_key = 10;
 }
 
 message CreateDocumentRequest {
@@ -30,6 +32,9 @@ message CreateDocumentRequest {
   string branch = 4;
   string path = 5;
   string correlation_id = 6;
+  int64 content_length = 7;
+  string upload_bucket = 8;
+  string upload_object_key = 9;
 }
 
 message GetDocumentRequest {

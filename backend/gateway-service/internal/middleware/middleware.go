@@ -20,6 +20,7 @@ func CorrelationIDMiddleware(logger *zap.Logger) func(http.Handler) http.Handler
 			ctx := ctxutils.WithCorrelationID(r.Context(), correlationID)
 			ctx = ctxutils.WithLogFields(ctx, map[string]string{"correlation_id": correlationID})
 			r = r.WithContext(ctx)
+			w.Header().Set("X-Correlation-ID", correlationID)
 			logger := logger.With(zap.String("correlation_id", correlationID))
 			logger.Info("incoming request", zap.String("path", r.URL.Path))
 			next.ServeHTTP(w, r)

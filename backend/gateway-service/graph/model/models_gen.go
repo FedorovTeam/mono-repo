@@ -42,10 +42,16 @@ type Query struct {
 
 type UploadKnowledgeDocumentInput struct {
 	FileName      string `json:"fileName"`
-	ContentBase64 string `json:"contentBase64"`
+	FileSizeBytes int    `json:"fileSizeBytes"`
 	Repository    string `json:"repository"`
 	Branch        string `json:"branch"`
 	Path          string `json:"path"`
+}
+
+type UploadKnowledgeDocumentPayload struct {
+	Document     *KnowledgeDocument `json:"document"`
+	UploadURL    string             `json:"uploadUrl"`
+	UploadMethod string             `json:"uploadMethod"`
 }
 
 type KnowledgeDocumentStatus string
