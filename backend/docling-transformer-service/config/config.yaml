@@ -1,0 +1,20 @@
+service:
+  name: docling-transformer-service
+  grpc_port: 9092
+
+pandoc:
+  endpoint: http://pandoc-transformer:8080
+
+docling:
+  endpoint: http://docling-service:8080
+
+minio:
+  endpoint: http://minio:9000
+  access_key: minio-access-key
+  secret_key: minio-secret-key
+  bucket: docling-transformations
+  region: us-east-1
+
+temporal:
+  address: temporal.example.com:7233
+  namespace: knowledge-base
