@@ -24,8 +24,8 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		return nil, err
 	}
 
-	correlationID := ctxutils.CorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID))
+	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
+	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("api_key", ctxutils.APIKey(ctx)))
 
 	created, err := r.DocumentClient.CreateDocument(ctx, &pb.CreateDocumentRequest{
 		FileName:        input.FileName,
@@ -88,8 +88,8 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 
 // RetryProcessing is the resolver for the retryProcessing field.
 func (r *mutationResolver) RetryProcessing(ctx context.Context, documentID string) (*model.KnowledgeDocument, error) {
-	correlationID := ctxutils.CorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("document_id", documentID))
+	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
+	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("document_id", documentID), zap.String("api_key", ctxutils.APIKey(ctx)))
 
 	doc, err := r.DocumentClient.RetryProcessing(ctx, &pb.RetryProcessingRequest{Id: documentID, CorrelationId: correlationID})
 	if err != nil {
@@ -103,8 +103,8 @@ func (r *mutationResolver) RetryProcessing(ctx context.Context, documentID strin
 
 // KnowledgeDocument is the resolver for the knowledgeDocument field.
 func (r *queryResolver) KnowledgeDocument(ctx context.Context, id string) (*model.KnowledgeDocument, error) {
-	correlationID := ctxutils.CorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("document_id", id))
+	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
+	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("document_id", id), zap.String("api_key", ctxutils.APIKey(ctx)))
 
 	doc, err := r.DocumentClient.GetDocument(ctx, &pb.GetDocumentRequest{Id: id})
 	if err != nil {
@@ -117,8 +117,8 @@ func (r *queryResolver) KnowledgeDocument(ctx context.Context, id string) (*mode
 
 // KnowledgeDocuments is the resolver for the knowledgeDocuments field.
 func (r *queryResolver) KnowledgeDocuments(ctx context.Context, filter *model.KnowledgeDocumentFilter, pagination *model.Pagination) (*model.KnowledgeDocumentConnection, error) {
-	correlationID := ctxutils.CorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID))
+	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
+	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("api_key", ctxutils.APIKey(ctx)))
 	limit, offset := paginationParams(pagination)
 	req := &pb.ListDocumentsRequest{Limit: int32(limit), Offset: int32(offset)}
 

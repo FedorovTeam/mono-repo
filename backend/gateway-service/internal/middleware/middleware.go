@@ -36,11 +36,15 @@ func APIKeyMiddleware(expectedKey string, logger *zap.Logger) func(http.Handler)
 				http.Error(w, "api key is not configured", http.StatusInternalServerError)
 				return
 			}
-			if r.Header.Get("X-API-Key") != expectedKey {
+			apiKey := r.Header.Get("X-API-Key")
+			if apiKey != expectedKey {
 				logger.Warn("unauthorized request", zap.String("path", r.URL.Path))
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			ctx := ctxutils.WithAPIKey(r.Context(), apiKey)
+			ctx = ctxutils.WithLogFields(ctx, map[string]string{"correlation_id": ctxutils.CorrelationID(ctx), "api_key": apiKey})
+			r = r.WithContext(ctx)
 			next.ServeHTTP(w, r)
 		})
 	}

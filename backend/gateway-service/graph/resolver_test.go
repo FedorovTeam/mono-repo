@@ -146,6 +146,56 @@ func TestUploadHappyPath(t *testing.T) {
 	}
 }
 
+func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
+	var capturedCorrelation string
+
+	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
+		if in.CorrelationId == "" {
+			t.Fatalf("correlation id was not generated")
+		}
+		capturedCorrelation = in.CorrelationId
+		return &pb.Document{Id: "doc-99", Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
+		return nil, nil
+	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
+		return nil, nil
+	}}
+
+	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
+		if in.CorrelationId != capturedCorrelation {
+			t.Fatalf("storage correlation mismatch: %s vs %s", in.CorrelationId, capturedCorrelation)
+		}
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: "docs/doc-99.docx", ExpiresInSeconds: 600}, nil
+	}}
+
+	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
+		if input.CorrelationId != capturedCorrelation {
+			t.Fatalf("workflow correlation mismatch: %s vs %s", input.CorrelationId, capturedCorrelation)
+		}
+		return "wf-99", nil
+	}}
+
+	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2048, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
+	mr := &mutationResolver{resolver}
+
+	payload, err := mr.UploadKnowledgeDocument(ctxutils.WithAPIKey(context.Background(), "secret"), model.UploadKnowledgeDocumentInput{
+		FileName:      "new.docx",
+		FileSizeBytes: 512,
+		Repository:    "org/repo",
+		Branch:        "main",
+		Path:          "docs/new.md",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if payload.Document == nil || payload.Document.ID != "doc-99" {
+		t.Fatalf("unexpected document returned: %+v", payload.Document)
+	}
+	if capturedCorrelation == "" {
+		t.Fatalf("correlation id was not captured")
+	}
+}
+
 func TestKnowledgeDocumentsPaginationAndFilter(t *testing.T) {
 	qr := &queryResolver{&Resolver{Logger: zap.NewNop(), DocumentClient: &mockDocumentClient{
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -355,6 +405,9 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	if storageServer.calls != 1 {
 		t.Fatalf("storage service should be called once, got %d", storageServer.calls)
 	}
+	if storageServer.lastAPIKey != "secret" {
+		t.Fatalf("api key not forwarded to storage service")
+	}
 	if resp.Data.UploadKnowledgeDocument.Document.ID != "doc-1" || resp.Data.UploadKnowledgeDocument.UploadURL != "http://minio/presigned" {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
 	}
@@ -368,6 +421,7 @@ type storageServiceStub struct {
 	t               *testing.T
 	calls           int
 	lastCorrelation string
+	lastAPIKey      string
 }
 
 func (s *storageServiceStub) GenerateUploadURL(ctx context.Context, req *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
@@ -385,6 +439,10 @@ func (s *storageServiceStub) GenerateUploadURL(ctx context.Context, req *storage
 	if cid := md.Get("x-correlation-id"); len(cid) == 0 || cid[0] != req.GetCorrelationId() {
 		s.t.Fatalf("correlation id not propagated in metadata")
 	}
+	if apiKey := md.Get("x-api-key"); len(apiKey) == 0 || apiKey[0] != "secret" {
+		s.t.Fatalf("api key not propagated in metadata: %v", apiKey)
+	}
+	s.lastAPIKey = md.Get("x-api-key")[0]
 
 	return &storagepb.GenerateUploadURLResponse{
 		UploadUrl:        "http://minio/presigned",
