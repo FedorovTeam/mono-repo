@@ -48,6 +48,34 @@
 | 6 | **Security by Default** | Все публичные GraphQL-мутации требуют аутентификации. |
 | 7 | **Observability First** | Все сервисы поддерживают логирование, метрики и tracing (OpenTelemetry). Везде прокидывается `Correlation-ID` / Workflow-ID. |
 
+### 2.1. Конфигурация
+
+Все переменные, ключи, токены, URL сервисов, параметры БД, MinIO и GitHub — **в одном `config.yaml`**:
+
+```yaml
+postgres:
+  dsn: postgres://...
+
+minio:
+  endpoint: ...
+  access_key: ...
+  secret_key: ...
+
+github:
+  token: ...
+  repo: ...
+
+temporal:
+  address: temporal.example.com:7233
+  namespace: knowledge-base
+
+docling:
+  endpoint: http://docling-service:8080
+
+```
+
+> ❗ И никаких .env или отдельного vault’а — всё централизовано в config.yaml.
+
 ---
 
 ## 3. Доменная модель и сервисы
@@ -78,11 +106,11 @@
    - Владеет таблицами `documents`, `document_versions`, `document_status_logs`.
    - Знает про ключи объектов в MinIO (оригинал и Markdown).
    - Является источником правды по статусам и метаданным документов.
-3. **`storage-service`** (MinIO-адаптер; может быть отдельным сервисом или слоем внутри `document-service`, но логически — отдельный контекст)
+3. **`storage-service`** 
    - Отвечает за загрузку/выдачу файлов из MinIO.
    - Складывает оригинал и конвертированный Markdown в разные bucket’ы.
    - Инкапсулирует работу с S3-совместимым API.
-4. **`pandoc-transformer-service`**
+4. **`docling-transformer-service`**
    - HTTP/gRPC-обёртка над Pandoc.
    - Принимает путь/байты DOCX, возвращает Markdown.
    - Stateless, легко масштабируется и перезапускается.
@@ -117,7 +145,7 @@
 - `gateway-service`
 - `document-service`
 - `storage-service`
-- `pandoc-transformer-service`
+- `docling-transformer-service`
 - `github-publisher-service`
 - `workflow-service`
 
@@ -156,7 +184,7 @@ backend/
   gateway-service/
   document-service/
   storage-service/
-  pandoc-transformer-service/
+  docling-transformer-service/
   github-publisher-service/
   workflow-service/
 
@@ -224,6 +252,23 @@ org/acme/project/payments/year=2025/month=04/day=22/6f8c...e42.md
 | `created_at` | TIMESTAMPTZ | Время создания записи |
 | `updated_at` | TIMESTAMPTZ | Время последнего обновления |
 
+### 5.4. Temporal: как используется
+
+Мы **не деплоим Temporal-кластер**, используем **готовый внешний инстанс**:
+см: ```infra/argocd/temporal-app.yaml```
+```
+temporal:
+  address: temporal.example.com:7233
+  namespace: knowledge-base
+```
+
+Наши задачи:
+
+- подключиться к **Temporal Worker**
+- выполнить **Workflow** + **Activity**
+- зарегистрировать воркер под `taskQueue: document-processing`
+
+Никакого NATS, никакого self-host Temporal — только подключение **как клиент**.
 ---
 
 ## 6. API и интеграция
@@ -316,9 +361,7 @@ rpc PublishMarkdown(PublishMarkdownRequest)
 - `README.md` — назначение, БД, MinIO bucket’ы, внешние зависимости; сценарий локального запуска.
 - `diagrams.md` — ключевые схемы компонентов и последовательностей (Mermaid).
 - `flows.md` — текстовое описание бизнес-процессов (например: Upload → Convert → Publish).
-- `contracts.md` — ссылки на gRPC proto, примеры GraphQL-запросов/ответов (для `gateway-service`).
 - `usecases.md` — сценарии: «админ загружает документ», «перепубликация документа» и т.п.
-- `tasks.md` — крупные этапы развития сервиса.
 - `test.md` — сценарии ручного тестирования (curl / grpcurl / GraphQL-примеры).
 - `code.md` — Mermaid-диаграмма Code / Module View конкретного сервиса.
 - `infrastructure.md` — Mermaid-диаграмма инфраструктурного уровня (БД, MinIO, Temporal).
