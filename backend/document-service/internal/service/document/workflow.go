@@ -58,8 +58,9 @@ type publishInput struct {
 }
 
 type convertResult struct {
-	MarkdownContent []byte
-	MarkdownKey     string
+        MarkdownContent []byte
+        MarkdownKey     string
+        MediaType       string
 }
 
 type Activities struct {
@@ -147,11 +148,11 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	if a.transformer == nil || a.storage == nil {
 		return convertResult{}, fmt.Errorf("transformer or storage client is not configured")
 	}
-	resp, err := a.transformer.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
-		Content:           input.OriginalContent,
-		FilenameExtension: input.FilenameExt,
-	})
-	if err != nil {
+        resp, err := a.transformer.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
+                Content:           input.OriginalContent,
+                FilenameExtension: input.FilenameExt,
+        })
+        if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("convert: %v", err))
 		return convertResult{}, err
 	}
@@ -163,10 +164,10 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("upload markdown: %v", err))
 		return convertResult{}, err
 	}
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: upload.ObjectKey}); err != nil {
-		return convertResult{}, err
-	}
-	return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: upload.ObjectKey}, nil
+        if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: upload.ObjectKey}); err != nil {
+                return convertResult{}, err
+        }
+        return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: upload.ObjectKey, MediaType: resp.MediaType}, nil
 }
 
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {

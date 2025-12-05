@@ -26,6 +26,7 @@ func TestDoclingConverterSuccess(t *testing.T) {
 			t.Fatalf("missing correlation id")
 		}
 
+		w.Header().Set("Content-Type", "text/markdown")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("# converted by docling"))
 	}))
@@ -33,7 +34,7 @@ func TestDoclingConverterSuccess(t *testing.T) {
 
 	conv := NewDoclingConverter(server.URL)
 
-	markdown, err := conv.Convert(context.Background(), DoclingConvertRequest{
+	result, err := conv.Convert(context.Background(), DoclingConvertRequest{
 		FileName:    "sample.docx",
 		Content:     []byte("docx-bytes"),
 		ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -43,8 +44,12 @@ func TestDoclingConverterSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if markdown != "# converted by docling" {
-		t.Fatalf("unexpected markdown: %s", markdown)
+	if string(result.Content) != "# converted by docling" {
+		t.Fatalf("unexpected markdown: %s", string(result.Content))
+	}
+
+	if result.MediaType != "text/markdown" {
+		t.Fatalf("unexpected media type: %s", result.MediaType)
 	}
 
 	if receivedCorrelation == "" {

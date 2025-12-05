@@ -20,19 +20,19 @@ import (
 const bufSize = 1024 * 1024
 
 type fakeConverter struct {
-	response string
-	err      error
-	ctx      context.Context
+        response converter.DoclingConvertResult
+        err      error
+        ctx      context.Context
 }
 
-func (f *fakeConverter) Convert(ctx context.Context, _ converter.DoclingConvertRequest) (string, error) {
-	f.ctx = ctx
-	return f.response, f.err
+func (f *fakeConverter) Convert(ctx context.Context, _ converter.DoclingConvertRequest) (converter.DoclingConvertResult, error) {
+        f.ctx = ctx
+        return f.response, f.err
 }
 
 func TestConvertDocxToMarkdown(t *testing.T) {
-	conv := &fakeConverter{response: "markdown"}
-	logger := zap.NewNop()
+        conv := &fakeConverter{response: converter.DoclingConvertResult{Content: []byte("markdown"), MediaType: "text/markdown"}}
+        logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
@@ -53,14 +53,18 @@ func TestConvertDocxToMarkdown(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{DocxContent: []byte("data")})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+        resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{Content: []byte("data")})
+        if err != nil {
+                t.Fatalf("unexpected error: %v", err)
+        }
 
-	if resp.GetMarkdown() != "markdown" {
-		t.Fatalf("unexpected markdown: %s", resp.GetMarkdown())
-	}
+        if string(resp.GetMarkdownContent()) != "markdown" {
+                t.Fatalf("unexpected markdown: %s", string(resp.GetMarkdownContent()))
+        }
+
+        if resp.GetMediaType() != "text/markdown" {
+                t.Fatalf("unexpected media type: %s", resp.GetMediaType())
+        }
 
 	corrID := telemetry.CorrelationIDFromContext(conv.ctx)
 	if corrID != "corr-123" {
@@ -69,8 +73,8 @@ func TestConvertDocxToMarkdown(t *testing.T) {
 }
 
 func TestConvertDocxToMarkdownValidation(t *testing.T) {
-	conv := &fakeConverter{response: "markdown"}
-	logger := zap.NewNop()
+        conv := &fakeConverter{response: converter.DoclingConvertResult{Content: []byte("markdown")}}
+        logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
@@ -90,7 +94,7 @@ func TestConvertDocxToMarkdownValidation(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	_, err = client.ConvertDocxToMarkdown(context.Background(), &transformerv1.ConvertDocxToMarkdownRequest{})
+        _, err = client.ConvertDocxToMarkdown(context.Background(), &transformerv1.ConvertDocxToMarkdownRequest{})
 
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected invalid argument, got %v", err)

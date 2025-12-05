@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.6
 // 	protoc        v3.21.12
-// source: proto/backend/transformer/v1/transformer.proto
+// source: backend/transformer/v1/transformer.proto
 
 package transformerv1
 
@@ -22,17 +22,16 @@ const (
 )
 
 type ConvertDocxToMarkdownRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FileName      string                 `protobuf:"bytes,1,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
-	DocxContent   []byte                 `protobuf:"bytes,2,opt,name=docx_content,json=docxContent,proto3" json:"docx_content,omitempty"`
-	ContentType   string                 `protobuf:"bytes,3,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Content           []byte                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	FilenameExtension string                 `protobuf:"bytes,2,opt,name=filename_extension,json=filenameExtension,proto3" json:"filename_extension,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ConvertDocxToMarkdownRequest) Reset() {
 	*x = ConvertDocxToMarkdownRequest{}
-	mi := &file_proto_backend_transformer_v1_transformer_proto_msgTypes[0]
+	mi := &file_backend_transformer_v1_transformer_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +43,7 @@ func (x *ConvertDocxToMarkdownRequest) String() string {
 func (*ConvertDocxToMarkdownRequest) ProtoMessage() {}
 
 func (x *ConvertDocxToMarkdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_backend_transformer_v1_transformer_proto_msgTypes[0]
+	mi := &file_backend_transformer_v1_transformer_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,40 +56,34 @@ func (x *ConvertDocxToMarkdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConvertDocxToMarkdownRequest.ProtoReflect.Descriptor instead.
 func (*ConvertDocxToMarkdownRequest) Descriptor() ([]byte, []int) {
-	return file_proto_backend_transformer_v1_transformer_proto_rawDescGZIP(), []int{0}
+	return file_backend_transformer_v1_transformer_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ConvertDocxToMarkdownRequest) GetFileName() string {
+func (x *ConvertDocxToMarkdownRequest) GetContent() []byte {
 	if x != nil {
-		return x.FileName
-	}
-	return ""
-}
-
-func (x *ConvertDocxToMarkdownRequest) GetDocxContent() []byte {
-	if x != nil {
-		return x.DocxContent
+		return x.Content
 	}
 	return nil
 }
 
-func (x *ConvertDocxToMarkdownRequest) GetContentType() string {
+func (x *ConvertDocxToMarkdownRequest) GetFilenameExtension() string {
 	if x != nil {
-		return x.ContentType
+		return x.FilenameExtension
 	}
 	return ""
 }
 
 type ConvertDocxToMarkdownResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Markdown      string                 `protobuf:"bytes,1,opt,name=markdown,proto3" json:"markdown,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	MarkdownContent []byte                 `protobuf:"bytes,1,opt,name=markdown_content,json=markdownContent,proto3" json:"markdown_content,omitempty"`
+	MediaType       string                 `protobuf:"bytes,2,opt,name=media_type,json=mediaType,proto3" json:"media_type,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ConvertDocxToMarkdownResponse) Reset() {
 	*x = ConvertDocxToMarkdownResponse{}
-	mi := &file_proto_backend_transformer_v1_transformer_proto_msgTypes[1]
+	mi := &file_backend_transformer_v1_transformer_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -102,7 +95,7 @@ func (x *ConvertDocxToMarkdownResponse) String() string {
 func (*ConvertDocxToMarkdownResponse) ProtoMessage() {}
 
 func (x *ConvertDocxToMarkdownResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_backend_transformer_v1_transformer_proto_msgTypes[1]
+	mi := &file_backend_transformer_v1_transformer_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -115,48 +108,56 @@ func (x *ConvertDocxToMarkdownResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConvertDocxToMarkdownResponse.ProtoReflect.Descriptor instead.
 func (*ConvertDocxToMarkdownResponse) Descriptor() ([]byte, []int) {
-	return file_proto_backend_transformer_v1_transformer_proto_rawDescGZIP(), []int{1}
+	return file_backend_transformer_v1_transformer_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ConvertDocxToMarkdownResponse) GetMarkdown() string {
+func (x *ConvertDocxToMarkdownResponse) GetMarkdownContent() []byte {
 	if x != nil {
-		return x.Markdown
+		return x.MarkdownContent
+	}
+	return nil
+}
+
+func (x *ConvertDocxToMarkdownResponse) GetMediaType() string {
+	if x != nil {
+		return x.MediaType
 	}
 	return ""
 }
 
-var File_proto_backend_transformer_v1_transformer_proto protoreflect.FileDescriptor
+var File_backend_transformer_v1_transformer_proto protoreflect.FileDescriptor
 
-const file_proto_backend_transformer_v1_transformer_proto_rawDesc = "" +
+const file_backend_transformer_v1_transformer_proto_rawDesc = "" +
 	"\n" +
-	".proto/backend/transformer/v1/transformer.proto\x12\x16backend.transformer.v1\"\x81\x01\n" +
-	"\x1cConvertDocxToMarkdownRequest\x12\x1b\n" +
-	"\tfile_name\x18\x01 \x01(\tR\bfileName\x12!\n" +
-	"\fdocx_content\x18\x02 \x01(\fR\vdocxContent\x12!\n" +
-	"\fcontent_type\x18\x03 \x01(\tR\vcontentType\";\n" +
-	"\x1dConvertDocxToMarkdownResponse\x12\x1a\n" +
-	"\bmarkdown\x18\x01 \x01(\tR\bmarkdown2\x9b\x01\n" +
+	"(backend/transformer/v1/transformer.proto\x12\x16backend.transformer.v1\"g\n" +
+	"\x1cConvertDocxToMarkdownRequest\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\fR\acontent\x12-\n" +
+	"\x12filename_extension\x18\x02 \x01(\tR\x11filenameExtension\"i\n" +
+	"\x1dConvertDocxToMarkdownResponse\x12)\n" +
+	"\x10markdown_content\x18\x01 \x01(\fR\x0fmarkdownContent\x12\x1d\n" +
+	"\n" +
+	"media_type\x18\x02 \x01(\tR\tmediaType2\x9b\x01\n" +
 	"\x12TransformerService\x12\x84\x01\n" +
 	"\x15ConvertDocxToMarkdown\x124.backend.transformer.v1.ConvertDocxToMarkdownRequest\x1a5.backend.transformer.v1.ConvertDocxToMarkdownResponseB]Z[github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1;transformerv1b\x06proto3"
 
 var (
-	file_proto_backend_transformer_v1_transformer_proto_rawDescOnce sync.Once
-	file_proto_backend_transformer_v1_transformer_proto_rawDescData []byte
+	file_backend_transformer_v1_transformer_proto_rawDescOnce sync.Once
+	file_backend_transformer_v1_transformer_proto_rawDescData []byte
 )
 
-func file_proto_backend_transformer_v1_transformer_proto_rawDescGZIP() []byte {
-	file_proto_backend_transformer_v1_transformer_proto_rawDescOnce.Do(func() {
-		file_proto_backend_transformer_v1_transformer_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_backend_transformer_v1_transformer_proto_rawDesc), len(file_proto_backend_transformer_v1_transformer_proto_rawDesc)))
+func file_backend_transformer_v1_transformer_proto_rawDescGZIP() []byte {
+	file_backend_transformer_v1_transformer_proto_rawDescOnce.Do(func() {
+		file_backend_transformer_v1_transformer_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_backend_transformer_v1_transformer_proto_rawDesc), len(file_backend_transformer_v1_transformer_proto_rawDesc)))
 	})
-	return file_proto_backend_transformer_v1_transformer_proto_rawDescData
+	return file_backend_transformer_v1_transformer_proto_rawDescData
 }
 
-var file_proto_backend_transformer_v1_transformer_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_proto_backend_transformer_v1_transformer_proto_goTypes = []any{
+var file_backend_transformer_v1_transformer_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_backend_transformer_v1_transformer_proto_goTypes = []any{
 	(*ConvertDocxToMarkdownRequest)(nil),  // 0: backend.transformer.v1.ConvertDocxToMarkdownRequest
 	(*ConvertDocxToMarkdownResponse)(nil), // 1: backend.transformer.v1.ConvertDocxToMarkdownResponse
 }
-var file_proto_backend_transformer_v1_transformer_proto_depIdxs = []int32{
+var file_backend_transformer_v1_transformer_proto_depIdxs = []int32{
 	0, // 0: backend.transformer.v1.TransformerService.ConvertDocxToMarkdown:input_type -> backend.transformer.v1.ConvertDocxToMarkdownRequest
 	1, // 1: backend.transformer.v1.TransformerService.ConvertDocxToMarkdown:output_type -> backend.transformer.v1.ConvertDocxToMarkdownResponse
 	1, // [1:2] is the sub-list for method output_type
@@ -166,26 +167,26 @@ var file_proto_backend_transformer_v1_transformer_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_proto_backend_transformer_v1_transformer_proto_init() }
-func file_proto_backend_transformer_v1_transformer_proto_init() {
-	if File_proto_backend_transformer_v1_transformer_proto != nil {
+func init() { file_backend_transformer_v1_transformer_proto_init() }
+func file_backend_transformer_v1_transformer_proto_init() {
+	if File_backend_transformer_v1_transformer_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_backend_transformer_v1_transformer_proto_rawDesc), len(file_proto_backend_transformer_v1_transformer_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_backend_transformer_v1_transformer_proto_rawDesc), len(file_backend_transformer_v1_transformer_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_backend_transformer_v1_transformer_proto_goTypes,
-		DependencyIndexes: file_proto_backend_transformer_v1_transformer_proto_depIdxs,
-		MessageInfos:      file_proto_backend_transformer_v1_transformer_proto_msgTypes,
+		GoTypes:           file_backend_transformer_v1_transformer_proto_goTypes,
+		DependencyIndexes: file_backend_transformer_v1_transformer_proto_depIdxs,
+		MessageInfos:      file_backend_transformer_v1_transformer_proto_msgTypes,
 	}.Build()
-	File_proto_backend_transformer_v1_transformer_proto = out.File
-	file_proto_backend_transformer_v1_transformer_proto_goTypes = nil
-	file_proto_backend_transformer_v1_transformer_proto_depIdxs = nil
+	File_backend_transformer_v1_transformer_proto = out.File
+	file_backend_transformer_v1_transformer_proto_goTypes = nil
+	file_backend_transformer_v1_transformer_proto_depIdxs = nil
 }

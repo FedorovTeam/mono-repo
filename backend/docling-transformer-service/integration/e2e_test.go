@@ -77,7 +77,7 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{DocxContent: []byte("docx stub")})
+	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{Content: []byte("docx stub")})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 		t.Fatalf("unexpected body sent to docling: %s", string(receivedBody))
 	}
 
-	if resp.GetMarkdown() != "## converted by docling" {
-		t.Fatalf("unexpected markdown: %s", resp.GetMarkdown())
+	if string(resp.GetMarkdownContent()) != "## converted by docling" {
+		t.Fatalf("unexpected markdown: %s", string(resp.GetMarkdownContent()))
 	}
 }

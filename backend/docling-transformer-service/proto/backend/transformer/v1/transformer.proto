@@ -9,11 +9,11 @@ service TransformerService {
 }
 
 message ConvertDocxToMarkdownRequest {
-  string file_name = 1;
-  bytes docx_content = 2;
-  string content_type = 3;
+  bytes content = 1;
+  string filename_extension = 2;
 }
 
 message ConvertDocxToMarkdownResponse {
-  string markdown = 1;
+  bytes markdown_content = 1;
+  string media_type = 2;
 }
