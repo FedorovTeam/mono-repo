@@ -28,11 +28,12 @@ type DoclingConfig struct {
 
 // MinioConfig описывает параметры доступа к MinIO.
 type MinioConfig struct {
-	Endpoint  string `yaml:"endpoint"`
-	AccessKey string `yaml:"access_key"`
-	SecretKey string `yaml:"secret_key"`
-	Bucket    string `yaml:"bucket"`
-	Region    string `yaml:"region"`
+        Endpoint  string `yaml:"endpoint"`
+        AccessKey string `yaml:"access_key"`
+        SecretKey string `yaml:"secret_key"`
+        Bucket    string `yaml:"bucket"`
+        Region    string `yaml:"region"`
+        UseSSL    bool   `yaml:"use_ssl"`
 }
 
 // TemporalConfig описывает подключение к Temporal.

@@ -3,9 +3,10 @@
 Docling Transformer Service — gRPC-обёртка над Docling для конвертации DOCX в Markdown с обязательным прокидыванием `x-correlation-id`. Сервис повторяет структуру `template-service` и конфигурируется через один `config.yaml`.
 
 ## Возможности
-- gRPC метод `ConvertDocxToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto`.
+- gRPC метод `ConvertDocxToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` (принимает `document_id`, `original_bucket`/`original_object_key`, опционально `markdown_bucket`/`markdown_object_key`).
 - HTTP-запрос к Docling-конвертеру для получения Markdown.
 - Проксирование correlation-id во все внешние вызовы.
+- Загрузка исходника из MinIO, сохранение результата в бакет Markdown.
 - Настройки Docling, MinIO и Temporal в одном конфигурационном файле.
 - Минимальные unit- и e2e-тесты против заглушки Docling.
 
@@ -13,7 +14,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл). Обязательные поля и их рекомендованные значения:
 - `service.name` и `service.grpc_port` — идентификатор сервиса и порт gRPC (9092).
 - `docling.endpoint` — HTTPS endpoint Docling: `https://docling.tech.fedorov-team.tech`.
-- `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — учётные данные, `minio.bucket` — обязательный бакет для результата, `minio.region` — регион.
+- `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — учётные данные, `minio.bucket` — обязательный бакет для результата, `minio.region` и `minio.use_ssl` — параметры подключения.
 - `temporal.address` — `temporal-frontend.temporal.svc.cluster.local:7233`, `temporal.namespace` — `knowledge-base`.
 
 ## Локальный запуск

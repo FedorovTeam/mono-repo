@@ -11,6 +11,7 @@ minio:
   secret_key: minio-secret-key
   bucket: docling-transformations
   region: us-east-1
+  use_ssl: true
 
 temporal:
   address: temporal-frontend.temporal.svc.cluster.local:7233
