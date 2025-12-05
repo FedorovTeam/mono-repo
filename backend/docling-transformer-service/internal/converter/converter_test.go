@@ -26,7 +26,7 @@ func TestDoclingConverterSuccess(t *testing.T) {
 
 	conv := NewDoclingConverter(server.URL)
 
-	markdown, err := conv.Convert(context.Background(), ConvertRequest{
+	markdown, err := conv.Convert(context.Background(), DoclingConvertRequest{
 		FileName:    "sample.docx",
 		Content:     []byte("docx-bytes"),
 		ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -52,7 +52,7 @@ func TestDoclingConverterErrorStatus(t *testing.T) {
 	defer server.Close()
 
 	conv := NewDoclingConverter(server.URL)
-	_, err := conv.Convert(context.Background(), ConvertRequest{Content: []byte("docx")})
+	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("docx")})
 	if err == nil {
 		t.Fatalf("expected error from Docling")
 	}
@@ -60,7 +60,7 @@ func TestDoclingConverterErrorStatus(t *testing.T) {
 
 func TestDoclingConverterEmptyContent(t *testing.T) {
 	conv := NewDoclingConverter("http://docling")
-	_, err := conv.Convert(context.Background(), ConvertRequest{Content: nil})
+	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: nil})
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
