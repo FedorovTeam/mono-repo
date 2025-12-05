@@ -29,27 +29,31 @@ func NewTransformerAPI(conv converter.Converter, logger *zap.Logger) *Transforme
 
 // ConvertDocxToMarkdown выполняет преобразование документа через конвертер.
 func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
-	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+        ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
-	s.logger.Info("ConvertDocxToMarkdown started", zap.String("correlation_id", correlationID), zap.String("file_name", req.GetFileName()))
+        s.logger.Info("ConvertDocxToMarkdown started", zap.String("correlation_id", correlationID))
 
-	if len(req.GetDocxContent()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "docx_content is required")
-	}
+        if len(req.GetContent()) == 0 {
+                return nil, status.Error(codes.InvalidArgument, "content is required")
+        }
 
-	markdown, err := s.converter.Convert(ctx, converter.DoclingConvertRequest{
-		FileName:    req.GetFileName(),
-		Content:     req.GetDocxContent(),
-		ContentType: req.GetContentType(),
-	})
-	if err != nil {
-		s.logger.Error("conversion failed", zap.String("correlation_id", correlationID), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "conversion error: %v", err)
-	}
+        fileName := ""
+        if ext := req.GetFilenameExtension(); ext != "" {
+                fileName = fmt.Sprintf("document.%s", ext)
+        }
 
-	s.logger.Info("ConvertDocxToMarkdown completed", zap.String("correlation_id", correlationID))
+        result, err := s.converter.Convert(ctx, converter.DoclingConvertRequest{
+                FileName: fileName,
+                Content:  req.GetContent(),
+        })
+        if err != nil {
+                s.logger.Error("conversion failed", zap.String("correlation_id", correlationID), zap.Error(err))
+                return nil, status.Errorf(codes.Internal, "conversion error: %v", err)
+        }
 
-	return &transformerv1.ConvertDocxToMarkdownResponse{Markdown: markdown}, nil
+        s.logger.Info("ConvertDocxToMarkdown completed", zap.String("correlation_id", correlationID))
+
+        return &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: result.Content, MediaType: result.MediaType}, nil
 }
 
 // Run запускает gRPC сервер на указанном порте.

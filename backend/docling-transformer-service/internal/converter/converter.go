@@ -22,14 +22,20 @@ const (
 
 // DoclingConvertRequest описывает входные данные для конвертации DOCX в Markdown.
 type DoclingConvertRequest struct {
-	FileName    string
-	Content     []byte
-	ContentType string
+        FileName    string
+        Content     []byte
+        ContentType string
+}
+
+// DoclingConvertResult описывает результат преобразования Docling.
+type DoclingConvertResult struct {
+        Content   []byte
+        MediaType string
 }
 
 // Converter определяет поведение конвертера документов.
 type Converter interface {
-	Convert(ctx context.Context, req DoclingConvertRequest) (string, error)
+        Convert(ctx context.Context, req DoclingConvertRequest) (DoclingConvertResult, error)
 }
 
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
@@ -49,12 +55,12 @@ func NewDoclingConverter(endpoint string) *DoclingConverter {
 }
 
 // Convert выполняет HTTP-вызов в Docling-сервис и возвращает Markdown.
-func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertRequest) (string, error) {
-	if len(req.Content) == 0 {
-		return "", errors.New("empty document")
-	}
+func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertRequest) (DoclingConvertResult, error) {
+        if len(req.Content) == 0 {
+                return DoclingConvertResult{}, errors.New("empty document")
+        }
 
-	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+        ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
 	contentType := req.ContentType
 	if contentType == "" {
@@ -64,8 +70,8 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingConvertPath)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(req.Content))
 	if err != nil {
-		return "", fmt.Errorf("build docling request: %w", err)
-	}
+                return DoclingConvertResult{}, fmt.Errorf("build docling request: %w", err)
+        }
 
 	httpReq.Header.Set("Content-Type", contentType)
 	httpReq.Header.Set(correlationIDHeader, correlationID)
@@ -76,20 +82,25 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 		httpReq.Header.Set(endpointHeader, c.endpoint)
 	}
 
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("call docling api: %w", err)
-	}
-	defer resp.Body.Close()
+        resp, err := c.client.Do(httpReq)
+        if err != nil {
+                return DoclingConvertResult{}, fmt.Errorf("call docling api: %w", err)
+        }
+        defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read docling response: %w", err)
-	}
+        body, err := io.ReadAll(resp.Body)
+        if err != nil {
+                return DoclingConvertResult{}, fmt.Errorf("read docling response: %w", err)
+        }
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("docling api returned status %d: %s", resp.StatusCode, string(body))
-	}
+        if resp.StatusCode != http.StatusOK {
+                return DoclingConvertResult{}, fmt.Errorf("docling api returned status %d: %s", resp.StatusCode, string(body))
+        }
 
-	return string(body), nil
+        mediaType := resp.Header.Get("Content-Type")
+        if mediaType == "" {
+                mediaType = "text/markdown"
+        }
+
+        return DoclingConvertResult{Content: body, MediaType: mediaType}, nil
 }
