@@ -10,15 +10,19 @@ import (
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
 	ActivityUploadOriginalName    = "document.uploadOriginal"
 	ActivityConvertToMarkdownName = "document.convertToMarkdown"
 	ActivityPublishMarkdownName   = "document.publishMarkdown"
+
+	correlationIDHeader = "x-correlation-id"
 )
 
 type WorkflowStarter interface {
@@ -133,6 +137,7 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 }
 
 func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInput) error {
+	ctx = a.withCorrelationID(ctx)
 	if a.storage == nil {
 		return fmt.Errorf("storage client is not configured")
 	}
@@ -150,6 +155,7 @@ func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInp
 }
 
 func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) (convertResult, error) {
+	ctx = a.withCorrelationID(ctx)
 	if a.transformer == nil {
 		return convertResult{}, fmt.Errorf("transformer client is not configured")
 	}
@@ -172,6 +178,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 }
 
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {
+	ctx = a.withCorrelationID(ctx)
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
@@ -192,4 +199,19 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 func (a *Activities) fail(ctx context.Context, documentID, reason string) error {
 	_, err := a.repo.UpdateStatus(ctx, documentID, model.StatusFailed, reason, nil)
 	return err
+}
+
+func (a *Activities) withCorrelationID(ctx context.Context) context.Context {
+	info, ok := activityInfo(ctx)
+	if !ok || info.WorkflowExecution.ID == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, info.WorkflowExecution.ID)
+}
+
+func activityInfo(ctx context.Context) (activity.Info, bool) {
+	defer func() {
+		_ = recover()
+	}()
+	return activity.GetInfo(ctx), true
 }
