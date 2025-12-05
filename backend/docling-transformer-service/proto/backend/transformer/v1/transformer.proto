@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package backend.transformer.v1;
+
+option go_package = "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1;transformerv1";
+
+service TransformerService {
+  rpc ConvertDocxToMarkdown(ConvertDocxToMarkdownRequest) returns (ConvertDocxToMarkdownResponse);
+}
+
+message ConvertDocxToMarkdownRequest {
+  string file_name = 1;
+  bytes docx_content = 2;
+  string content_type = 3;
+}
+
+message ConvertDocxToMarkdownResponse {
+  string markdown = 1;
+}

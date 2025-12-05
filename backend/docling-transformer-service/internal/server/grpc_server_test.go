@@ -1,0 +1,98 @@
+package server
+
+import (
+	"context"
+	"net"
+	"testing"
+
+	"github.com/mono-repo/docling-transformer-service/internal/converter"
+	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
+	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
+)
+
+const bufSize = 1024 * 1024
+
+type fakeConverter struct {
+	response string
+	err      error
+	ctx      context.Context
+}
+
+func (f *fakeConverter) Convert(ctx context.Context, _ converter.ConvertRequest) (string, error) {
+	f.ctx = ctx
+	return f.response, f.err
+}
+
+func TestConvertDocxToMarkdown(t *testing.T) {
+	conv := &fakeConverter{response: "markdown"}
+	logger := zap.NewNop()
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, logger))
+
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+	t.Cleanup(srv.Stop)
+
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-123"))
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(_ context.Context, s string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial bufnet: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{DocxContent: []byte("data")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.GetMarkdown() != "markdown" {
+		t.Fatalf("unexpected markdown: %s", resp.GetMarkdown())
+	}
+
+	corrID := telemetry.CorrelationIDFromContext(conv.ctx)
+	if corrID != "corr-123" {
+		t.Fatalf("correlation id not propagated, got %s", corrID)
+	}
+}
+
+func TestConvertDocxToMarkdownValidation(t *testing.T) {
+	conv := &fakeConverter{response: "markdown"}
+	logger := zap.NewNop()
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, logger))
+
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(_ context.Context, s string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial bufnet: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+	_, err = client.ConvertDocxToMarkdown(context.Background(), &transformerv1.ConvertDocxToMarkdownRequest{})
+
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+}
