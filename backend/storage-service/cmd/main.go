@@ -8,8 +8,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -25,15 +23,21 @@ func main() {
 		log.Fatal("не удалось загрузить конфигурацию storage-service")
 	}
 
-	minioClient, err := minio.New(cfg.Minio.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.Minio.AccessKey, cfg.Minio.SecretKey, ""),
-		Secure: cfg.Minio.UseSSL,
+	ctx := context.Background()
+	minioAPI, err := storage.NewMinioClient(ctx, storage.MinioClientConfig{
+		Endpoint:  cfg.Minio.Endpoint,
+		AccessKey: cfg.Minio.AccessKey,
+		SecretKey: cfg.Minio.SecretKey,
+		UseSSL:    cfg.Minio.UseSSL,
+		Buckets: []string{
+			cfg.Minio.Buckets.KnowledgeDocx,
+			cfg.Minio.Buckets.KnowledgeMD,
+		},
 	})
 	if err != nil {
 		log.Fatalf("не удалось инициализировать MinIO клиент: %v", err)
 	}
 
-	minioAPI := storage.NewMinioAPI(minioClient)
 	keyGenerator := storage.NewObjectKeyGenerator(nil)
 	storageService := storage.NewService(
 		minioAPI,
@@ -52,7 +56,7 @@ func main() {
 		log.Fatalf("не удалось открыть порт %s: %v", cfg.Service.GRPCPort, err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go func() {

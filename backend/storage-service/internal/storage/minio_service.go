@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 // Client описывает подмножество методов MinIO, используемых сервисом.
 type Client interface {
 	BucketExists(ctx context.Context, bucketName string) (bool, error)
+	MakeBucket(ctx context.Context, bucketName string, opts minio.MakeBucketOptions) error
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) error
 	GetObject(ctx context.Context, bucketName, objectName string) (io.ReadCloser, error)
 	PresignHeader(ctx context.Context, method, bucketName, objectName string, expires time.Duration, reqParams url.Values, extraHeaders http.Header) (*url.URL, error)
@@ -34,6 +36,11 @@ func NewMinioAPI(client *minio.Client) *MinioAPI {
 // BucketExists проксирует вызов к minio.Client.
 func (m *MinioAPI) BucketExists(ctx context.Context, bucketName string) (bool, error) {
 	return m.client.BucketExists(ctx, bucketName)
+}
+
+// MakeBucket создаёт бакет, если он отсутствует.
+func (m *MinioAPI) MakeBucket(ctx context.Context, bucketName string, opts minio.MakeBucketOptions) error {
+	return m.client.MakeBucket(ctx, bucketName, opts)
 }
 
 // PutObject сохраняет объект в MinIO и игнорирует UploadInfo.
@@ -68,6 +75,34 @@ type Service struct {
 type ObjectLocation struct {
 	Bucket string
 	Key    string
+}
+
+// MinioClientConfig содержит параметры подключения и список обязательных бакетов.
+type MinioClientConfig struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	UseSSL    bool
+	Buckets   []string
+}
+
+// NewMinioClient создает клиента MinIO и инициализирует указанные бакеты.
+func NewMinioClient(ctx context.Context, cfg MinioClientConfig) (*MinioAPI, error) {
+	client, err := minio.New(cfg.Endpoint, &minio.Options{
+		Creds:        credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+		Secure:       cfg.UseSSL,
+		BucketLookup: minio.BucketLookupPath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("не удалось инициализировать MinIO клиент: %w", err)
+	}
+
+	api := NewMinioAPI(client)
+	if err := initializeBuckets(ctx, api, cfg.Buckets); err != nil {
+		return nil, err
+	}
+
+	return api, nil
 }
 
 // NewService конструирует сервис работы с хранилищем.
@@ -162,4 +197,27 @@ func detectContentType(extension string) string {
 	}
 
 	return "application/octet-stream"
+}
+
+func initializeBuckets(ctx context.Context, client Client, buckets []string) error {
+	for _, bucket := range buckets {
+		if bucket == "" {
+			return fmt.Errorf("bucket name must not be empty")
+		}
+
+		exists, err := client.BucketExists(ctx, bucket)
+		if err != nil {
+			return fmt.Errorf("не удалось проверить наличие бакета %s: %w", bucket, err)
+		}
+
+		if exists {
+			continue
+		}
+
+		if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
+			return fmt.Errorf("не удалось создать бакет %s: %w", bucket, err)
+		}
+	}
+
+	return nil
 }
