@@ -3,9 +3,9 @@ server:
 security:
   apiKey: "secret"
 documentService:
-  address: "document.backend.svc.cluster.local:9090"
+  address: "document-service.document-service.svc.cluster.local:9090"
 storageService:
-  address: "storage.backend.svc.cluster.local:9090"
+  address: "storage-service.storage-service.svc.cluster.local:9090"
 temporal:
   address: "temporal-frontend.temporal.svc.cluster.local:7233"
   namespace: "knowledge-base"
