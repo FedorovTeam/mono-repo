@@ -1,15 +1,15 @@
 service:
   name: github-publisher-service
-  grpc_port: 9097
+  grpc_port: 9090
 
 github:
   base_url: https://api.github.com
   owner: FedorovTeam
-  repository: knowledge-base
-  token: ghp_example_token
+  repository: docs
+  token: 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
   default_branch: main
   author_name: Knowledge Bot
-  author_email: bot@example.org
+  author_email: bot@fedorov-team.tech
   correlation_header: X-Correlation-ID
 
 minio:

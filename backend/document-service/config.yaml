@@ -1,11 +1,11 @@
 server:
-  addr: ":50051"
+  addr: ":9090"
 postgres:
   dsn: "postgres://postgres:postgres@localhost:5432/document?sslmode=disable"
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"
-  access_key: "minio-access-key"
-  secret_key: "minio-secret-key"
+  access_key: "xUCM3lvYME7MrYTwegSA"
+  secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
   use_ssl: true
   original_bucket: "backend-original"
   markdown_bucket: "backend-md"
@@ -15,9 +15,9 @@ temporal:
   namespace: "knowledge-base"
   task_queue: "document-processing"
 services:
-  storage_service: "storage.backend.svc.cluster.local:50052"
-  transformer_service: "transformer.backend.svc.cluster.local:9092"
-  github_publisher_service: "github-publisher.backend.svc.cluster.local:9097"
+  storage_service: "storage.backend.svc.cluster.local:9090"
+  transformer_service: "transformer.backend.svc.cluster.local:9090"
+  github_publisher_service: "github-publisher.backend.svc.cluster.local:9090"
 github:
   repository: "FedorovTeam/knowledge-base"
   branch: "main"

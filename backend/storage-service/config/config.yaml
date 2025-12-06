@@ -1,5 +1,5 @@
 service:
-  grpc_port: ":50052"
+  grpc_port: ":9090"
 
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"
