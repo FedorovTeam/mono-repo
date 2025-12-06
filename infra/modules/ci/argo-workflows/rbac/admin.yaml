@@ -6,7 +6,7 @@ metadata:
   name: workflows-admin
   namespace: argo
   annotations:
-    workflows.argoproj.io/rbac-rule: '"argo-workflows-admin" in groups'
+    workflows.argoproj.io/rbac-rule: "'argo-workflows-admin' in groups"
     workflows.argoproj.io/rbac-rule-precedence: "0"
 ---
 apiVersion: v1
