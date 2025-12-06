@@ -1,7 +1,7 @@
 server:
   addr: ":9090"
 postgres:
-  dsn: "postgres://postgres:postgres@localhost:5432/document?sslmode=disable"
+  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/document?sslmode=disable"
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"
   access_key: "xUCM3lvYME7MrYTwegSA"
