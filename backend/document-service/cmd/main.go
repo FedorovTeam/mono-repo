@@ -143,6 +143,8 @@ func main() {
 		temporalClient,
 		cfg.Temporal.TaskQueue,
 		activities,
+		cfg.Minio.OriginalBucket,
+		cfg.Minio.MarkdownBucket,
 	)
 
 	server := transport.NewServer(service)

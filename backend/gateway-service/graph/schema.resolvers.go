@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -25,25 +26,15 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	}
 
 	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("api_key", ctxutils.APIKey(ctx)))
-
-	created, err := r.DocumentClient.CreateDocument(ctx, &pb.CreateDocumentRequest{
-		FileName:        input.FileName,
-		Repository:      input.Repository,
-		Branch:          input.Branch,
-		Path:            input.Path,
-		CorrelationId:   correlationID,
-		ContentLength:   int64(input.FileSizeBytes),
-		UploadBucket:    "",
-		UploadObjectKey: "",
-	})
-	if err != nil {
-		logger.Error("failed to create document", zap.Error(err))
-		return nil, fmt.Errorf("cannot create document: %w", err)
-	}
+	documentID := uuid.NewString()
+	logger := r.Logger.With(
+		zap.String("correlation_id", correlationID),
+		zap.String("api_key", ctxutils.APIKey(ctx)),
+		zap.String("document_id", documentID),
+	)
 
 	uploadURL, err := r.StorageClient.GenerateUploadURL(ctx, &storagepb.GenerateUploadURLRequest{
-		DocumentId:       created.GetId(),
+		DocumentId:       documentID,
 		FileName:         input.FileName,
 		ContentLength:    int64(input.FileSizeBytes),
 		CorrelationId:    correlationID,
@@ -54,11 +45,20 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		return nil, fmt.Errorf("cannot generate upload url: %w", err)
 	}
 
-	if created.UploadBucket == "" {
-		created.UploadBucket = uploadURL.GetBucket()
-	}
-	if created.UploadObjectKey == "" {
-		created.UploadObjectKey = uploadURL.GetObjectKey()
+	created, err := r.DocumentClient.CreateDocument(ctx, &pb.CreateDocumentRequest{
+		Id:              documentID,
+		FileName:        input.FileName,
+		Repository:      input.Repository,
+		Branch:          input.Branch,
+		Path:            input.Path,
+		CorrelationId:   correlationID,
+		ContentLength:   int64(input.FileSizeBytes),
+		UploadBucket:    uploadURL.GetBucket(),
+		UploadObjectKey: uploadURL.GetObjectKey(),
+	})
+	if err != nil {
+		logger.Error("failed to create document", zap.Error(err))
+		return nil, fmt.Errorf("cannot create document: %w", err)
 	}
 
 	workflowID, err := r.TemporalClient.StartUploadWorkflow(ctx, temporal.UploadWorkflowInput{

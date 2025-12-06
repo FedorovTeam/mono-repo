@@ -83,15 +83,19 @@ func (DocumentStatus) EnumDescriptor() ([]byte, []int) {
 type Document struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name              string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Status            DocumentStatus         `protobuf:"varint,3,opt,name=status,proto3,enum=backend.document.v1.DocumentStatus" json:"status,omitempty"`
-	OriginalBucket    string                 `protobuf:"bytes,4,opt,name=original_bucket,json=originalBucket,proto3" json:"original_bucket,omitempty"`
-	OriginalObjectKey string                 `protobuf:"bytes,5,opt,name=original_object_key,json=originalObjectKey,proto3" json:"original_object_key,omitempty"`
-	MarkdownBucket    string                 `protobuf:"bytes,6,opt,name=markdown_bucket,json=markdownBucket,proto3" json:"markdown_bucket,omitempty"`
-	MarkdownObjectKey string                 `protobuf:"bytes,7,opt,name=markdown_object_key,json=markdownObjectKey,proto3" json:"markdown_object_key,omitempty"`
-	CreatedAt         *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt         *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	Versions          []*DocumentVersion     `protobuf:"bytes,10,rep,name=versions,proto3" json:"versions,omitempty"`
+	FileName          string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	Repository        string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
+	Branch            string                 `protobuf:"bytes,4,opt,name=branch,proto3" json:"branch,omitempty"`
+	Path              string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
+	Status            DocumentStatus         `protobuf:"varint,6,opt,name=status,proto3,enum=backend.document.v1.DocumentStatus" json:"status,omitempty"`
+	WorkflowId        string                 `protobuf:"bytes,7,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Error             string                 `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
+	UploadBucket      string                 `protobuf:"bytes,9,opt,name=upload_bucket,json=uploadBucket,proto3" json:"upload_bucket,omitempty"`
+	UploadObjectKey   string                 `protobuf:"bytes,10,opt,name=upload_object_key,json=uploadObjectKey,proto3" json:"upload_object_key,omitempty"`
+	MarkdownBucket    string                 `protobuf:"bytes,11,opt,name=markdown_bucket,json=markdownBucket,proto3" json:"markdown_bucket,omitempty"`
+	MarkdownObjectKey string                 `protobuf:"bytes,12,opt,name=markdown_object_key,json=markdownObjectKey,proto3" json:"markdown_object_key,omitempty"`
+	CreatedAt         *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt         *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -133,9 +137,30 @@ func (x *Document) GetId() string {
 	return ""
 }
 
-func (x *Document) GetName() string {
+func (x *Document) GetFileName() string {
 	if x != nil {
-		return x.Name
+		return x.FileName
+	}
+	return ""
+}
+
+func (x *Document) GetRepository() string {
+	if x != nil {
+		return x.Repository
+	}
+	return ""
+}
+
+func (x *Document) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *Document) GetPath() string {
+	if x != nil {
+		return x.Path
 	}
 	return ""
 }
@@ -147,16 +172,30 @@ func (x *Document) GetStatus() DocumentStatus {
 	return DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED
 }
 
-func (x *Document) GetOriginalBucket() string {
+func (x *Document) GetWorkflowId() string {
 	if x != nil {
-		return x.OriginalBucket
+		return x.WorkflowId
 	}
 	return ""
 }
 
-func (x *Document) GetOriginalObjectKey() string {
+func (x *Document) GetError() string {
 	if x != nil {
-		return x.OriginalObjectKey
+		return x.Error
+	}
+	return ""
+}
+
+func (x *Document) GetUploadBucket() string {
+	if x != nil {
+		return x.UploadBucket
+	}
+	return ""
+}
+
+func (x *Document) GetUploadObjectKey() string {
+	if x != nil {
+		return x.UploadObjectKey
 	}
 	return ""
 }
@@ -189,204 +228,26 @@ func (x *Document) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *Document) GetVersions() []*DocumentVersion {
-	if x != nil {
-		return x.Versions
-	}
-	return nil
-}
-
-type DocumentVersion struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	DocumentId        string                 `protobuf:"bytes,2,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
-	Version           int32                  `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
-	OriginalObjectKey string                 `protobuf:"bytes,4,opt,name=original_object_key,json=originalObjectKey,proto3" json:"original_object_key,omitempty"`
-	MarkdownObjectKey string                 `protobuf:"bytes,5,opt,name=markdown_object_key,json=markdownObjectKey,proto3" json:"markdown_object_key,omitempty"`
-	CreatedAt         *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt         *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
-}
-
-func (x *DocumentVersion) Reset() {
-	*x = DocumentVersion{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DocumentVersion) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DocumentVersion) ProtoMessage() {}
-
-func (x *DocumentVersion) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DocumentVersion.ProtoReflect.Descriptor instead.
-func (*DocumentVersion) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *DocumentVersion) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *DocumentVersion) GetDocumentId() string {
-	if x != nil {
-		return x.DocumentId
-	}
-	return ""
-}
-
-func (x *DocumentVersion) GetVersion() int32 {
-	if x != nil {
-		return x.Version
-	}
-	return 0
-}
-
-func (x *DocumentVersion) GetOriginalObjectKey() string {
-	if x != nil {
-		return x.OriginalObjectKey
-	}
-	return ""
-}
-
-func (x *DocumentVersion) GetMarkdownObjectKey() string {
-	if x != nil {
-		return x.MarkdownObjectKey
-	}
-	return ""
-}
-
-func (x *DocumentVersion) GetCreatedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.CreatedAt
-	}
-	return nil
-}
-
-func (x *DocumentVersion) GetUpdatedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.UpdatedAt
-	}
-	return nil
-}
-
-type DocumentStatusLog struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	DocumentId    string                 `protobuf:"bytes,2,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
-	FromStatus    DocumentStatus         `protobuf:"varint,3,opt,name=from_status,json=fromStatus,proto3,enum=backend.document.v1.DocumentStatus" json:"from_status,omitempty"`
-	ToStatus      DocumentStatus         `protobuf:"varint,4,opt,name=to_status,json=toStatus,proto3,enum=backend.document.v1.DocumentStatus" json:"to_status,omitempty"`
-	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DocumentStatusLog) Reset() {
-	*x = DocumentStatusLog{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DocumentStatusLog) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DocumentStatusLog) ProtoMessage() {}
-
-func (x *DocumentStatusLog) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DocumentStatusLog.ProtoReflect.Descriptor instead.
-func (*DocumentStatusLog) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *DocumentStatusLog) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *DocumentStatusLog) GetDocumentId() string {
-	if x != nil {
-		return x.DocumentId
-	}
-	return ""
-}
-
-func (x *DocumentStatusLog) GetFromStatus() DocumentStatus {
-	if x != nil {
-		return x.FromStatus
-	}
-	return DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED
-}
-
-func (x *DocumentStatusLog) GetToStatus() DocumentStatus {
-	if x != nil {
-		return x.ToStatus
-	}
-	return DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED
-}
-
-func (x *DocumentStatusLog) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
-func (x *DocumentStatusLog) GetCreatedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.CreatedAt
-	}
-	return nil
-}
-
 type CreateDocumentRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	Name              string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	OriginalBucket    string                 `protobuf:"bytes,2,opt,name=original_bucket,json=originalBucket,proto3" json:"original_bucket,omitempty"`
-	MarkdownBucket    string                 `protobuf:"bytes,3,opt,name=markdown_bucket,json=markdownBucket,proto3" json:"markdown_bucket,omitempty"`
-	OriginalContent   []byte                 `protobuf:"bytes,4,opt,name=original_content,json=originalContent,proto3" json:"original_content,omitempty"`
-	FilenameExtension string                 `protobuf:"bytes,5,opt,name=filename_extension,json=filenameExtension,proto3" json:"filename_extension,omitempty"`
-	PublishPath       string                 `protobuf:"bytes,6,opt,name=publish_path,json=publishPath,proto3" json:"publish_path,omitempty"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	FileName          string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	Repository        string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
+	Branch            string                 `protobuf:"bytes,4,opt,name=branch,proto3" json:"branch,omitempty"`
+	Path              string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
+	CorrelationId     string                 `protobuf:"bytes,6,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	ContentLength     int64                  `protobuf:"varint,7,opt,name=content_length,json=contentLength,proto3" json:"content_length,omitempty"`
+	UploadBucket      string                 `protobuf:"bytes,8,opt,name=upload_bucket,json=uploadBucket,proto3" json:"upload_bucket,omitempty"`
+	UploadObjectKey   string                 `protobuf:"bytes,9,opt,name=upload_object_key,json=uploadObjectKey,proto3" json:"upload_object_key,omitempty"`
+	MarkdownBucket    string                 `protobuf:"bytes,10,opt,name=markdown_bucket,json=markdownBucket,proto3" json:"markdown_bucket,omitempty"`
+	MarkdownObjectKey string                 `protobuf:"bytes,11,opt,name=markdown_object_key,json=markdownObjectKey,proto3" json:"markdown_object_key,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CreateDocumentRequest) Reset() {
 	*x = CreateDocumentRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[3]
+	mi := &file_backend_document_v1_document_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -398,7 +259,7 @@ func (x *CreateDocumentRequest) String() string {
 func (*CreateDocumentRequest) ProtoMessage() {}
 
 func (x *CreateDocumentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[3]
+	mi := &file_backend_document_v1_document_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,19 +272,68 @@ func (x *CreateDocumentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateDocumentRequest.ProtoReflect.Descriptor instead.
 func (*CreateDocumentRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{3}
+	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *CreateDocumentRequest) GetName() string {
+func (x *CreateDocumentRequest) GetId() string {
 	if x != nil {
-		return x.Name
+		return x.Id
 	}
 	return ""
 }
 
-func (x *CreateDocumentRequest) GetOriginalBucket() string {
+func (x *CreateDocumentRequest) GetFileName() string {
 	if x != nil {
-		return x.OriginalBucket
+		return x.FileName
+	}
+	return ""
+}
+
+func (x *CreateDocumentRequest) GetRepository() string {
+	if x != nil {
+		return x.Repository
+	}
+	return ""
+}
+
+func (x *CreateDocumentRequest) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+func (x *CreateDocumentRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *CreateDocumentRequest) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
+}
+
+func (x *CreateDocumentRequest) GetContentLength() int64 {
+	if x != nil {
+		return x.ContentLength
+	}
+	return 0
+}
+
+func (x *CreateDocumentRequest) GetUploadBucket() string {
+	if x != nil {
+		return x.UploadBucket
+	}
+	return ""
+}
+
+func (x *CreateDocumentRequest) GetUploadObjectKey() string {
+	if x != nil {
+		return x.UploadObjectKey
 	}
 	return ""
 }
@@ -435,23 +345,9 @@ func (x *CreateDocumentRequest) GetMarkdownBucket() string {
 	return ""
 }
 
-func (x *CreateDocumentRequest) GetOriginalContent() []byte {
+func (x *CreateDocumentRequest) GetMarkdownObjectKey() string {
 	if x != nil {
-		return x.OriginalContent
-	}
-	return nil
-}
-
-func (x *CreateDocumentRequest) GetFilenameExtension() string {
-	if x != nil {
-		return x.FilenameExtension
-	}
-	return ""
-}
-
-func (x *CreateDocumentRequest) GetPublishPath() string {
-	if x != nil {
-		return x.PublishPath
+		return x.MarkdownObjectKey
 	}
 	return ""
 }
@@ -465,7 +361,7 @@ type GetDocumentRequest struct {
 
 func (x *GetDocumentRequest) Reset() {
 	*x = GetDocumentRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[4]
+	mi := &file_backend_document_v1_document_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -477,7 +373,7 @@ func (x *GetDocumentRequest) String() string {
 func (*GetDocumentRequest) ProtoMessage() {}
 
 func (x *GetDocumentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[4]
+	mi := &file_backend_document_v1_document_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -490,7 +386,7 @@ func (x *GetDocumentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDocumentRequest.ProtoReflect.Descriptor instead.
 func (*GetDocumentRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{4}
+	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetDocumentRequest) GetId() string {
@@ -511,7 +407,7 @@ type ListDocumentsRequest struct {
 
 func (x *ListDocumentsRequest) Reset() {
 	*x = ListDocumentsRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[5]
+	mi := &file_backend_document_v1_document_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +419,7 @@ func (x *ListDocumentsRequest) String() string {
 func (*ListDocumentsRequest) ProtoMessage() {}
 
 func (x *ListDocumentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[5]
+	mi := &file_backend_document_v1_document_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,7 +432,7 @@ func (x *ListDocumentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDocumentsRequest.ProtoReflect.Descriptor instead.
 func (*ListDocumentsRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{5}
+	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListDocumentsRequest) GetLimit() int32 {
@@ -569,7 +465,7 @@ type ListDocumentsResponse struct {
 
 func (x *ListDocumentsResponse) Reset() {
 	*x = ListDocumentsResponse{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[6]
+	mi := &file_backend_document_v1_document_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +477,7 @@ func (x *ListDocumentsResponse) String() string {
 func (*ListDocumentsResponse) ProtoMessage() {}
 
 func (x *ListDocumentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[6]
+	mi := &file_backend_document_v1_document_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +490,7 @@ func (x *ListDocumentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDocumentsResponse.ProtoReflect.Descriptor instead.
 func (*ListDocumentsResponse) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{6}
+	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListDocumentsResponse) GetDocuments() []*Document {
@@ -618,7 +514,7 @@ type UpdateDocumentStatusRequest struct {
 
 func (x *UpdateDocumentStatusRequest) Reset() {
 	*x = UpdateDocumentStatusRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[7]
+	mi := &file_backend_document_v1_document_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -630,7 +526,7 @@ func (x *UpdateDocumentStatusRequest) String() string {
 func (*UpdateDocumentStatusRequest) ProtoMessage() {}
 
 func (x *UpdateDocumentStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[7]
+	mi := &file_backend_document_v1_document_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -643,7 +539,7 @@ func (x *UpdateDocumentStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateDocumentStatusRequest.ProtoReflect.Descriptor instead.
 func (*UpdateDocumentStatusRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{7}
+	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateDocumentStatusRequest) GetId() string {
@@ -692,49 +588,43 @@ var File_backend_document_v1_document_proto protoreflect.FileDescriptor
 
 const file_backend_document_v1_document_proto_rawDesc = "" +
 	"\n" +
-	"\"backend/document/v1/document.proto\x12\x13backend.document.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd5\x03\n" +
+	"\"backend/document/v1/document.proto\x12\x13backend.document.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x97\x04\n" +
 	"\bDocument\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12;\n" +
-	"\x06status\x18\x03 \x01(\x0e2#.backend.document.v1.DocumentStatusR\x06status\x12'\n" +
-	"\x0foriginal_bucket\x18\x04 \x01(\tR\x0eoriginalBucket\x12.\n" +
-	"\x13original_object_key\x18\x05 \x01(\tR\x11originalObjectKey\x12'\n" +
-	"\x0fmarkdown_bucket\x18\x06 \x01(\tR\x0emarkdownBucket\x12.\n" +
-	"\x13markdown_object_key\x18\a \x01(\tR\x11markdownObjectKey\x129\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
+	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1e\n" +
 	"\n" +
-	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"repository\x18\x03 \x01(\tR\n" +
+	"repository\x12\x16\n" +
+	"\x06branch\x18\x04 \x01(\tR\x06branch\x12\x12\n" +
+	"\x04path\x18\x05 \x01(\tR\x04path\x12;\n" +
+	"\x06status\x18\x06 \x01(\x0e2#.backend.document.v1.DocumentStatusR\x06status\x12\x1f\n" +
+	"\vworkflow_id\x18\a \x01(\tR\n" +
+	"workflowId\x12\x14\n" +
+	"\x05error\x18\b \x01(\tR\x05error\x12#\n" +
+	"\rupload_bucket\x18\t \x01(\tR\fuploadBucket\x12*\n" +
+	"\x11upload_object_key\x18\n" +
+	" \x01(\tR\x0fuploadObjectKey\x12'\n" +
+	"\x0fmarkdown_bucket\x18\v \x01(\tR\x0emarkdownBucket\x12.\n" +
+	"\x13markdown_object_key\x18\f \x01(\tR\x11markdownObjectKey\x129\n" +
 	"\n" +
-	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12@\n" +
-	"\bversions\x18\n" +
-	" \x03(\v2$.backend.document.v1.DocumentVersionR\bversions\"\xb2\x02\n" +
-	"\x0fDocumentVersion\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
-	"\vdocument_id\x18\x02 \x01(\tR\n" +
-	"documentId\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\x05R\aversion\x12.\n" +
-	"\x13original_object_key\x18\x04 \x01(\tR\x11originalObjectKey\x12.\n" +
-	"\x13markdown_object_key\x18\x05 \x01(\tR\x11markdownObjectKey\x129\n" +
+	"created_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"updated_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x88\x03\n" +
+	"\x15CreateDocumentRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
+	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1e\n" +
 	"\n" +
-	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x9f\x02\n" +
-	"\x11DocumentStatusLog\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
-	"\vdocument_id\x18\x02 \x01(\tR\n" +
-	"documentId\x12D\n" +
-	"\vfrom_status\x18\x03 \x01(\x0e2#.backend.document.v1.DocumentStatusR\n" +
-	"fromStatus\x12@\n" +
-	"\tto_status\x18\x04 \x01(\x0e2#.backend.document.v1.DocumentStatusR\btoStatus\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\x129\n" +
-	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xfa\x01\n" +
-	"\x15CreateDocumentRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
-	"\x0foriginal_bucket\x18\x02 \x01(\tR\x0eoriginalBucket\x12'\n" +
-	"\x0fmarkdown_bucket\x18\x03 \x01(\tR\x0emarkdownBucket\x12)\n" +
-	"\x10original_content\x18\x04 \x01(\fR\x0foriginalContent\x12-\n" +
-	"\x12filename_extension\x18\x05 \x01(\tR\x11filenameExtension\x12!\n" +
-	"\fpublish_path\x18\x06 \x01(\tR\vpublishPath\"$\n" +
+	"repository\x18\x03 \x01(\tR\n" +
+	"repository\x12\x16\n" +
+	"\x06branch\x18\x04 \x01(\tR\x06branch\x12\x12\n" +
+	"\x04path\x18\x05 \x01(\tR\x04path\x12%\n" +
+	"\x0ecorrelation_id\x18\x06 \x01(\tR\rcorrelationId\x12%\n" +
+	"\x0econtent_length\x18\a \x01(\x03R\rcontentLength\x12#\n" +
+	"\rupload_bucket\x18\b \x01(\tR\fuploadBucket\x12*\n" +
+	"\x11upload_object_key\x18\t \x01(\tR\x0fuploadObjectKey\x12'\n" +
+	"\x0fmarkdown_bucket\x18\n" +
+	" \x01(\tR\x0emarkdownBucket\x12.\n" +
+	"\x13markdown_object_key\x18\v \x01(\tR\x11markdownObjectKey\"$\n" +
 	"\x12GetDocumentRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x8e\x01\n" +
 	"\x14ListDocumentsRequest\x12\x14\n" +
@@ -776,45 +666,37 @@ func file_backend_document_v1_document_proto_rawDescGZIP() []byte {
 }
 
 var file_backend_document_v1_document_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_backend_document_v1_document_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_backend_document_v1_document_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_backend_document_v1_document_proto_goTypes = []any{
 	(DocumentStatus)(0),                 // 0: backend.document.v1.DocumentStatus
 	(*Document)(nil),                    // 1: backend.document.v1.Document
-	(*DocumentVersion)(nil),             // 2: backend.document.v1.DocumentVersion
-	(*DocumentStatusLog)(nil),           // 3: backend.document.v1.DocumentStatusLog
-	(*CreateDocumentRequest)(nil),       // 4: backend.document.v1.CreateDocumentRequest
-	(*GetDocumentRequest)(nil),          // 5: backend.document.v1.GetDocumentRequest
-	(*ListDocumentsRequest)(nil),        // 6: backend.document.v1.ListDocumentsRequest
-	(*ListDocumentsResponse)(nil),       // 7: backend.document.v1.ListDocumentsResponse
-	(*UpdateDocumentStatusRequest)(nil), // 8: backend.document.v1.UpdateDocumentStatusRequest
-	(*timestamppb.Timestamp)(nil),       // 9: google.protobuf.Timestamp
+	(*CreateDocumentRequest)(nil),       // 2: backend.document.v1.CreateDocumentRequest
+	(*GetDocumentRequest)(nil),          // 3: backend.document.v1.GetDocumentRequest
+	(*ListDocumentsRequest)(nil),        // 4: backend.document.v1.ListDocumentsRequest
+	(*ListDocumentsResponse)(nil),       // 5: backend.document.v1.ListDocumentsResponse
+	(*UpdateDocumentStatusRequest)(nil), // 6: backend.document.v1.UpdateDocumentStatusRequest
+	(*timestamppb.Timestamp)(nil),       // 7: google.protobuf.Timestamp
 }
 var file_backend_document_v1_document_proto_depIdxs = []int32{
 	0,  // 0: backend.document.v1.Document.status:type_name -> backend.document.v1.DocumentStatus
-	9,  // 1: backend.document.v1.Document.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 2: backend.document.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
-	2,  // 3: backend.document.v1.Document.versions:type_name -> backend.document.v1.DocumentVersion
-	9,  // 4: backend.document.v1.DocumentVersion.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 5: backend.document.v1.DocumentVersion.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 6: backend.document.v1.DocumentStatusLog.from_status:type_name -> backend.document.v1.DocumentStatus
-	0,  // 7: backend.document.v1.DocumentStatusLog.to_status:type_name -> backend.document.v1.DocumentStatus
-	9,  // 8: backend.document.v1.DocumentStatusLog.created_at:type_name -> google.protobuf.Timestamp
-	0,  // 9: backend.document.v1.ListDocumentsRequest.status_filter:type_name -> backend.document.v1.DocumentStatus
-	1,  // 10: backend.document.v1.ListDocumentsResponse.documents:type_name -> backend.document.v1.Document
-	0,  // 11: backend.document.v1.UpdateDocumentStatusRequest.status:type_name -> backend.document.v1.DocumentStatus
-	4,  // 12: backend.document.v1.DocumentService.CreateDocument:input_type -> backend.document.v1.CreateDocumentRequest
-	5,  // 13: backend.document.v1.DocumentService.GetDocument:input_type -> backend.document.v1.GetDocumentRequest
-	6,  // 14: backend.document.v1.DocumentService.ListDocuments:input_type -> backend.document.v1.ListDocumentsRequest
-	8,  // 15: backend.document.v1.DocumentService.UpdateDocumentStatus:input_type -> backend.document.v1.UpdateDocumentStatusRequest
-	1,  // 16: backend.document.v1.DocumentService.CreateDocument:output_type -> backend.document.v1.Document
-	1,  // 17: backend.document.v1.DocumentService.GetDocument:output_type -> backend.document.v1.Document
-	7,  // 18: backend.document.v1.DocumentService.ListDocuments:output_type -> backend.document.v1.ListDocumentsResponse
-	1,  // 19: backend.document.v1.DocumentService.UpdateDocumentStatus:output_type -> backend.document.v1.Document
-	16, // [16:20] is the sub-list for method output_type
-	12, // [12:16] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	7,  // 1: backend.document.v1.Document.created_at:type_name -> google.protobuf.Timestamp
+	7,  // 2: backend.document.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
+	0,  // 3: backend.document.v1.ListDocumentsRequest.status_filter:type_name -> backend.document.v1.DocumentStatus
+	1,  // 4: backend.document.v1.ListDocumentsResponse.documents:type_name -> backend.document.v1.Document
+	0,  // 5: backend.document.v1.UpdateDocumentStatusRequest.status:type_name -> backend.document.v1.DocumentStatus
+	2,  // 6: backend.document.v1.DocumentService.CreateDocument:input_type -> backend.document.v1.CreateDocumentRequest
+	3,  // 7: backend.document.v1.DocumentService.GetDocument:input_type -> backend.document.v1.GetDocumentRequest
+	4,  // 8: backend.document.v1.DocumentService.ListDocuments:input_type -> backend.document.v1.ListDocumentsRequest
+	6,  // 9: backend.document.v1.DocumentService.UpdateDocumentStatus:input_type -> backend.document.v1.UpdateDocumentStatusRequest
+	1,  // 10: backend.document.v1.DocumentService.CreateDocument:output_type -> backend.document.v1.Document
+	1,  // 11: backend.document.v1.DocumentService.GetDocument:output_type -> backend.document.v1.Document
+	5,  // 12: backend.document.v1.DocumentService.ListDocuments:output_type -> backend.document.v1.ListDocumentsResponse
+	1,  // 13: backend.document.v1.DocumentService.UpdateDocumentStatus:output_type -> backend.document.v1.Document
+	10, // [10:14] is the sub-list for method output_type
+	6,  // [6:10] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_backend_document_v1_document_proto_init() }
@@ -828,7 +710,7 @@ func file_backend_document_v1_document_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_backend_document_v1_document_proto_rawDesc), len(file_backend_document_v1_document_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,23 @@ func TestUploadHappyPath(t *testing.T) {
 	ctx := ctxutils.WithCorrelationID(context.Background(), "corr-test")
 	docCalled := false
 	temporalCalled := false
+	storageDocID := ""
+	storageCalled := false
+
+	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
+		storageCalled = true
+		storageDocID = in.GetDocumentId()
+		if in.CorrelationId != "corr-test" {
+			t.Fatalf("storage correlation id missing")
+		}
+		if in.ExpiresInSeconds != 600 {
+			t.Fatalf("unexpected ttl: %d", in.ExpiresInSeconds)
+		}
+		if storageDocID == "" {
+			t.Fatalf("document id is empty in storage request")
+		}
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: fmt.Sprintf("docs/%s.docx", storageDocID), ExpiresInSeconds: 900}, nil
+	}}
 
 	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
 		docCalled = true
@@ -94,21 +112,15 @@ func TestUploadHappyPath(t *testing.T) {
 		if in.ContentLength != 1024 {
 			t.Fatalf("unexpected content length: %d", in.ContentLength)
 		}
-		return &pb.Document{Id: "123", FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		if in.GetId() != storageDocID {
+			t.Fatalf("document id mismatch: %s vs %s", in.GetId(), storageDocID)
+		}
+		if in.GetUploadBucket() != "docs" || in.GetUploadObjectKey() == "" {
+			t.Fatalf("bucket info not forwarded")
+		}
+		return &pb.Document{Id: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil }, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
-	}}
-
-	storageCalled := false
-	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
-		storageCalled = true
-		if in.CorrelationId != "corr-test" {
-			t.Fatalf("storage correlation id missing")
-		}
-		if in.ExpiresInSeconds != 600 {
-			t.Fatalf("unexpected ttl: %d", in.ExpiresInSeconds)
-		}
-		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: "docs/123.docx", ExpiresInSeconds: 900}, nil
 	}}
 
 	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
@@ -116,7 +128,7 @@ func TestUploadHappyPath(t *testing.T) {
 		if input.CorrelationId != "corr-test" {
 			t.Fatalf("workflow correlation id missing")
 		}
-		if input.DocumentId != "123" || input.UploadBucket != "docs" || input.UploadObjectKey != "docs/123.docx" || input.UploadURL == "" || input.FileSizeBytes != 1024 {
+		if input.DocumentId != storageDocID || input.UploadBucket != "docs" || input.UploadObjectKey == "" || input.UploadURL == "" || input.FileSizeBytes != 1024 {
 			t.Fatalf("unexpected workflow input: %+v", input)
 		}
 		return "wf-1", nil
@@ -148,29 +160,37 @@ func TestUploadHappyPath(t *testing.T) {
 
 func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 	var capturedCorrelation string
+	var capturedDocID string
 
-	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
+	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
 		if in.CorrelationId == "" {
 			t.Fatalf("correlation id was not generated")
 		}
 		capturedCorrelation = in.CorrelationId
-		return &pb.Document{Id: "doc-99", Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		capturedDocID = in.GetDocumentId()
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: fmt.Sprintf("docs/%s.docx", capturedDocID), ExpiresInSeconds: 600}, nil
+	}}
+
+	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
+		if in.CorrelationId != capturedCorrelation {
+			t.Fatalf("correlation id was not propagated")
+		}
+		if in.GetId() != capturedDocID {
+			t.Fatalf("document id mismatch: %s vs %s", in.GetId(), capturedDocID)
+		}
+		return &pb.Document{Id: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
 		return nil, nil
 	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
 	}}
 
-	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
-		if in.CorrelationId != capturedCorrelation {
-			t.Fatalf("storage correlation mismatch: %s vs %s", in.CorrelationId, capturedCorrelation)
-		}
-		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: "docs/doc-99.docx", ExpiresInSeconds: 600}, nil
-	}}
-
 	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
 		if input.CorrelationId != capturedCorrelation {
 			t.Fatalf("workflow correlation mismatch: %s vs %s", input.CorrelationId, capturedCorrelation)
+		}
+		if input.DocumentId != capturedDocID {
+			t.Fatalf("workflow document mismatch: %s vs %s", input.DocumentId, capturedDocID)
 		}
 		return "wf-99", nil
 	}}
@@ -188,7 +208,7 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if payload.Document == nil || payload.Document.ID != "doc-99" {
+	if payload.Document == nil || payload.Document.ID != capturedDocID {
 		t.Fatalf("unexpected document returned: %+v", payload.Document)
 	}
 	if capturedCorrelation == "" {
@@ -226,9 +246,19 @@ func TestKnowledgeDocumentsPaginationAndFilter(t *testing.T) {
 
 func TestGraphQLUploadEndToEnd(t *testing.T) {
 	logger := zap.NewNop()
+	var capturedDocID string
 	docClient := &mockDocumentClient{
 		createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
-			return &pb.Document{Id: "doc-1", FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+			if in.GetId() == "" {
+				t.Fatalf("document id not provided")
+			}
+			if capturedDocID == "" {
+				capturedDocID = in.GetId()
+			}
+			if in.GetId() != capturedDocID {
+				t.Fatalf("document id mismatch: %s vs %s", in.GetId(), capturedDocID)
+			}
+			return &pb.Document{Id: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 		},
 		getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -240,6 +270,9 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 		if input.CorrelationId != "corr-integration" {
 			t.Fatalf("correlation id missing in workflow")
 		}
+		if input.DocumentId != capturedDocID {
+			t.Fatalf("workflow document mismatch: %s vs %s", input.DocumentId, capturedDocID)
+		}
 		return "wf-99", nil
 	}}
 
@@ -250,7 +283,8 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 		if in.ExpiresInSeconds != 900 {
 			t.Fatalf("unexpected expires ttl: %d", in.ExpiresInSeconds)
 		}
-		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/signed", Bucket: "docx", ObjectKey: "docx/doc-1.docx", ExpiresInSeconds: 600}, nil
+		capturedDocID = in.GetDocumentId()
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/signed", Bucket: "docx", ObjectKey: fmt.Sprintf("docx/%s.docx", capturedDocID), ExpiresInSeconds: 600}, nil
 	}}
 
 	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
@@ -301,7 +335,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	if len(resp.Errors) > 0 {
 		t.Fatalf("unexpected graphql errors: %+v", resp.Errors)
 	}
-	if resp.Data.UploadKnowledgeDocument.Document.ID != "doc-1" || resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != "wf-99" {
+	if resp.Data.UploadKnowledgeDocument.Document.ID == "" || resp.Data.UploadKnowledgeDocument.Document.ID != capturedDocID || resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != "wf-99" {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
 	}
 	if resp.Data.UploadKnowledgeDocument.UploadURL == "" || resp.Data.UploadKnowledgeDocument.UploadMethod == "" {
@@ -336,7 +370,10 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	logger := zap.NewNop()
 	docClient := &mockDocumentClient{
 		createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
-			return &pb.Document{Id: "doc-1", FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+			if in.GetId() == "" || in.GetId() != storageServer.lastDocumentID {
+				t.Fatalf("document id mismatch: %s vs %s", in.GetId(), storageServer.lastDocumentID)
+			}
+			return &pb.Document{Id: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 		},
 		getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -347,6 +384,9 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
 		if input.CorrelationId != "corr-grpc" {
 			t.Fatalf("correlation id missing in workflow")
+		}
+		if input.DocumentId != storageServer.lastDocumentID {
+			t.Fatalf("workflow document mismatch: %s vs %s", input.DocumentId, storageServer.lastDocumentID)
 		}
 		if input.UploadURL != "http://minio/presigned" {
 			t.Fatalf("unexpected upload url: %s", input.UploadURL)
@@ -408,7 +448,7 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	if storageServer.lastAPIKey != "secret" {
 		t.Fatalf("api key not forwarded to storage service")
 	}
-	if resp.Data.UploadKnowledgeDocument.Document.ID != "doc-1" || resp.Data.UploadKnowledgeDocument.UploadURL != "http://minio/presigned" {
+	if resp.Data.UploadKnowledgeDocument.Document.ID != storageServer.lastDocumentID || resp.Data.UploadKnowledgeDocument.UploadURL != "http://minio/presigned" {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
 	}
 	if storageServer.lastCorrelation != "corr-grpc" {
@@ -422,11 +462,13 @@ type storageServiceStub struct {
 	calls           int
 	lastCorrelation string
 	lastAPIKey      string
+	lastDocumentID  string
 }
 
 func (s *storageServiceStub) GenerateUploadURL(ctx context.Context, req *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
 	s.calls++
 	s.lastCorrelation = req.GetCorrelationId()
+	s.lastDocumentID = req.GetDocumentId()
 
 	if req.GetDocumentId() == "" {
 		s.t.Fatalf("document id is required")

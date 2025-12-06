@@ -27,7 +27,9 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 	}
 	defer tx.Rollback()
 
-	doc.ID = uuid.NewString()
+	if doc.ID == "" {
+		doc.ID = uuid.NewString()
+	}
 	now := time.Now().UTC()
 	doc.CreatedAt = now
 	doc.UpdatedAt = now

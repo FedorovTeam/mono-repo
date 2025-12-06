@@ -21,23 +21,38 @@ type Repository interface {
 }
 
 type Service struct {
-	repo       Repository
-	keyManager storage.KeyManager
-	temporal   WorkflowStarter
-	taskQueue  string
+	repo                  Repository
+	keyManager            storage.KeyManager
+	temporal              WorkflowStarter
+	taskQueue             string
+	defaultOriginalBucket string
+	defaultMarkdownBucket string
 }
 
-func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarter, taskQueue string, activities *Activities) *Service {
-	return &Service{repo: repo, keyManager: keyManager, temporal: temporal, taskQueue: taskQueue}
+func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarter, taskQueue string, activities *Activities, defaultOriginalBucket, defaultMarkdownBucket string) *Service {
+	return &Service{
+		repo:                  repo,
+		keyManager:            keyManager,
+		temporal:              temporal,
+		taskQueue:             taskQueue,
+		defaultOriginalBucket: defaultOriginalBucket,
+		defaultMarkdownBucket: defaultMarkdownBucket,
+	}
 }
 
 type CreateInput struct {
-	Name            string
-	OriginalBucket  string
-	MarkdownBucket  string
-	OriginalContent []byte
-	FilenameExt     string
-	PublishPath     string
+	ID                string
+	FileName          string
+	Repository        string
+	Branch            string
+	Path              string
+	UploadBucket      string
+	UploadObjectKey   string
+	MarkdownBucket    string
+	MarkdownObjectKey string
+	OriginalContent   []byte
+	FilenameExt       string
+	PublishPath       string
 }
 
 type UpdateStatusInput struct {
@@ -50,39 +65,58 @@ type UpdateStatusInput struct {
 }
 
 func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Document, error) {
-	if strings.TrimSpace(in.Name) == "" {
+	if strings.TrimSpace(in.FileName) == "" {
 		return nil, errors.New("name is required")
 	}
-	if in.OriginalBucket == "" || in.MarkdownBucket == "" {
-		return nil, errors.New("buckets are required")
+	if in.ID != "" {
+		if _, err := uuid.Parse(in.ID); err != nil {
+			return nil, errors.New("id is not a valid uuid")
+		}
 	}
-	if len(in.OriginalContent) == 0 {
-		return nil, errors.New("original content is required")
+	originalBucket := in.UploadBucket
+	if originalBucket == "" {
+		originalBucket = s.defaultOriginalBucket
+	}
+	markdownBucket := in.MarkdownBucket
+	if markdownBucket == "" {
+		markdownBucket = s.defaultMarkdownBucket
+	}
+	if originalBucket == "" || markdownBucket == "" {
+		return nil, errors.New("buckets are required")
 	}
 	pair, err := s.keyManager.GenerateKeys(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("generate keys: %w", err)
 	}
+	originalKey := in.UploadObjectKey
+	if originalKey == "" {
+		originalKey = pair.OriginalObjectKey
+	}
+	markdownKey := in.MarkdownObjectKey
+	if markdownKey == "" {
+		markdownKey = pair.MarkdownObjectKey
+	}
 
 	doc := &model.Document{
-		Name:              in.Name,
+		ID:                in.ID,
+		Name:              in.FileName,
 		Status:            model.StatusUploaded,
-		OriginalBucket:    in.OriginalBucket,
-		OriginalObjectKey: pair.OriginalObjectKey,
-		MarkdownBucket:    in.MarkdownBucket,
-		MarkdownObjectKey: pair.MarkdownObjectKey,
+		OriginalBucket:    originalBucket,
+		OriginalObjectKey: originalKey,
+		MarkdownBucket:    markdownBucket,
+		MarkdownObjectKey: markdownKey,
 	}
 	version := &model.DocumentVersion{
 		Version:           1,
-		OriginalObjectKey: pair.OriginalObjectKey,
-		MarkdownObjectKey: pair.MarkdownObjectKey,
+		OriginalObjectKey: originalKey,
+		MarkdownObjectKey: markdownKey,
 	}
 	log := &model.DocumentStatusLog{ToStatus: model.StatusUploaded}
 	created, err := s.repo.CreateDocument(ctx, doc, version, log)
 	if err != nil {
 		return nil, err
 	}
-	if s.temporal != nil {
+	if s.temporal != nil && len(in.OriginalContent) > 0 {
 		opts := client.StartWorkflowOptions{ID: created.ID, TaskQueue: s.taskQueue}
 		input := WorkflowInput{
 			DocumentID:        created.ID,

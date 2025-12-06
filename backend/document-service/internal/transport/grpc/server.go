@@ -41,12 +41,15 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocumentRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "CreateDocument")
 	doc, err := s.service.CreateDocument(ctx, svc.CreateInput{
-		Name:            req.GetName(),
-		OriginalBucket:  req.GetOriginalBucket(),
-		MarkdownBucket:  req.GetMarkdownBucket(),
-		OriginalContent: req.GetOriginalContent(),
-		FilenameExt:     req.GetFilenameExtension(),
-		PublishPath:     req.GetPublishPath(),
+		ID:                req.GetId(),
+		FileName:          req.GetFileName(),
+		Repository:        req.GetRepository(),
+		Branch:            req.GetBranch(),
+		Path:              req.GetPath(),
+		UploadBucket:      req.GetUploadBucket(),
+		UploadObjectKey:   req.GetUploadObjectKey(),
+		MarkdownBucket:    req.GetMarkdownBucket(),
+		MarkdownObjectKey: req.GetMarkdownObjectKey(),
 	})
 	if err != nil {
 		return nil, err
@@ -101,25 +104,14 @@ func (s *Server) UpdateDocumentStatus(ctx context.Context, req *documentv1.Updat
 func toProto(doc *model.Document) *documentv1.Document {
 	p := &documentv1.Document{
 		Id:                doc.ID,
-		Name:              doc.Name,
+		FileName:          doc.Name,
 		Status:            toProtoStatus(doc.Status),
-		OriginalBucket:    doc.OriginalBucket,
-		OriginalObjectKey: doc.OriginalObjectKey,
+		UploadBucket:      doc.OriginalBucket,
+		UploadObjectKey:   doc.OriginalObjectKey,
 		MarkdownBucket:    doc.MarkdownBucket,
 		MarkdownObjectKey: doc.MarkdownObjectKey,
 		CreatedAt:         timestamppb.New(doc.CreatedAt),
 		UpdatedAt:         timestamppb.New(doc.UpdatedAt),
-	}
-	for _, v := range doc.Versions {
-		p.Versions = append(p.Versions, &documentv1.DocumentVersion{
-			Id:                v.ID,
-			DocumentId:        v.DocumentID,
-			Version:           v.Version,
-			OriginalObjectKey: v.OriginalObjectKey,
-			MarkdownObjectKey: v.MarkdownObjectKey,
-			CreatedAt:         timestamppb.New(v.CreatedAt),
-			UpdatedAt:         timestamppb.New(v.UpdatedAt),
-		})
 	}
 	return p
 }
