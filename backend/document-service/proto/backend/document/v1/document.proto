@@ -17,43 +17,33 @@ enum DocumentStatus {
 
 message Document {
   string id = 1;
-  string name = 2;
-  DocumentStatus status = 3;
-  string original_bucket = 4;
-  string original_object_key = 5;
-  string markdown_bucket = 6;
-  string markdown_object_key = 7;
-  google.protobuf.Timestamp created_at = 8;
-  google.protobuf.Timestamp updated_at = 9;
-  repeated DocumentVersion versions = 10;
-}
-
-message DocumentVersion {
-  string id = 1;
-  string document_id = 2;
-  int32 version = 3;
-  string original_object_key = 4;
-  string markdown_object_key = 5;
-  google.protobuf.Timestamp created_at = 6;
-  google.protobuf.Timestamp updated_at = 7;
-}
-
-message DocumentStatusLog {
-  string id = 1;
-  string document_id = 2;
-  DocumentStatus from_status = 3;
-  DocumentStatus to_status = 4;
-  string reason = 5;
-  google.protobuf.Timestamp created_at = 6;
+  string file_name = 2;
+  string repository = 3;
+  string branch = 4;
+  string path = 5;
+  DocumentStatus status = 6;
+  string workflow_id = 7;
+  string error = 8;
+  string upload_bucket = 9;
+  string upload_object_key = 10;
+  string markdown_bucket = 11;
+  string markdown_object_key = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
 }
 
 message CreateDocumentRequest {
-  string name = 1;
-  string original_bucket = 2;
-  string markdown_bucket = 3;
-  bytes original_content = 4;
-  string filename_extension = 5;
-  string publish_path = 6;
+  string id = 1;
+  string file_name = 2;
+  string repository = 3;
+  string branch = 4;
+  string path = 5;
+  string correlation_id = 6;
+  int64 content_length = 7;
+  string upload_bucket = 8;
+  string upload_object_key = 9;
+  string markdown_bucket = 10;
+  string markdown_object_key = 11;
 }
 
 message GetDocumentRequest {

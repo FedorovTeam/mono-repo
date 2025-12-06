@@ -2,14 +2,17 @@ syntax = "proto3";
 
 package backend.document.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "backend-gateway-service/proto/backend/document/v1;pb";
 
 enum DocumentStatus {
-  DOCUMENT_STATUS_UPLOADED = 0;
-  DOCUMENT_STATUS_STORED_ORIGINAL = 1;
-  DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN = 2;
-  DOCUMENT_STATUS_PUBLISHED_TO_GITHUB = 3;
-  DOCUMENT_STATUS_FAILED = 4;
+  DOCUMENT_STATUS_UNSPECIFIED = 0;
+  DOCUMENT_STATUS_UPLOADED = 1;
+  DOCUMENT_STATUS_STORED_ORIGINAL = 2;
+  DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN = 3;
+  DOCUMENT_STATUS_PUBLISHED_TO_GITHUB = 4;
+  DOCUMENT_STATUS_FAILED = 5;
 }
 
 message Document {
@@ -23,11 +26,15 @@ message Document {
   string error = 8;
   string upload_bucket = 9;
   string upload_object_key = 10;
+  string markdown_bucket = 11;
+  string markdown_object_key = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
 }
 
 message CreateDocumentRequest {
-  string file_name = 1;
-  string content_base64 = 2;
+  string id = 1;
+  string file_name = 2;
   string repository = 3;
   string branch = 4;
   string path = 5;
@@ -35,6 +42,8 @@ message CreateDocumentRequest {
   int64 content_length = 7;
   string upload_bucket = 8;
   string upload_object_key = 9;
+  string markdown_bucket = 10;
+  string markdown_object_key = 11;
 }
 
 message GetDocumentRequest {

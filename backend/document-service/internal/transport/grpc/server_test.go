@@ -106,7 +106,7 @@ func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Statu
 
 func TestGRPCWorkflow(t *testing.T) {
 	repo := &memoryRepo{}
-	svc := document.New(repo, staticKey{}, nil, "", nil)
+	svc := document.New(repo, staticKey{}, nil, "", nil, "orig", "md")
 	srv := NewServer(svc)
 	grpcServer := grpc.NewServer()
 	documentv1.RegisterDocumentServiceServer(grpcServer, srv)
@@ -118,7 +118,7 @@ func TestGRPCWorkflow(t *testing.T) {
 	client := documentv1.NewDocumentServiceClient(conn)
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "test-corr"))
 
-	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{Name: "doc", OriginalBucket: "orig", MarkdownBucket: "md", OriginalContent: []byte("doc"), FilenameExtension: "docx"})
+	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{FileName: "doc", UploadBucket: "orig", MarkdownBucket: "md"})
 	require.NoError(t, err)
 	require.Equal(t, documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED, created.Status)
 
