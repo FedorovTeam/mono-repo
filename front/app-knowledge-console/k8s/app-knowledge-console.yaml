@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: knowledge-console
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-knowledge-console
+  namespace: knowledge-console
+  labels:
+    app: app-knowledge-console
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-knowledge-console
+  template:
+    metadata:
+      labels:
+        app: app-knowledge-console
+    spec:
+      containers:
+        - name: app-knowledge-console
+          image: harbor.tech.fedorov-team.tech/frontend/app-knowledge-console:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # URL до gateway, который доступен из браузера
+            - name: NEXT_PUBLIC_GATEWAY_URL
+              value: "https://gateway.fedorov-team.tech/query"
+            # API-ключ, который gateway ждёт в X-API-Key
+            - name: NEXT_PUBLIC_API_KEY
+              value: "secret"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-knowledge-console
+  namespace: knowledge-console
+  labels:
+    app: app-knowledge-console
+spec:
+  selector:
+    app: app-knowledge-console
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-knowledge-console
+  namespace: knowledge-console
+  annotations:
+    # подставь ваш ingress-класс
+    kubernetes.io/ingress.class: traefik
+    # или так (если используете ingressClassName, можно убрать аннотацию выше):
+    # cert-manager для TLS
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - console.fedorov-team.tech
+      secretName: console-fedorov-team-tech-tls
+  rules:
+    - host: console.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app-knowledge-console
+                port:
+                  number: 80
