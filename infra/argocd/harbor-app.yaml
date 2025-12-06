@@ -1,0 +1,108 @@
+# infra/argocd/harbor-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: harbor
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://helm.goharbor.io
+    chart: harbor
+    targetRevision: 1.17.1
+    helm:
+      # Можно явно указать имя релиза, чтобы было предсказуемо
+      releaseName: harbor
+      values: |
+        core:
+          secret: harbor-internal-secret
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+        jobservice:
+          secret: harbor-internal-secret
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+        trivy:
+          enabled: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1024Mi
+            limits:
+              cpu: 400m
+              memory: 1536Mi
+        registry:
+          registry:
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+              limits:
+                cpu: 400m
+                memory: 1024Mi
+          controller:
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 200m
+                memory: 512Mi
+        chartmuseum:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+        expose:
+          type: clusterIP
+          tls:
+            enabled: false
+        externalURL: https://harbor.tech.fedorov-team.tech
+        persistence:
+          persistentVolumeClaim:
+            registry:
+              existingClaim: harbor-registry
+          imageChartStorage:
+            type: s3
+            s3:
+              region: us-east-1
+              bucket: harbor
+              regionendpoint: https://api.minio.tech.fedorov-team.tech
+              existingSecret: harbor-s3
+              secure: true
+              v4auth: true
+        database:
+          type: external
+          external:
+            host: postgres-postgresql.postgres.svc.cluster.local
+            port: 5432
+            username: postgres
+            coreDatabase: registry
+            existingSecret: harbor-db
+            sslmode: disable
+        existingSecretAdminPassword: harbor-admin
+        existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: harbor
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true
