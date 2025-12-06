@@ -1,7 +1,7 @@
 # Dockerfile
 
 # Шаг 1: сборка бинаря
-FROM golang:1.23.8-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 RUN apk update && apk add --no-cache git
 
