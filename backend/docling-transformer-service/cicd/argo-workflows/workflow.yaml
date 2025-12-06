@@ -69,7 +69,7 @@ spec:
             git clone --depth 1 --sparse "$REPO" /workspace
             cd /workspace
             git sparse-checkout init --cone
-            git sparse-checkout set backend/gateway-service
+            git sparse-checkout set backend/docling-transformer-service
             git fetch --depth 1 origin {{inputs.parameters.git_sha}}
             git checkout {{inputs.parameters.git_sha}}
         env:
@@ -95,10 +95,10 @@ spec:
         image: gcr.io/kaniko-project/executor:v1.22.0
         command: [ "/kaniko/executor" ]
         args:
-          - --dockerfile=/workspace/backend/gateway-service/Dockerfile
-          - --context=/workspace/backend/gateway-service
-          - --destination=harbor.tech.fedorov-team.tech/backend/gateway-service:{{inputs.parameters.git_sha}}
-          - --destination=harbor.tech.fedorov-team.tech/backend/gateway-service:latest
+          - --dockerfile=/workspace/backend/docling-transformer-service/Dockerfile
+          - --context=/workspace/backend/docling-transformer-service
+          - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:{{inputs.parameters.git_sha}}
+          - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:latest
           - --cache=true
           - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
           - --verbosity=debug
@@ -128,7 +128,7 @@ spec:
             : "${ARGOCD_TOKEN:?ARGOCD_TOKEN is not set}"
             ulimit -n 1048576 || true
 
-            APP="app-gateway-service"
+            APP="app-docling-transformer-service"
             SERVER="argocd-server.argocd.svc.cluster.local:443"
 
             # 1) убеждаемся, что приложение существует
