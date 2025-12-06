@@ -2,7 +2,7 @@ replicaCount: 1
 fullnameOverride: document-service
 
 image:
-  repository: harbor.tech.moiqr.ru/backend/document-service
+  repository: harbor.tech.fedorov-team.tech/backend/document-service
   pullPolicy: Always
   tag: "latest"
 

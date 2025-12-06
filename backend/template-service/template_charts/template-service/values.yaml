@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: harbor.tech.moiqr.ru/backend/template-service
+  repository: harbor.tech.fedorov-team.tech/backend/template-service
   pullPolicy: IfNotPresent
   tag: "latest"
 imagePullSecrets:

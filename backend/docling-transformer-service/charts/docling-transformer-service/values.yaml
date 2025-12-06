@@ -2,7 +2,7 @@ replicaCount: 1
 fullnameOverride: docling-transformer-service
 
 image:
-  repository: harbor.tech.moiqr.ru/backend/docling-transformer-service
+  repository: harbor.tech.fedorov-team.tech/backend/docling-transformer-service
   pullPolicy: Always
   tag: "latest"
 

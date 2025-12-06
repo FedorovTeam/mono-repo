@@ -2,7 +2,7 @@ replicaCount: 1
 fullnameOverride: storage-service
 
 image:
-  repository: harbor.tech.moiqr.ru/backend/storage-service
+  repository: harbor.tech.fedorov-team.tech/backend/storage-service
   pullPolicy: Always
   tag: "latest"
 

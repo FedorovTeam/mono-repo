@@ -95,10 +95,10 @@ spec:
         args:
           - --dockerfile=/workspace/template-service/Dockerfile
           - --context=/workspace/template-service
-          - --destination=harbor.tech.moiqr.ru/backend/template-service:{{inputs.parameters.git_sha}}
-          - --destination=harbor.tech.moiqr.ru/backend/template-service:latest
+          - --destination=harbor.tech.fedorov-team.tech/backend/template-service:{{inputs.parameters.git_sha}}
+          - --destination=harbor.tech.fedorov-team.tech/backend/template-service:latest
           - --cache=true
-          - --cache-repo=harbor.tech.moiqr.ru/backend/kaniko-cache
+          - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
           - --verbosity=debug
         env:
           - name: DOCKER_CONFIG
