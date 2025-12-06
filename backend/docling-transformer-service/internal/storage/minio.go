@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 )
@@ -27,18 +28,41 @@ func NewMinioStorage(client *minio.Client) *MinioStorage {
 
 // Download читает объект из указанного бакета.
 func (m *MinioStorage) Download(ctx context.Context, bucket, objectKey string) ([]byte, error) {
-	obj, err := m.client.GetObject(ctx, bucket, objectKey, minio.GetObjectOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("get object: %w", err)
-	}
-	defer obj.Close()
+	var lastErr error
 
-	data, err := io.ReadAll(obj)
-	if err != nil {
-		return nil, fmt.Errorf("read object: %w", err)
+	for attempt := 1; attempt <= 10; attempt++ {
+		obj, err := m.client.GetObject(ctx, bucket, objectKey, minio.GetObjectOptions{})
+		if err != nil {
+			// Если это "ключ не найден" — подождать и попробовать ещё раз
+			if respErr, ok := err.(minio.ErrorResponse); ok && respErr.Code == "NoSuchKey" {
+				lastErr = err
+
+				// небольшая экспоненциальная пауза: 0.5s, 1s, 2s, 4s...
+				sleep := time.Duration(attempt) * 500 * time.Millisecond
+
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(sleep):
+					continue
+				}
+			}
+
+			// другая ошибка — выходим сразу
+			return nil, fmt.Errorf("get object: %w", err)
+		}
+
+		defer obj.Close()
+
+		data, err := io.ReadAll(obj)
+		if err != nil {
+			return nil, fmt.Errorf("read object: %w", err)
+		}
+
+		return data, nil
 	}
 
-	return data, nil
+	return nil, fmt.Errorf("read object: %w", lastErr)
 }
 
 // Upload сохраняет контент в MinIO.
