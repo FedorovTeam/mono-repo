@@ -2,9 +2,11 @@ replicaCount: 1
 fullnameOverride: gateway-service
 
 image:
-  repository: harbor.tech.moiqr.ru/backend/gateway-service
+  repository: harbor.tech.fedorov-team.tech/backend/gateway-service
   pullPolicy: Always
-  tag: "latest"
+  tag: "latest"        # будет переписываться CI через `helm-set image.tag=<git_sha>`
+
+# Секрет с dockerconfig.json для Harbor
 imagePullSecrets:
   - name: regcred
 
@@ -29,7 +31,7 @@ affinity: {}
 
 ingress:
   enabled: true
-  host: api.dashboard.moiqr.ru
+  host: gateway.tech.fedorov-team.tech
   tls:
     enabled: true
     issuerRef:

@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: mono-repo-services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: git@github.com:FedorovTeam/mono-repo.git
+        revision: main
+        directories:
+          # backend/<service>/charts/<chart>
+          - path: "backend/*/charts/*"
+  template:
+    metadata:
+      # parts: ["backend", "<service>", "charts", "<chart>"]
+      # service: index 1
+      name: '{{ $parts := splitList "/" .path.path }}{{ $service := index $parts 1 | lower | replace "_" "-" }}{{ printf "app-%s" $service }}'
+      labels:
+        managed-by: application-set
+        service: '{{ index (splitList "/" .path.path) 1 }}'
+        mono-repo: backend
+    spec:
+      project: default
+      source:
+        repoURL: git@github.com:FedorovTeam/mono-repo.git
+        targetRevision: main
+        path: '{{ .path.path }}'
+        helm:
+          valueFiles: []
+          values: |
+            replicaCount: 1
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 100m
+                memory: 128Mi
+      destination:
+        server: https://kubernetes.default.svc
+        # namespace = <service> (backend/<service>/...)
+        namespace: '{{ index (splitList "/" .path.path) 1 }}'
+      syncPolicy:
+        automated:
+          selfHeal: true
+          prune: false
+        syncOptions:
+          - CreateNamespace=true

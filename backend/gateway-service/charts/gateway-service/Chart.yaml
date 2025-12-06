@@ -1,5 +1,5 @@
 apiVersion: v2
 name: gateway-service
 version: 0.1.0
-description: CRM Dashboard Gateway service
+description: Backend Gateway service
 appVersion: "1.0.0"
