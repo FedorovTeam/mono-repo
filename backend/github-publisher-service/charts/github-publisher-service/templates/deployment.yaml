@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "document-service.fullname" . }}
+  name: {{ include "github-publisher-service.fullname" . }}
   labels:
-    {{- include "document-service.labels" . | nindent 4 }}
+    {{- include "github-publisher-service.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "document-service.selectorLabels" . | nindent 6 }}
+      {{- include "github-publisher-service.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "document-service.selectorLabels" . | nindent 8 }}
+        {{- include "github-publisher-service.selectorLabels" . | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -23,8 +23,10 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - containerPort: {{ .Values.service.port }}
-            - containerPort: {{ .Values.service.grpcPort }}
+            - name: http
+              containerPort: {{ .Values.service.port }}
+            - name: grpc
+              containerPort: {{ .Values.service.grpcPort }}
           env:
             - name: SERVICE_NAME
               value: {{ .Values.env.SERVICE_NAME | quote }}

@@ -1,10 +1,11 @@
 replicaCount: 1
-fullnameOverride: document-service
+fullnameOverride: github-publisher-service
 
 image:
-  repository: harbor.tech.moiqr.ru/backend/document-service
+  repository: harbor.tech.moiqr.ru/backend/github-publisher-service
   pullPolicy: Always
   tag: "latest"
+
 imagePullSecrets:
   - name: regcred
 
@@ -14,7 +15,7 @@ service:
   grpcPort: 9090
 
 env:
-  SERVICE_NAME: document-service
+  SERVICE_NAME: github-publisher-service
   SERVICE_PORT: 8080
   GRPC_PORT: 9090
   SERVICE_REGION: local

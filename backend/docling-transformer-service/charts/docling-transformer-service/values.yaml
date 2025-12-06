@@ -5,6 +5,7 @@ image:
   repository: harbor.tech.moiqr.ru/backend/docling-transformer-service
   pullPolicy: Always
   tag: "latest"
+
 imagePullSecrets:
   - name: regcred
 

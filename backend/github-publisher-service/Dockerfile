@@ -21,6 +21,5 @@ WORKDIR /app
 
 COPY --from=builder /app/github-publisher-service .
 COPY --from=builder /app/config/ ./config/
-COPY --from=builder /app/db/ ./db/
 
 CMD ["./github-publisher-service"]

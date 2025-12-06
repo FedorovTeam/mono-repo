@@ -5,6 +5,7 @@ image:
   repository: harbor.tech.moiqr.ru/backend/storage-service
   pullPolicy: Always
   tag: "latest"
+
 imagePullSecrets:
   - name: regcred
 

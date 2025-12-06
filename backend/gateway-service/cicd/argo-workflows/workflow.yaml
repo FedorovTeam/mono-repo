@@ -7,71 +7,69 @@ metadata:
     workflows.argoproj.io/creator: akadmin
 spec:
   entrypoint: build
-  serviceAccountName: workflows-admin
+  serviceAccountName: ci-bot
+
+  # Общие аргументы, которые будут видны в UI
+  arguments:
+    parameters:
+      - name: git_sha
+        description: "Git commit SHA to build"
+      - name: repo
+        description: "GitHub repo (owner/name)"
+        default: "FedorovTeam/mono-repo"
+      - name: image
+        description: "Target image (Harbor)"
+        default: "harbor.tech.fedorov-team.tech/backend/gateway-service"
+      - name: argocd_app
+        description: "Argo CD Application name"
+        default: "app-gateway-service"
+      - name: argocd_server
+        description: "Argo CD server"
+        default: "argocd-server.argocd.svc.cluster.local:443"
 
   volumes:
     - name: docker-config
       secret:
         secretName: harbor-docker-config
+    - name: workdir
+      emptyDir: {}
     - name: go-build-cache
       emptyDir: {}
 
-  arguments:
-    parameters:
-      - name: git_sha        # SHA передаётся при submit
-
   templates:
+    # Оркестрация шагов
     - name: build
-      inputs:
-        parameters:
-          - name: git_sha
-      steps:
-        - - name: clone
+      dag:
+        tasks:
+          - name: clone
             template: git-clone
-            arguments:
-              parameters:
-                - name: git_sha
-                  value: "{{inputs.parameters.git_sha}}"
-        - - name: build-image
+          - name: build-image
+            dependencies: [clone]
             template: kaniko-build
-            arguments:
-              parameters:
-                - name: git_sha
-                  value: "{{inputs.parameters.git_sha}}"
-              artifacts:
-                - name: source
-                  from: "{{steps.clone.outputs.artifacts.source}}"
-        - - name: deploy
+          - name: deploy
+            dependencies: [build-image]
             template: argocd-deploy
-            arguments:
-              parameters:
-                - name: git_sha
-                  value: "{{inputs.parameters.git_sha}}"
 
+    # 1) Клонирование только backend/gateway-service
     - name: git-clone
-      inputs:
-        parameters:
-          - name: git_sha
-      outputs:
-        artifacts:
-          - name: source
-            path: /workspace
       container:
         image: alpine/git:latest
         command: ["sh", "-c"]
         args:
           - |
-            set -e
+            set -eu
             ulimit -n 1048576
-            REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
 
-            echo "Cloning $REPO @ {{inputs.parameters.git_sha}}"
+            REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/{{workflow.parameters.repo}}.git"
+            echo "Cloning $REPO @ {{workflow.parameters.git_sha}}"
+
             git clone --depth 1 --sparse "$REPO" /workspace
             cd /workspace
             git sparse-checkout init --cone
             git sparse-checkout set backend/gateway-service
-            git fetch --depth 1 origin {{inputs.parameters.git_sha}}
-            git checkout {{inputs.parameters.git_sha}}
+            git fetch --depth 1 origin {{workflow.parameters.git_sha}}
+            git checkout {{workflow.parameters.git_sha}}
+
         env:
           - name: GIT_USERNAME
             valueFrom:
@@ -83,25 +81,28 @@ spec:
               secretKeyRef:
                 name: github-secret
                 key: password
+        volumeMounts:
+          - name: workdir
+            mountPath: /workspace
 
+    # 2) Kaniko build → Harbor
     - name: kaniko-build
-      inputs:
-        parameters:
-          - name: git_sha
-        artifacts:
-          - name: source
-            path: /workspace
       container:
         image: gcr.io/kaniko-project/executor:v1.22.0
-        command: [ "/kaniko/executor" ]
+        command: ["sh", "-c"]
         args:
-          - --dockerfile=/workspace/backend/gateway-service/Dockerfile
-          - --context=/workspace/backend/gateway-service
-          - --destination=harbor.tech.fedorov-team.tech/backend/gateway-service:{{inputs.parameters.git_sha}}
-          - --destination=harbor.tech.fedorov-team.tech/backend/gateway-service:latest
-          - --cache=true
-          - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
-          - --verbosity=debug
+          - |
+            set -eu
+            ulimit -n 1048576
+
+            /kaniko/executor \
+              --dockerfile=/workspace/backend/gateway-service/Dockerfile \
+              --context=/workspace/backend/gateway-service \
+              --destination={{workflow.parameters.image}}:{{workflow.parameters.git_sha}} \
+              --destination={{workflow.parameters.image}}:latest \
+              --cache=true \
+              --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache \
+              --verbosity=debug
         env:
           - name: DOCKER_CONFIG
             value: /kaniko/.docker
@@ -111,36 +112,51 @@ spec:
             subPath: .dockerconfigjson
           - name: go-build-cache
             mountPath: /go
+          - name: workdir
+            mountPath: /workspace
         securityContext:
           runAsUser: 0
           privileged: true
 
+    # 3) Деплой через Argo CD
     - name: argocd-deploy
-      inputs:
-        parameters:
-          - name: git_sha
       container:
-        image: quay.io/argoproj/argocd:v2.8.4
+        image: quay.io/argoproj/argocd:v2.9.3
         command: ["bash", "-c"]
         args:
           - |
-            set -euo pipefail
+            set -eu
+
             : "${ARGOCD_TOKEN:?ARGOCD_TOKEN is not set}"
-            # поднять лимит открытых файлов для этого шага
             ulimit -n 1048576 || true
 
-            APP="app-gateway-service"
-            SERVER="argocd-server.argocd.svc.cluster.local:443"
+            APP="{{workflow.parameters.argocd_app}}"
+            SERVER="{{workflow.parameters.argocd_server}}"
 
-            # 1) убеждаемся, что приложение существует
-            argocd app get "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web >/dev/null
+            echo "Using Argo CD app: $APP"
+            echo "Argo CD server: $SERVER"
 
-            # 2) ждём, пока не будет активных операций
-            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --operation --timeout 600
+            # 1) Проверяем, что приложение существует
+            argocd app get "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web >/dev/null
 
-            # 3) выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
+            # 2) Ждём окончания любых активных операций
+            argocd app wait "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --operation \
+              --timeout 600
+
+            # 3) Выставляем новый image.tag (код 20 = "нет изменений")
             set +e
-            argocd app set "$APP" --helm-set image.tag={{inputs.parameters.git_sha}} --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web
+            argocd app set "$APP" \
+              --helm-set image.tag={{workflow.parameters.git_sha}} \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web
             RC=$?
             set -e
             if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
@@ -148,9 +164,15 @@ spec:
               exit "$RC"
             fi
 
-            # 4) запускаем sync
+            # 4) Запускаем sync
             set +e
-            argocd app sync "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --timeout 600 --prune --retry-limit 1
+            argocd app sync "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --timeout 600 \
+              --prune \
+              --retry-limit 1
             RC=$?
             set -e
             if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
@@ -158,11 +180,17 @@ spec:
               exit "$RC"
             fi
 
-            # 5) ждём синхронизации и здоровья
-            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --sync --health --timeout 600
-      env:
-        - name: ARGOCD_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: argocd-token
-              key: token
+            # 5) Ждём sync + health
+            argocd app wait "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --sync \
+              --health \
+              --timeout 600
+        env:
+          - name: ARGOCD_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: argocd-token
+                key: token
