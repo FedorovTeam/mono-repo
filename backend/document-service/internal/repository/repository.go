@@ -60,10 +60,17 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 		log.ID = uuid.NewString()
 		log.DocumentID = doc.ID
 		log.CreatedAt = now
+
+		var fromStatus sql.NullString
+		if log.FromStatus != "" {
+			fromStatus.Valid = true
+			fromStatus.String = string(log.FromStatus)
+		} // иначе Valid=false → NULL в БД
+
 		if _, err = tx.ExecContext(ctx, `
             INSERT INTO document_status_logs (id, document_id, from_status, to_status, reason, created_at)
             VALUES ($1,$2,$3,$4,$5,$6)
-        `, log.ID, log.DocumentID, string(log.FromStatus), string(log.ToStatus), log.Reason, log.CreatedAt); err != nil {
+        `, log.ID, log.DocumentID, fromStatus, string(log.ToStatus), log.Reason, log.CreatedAt); err != nil {
 			return nil, err
 		}
 	}
@@ -210,10 +217,17 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 				Reason:     reason,
 				CreatedAt:  now,
 			}
+
+			var fromStatus sql.NullString
+			if log.FromStatus != "" {
+				fromStatus.Valid = true
+				fromStatus.String = string(log.FromStatus)
+			}
+
 			if _, err = tx.ExecContext(ctx, `
             INSERT INTO document_status_logs (id, document_id, from_status, to_status, reason, created_at)
             VALUES ($1,$2,$3,$4,$5,$6)
-        `, log.ID, log.DocumentID, string(log.FromStatus), string(log.ToStatus), log.Reason, log.CreatedAt); err != nil {
+        `, log.ID, log.DocumentID, fromStatus, string(log.ToStatus), log.Reason, log.CreatedAt); err != nil {
 				return nil, err
 			}
 		}
