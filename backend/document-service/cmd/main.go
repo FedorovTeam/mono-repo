@@ -30,12 +30,12 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "config.yaml", "path to config file")
+	configPath := flag.String("config", "config/config.yaml", "path to config file")
 	migrate := flag.Bool("migrate", false, "run migrations and exit")
 	flag.Parse()
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
+	cfg, err := config.Load(*configPath)
+	if err != nil || cfg == nil {
 		log.Fatalf("load config: %v", err)
 	}
 
