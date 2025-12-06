@@ -1,0 +1,31 @@
+replicaCount: 1
+fullnameOverride: storage-service
+
+image:
+  repository: harbor.tech.moiqr.ru/backend/storage-service
+  pullPolicy: Always
+  tag: "latest"
+imagePullSecrets:
+  - name: regcred
+
+service:
+  type: ClusterIP
+  port: 8080
+  grpcPort: 9090
+
+env:
+  SERVICE_NAME: storage-service
+  SERVICE_PORT: 8080
+  GRPC_PORT: 9090
+  SERVICE_REGION: local
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

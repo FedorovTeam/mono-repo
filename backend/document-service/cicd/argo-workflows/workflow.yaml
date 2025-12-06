@@ -1,0 +1,173 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: document-service-build
+  namespace: argo
+  labels:
+    workflows.argoproj.io/creator: akadmin
+spec:
+  entrypoint: build
+  serviceAccountName: workflows-admin
+
+  volumes:
+    - name: docker-config
+      secret:
+        secretName: harbor-docker-config
+    - name: go-build-cache
+      emptyDir: {}
+
+  arguments:
+    parameters:
+      - name: git_sha        # SHA передаётся при submit
+
+  templates:
+    # ─────────────────────────────── build (steps) ────────────────────────────────
+    - name: build
+      inputs:
+        parameters:
+          - name: git_sha
+      steps:
+        - - name: clone
+            template: git-clone
+            arguments:
+              parameters:
+                - name: git_sha
+                  value: "{{inputs.parameters.git_sha}}"
+
+
+        - - name: build-image
+            template: kaniko-build
+            arguments:
+              parameters:
+                - name: git_sha
+                  value: "{{inputs.parameters.git_sha}}"
+              artifacts:
+                - name: source
+                  from: "{{steps.clone.outputs.artifacts.source}}"
+
+        - - name: deploy
+            template: argocd-deploy
+            arguments:
+              parameters:
+                - name: git_sha
+                  value: "{{inputs.parameters.git_sha}}"
+
+    # ──────────────────────────────── git-clone ──────────────────────────────────
+    - name: git-clone
+      inputs:
+        parameters:
+          - name: git_sha
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: alpine/git:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            ulimit -n 1048576
+            REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/moiqr/backend-mono-repo.git"
+            git clone --depth 1 --sparse "$REPO" /workspace
+            cd /workspace
+            git sparse-checkout init --cone
+            git sparse-checkout set document-service
+            git fetch --depth 1 origin {{inputs.parameters.git_sha}}
+            git checkout {{inputs.parameters.git_sha}}
+        env:
+          - name: GIT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: github-secret
+                key: username
+          - name: GIT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-secret
+                key: password
+
+    - name: kaniko-build
+      inputs:
+        parameters:
+          - name: git_sha
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: gcr.io/kaniko-project/executor:v1.22.0
+        command: [ "/kaniko/executor" ]
+        args:
+          - --dockerfile=/workspace/document-service/Dockerfile
+          - --context=/workspace/document-service
+          - --destination=harbor.tech.moiqr.ru/backend/document-service:{{inputs.parameters.git_sha}}
+          - --destination=harbor.tech.moiqr.ru/backend/document-service:latest
+          - --cache=true
+          - --cache-repo=harbor.tech.moiqr.ru/backend/kaniko-cache
+          - --verbosity=debug
+        env:
+          - name: DOCKER_CONFIG
+            value: /kaniko/.docker
+        volumeMounts:
+          - name: docker-config
+            mountPath: /kaniko/.docker/config.json
+            subPath: .dockerconfigjson
+          - name: go-build-cache
+            mountPath: /go
+        securityContext:
+          runAsUser: 0
+          privileged: true
+
+    # ────────────────────────────── argocd-deploy ────────────────────────────────
+    - name: argocd-deploy
+      inputs:
+        parameters:
+          - name: git_sha
+      container:
+        image: quay.io/argoproj/argocd:v2.8.4
+        command: ["bash", "-c"]
+        args:
+          - |
+            set -euo pipefail
+            : "${ARGOCD_TOKEN:?ARGOCD_TOKEN is not set}"
+            # поднять лимит открытых файлов для этого шага
+            ulimit -n 1048576 || true
+
+            APP="app-document-service"
+            SERVER="argocd.analytics.moiqr.ru"
+
+            # 1) убеждаемся, что приложение существует
+            argocd app get "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web >/dev/null
+
+            # 2) ждём, пока не будет активных операций (если автосинк/другой пайплайн уже что-то крутит)
+            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --operation --timeout 600
+
+            # 3) выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
+            set +e
+            argocd app set "$APP" --helm-set image.tag={{inputs.parameters.git_sha}} --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web
+            RC=$?
+            set -e
+            if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
+              echo "argocd app set failed with code $RC"
+              exit "$RC"
+            fi
+
+            # 4) запускаем sync (можно async + ожидание)
+            set +e
+            argocd app sync "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --timeout 600 --prune --retry-limit 1
+            RC=$?
+            set -e
+            if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
+              echo "argocd app sync failed with code $RC"
+              exit "$RC"
+            fi
+
+            # 5) ждём синхронизации и здоровья
+            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --sync --health --timeout 600
+      env:
+        - name: ARGOCD_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: argocd-token
+              key: token
+
