@@ -100,11 +100,20 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.Handle("/query", instrumentedHandler)
 	mux.Handle("/playground", playground.Handler("GraphQL playground", "/query"))
 
-	handlerWithMiddleware := middleware.CorrelationIDMiddleware(s.logger)(middleware.APIKeyMiddleware(s.cfg.Security.APIKey, s.logger)(mux))
+	handlerWithMiddleware :=
+		middleware.CorrelationIDMiddleware(s.logger)(
+			middleware.APIKeyMiddleware(s.cfg.Security.APIKey, s.logger)(mux),
+		)
+
+	allowedOrigins := []string{
+		"https://console.fedorov-team.tech",
+		"http://localhost:3000", // на всякий случай для локальной разработки
+	}
+	corsHandler := middleware.CORSMiddleware(allowedOrigins)(handlerWithMiddleware)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.cfg.Server.Port),
-		Handler:           handlerWithMiddleware,
+		Handler:           corsHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

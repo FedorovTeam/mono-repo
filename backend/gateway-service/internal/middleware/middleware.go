@@ -36,6 +36,10 @@ func APIKeyMiddleware(expectedKey string, logger *zap.Logger) func(http.Handler)
 				http.Error(w, "api key is not configured", http.StatusInternalServerError)
 				return
 			}
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
 			apiKey := r.Header.Get("X-API-Key")
 			if apiKey != expectedKey {
 				logger.Warn("unauthorized request", zap.String("path", r.URL.Path))
