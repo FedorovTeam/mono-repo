@@ -199,7 +199,6 @@ metadata:
 data:
   last-sha: ""
 ---
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -218,13 +217,13 @@ data:
     GH_API="https://api.github.com/repos/${github_repo}/commits/${github_branch}"
     STATE_CM="github-poller-state"
 
-    if [ -z "${GITHUB_TOKEN:-}" ]; then
+    if [ -z "$${GITHUB_TOKEN:-}" ]; then
       echo "GITHUB_TOKEN is not set"
       exit 1
     fi
 
     # Получаем последний коммит из GitHub (с авторизацией по токену)
-    SHA=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "$GH_API" | jq -r '.sha')
+    SHA=$(curl -s -H "Authorization: token $${GITHUB_TOKEN}" "$GH_API" | jq -r '.sha')
 
     if [ -z "$SHA" ] || [ "$SHA" = "null" ]; then
       echo "Failed to get SHA from GitHub"
