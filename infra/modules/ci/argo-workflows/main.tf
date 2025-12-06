@@ -270,3 +270,30 @@ resource "kubernetes_manifest" "rbac" {
   }
   depends_on = [helm_release.argo_workflows_crds]
 }
+
+resource "kubernetes_secret" "github_secret" {
+  metadata {
+    name      = "github-secret"
+    namespace = var.namespace
+  }
+
+  type = "kubernetes.io/basic-auth"
+
+  data = {
+    username = var.github_username
+    password = var.github_token
+  }
+}
+
+resource "kubernetes_secret" "argocd_token" {
+  metadata {
+    name      = "argocd-token"
+    namespace = var.namespace
+  }
+
+  type = "Opaque"
+
+  data = {
+    token = var.argocd_token
+  }
+}
