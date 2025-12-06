@@ -92,7 +92,7 @@ func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient
 
 func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error {
 	options := workflow.ActivityOptions{
-		StartToCloseTimeout: time.Minute * 2,
+		StartToCloseTimeout: 2 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    time.Second,
 			BackoffCoefficient: 2,
@@ -101,14 +101,22 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 	}
 	ctx = workflow.WithActivityOptions(ctx, options)
 
-	uploadArg := uploadOriginalInput{
-		DocumentID:      input.DocumentID,
-		FilenameExt:     input.FilenameExt,
-		OriginalContent: input.OriginalContent,
-		Version:         input.Version + 1,
-	}
-	if err := workflow.ExecuteActivity(ctx, ActivityUploadOriginalName, uploadArg).Get(ctx, nil); err != nil {
-		return err
+	currentVersion := input.Version
+
+	// 👇 Если байты есть — сами кладём оригинал в MinIO
+	if len(input.OriginalContent) > 0 {
+		uploadArg := uploadOriginalInput{
+			DocumentID:      input.DocumentID,
+			FilenameExt:     input.FilenameExt,
+			OriginalContent: input.OriginalContent,
+			Version:         currentVersion + 1,
+		}
+
+		if err := workflow.ExecuteActivity(ctx, ActivityUploadOriginalName, uploadArg).Get(ctx, nil); err != nil {
+			return err
+		}
+
+		currentVersion = uploadArg.Version
 	}
 
 	convArg := convertInput{
@@ -117,8 +125,9 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		MarkdownBucket:    input.MarkdownBucket,
 		OriginalObjectKey: input.OriginalObjectKey,
 		MarkdownObjectKey: input.MarkdownObjectKey,
-		Version:           uploadArg.Version + 1,
+		Version:           currentVersion + 1,
 	}
+
 	var convRes convertResult
 	if err := workflow.ExecuteActivity(ctx, ActivityConvertToMarkdownName, convArg).Get(ctx, &convRes); err != nil {
 		return err
@@ -130,9 +139,11 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		Version:         convArg.Version + 1,
 		Path:            input.PublishPath,
 	}
+
 	if err := workflow.ExecuteActivity(ctx, ActivityPublishMarkdownName, pubArg).Get(ctx, nil); err != nil {
 		return err
 	}
+
 	return nil
 }
 

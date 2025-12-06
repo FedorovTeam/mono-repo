@@ -116,8 +116,12 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	if err != nil {
 		return nil, err
 	}
-	if s.temporal != nil && len(in.OriginalContent) > 0 {
-		opts := client.StartWorkflowOptions{ID: created.ID, TaskQueue: s.taskQueue}
+	if s.temporal != nil {
+		opts := client.StartWorkflowOptions{
+			ID:        created.ID,
+			TaskQueue: s.taskQueue,
+		}
+
 		input := WorkflowInput{
 			DocumentID:        created.ID,
 			OriginalBucket:    created.OriginalBucket,
@@ -129,6 +133,7 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 			OriginalContent:   in.OriginalContent,
 			Version:           version.Version,
 		}
+
 		if _, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input); err != nil {
 			return nil, fmt.Errorf("start workflow: %w", err)
 		}
