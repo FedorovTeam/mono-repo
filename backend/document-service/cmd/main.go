@@ -31,7 +31,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config/config.yaml", "path to config file")
-	migrate := flag.Bool("migrate", false, "run migrations and exit")
+	migrateOnly := flag.Bool("migrate-only", false, "run migrations and exit")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -47,13 +47,16 @@ func main() {
 		log.Fatalf("connect db: %v", err)
 	}
 	defer db.Close()
-	db.SetConnMaxLifetime(time.Minute * 5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
-	if *migrate {
-		if err := migrations.Run(ctx, db); err != nil {
-			log.Fatalf("run migrations: %v", err)
-		}
-		log.Println("migrations applied")
+	// 🔹 ВСЕГДА прогоняем миграции при старте
+	if err := migrations.Run(ctx, db); err != nil {
+		log.Fatalf("run migrations: %v", err)
+	}
+
+	// Если сервис запущен в режиме "только миграции" — выходим
+	if *migrateOnly {
+		log.Println("migrations applied, exiting because of -migrate-only")
 		return
 	}
 
@@ -66,9 +69,17 @@ func main() {
 	}
 
 	repo := repository.New(db)
-	keyManager := storage.NewMinioKeyManager(minioClient, cfg.Minio.BucketPrefix, cfg.Minio.OriginalBucket, cfg.Minio.MarkdownBucket)
+	keyManager := storage.NewMinioKeyManager(
+		minioClient,
+		cfg.Minio.BucketPrefix,
+		cfg.Minio.OriginalBucket,
+		cfg.Minio.MarkdownBucket,
+	)
 
-	temporalClient, err := client.Dial(client.Options{HostPort: cfg.Temporal.Address, Namespace: cfg.Temporal.Namespace})
+	temporalClient, err := client.Dial(client.Options{
+		HostPort:  cfg.Temporal.Address,
+		Namespace: cfg.Temporal.Namespace,
+	})
 	if err != nil {
 		log.Fatalf("temporal client: %v", err)
 	}
@@ -97,11 +108,28 @@ func main() {
 	publisherClient := githubpublisherv1.NewGithubPublisherServiceClient(publisherConn)
 
 	workerInstance := worker.New(temporalClient, cfg.Temporal.TaskQueue, worker.Options{})
-	activities := docservice.NewActivities(repo, storageClient, transformerClient, publisherClient, cfg.Github.Repository, cfg.Github.Branch)
+	activities := docservice.NewActivities(
+		repo,
+		storageClient,
+		transformerClient,
+		publisherClient,
+		cfg.Github.Repository,
+		cfg.Github.Branch,
+	)
+
 	workerInstance.RegisterWorkflow(docservice.DocumentProcessingWorkflow)
-	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: docservice.ActivityUploadOriginalName})
-	workerInstance.RegisterActivityWithOptions(activities.ConvertToMarkdown, activity.RegisterOptions{Name: docservice.ActivityConvertToMarkdownName})
-	workerInstance.RegisterActivityWithOptions(activities.PublishMarkdown, activity.RegisterOptions{Name: docservice.ActivityPublishMarkdownName})
+	workerInstance.RegisterActivityWithOptions(
+		activities.UploadOriginal,
+		activity.RegisterOptions{Name: docservice.ActivityUploadOriginalName},
+	)
+	workerInstance.RegisterActivityWithOptions(
+		activities.ConvertToMarkdown,
+		activity.RegisterOptions{Name: docservice.ActivityConvertToMarkdownName},
+	)
+	workerInstance.RegisterActivityWithOptions(
+		activities.PublishMarkdown,
+		activity.RegisterOptions{Name: docservice.ActivityPublishMarkdownName},
+	)
 
 	go func() {
 		if err := workerInstance.Run(worker.InterruptCh()); err != nil {
@@ -109,7 +137,13 @@ func main() {
 		}
 	}()
 
-	service := docservice.New(repo, keyManager, temporalClient, cfg.Temporal.TaskQueue, activities)
+	service := docservice.New(
+		repo,
+		keyManager,
+		temporalClient,
+		cfg.Temporal.TaskQueue,
+		activities,
+	)
 
 	server := transport.NewServer(service)
 	if err := server.ListenAndServe(ctx, cfg.Server.Addr); err != nil {
