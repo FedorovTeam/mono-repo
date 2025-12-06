@@ -3,8 +3,8 @@ service:
 
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"
-  access_key: "minio-access-key"
-  secret_key: "minio-secret-key"
+  access_key: "xUCM3lvYME7MrYTwegSA"
+  secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
   use_ssl: true
   buckets:
     knowledge_docx: "knowledge-docx"
