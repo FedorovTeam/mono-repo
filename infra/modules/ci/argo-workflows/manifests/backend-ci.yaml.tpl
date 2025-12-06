@@ -80,7 +80,7 @@ spec:
           - |
             set -eo pipefail
             ulimit -n 1048576
-            REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/${github_repo}.git"
+            REPO="https://$${GIT_USERNAME}:$${GIT_TOKEN}@github.com/${github_repo}.git"
             git clone --depth 1 "$REPO" /repo
             cd /repo
             git fetch --depth 1 origin {{inputs.parameters.git_sha}}
