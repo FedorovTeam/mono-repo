@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: document-service-build
+  name: document-service
   namespace: argo
   labels:
     workflows.argoproj.io/creator: akadmin
@@ -21,7 +21,6 @@ spec:
       - name: git_sha        # SHA передаётся при submit
 
   templates:
-    # ─────────────────────────────── build (steps) ────────────────────────────────
     - name: build
       inputs:
         parameters:
@@ -33,8 +32,6 @@ spec:
               parameters:
                 - name: git_sha
                   value: "{{inputs.parameters.git_sha}}"
-
-
         - - name: build-image
             template: kaniko-build
             arguments:
@@ -44,7 +41,6 @@ spec:
               artifacts:
                 - name: source
                   from: "{{steps.clone.outputs.artifacts.source}}"
-
         - - name: deploy
             template: argocd-deploy
             arguments:
@@ -52,7 +48,6 @@ spec:
                 - name: git_sha
                   value: "{{inputs.parameters.git_sha}}"
 
-    # ──────────────────────────────── git-clone ──────────────────────────────────
     - name: git-clone
       inputs:
         parameters:
@@ -68,11 +63,13 @@ spec:
           - |
             set -e
             ulimit -n 1048576
-            REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/moiqr/backend-mono-repo.git"
+            REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
+
+            echo "Cloning $REPO @ {{inputs.parameters.git_sha}}"
             git clone --depth 1 --sparse "$REPO" /workspace
             cd /workspace
             git sparse-checkout init --cone
-            git sparse-checkout set document-service
+            git sparse-checkout set backend/gateway-service
             git fetch --depth 1 origin {{inputs.parameters.git_sha}}
             git checkout {{inputs.parameters.git_sha}}
         env:
@@ -98,12 +95,12 @@ spec:
         image: gcr.io/kaniko-project/executor:v1.22.0
         command: [ "/kaniko/executor" ]
         args:
-          - --dockerfile=/workspace/document-service/Dockerfile
-          - --context=/workspace/document-service
-          - --destination=harbor.tech.moiqr.ru/backend/document-service:{{inputs.parameters.git_sha}}
-          - --destination=harbor.tech.moiqr.ru/backend/document-service:latest
+          - --dockerfile=/workspace/backend/gateway-service/Dockerfile
+          - --context=/workspace/backend/gateway-service
+          - --destination=harbor.tech.fedorov-team.tech/backend/gateway-service:{{inputs.parameters.git_sha}}
+          - --destination=harbor.tech.fedorov-team.tech/backend/gateway-service:latest
           - --cache=true
-          - --cache-repo=harbor.tech.moiqr.ru/backend/kaniko-cache
+          - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
           - --verbosity=debug
         env:
           - name: DOCKER_CONFIG
@@ -118,7 +115,6 @@ spec:
           runAsUser: 0
           privileged: true
 
-    # ────────────────────────────── argocd-deploy ────────────────────────────────
     - name: argocd-deploy
       inputs:
         parameters:
@@ -130,16 +126,15 @@ spec:
           - |
             set -euo pipefail
             : "${ARGOCD_TOKEN:?ARGOCD_TOKEN is not set}"
-            # поднять лимит открытых файлов для этого шага
             ulimit -n 1048576 || true
 
-            APP="app-document-service"
-            SERVER="argocd.analytics.moiqr.ru"
+            APP="app-gateway-service"
+            SERVER="argocd-server.argocd.svc.cluster.local:443"
 
             # 1) убеждаемся, что приложение существует
             argocd app get "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web >/dev/null
 
-            # 2) ждём, пока не будет активных операций (если автосинк/другой пайплайн уже что-то крутит)
+            # 2) ждём, пока не будет активных операций
             argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --operation --timeout 600
 
             # 3) выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
@@ -152,7 +147,7 @@ spec:
               exit "$RC"
             fi
 
-            # 4) запускаем sync (можно async + ожидание)
+            # 4) запускаем sync
             set +e
             argocd app sync "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --timeout 600 --prune --retry-limit 1
             RC=$?
@@ -170,4 +165,3 @@ spec:
             secretKeyRef:
               name: argocd-token
               key: token
-
