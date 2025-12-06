@@ -1,0 +1,22 @@
+# modules/ci/argo-workflows/rbac/argo-pod-patch-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argo-pod-patch
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get","list","watch","patch","update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argo-pod-patch-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-pod-patch
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflows-workflow-controller
+    namespace: argo

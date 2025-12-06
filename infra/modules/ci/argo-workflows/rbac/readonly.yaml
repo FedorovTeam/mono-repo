@@ -1,0 +1,44 @@
+# modules/ci/argo-workflows/rbac/readonly.yaml
+# Service Account для readonly (fallback когда у пользователя нет admin в группах)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workflows-readonly
+  namespace: argo
+  annotations:
+    workflows.argoproj.io/rbac-rule: "true"
+    workflows.argoproj.io/rbac-rule-precedence: "100"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: workflows-readonly.service-account-token
+  namespace: argo
+  annotations:
+    kubernetes.io/service-account.name: workflows-readonly
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: workflows-readonly
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows","workflowtemplates","cronworkflows","clusterworkflowtemplates"]
+    verbs: ["get","list","watch"]
+  - apiGroups: [""]
+    resources: ["pods","pods/log"]
+    verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: workflows-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: workflows-readonly
+subjects:
+  - kind: ServiceAccount
+    name: workflows-readonly
+    namespace: argo

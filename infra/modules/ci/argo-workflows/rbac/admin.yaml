@@ -1,0 +1,72 @@
+# modules/ci/argo-workflows/rbac/admin.yaml
+# admin ServiceAccount и доступ к workflows (оставим как есть)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workflows-admin
+  namespace: argo
+  annotations:
+    workflows.argoproj.io/rbac-rule: '"argo-workflows-admin" in groups'
+    workflows.argoproj.io/rbac-rule-precedence: "0"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: workflows-admin.service-account-token
+  namespace: argo
+  annotations:
+    kubernetes.io/service-account.name: workflows-admin
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: workflows-admin
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "cronworkflows", "clusterworkflowtemplates"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["*"]
+  - apiGroups: [ "argoproj.io" ]
+    resources: [ "workflowtaskresults" ]
+    verbs: [ "get", "list", "watch", "create", "update", "patch" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: workflows-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: workflows-admin
+subjects:
+  - kind: ServiceAccount
+    name: workflows-admin
+    namespace: argo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argo-events-read
+  namespace: argo
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["eventsources", "sensors"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argo-events-read
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argo-events-read
+subjects:
+  - kind: ServiceAccount
+    name: workflows-admin
+    namespace: argo
+# Removed static service account token Secret; Kubernetes will auto-generate a token for the ServiceAccount.
