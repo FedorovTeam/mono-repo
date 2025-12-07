@@ -69,26 +69,21 @@ spec:
               value: "https://data.fedorov-team.tech"
 
             # --- MinIO как S3 backend для вложений ---
-            # Название bucket’а под NocoDB
-#            - name: NC_S3_BUCKET_NAME
-#              value: "nocodb"
-            # ENDPOINT MinIO (замени на свой, пример — внутренний сервис или внешний URL)
-            # пример для внутреннего сервиса:
-            # value: "http://minio-hl.minio.svc.cluster.local:9000"
-#            - name: NC_S3_ENDPOINT
-#              value: "https://api.minio.tech.fedorov-team.tech"
-#            - name: NC_S3_ACCESS_KEY
-#              value: "FMDDkOTeqkbPel6I9FF8"
-#            - name: NC_S3_ACCESS_SECRET
-#              value: "fu8bGc29QvbstcQ3KHMDxoCtATAy9WV0Z7OGxhJ6"
-            # Для MinIO почти всегда нужно path-style
-#            - name: NC_S3_FORCE_PATH_STYLE
-#              value: "true"
+            - name: NC_S3_BUCKET_NAME
+              value: "nocodb"
+            - name: NC_S3_ENDPOINT
+              value: "https://api.minio.tech.fedorov-team.tech"
+            - name: NC_S3_ACCESS_KEY
+              value: "FMDDkOTeqkbPel6I9FF8"
+            - name: NC_S3_ACCESS_SECRET
+              value: "fu8bGc29QvbstcQ3KHMDxoCtATAy9WV0Z7OGxhJ6"
+            - name: NC_S3_FORCE_PATH_STYLE
+              value: "true"
             # Дополнительно можно включить secure attachments и время жизни URL-ов
-#            - name: NC_SECURE_ATTACHMENTS
-#              value: "true"
-#            - name: NC_ATTACHMENT_EXPIRE_SECONDS
-#              value: "7200"
+            - name: NC_SECURE_ATTACHMENTS
+              value: "true"
+            - name: NC_ATTACHMENT_EXPIRE_SECONDS
+              value: "7200"
 
             # (опционально) Ограничения и прочая конфигурация по вкусу
             - name: NC_DISABLE_TELE
