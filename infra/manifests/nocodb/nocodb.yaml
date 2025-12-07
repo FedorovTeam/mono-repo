@@ -1,0 +1,139 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nocodb-data
+  namespace: nocodb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nocodb
+  namespace: nocodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nocodb
+  template:
+    metadata:
+      labels:
+        app: nocodb
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: nocodb
+      containers:
+        - name: nocodb
+          image: nocodb/nocodb:0.265.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+          env:
+            # --- БД NocoDB (Postgres) ---
+            # формат NC_DB см. доку: pg://host:5432?u=user&p=pass&d=db_name :contentReference[oaicite:0]{index=0}
+            - name: NC_DB
+              value: "pg://postgres-postgresql.postgres.svc.cluster.local:5432?u=postgres&p=3&!tAL5bf38yfx&d=nocodb"
+            # JWT secret для токенов NocoDB (обязательно переопредели!)
+            - name: NC_AUTH_JWT_SECRET
+              value: "f56b45f299945f7abb6682d25561279bd796b9c359431d21d40c509752c3515a"
+            # Redis для кеша NocoDB (у тебя уже есть redis-master.redis.svc.cluster.local)
+            - name: NC_REDIS_URL
+              value: "redis://redis-master.redis.svc.cluster.local:6379/0"
+
+            # Публичный URL — для ссылок в письмах и корректного OIDC/redirect’ов
+            - name: NC_PUBLIC_URL
+              value: "https://data.fedorov-team.tech"
+
+            # --- MinIO как S3 backend для вложений ---
+            # Название bucket’а под NocoDB
+            - name: NC_S3_BUCKET_NAME
+              value: "nocodb"
+            # ENDPOINT MinIO (замени на свой, пример — внутренний сервис или внешний URL)
+            # пример для внутреннего сервиса:
+            # value: "http://minio-hl.minio.svc.cluster.local:9000"
+            - name: NC_S3_ENDPOINT
+              value: "https://api.minio.tech.fedorov-team.tech"
+            - name: NC_S3_ACCESS_KEY
+              value: "FMDDkOTeqkbPel6I9FF8"
+            - name: NC_S3_ACCESS_SECRET
+              value: "fu8bGc29QvbstcQ3KHMDxoCtATAy9WV0Z7OGxhJ6"
+            # Для MinIO почти всегда нужно path-style
+            - name: NC_S3_FORCE_PATH_STYLE
+              value: "true"
+            # Дополнительно можно включить secure attachments и время жизни URL-ов
+            - name: NC_SECURE_ATTACHMENTS
+              value: "true"
+            - name: NC_ATTACHMENT_EXPIRE_SECONDS
+              value: "7200"
+
+            # (опционально) Ограничения и прочая конфигурация по вкусу
+            - name: NC_DISABLE_TELE
+              value: "true"
+            - name: NC_ADMIN_EMAIL
+              value: "Broadcast7826"
+            - name: NC_ADMIN_PASSWORD
+              value: "%Md7ST68ZrkR6!ar"
+
+          volumeMounts:
+            - name: data
+              mountPath: /usr/app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nocodb-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nocodb
+  namespace: nocodb
+spec:
+  selector:
+    app: nocodb
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nocodb
+  namespace: nocodb
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - data.fedorov-team.tech
+      secretName: nocodb-tls
+  rules:
+    - host: data.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nocodb
+                port:
+                  number: 8080
