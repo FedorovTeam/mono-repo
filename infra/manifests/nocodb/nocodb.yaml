@@ -67,6 +67,10 @@ spec:
               value: "dev@fedorov-team.tech"
             - name: NC_SMTP_PASSWORD
               value: "password"
+            - name: DEBUG
+              value: "nc:*,knex:*"
+            - name: NC_ENABLE_ALL_API_ERROR_LOGGING
+              value: "true"
 
             # Публичный URL — для ссылок в письмах и корректного OIDC/redirect’ов
             - name: NC_PUBLIC_URL
