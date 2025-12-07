@@ -1,0 +1,77 @@
+# manifests/budibase/values.yaml
+
+ingress:
+  enabled: true
+  className: "traefik"
+  hosts:
+    - host: "budibase.tech.fedorov-team.tech"
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: proxy-service
+              port:
+                number: 10000
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  tls:
+    - hosts:
+        - budibase.tech.fedorov-team.tech
+      secretName: budibase-tls
+
+# создание секретов Budibase (JWT и т.п.)
+createSecrets: true
+
+couchdb:
+  # можно оставить встроенный CouchDB
+  enabled: true
+  persistentVolume:
+    enabled: true
+    storageClass: ""     # если нужно — подставь свой storageClass
+    size: 10Gi
+
+services:
+  # --- Budibase Proxy / App / Worker — дефолтные реплики
+  proxy:
+    replicaCount: 1
+  apps:
+    replicaCount: 1
+  worker:
+    replicaCount: 1
+
+  # --- ВНЕШНИЙ Redis (ТВОЙ) ---
+  redis:
+    enabled: false              # не разворачиваем встроенный Redis
+    url: "redis-master.redis.svc.cluster.local"
+    port: 6379
+#    password: "YOUR_REDIS_PASSWORD"    # подставь реальный из секрета
+
+  # --- ВНЕШНИЙ MinIO (ТВОЙ) ---
+  objectStore:
+    # не поднимать встроенный minio-service
+    minio: false
+
+    # URL до твоего MinIO (через Traefik)
+    url: "https://api.minio.tech.fedorov-team.tech"
+
+    # доступ (лучше создать отдельного пользователя / key-pair под Budibase)
+    accessKey: "0t4IWkzYzMKfFsfNOdWs"
+    secretKey: "dJ1CiwAjlLdpui0erccAeC1DaPv0USrUP2Uvd3rv"
+
+    # регион — любой, который у тебя принят (можно тот же, что и в Grist)
+    region: "ru-central"
+    bucket: "budibase"
+
+    # если хочешь, чтобы Budibase-чарт не создавал PVC под свой MinIO
+    storageClass: ""
+    storage: 0Gi
+
+# Дополнительные env для Budibase (опционально)
+env:
+  - name: JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: budibase-budibase
+        key: jwtSecret
