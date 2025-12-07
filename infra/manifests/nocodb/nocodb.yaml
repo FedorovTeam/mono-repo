@@ -49,8 +49,8 @@ spec:
           env:
             # --- БД NocoDB (Postgres) ---
             # формат NC_DB см. доку: pg://host:5432?u=user&p=pass&d=db_name :contentReference[oaicite:0]{index=0}
-#            - name: NC_DB
-#              value: "pg://postgres-postgresql.postgres.svc.cluster.local:5432?u=nocodb_user&p=6e62f86fabefb9c141e98595e19becbf&d=nocodb"
+            - name: NC_DB
+              value: "pg://postgres-postgresql.postgres.svc.cluster.local:5432?u=nocodb_user&p=6e62f86fabefb9c141e98595e19becbf&d=nocodb"
             # JWT secret для токенов NocoDB (обязательно переопредели!)
             - name: NC_AUTH_JWT_SECRET
               value: "f56b45f299945f7abb6682d25561279bd796b9c359431d21d40c509752c3515a"
@@ -64,20 +64,20 @@ spec:
 
             # --- MinIO как S3 backend для вложений ---
             # Название bucket’а под NocoDB
-            - name: NC_S3_BUCKET_NAME
-              value: "nocodb"
+#            - name: NC_S3_BUCKET_NAME
+#              value: "nocodb"
             # ENDPOINT MinIO (замени на свой, пример — внутренний сервис или внешний URL)
             # пример для внутреннего сервиса:
             # value: "http://minio-hl.minio.svc.cluster.local:9000"
-            - name: NC_S3_ENDPOINT
-              value: "https://api.minio.tech.fedorov-team.tech"
-            - name: NC_S3_ACCESS_KEY
-              value: "FMDDkOTeqkbPel6I9FF8"
-            - name: NC_S3_ACCESS_SECRET
-              value: "fu8bGc29QvbstcQ3KHMDxoCtATAy9WV0Z7OGxhJ6"
+#            - name: NC_S3_ENDPOINT
+#              value: "https://api.minio.tech.fedorov-team.tech"
+#            - name: NC_S3_ACCESS_KEY
+#              value: "FMDDkOTeqkbPel6I9FF8"
+#            - name: NC_S3_ACCESS_SECRET
+#              value: "fu8bGc29QvbstcQ3KHMDxoCtATAy9WV0Z7OGxhJ6"
             # Для MinIO почти всегда нужно path-style
-            - name: NC_S3_FORCE_PATH_STYLE
-              value: "true"
+#            - name: NC_S3_FORCE_PATH_STYLE
+#              value: "true"
             # Дополнительно можно включить secure attachments и время жизни URL-ов
             - name: NC_SECURE_ATTACHMENTS
               value: "true"
