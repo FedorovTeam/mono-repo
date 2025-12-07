@@ -72,8 +72,6 @@ spec:
             # Название bucket’а под NocoDB
             - name: NC_S3_BUCKET_NAME
               value: "nocodb"
-            - name: NC_S3_REGION
-              value: "ru-central"
             # ENDPOINT MinIO (замени на свой, пример — внутренний сервис или внешний URL)
             # пример для внутреннего сервиса:
             # value: "http://minio-hl.minio.svc.cluster.local:9000"
