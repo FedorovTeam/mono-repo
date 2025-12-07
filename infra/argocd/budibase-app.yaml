@@ -6,77 +6,56 @@ metadata:
 spec:
   project: default
   source:
-    # ВАЖНО: здесь уже НЕ твой mono-repo, а helm-репо Budibase
-    repoURL: https://budibase.github.io/budibase/
+    repoURL: https://budibase.github.io/budibase      # helm-репо Budibase
     chart: budibase
-    targetRevision: 2.3.25 # или любой актуальный tag из helm repo
+    targetRevision: 3.0.493                          # или другая существующая версия
     helm:
-      # Здесь же вшиваем values, чтобы не городить multi-source
-      values: |-
+      values: |
         ingress:
           enabled: true
           className: "traefik"
-          hosts:
-            - host: "budibase.tech.fedorov-team.tech"
-              paths:
-                - path: /
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: proxy-service
-                      port:
-                        number: 10000
           annotations:
             cert-manager.io/cluster-issuer: "letsencrypt"
             traefik.ingress.kubernetes.io/router.entrypoints: websecure
+          hosts:
+            - host: budibase.tech.fedorov-team.tech
+              paths:
+                - path: /
+                  pathType: Prefix
           tls:
             - hosts:
                 - budibase.tech.fedorov-team.tech
               secretName: budibase-tls
 
-        createSecrets: true
-
         couchdb:
           enabled: true
           persistentVolume:
             enabled: true
-            storageClass: ""
             size: 10Gi
 
-        services:
-          proxy:
-            replicaCount: 1
-          apps:
-            replicaCount: 1
-          worker:
-            replicaCount: 1
-
-          # ВНЕШНИЙ Redis (ТВОЙ)
+        # внешний Redis (твой)
+        redis:
+          enabled: false        # встроенный Redis отключаем
+        globals:
           redis:
-            enabled: false
-            url: "redis-master.redis.svc.cluster.local"
+            host: redis-master.redis.svc.cluster.local
             port: 6379
-            # если у редиса есть пароль — добавь:
-            # password: "YOUR_REDIS_PASSWORD"
-            storageClass: ""
+            # password: ""      # если нужен пароль — вынеси в секрет и подключи envFrom
 
-          # ВНЕШНЕЕ S3-хранилище (твой MinIO через https)
+        # внешний MinIO (твой)
+        objectStore:
+          minio: false          # встроенный MinIO не поднимаем
+        globals:
           objectStore:
-            # не поднимать встроенный MinIO
-            minio: false
-            accessKey: "0t4IWkzYzMKfFsfNOdWs"
-            secretKey: "dJ1CiwAjlLdpui0erccAeC1DaPv0USrUP2Uvd3rv"
-            # bucket, который ты заведёшь в своём MinIO
-            bucket: "budibase"
-            region: "ru-central"
+            url: https://api.minio.tech.fedorov-team.tech
+            accessKey: 0t4IWkzYzMKfFsfNOdWs
+            secretKey: dJ1CiwAjlLdpui0erccAeC1DaPv0USrUP2Uvd3rv
+            region: ru-central
+            bucket: budibase
 
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: budibase
-
-  syncPolicy:
-    automated:
-      selfHeal: true
-      prune: true
-    syncOptions:
-      - CreateNamespace=true
+        # пример: фиксированный JWT_SECRET, чтобы не терять логины при апгрейдах
+        globals:
+          createSecrets: false
+          jwtSecret: "super-long-random-jwt-secret"
+          internalApiKey: "super-long-random-internal-api-key"
+          apiEncryptionKey: "super-long-random-encryption-key"
