@@ -85,8 +85,10 @@ spec:
             - name: NC_ATTACHMENT_EXPIRE_SECONDS
               value: "7200"
 
-            # (опционально) Ограничения и прочая конфигурация по вкусу
+            # Ограничения и прочая конфигурация
             - name: NC_DISABLE_TELE
+              value: "true"
+            - name: NC_DISABLE_SUPPORT_CHAT
               value: "true"
             - name: NC_ADMIN_EMAIL
               value: "Broadcast7826@gmail.com"
