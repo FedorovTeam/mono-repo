@@ -56,14 +56,14 @@ spec:
               value: "f56b45f299945f7abb6682d25561279bd796b9c359431d21d40c509752c3515a"
             # Redis для кеша NocoDB (у тебя уже есть redis-master.redis.svc.cluster.local)
             - name: NC_REDIS_URL
-              value: "redis://:@redis-master.redis.svc.cluster.local:6379/4"
+              value: "redis://@redis-master.redis.svc.cluster.local:6379/4"
 
 #            - name: DEBUG
 #              value: "nc:*,knex:*"
 #            - name: NC_ENABLE_ALL_API_ERROR_LOGGING
 #              value: "true"
-#            - name: NC_DISABLE_CACHE
-#              value: "true"
+            - name: NC_DISABLE_CACHE
+              value: "true"
             # Публичный URL — для ссылок в письмах и корректного OIDC/redirect’ов
             - name: NC_PUBLIC_URL
               value: "https://data.fedorov-team.tech"
