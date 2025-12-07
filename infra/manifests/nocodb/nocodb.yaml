@@ -58,10 +58,10 @@ spec:
             - name: NC_REDIS_URL
               value: "redis://redis-master.redis.svc.cluster.local:6379/4"
 
-            - name: DEBUG
-              value: "nc:*,knex:*"
-            - name: NC_ENABLE_ALL_API_ERROR_LOGGING
-              value: "true"
+#            - name: DEBUG
+#              value: "nc:*,knex:*"
+#            - name: NC_ENABLE_ALL_API_ERROR_LOGGING
+#              value: "true"
             - name: NC_DISABLE_CACHE
               value: "true"
             # Публичный URL — для ссылок в письмах и корректного OIDC/redirect’ов
