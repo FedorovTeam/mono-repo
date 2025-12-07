@@ -50,7 +50,7 @@ spec:
             # --- БД NocoDB (Postgres) ---
             # формат NC_DB см. доку: pg://host:5432?u=user&p=pass&d=db_name :contentReference[oaicite:0]{index=0}
             - name: NC_DB
-              value: "pg://postgres-postgresql.postgres.svc.cluster.local:5432?u=postgres&p=3%26%21tAL5bf38yfx&d=nocodb"
+              value: "pg://postgres-postgresql.postgres.svc.cluster.local:5432?u=postgres&p=3%26!tAL5bf38yfx&d=nocodb"
             # JWT secret для токенов NocoDB (обязательно переопредели!)
             - name: NC_AUTH_JWT_SECRET
               value: "f56b45f299945f7abb6682d25561279bd796b9c359431d21d40c509752c3515a"
