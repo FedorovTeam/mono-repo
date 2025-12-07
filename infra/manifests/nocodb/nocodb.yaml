@@ -90,7 +90,7 @@ spec:
             - name: NC_DISABLE_TELE
               value: "true"
             - name: NC_ADMIN_EMAIL
-              value: "Broadcast7826"
+              value: "Broadcast7826@gmail.com"
             - name: NC_ADMIN_PASSWORD
               value: "%Md7ST68ZrkR6!ar"
 
