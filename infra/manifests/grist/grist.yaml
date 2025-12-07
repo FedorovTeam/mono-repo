@@ -1,0 +1,174 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grist-persist
+  namespace: grist
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grist
+  namespace: grist
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grist
+  template:
+    metadata:
+      labels:
+        app: grist
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: grist
+      containers:
+        - name: grist
+          image: gristlabs/grist-oss:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8484
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          env:
+            # ОБЯЗАТЕЛЬНО: секрет для сессий
+            - name: GRIST_SESSION_SECRET
+              value: "61c894afe2b6437d0060fb5a6a194c30c559c9b13558922cd3dda5816bc9ccbe"
+
+            # URL, по которому Grist будет доступен извне
+            - name: APP_HOME_URL
+              value: "https://data.tech.fedorov-team.tech"
+
+            # Один общий workspace/организация для всех
+            - name: GRIST_SINGLE_ORG
+              value: "team"
+
+            # Админский e-mail для первой учётки
+            - name: GRIST_DEFAULT_EMAIL
+              value: "admin@fedorov-team.tech"
+
+            # Требовать логин для доступа
+            - name: GRIST_FORCE_LOGIN
+              value: "true"
+
+            # (опционально) отключить авто-чек обновлений
+            - name: GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING
+              value: "false"
+
+            # (опционально) более строгий режим SQLite
+            - name: GRIST_SQLITE_MODE
+              value: "sync"
+
+            # Debug можно выключить позже
+            - name: DEBUG
+              value: "1"
+
+            # Postgres
+            - name: TYPEORM_TYPE
+              value: "postgres"
+            - name: TYPEORM_DATABASE
+              value: "grist_home"
+            - name: TYPEORM_USERNAME
+              value: "postgres"
+            - name: TYPEORM_PASSWORD
+              value: "3&!tAL5bf38yfx"
+            - name: TYPEORM_HOST
+              value: "postgres-postgresql.postgres.svc.cluster.local"
+            - name: TYPEORM_PORT
+              value: "5432"
+
+            # Redis
+            - name: REDIS_URL
+              value: "redis://redis-master.redis.svc.cluster.local:6379/0"
+
+            # MinIO S3
+            - name: GRIST_DOCS_MINIO_ACCESS_KEY
+              value: "CYo5eRkMLWHog5x6bjjA"
+            - name: GRIST_DOCS_MINIO_SECRET_KEY
+              value: "BWxVlEAOVJXuI1LjMZ8nNuety7nTfc2Ll6VBwtIS"
+            - name: GRIST_DOCS_MINIO_USE_SSL
+              value: "1"
+            - name: GRIST_DOCS_MINIO_BUCKET
+              value: "grist-docs"
+            - name: GRIST_DOCS_MINIO_ENDPOINT
+              value: "api.minio.tech.fedorov-team.tech"
+            - name: GRIST_DOCS_MINIO_PORT
+              value: "443"
+            - name: GRIST_DOCS_MINIO_BUCKET_REGION
+              value: "ru-central"
+
+            # Authentik
+            - name: GRIST_OIDC_SP_HOST
+              value: "https://data.tech.fedorov-team.tech"
+            - name: GRIST_OIDC_IDP_ISSUER
+              value: "https://auth.tech.fedorov-team.tech/application/o/grist/.well-known/openid-configuration"
+            - name: GRIST_OIDC_IDP_CLIENT_ID
+              value: "JJxKvnx7qxDS7JZ8co5gUUys1tIzfZGH2QjXb5Z8"
+            - name: GRIST_OIDC_IDP_CLIENT_SECRET
+              value: "PdIF3etri04KDNIMHUgiATR0kepF0desJuwaEaaL6HFo9fWgZ40ojVG90hGjCZkb9h2LaJrJ85xFD1ShwvuIOGSW6CgoBfKzvlMUNw12P4SMMBy0RTDvHgzXZabsuaNa"
+            - name: GRIST_ORG_IN_PATH
+              value: "true"
+            - name: GRIST_OIDC_IDP_SCOPES
+              value: "openid profile email"
+
+          volumeMounts:
+            - name: persist
+              mountPath: /persist
+      volumes:
+        - name: persist
+          persistentVolumeClaim:
+            claimName: grist-persist
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grist
+  namespace: grist
+spec:
+  selector:
+    app: grist
+  ports:
+    - name: http
+      port: 8484
+      targetPort: 8484
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grist
+  namespace: grist
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - grist.tech.fedorov-team.tech
+      secretName: grist-tls
+  rules:
+    - host: grist.tech.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grist
+                port:
+                  number: 8484
