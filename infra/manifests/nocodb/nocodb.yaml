@@ -57,6 +57,16 @@ spec:
             # Redis для кеша NocoDB (у тебя уже есть redis-master.redis.svc.cluster.local)
             - name: NC_REDIS_URL
               value: "redis://redis-master.redis.svc.cluster.local:6379/4"
+            - name: NC_SMTP_FROM
+              value: "dev@fedorov-team.tech"
+            - name: NC_SMTP_HOST
+              value: "smtp.mail.ru"
+            - name: NC_SMTP_PORT
+              value: "486"
+            - name: NC_SMTP_USERNAME
+              value: "dev@fedorov-team.tech"
+            - name: NC_SMTP_PASSWORD
+              value: "password"
 
             # Публичный URL — для ссылок в письмах и корректного OIDC/redirect’ов
             - name: NC_PUBLIC_URL
