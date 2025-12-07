@@ -61,7 +61,7 @@ spec:
 
             # Админский e-mail для первой учётки
             - name: GRIST_DEFAULT_EMAIL
-              value: "admin@fedorov-team.tech"
+              value: "939306@gmail.com"
 
             # Требовать логин для доступа
             - name: GRIST_FORCE_LOGIN
