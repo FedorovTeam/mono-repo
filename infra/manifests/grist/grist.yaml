@@ -53,7 +53,7 @@ spec:
 
             # URL, по которому Grist будет доступен извне
             - name: APP_HOME_URL
-              value: "https://data.tech.fedorov-team.tech"
+              value: "https://data.fedorov-team.tech"
 
             # Один общий workspace/организация для всех
             - name: GRIST_SINGLE_ORG
@@ -115,7 +115,7 @@ spec:
 
             # Authentik
             - name: GRIST_OIDC_SP_HOST
-              value: "https://data.tech.fedorov-team.tech"
+              value: "https://data.fedorov-team.tech"
             - name: GRIST_OIDC_IDP_ISSUER
               value: "https://auth.tech.fedorov-team.tech/application/o/grist/.well-known/openid-configuration"
             - name: GRIST_OIDC_IDP_CLIENT_ID
@@ -159,10 +159,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - grist.tech.fedorov-team.tech
+        - data.fedorov-team.tech
       secretName: grist-tls
   rules:
-    - host: grist.tech.fedorov-team.tech
+    - host: data.fedorov-team.tech
       http:
         paths:
           - path: /
