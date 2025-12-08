@@ -51,6 +51,7 @@ type Document struct {
 	ID                string
 	Name              string
 	Status            Status
+	WorkflowID        string
 	OriginalBucket    string
 	OriginalObjectKey string
 	MarkdownBucket    string

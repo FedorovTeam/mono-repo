@@ -1,5 +1,9 @@
 service:
   grpc_port: ":9090"
+  document_service: "document-service.document-service.svc.cluster.local:9090"
+
+events:
+  upload_bucket: "knowledge-docx"
 
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"

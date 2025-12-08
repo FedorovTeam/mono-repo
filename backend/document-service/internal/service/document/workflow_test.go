@@ -34,6 +34,10 @@ func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to model.Status,
 	return &model.Document{ID: id, Status: to}, nil
 }
 
+func (f *fakeRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
+	return &model.Document{ID: id, WorkflowID: workflowID}, nil
+}
+
 type fakeTransformerClient struct {
 	lastRequest *transformerv1.ConvertDocxToMarkdownRequest
 	resp        *transformerv1.ConvertDocxToMarkdownResponse

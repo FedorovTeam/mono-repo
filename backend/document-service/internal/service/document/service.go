@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -18,6 +19,7 @@ type Repository interface {
 	GetDocument(ctx context.Context, id string) (*model.Document, error)
 	ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
 	UpdateStatus(ctx context.Context, id string, to model.Status, reason string, version *model.DocumentVersion) (*model.Document, error)
+	UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error)
 }
 
 type Service struct {
@@ -53,6 +55,12 @@ type CreateInput struct {
 	OriginalContent   []byte
 	FilenameExt       string
 	PublishPath       string
+}
+
+type ConfirmUploadInput struct {
+	DocumentID string
+	Bucket     string
+	ObjectKey  string
 }
 
 type UpdateStatusInput struct {
@@ -116,29 +124,60 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	if err != nil {
 		return nil, err
 	}
-	if s.temporal != nil {
-		opts := client.StartWorkflowOptions{
-			ID:        created.ID,
-			TaskQueue: s.taskQueue,
-		}
-
-		input := WorkflowInput{
-			DocumentID:        created.ID,
-			OriginalBucket:    created.OriginalBucket,
-			MarkdownBucket:    created.MarkdownBucket,
-			OriginalObjectKey: created.OriginalObjectKey,
-			MarkdownObjectKey: created.MarkdownObjectKey,
-			FilenameExt:       in.FilenameExt,
-			PublishPath:       in.PublishPath,
-			OriginalContent:   in.OriginalContent,
-			Version:           version.Version,
-		}
-
-		if _, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input); err != nil {
-			return nil, fmt.Errorf("start workflow: %w", err)
-		}
-	}
 	return created, nil
+}
+
+func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*model.Document, error) {
+	if _, err := uuid.Parse(in.DocumentID); err != nil {
+		return nil, errors.New("invalid id")
+	}
+	if strings.TrimSpace(in.ObjectKey) == "" {
+		return nil, errors.New("object_key is required")
+	}
+	if strings.TrimSpace(in.Bucket) == "" {
+		return nil, errors.New("bucket is required")
+	}
+
+	doc, err := s.repo.UpdateStatus(ctx, in.DocumentID, model.StatusStoredOriginal, "", &model.DocumentVersion{Version: 1, OriginalObjectKey: in.ObjectKey})
+	if err != nil {
+		return nil, err
+	}
+	if doc.OriginalBucket != "" && doc.OriginalBucket != in.Bucket {
+		return nil, fmt.Errorf("bucket mismatch: expected %s, got %s", doc.OriginalBucket, in.Bucket)
+	}
+	if s.temporal == nil {
+		return doc, nil
+	}
+
+	opts := client.StartWorkflowOptions{
+		ID:        doc.ID,
+		TaskQueue: s.taskQueue,
+	}
+
+	publishPath := doc.Name
+	version := int32(1)
+	if len(doc.Versions) > 0 {
+		version = doc.Versions[len(doc.Versions)-1].Version
+	}
+
+	input := WorkflowInput{
+		DocumentID:        doc.ID,
+		OriginalBucket:    doc.OriginalBucket,
+		MarkdownBucket:    doc.MarkdownBucket,
+		OriginalObjectKey: doc.OriginalObjectKey,
+		MarkdownObjectKey: doc.MarkdownObjectKey,
+		FilenameExt:       strings.TrimPrefix(filepath.Ext(in.ObjectKey), "."),
+		PublishPath:       publishPath,
+		Version:           version,
+	}
+
+	run, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input)
+	if err != nil {
+		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, fmt.Sprintf("start workflow: %v", err), nil)
+		return nil, fmt.Errorf("start workflow: %w", err)
+	}
+
+	return s.repo.UpdateWorkflowID(ctx, doc.ID, run.GetRunID())
 }
 
 func (s *Service) GetDocument(ctx context.Context, id string) (*model.Document, error) {

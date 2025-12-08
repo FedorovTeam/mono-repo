@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package backend.document.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "backend-storage-service/proto/backend/document/v1;documentv1";
+
+enum DocumentStatus {
+  DOCUMENT_STATUS_UNSPECIFIED = 0;
+  DOCUMENT_STATUS_UPLOADED = 1;
+  DOCUMENT_STATUS_STORED_ORIGINAL = 2;
+  DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN = 3;
+  DOCUMENT_STATUS_PUBLISHED_TO_GITHUB = 4;
+  DOCUMENT_STATUS_FAILED = 5;
+}
+
+message Document {
+  string id = 1;
+  string file_name = 2;
+  string repository = 3;
+  string branch = 4;
+  string path = 5;
+  DocumentStatus status = 6;
+  string workflow_id = 7;
+  string error = 8;
+  string upload_bucket = 9;
+  string upload_object_key = 10;
+  string markdown_bucket = 11;
+  string markdown_object_key = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+}
+
+message CreateDocumentRequest {
+  string id = 1;
+  string file_name = 2;
+  string repository = 3;
+  string branch = 4;
+  string path = 5;
+  string correlation_id = 6;
+  int64 content_length = 7;
+  string upload_bucket = 8;
+  string upload_object_key = 9;
+  string markdown_bucket = 10;
+  string markdown_object_key = 11;
+}
+
+message GetDocumentRequest {
+  string id = 1;
+}
+
+message ListDocumentsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  DocumentStatus status_filter = 3;
+}
+
+message ListDocumentsResponse {
+  repeated Document documents = 1;
+}
+
+message UpdateDocumentStatusRequest {
+  string id = 1;
+  DocumentStatus status = 2;
+  string reason = 3;
+  string original_object_key = 4;
+  string markdown_object_key = 5;
+  int32 version = 6;
+}
+
+message ConfirmUploadRequest {
+  string document_id = 1;
+  string bucket = 2;
+  string object_key = 3;
+  string correlation_id = 4;
+}
+
+service DocumentService {
+  rpc CreateDocument(CreateDocumentRequest) returns (Document);
+  rpc GetDocument(GetDocumentRequest) returns (Document);
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
+  rpc UpdateDocumentStatus(UpdateDocumentStatusRequest) returns (Document);
+  rpc ConfirmUpload(ConfirmUploadRequest) returns (Document);
+}

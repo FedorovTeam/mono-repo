@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 
@@ -164,6 +165,12 @@ func (m *mockPresignClient) PresignHeader(_ context.Context, method, bucketName,
 	return url.Parse("http://minio/upload")
 }
 
+func (m *mockPresignClient) ListenBucketNotification(context.Context, string, string, string, []string) <-chan notification.Info {
+	ch := make(chan notification.Info)
+	close(ch)
+	return ch
+}
+
 type mockClient struct {
 	buckets    map[string]bool
 	storedData map[string]map[string][]byte
@@ -203,6 +210,12 @@ func (m *mockClient) PutObject(_ context.Context, bucketName, objectName string,
 
 	m.storedData[bucketName][objectName] = buf
 	return nil
+}
+
+func (m *mockClient) ListenBucketNotification(context.Context, string, string, string, []string) <-chan notification.Info {
+	ch := make(chan notification.Info)
+	close(ch)
+	return ch
 }
 
 func (m *mockClient) GetObject(_ context.Context, bucketName, objectName string) (io.ReadCloser, error) {

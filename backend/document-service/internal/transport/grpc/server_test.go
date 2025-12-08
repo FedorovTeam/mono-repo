@@ -104,6 +104,18 @@ func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Statu
 	return &doc, nil
 }
 
+func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc, ok := m.documents[id]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	doc.WorkflowID = workflowID
+	m.documents[id] = doc
+	return &doc, nil
+}
+
 func TestGRPCWorkflow(t *testing.T) {
 	repo := &memoryRepo{}
 	svc := document.New(repo, staticKey{}, nil, "", nil, "orig", "md")

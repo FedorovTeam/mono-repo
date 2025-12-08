@@ -69,9 +69,17 @@ message UpdateDocumentStatusRequest {
   int32 version = 6;
 }
 
+message ConfirmUploadRequest {
+  string document_id = 1;
+  string bucket = 2;
+  string object_key = 3;
+  string correlation_id = 4;
+}
+
 service DocumentService {
   rpc CreateDocument(CreateDocumentRequest) returns (Document);
   rpc GetDocument(GetDocumentRequest) returns (Document);
   rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
   rpc UpdateDocumentStatus(UpdateDocumentStatusRequest) returns (Document);
+  rpc ConfirmUpload(ConfirmUploadRequest) returns (Document);
 }
