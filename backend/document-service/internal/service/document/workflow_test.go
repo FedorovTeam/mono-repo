@@ -2,6 +2,8 @@ package document
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"backend-document-service/internal/model"
@@ -80,12 +82,21 @@ func (fakePublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.
 	return nil, nil
 }
 
+type trackingPublisher struct {
+	called bool
+}
+
+func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
+	p.called = true
+	return &githubpublisherv1.PublishMarkdownResponse{}, nil
+}
+
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: []byte("md"), MediaType: "text/markdown", MarkdownObjectKey: "md-key"}}
 	storage := &fakeStorageClient{}
 
-	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main")
+	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main", "https://api.github.com")
 
 	result, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        "doc-1",
@@ -121,5 +132,72 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 
 	if repo.lastVersion == nil || repo.lastVersion.Version != 3 || repo.lastVersion.MarkdownObjectKey != "md-key" {
 		t.Fatalf("version was not saved correctly: %+v", repo.lastVersion)
+	}
+}
+
+func TestPublishMarkdownValidatesRepositoryBeforePublish(t *testing.T) {
+	repo := &fakeRepo{}
+	publisher := &trackingPublisher{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	activities := NewActivities(repo, nil, nil, publisher, "owner", "repo", "main", "main", server.URL)
+	activities.httpClient = server.Client()
+
+	err := activities.PublishMarkdown(context.Background(), publishInput{
+		DocumentID:        "doc-1",
+		MarkdownBucket:    "bucket",
+		MarkdownObjectKey: "object",
+		Path:              "doc.md",
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	if repo.lastStatus != model.StatusFailed {
+		t.Fatalf("expected failed status, got %v", repo.lastStatus)
+	}
+	if publisher.called {
+		t.Fatal("publisher should not be called after failed validation")
+	}
+}
+
+func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
+	repo := &fakeRepo{}
+	publisher := &trackingPublisher{}
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	activities := NewActivities(repo, nil, nil, publisher, "owner", "repo", "main", "main", server.URL)
+	activities.httpClient = server.Client()
+
+	err := activities.PublishMarkdown(context.Background(), publishInput{
+		DocumentID:        "doc-2",
+		DocumentName:      "doc title",
+		MarkdownBucket:    "bucket",
+		MarkdownObjectKey: "object",
+		Path:              "doc.md",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if requestedPath != "/repos/owner/repo" {
+		t.Fatalf("unexpected validation path: %s", requestedPath)
+	}
+	if !publisher.called {
+		t.Fatal("publisher was not called")
+	}
+	if repo.lastStatus != model.StatusPublishedToGitHub {
+		t.Fatalf("expected published status, got %v", repo.lastStatus)
 	}
 }

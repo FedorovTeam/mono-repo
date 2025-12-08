@@ -37,6 +37,7 @@ type Config struct {
 		Repository string `yaml:"repository"`
 		Branch     string `yaml:"branch"`
 		BaseBranch string `yaml:"base_branch"`
+		BaseURL    string `yaml:"base_url"`
 	} `yaml:"github"`
 }
 
