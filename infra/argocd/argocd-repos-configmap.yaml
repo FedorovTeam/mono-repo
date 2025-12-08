@@ -38,4 +38,7 @@ data:
     - type: helm
       name: temporalio
       url: https://go.temporal.io/helm-charts
+    - type: helm
+      name: budibase
+      url: https://budibase.github.io/budibase
   accounts.ci: apiKey, login
