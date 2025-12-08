@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +84,11 @@ type keyMock struct {
 
 func (k *keyMock) GenerateKeys(ctx context.Context, data storage.KeyGenerationData) (storage.KeyPair, error) {
 	k.lastData = data
-	return storage.KeyPair{OriginalObjectKey: "orig", MarkdownObjectKey: "md"}, nil
+	entityPath := strings.Trim(data.EntitySpecificPath, "/")
+	if entityPath == "" {
+		entityPath = "key"
+	}
+	return storage.KeyPair{OriginalObjectKey: "orig/" + entityPath, MarkdownObjectKey: "md/" + entityPath}, nil
 }
 
 type failingKey struct{}
@@ -108,7 +113,7 @@ func TestCreateDocumentSuccess(t *testing.T) {
 	repo := &repoMock{}
 	keys := &keyMock{}
 	svc := New(repo, keys, nil, "", nil, "orig", "md", "owner", "repo", "main", "main")
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx", Repository: "repo/name", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", Owner: "owner", BaseBranch: "main"})
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx", Repository: "repo/name", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", EntitySpecificPath: "docs/articles/name", Owner: "owner", BaseBranch: "main"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
 	require.Equal(t, doc.ID, doc.WorkflowID)
@@ -117,11 +122,14 @@ func TestCreateDocumentSuccess(t *testing.T) {
 	require.Equal(t, "docs/name.md", doc.Path)
 	require.Equal(t, "orig", doc.OriginalBucket)
 	require.Equal(t, "md", doc.MarkdownBucket)
+	require.Contains(t, doc.OriginalObjectKey, "docs/articles/name")
+	require.Contains(t, doc.MarkdownObjectKey, "docs/articles/name")
 	require.Equal(t, model.StatusUploaded, doc.Status)
 	require.Len(t, doc.Versions, 1)
 	require.Equal(t, doc.ID, keys.lastData.DocumentID)
 	require.Equal(t, "docs/name.md", keys.lastData.Path)
 	require.Equal(t, "docs/publish/name.md", keys.lastData.PublishPath)
+	require.Equal(t, "docs/articles/name", keys.lastData.EntitySpecificPath)
 }
 
 func TestCreateDocumentRespectsProvidedID(t *testing.T) {

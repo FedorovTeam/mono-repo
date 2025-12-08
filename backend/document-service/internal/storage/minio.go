@@ -28,10 +28,11 @@ type MinioKeyManager struct {
 }
 
 type KeyGenerationData struct {
-	DocumentID  string
-	FileName    string
-	Path        string
-	PublishPath string
+	DocumentID         string
+	FileName           string
+	Path               string
+	PublishPath        string
+	EntitySpecificPath string
 }
 
 func NewMinioKeyManager(client *minio.Client, prefix, originalBucket, markdownBucket string) *MinioKeyManager {
@@ -94,6 +95,7 @@ func buildEntitySpecificPath(data KeyGenerationData) string {
 	}
 
 	candidate := firstNonEmpty(
+		normalizePath(data.EntitySpecificPath),
 		normalizePath(data.PublishPath),
 		normalizePath(data.Path),
 		normalizePath(data.FileName),

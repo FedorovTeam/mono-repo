@@ -46,20 +46,21 @@ func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocum
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(req.GetFileName())), ".")
 
 	doc, err := s.service.CreateDocument(ctx, svc.CreateInput{
-		ID:                req.GetId(),
-		FileName:          req.GetFileName(),
-		Owner:             req.GetOwner(),
-		Repository:        req.GetRepository(),
-		Branch:            req.GetBranch(),
-		BaseBranch:        req.GetBaseBranch(),
-		Path:              req.GetPath(),
-		UploadBucket:      req.GetUploadBucket(),
-		UploadObjectKey:   req.GetUploadObjectKey(),
-		MarkdownBucket:    req.GetMarkdownBucket(),
-		MarkdownObjectKey: req.GetMarkdownObjectKey(),
-		FilenameExt:       ext,
-		PublishPath:       req.GetPath(), // можно собрать сложнее, если надо
-		CreatePR:          req.GetCreatePr(),
+		ID:                 req.GetId(),
+		FileName:           req.GetFileName(),
+		Owner:              req.GetOwner(),
+		Repository:         req.GetRepository(),
+		Branch:             req.GetBranch(),
+		BaseBranch:         req.GetBaseBranch(),
+		Path:               req.GetPath(),
+		UploadBucket:       req.GetUploadBucket(),
+		UploadObjectKey:    req.GetUploadObjectKey(),
+		MarkdownBucket:     req.GetMarkdownBucket(),
+		MarkdownObjectKey:  req.GetMarkdownObjectKey(),
+		FilenameExt:        ext,
+		PublishPath:        req.GetPath(), // можно собрать сложнее, если надо
+		EntitySpecificPath: req.GetEntitySpecificPath(),
+		CreatePR:           req.GetCreatePr(),
 	})
 	if err != nil {
 		return nil, err
