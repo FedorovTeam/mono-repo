@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: frontend-workflows
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL:   git@github.com:FedorovTeam/mono-repo.git
+        revision:  main
+        directories:
+          # front/<app>/cicd/argo-workflows
+          - path: "front/*/cicd/argo-workflows"
+
+  template:
+    metadata:
+      # parts: ["front", "<app>", "cicd", "argo-workflows"]
+      # app: index 1
+      name: '{{ $parts := splitList "/" .path.path }}{{ $service := index $parts 1 | lower | replace "_" "-" }}{{ printf "wf-%s" $service }}'
+    spec:
+      project: default
+      source:
+        repoURL:        git@github.com:FedorovTeam/mono-repo.git
+        targetRevision: main
+        path:           '{{ .path.path }}'
+        directory:
+          recurse: true
+      destination:
+        server:    https://kubernetes.default.svc
+        namespace: argo
+      syncPolicy:
+        automated:
+          prune:     true
+          selfHeal:  true

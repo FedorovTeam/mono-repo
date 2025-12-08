@@ -1,0 +1,43 @@
+replicaCount: 1
+fullnameOverride: app-knowledge-console
+
+image:
+  repository: harbor.tech.fedorov-team.tech/frontend/app-knowledge-console
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets:
+  - name: regcred
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  host: console.fedorov-team.tech
+  tls:
+    enabled: true
+    secretName: console-fedorov-team-tech-tls
+
+env:
+  NEXT_PUBLIC_GATEWAY_URL: "https://gateway.fedorov-team.tech/query"
+  NEXT_PUBLIC_API_KEY: "secret"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
