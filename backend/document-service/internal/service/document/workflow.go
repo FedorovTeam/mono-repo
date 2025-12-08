@@ -3,6 +3,8 @@ package document
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"backend-document-service/internal/model"
@@ -94,9 +96,11 @@ type Activities struct {
 	repoName    string
 	branch      string
 	baseBranch  string
+	baseURL     string
+	httpClient  *http.Client
 }
 
-func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string) *Activities {
+func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch, baseURL string) *Activities {
 	return &Activities{
 		repo:        repo,
 		storage:     storageClient,
@@ -106,6 +110,8 @@ func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient
 		repoName:    repoName,
 		branch:      branch,
 		baseBranch:  baseBranch,
+		baseURL:     baseURL,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -256,6 +262,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		commitMessage = path
 	}
 
+	if err := a.validateRepository(ctx, owner, repository); err != nil {
+		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))
+		return err
+	}
+
 	req := &githubpublisherv1.PublishMarkdownRequest{
 		Owner:         owner,
 		Repository:    repository,
@@ -303,4 +314,38 @@ func activityInfo(ctx context.Context) (activity.Info, bool) {
 		_ = recover()
 	}()
 	return activity.GetInfo(ctx), true
+}
+
+func (a *Activities) validateRepository(ctx context.Context, owner, repository string) error {
+	client := a.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+
+	baseURL := strings.TrimSuffix(a.baseURL, "/")
+	if baseURL == "" {
+		baseURL = "https://api.github.com"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/%s", baseURL, owner, repository), nil)
+	if err != nil {
+		return fmt.Errorf("build repository check request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("github repository validation failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound:
+		return fmt.Errorf("repository %s/%s not found", owner, repository)
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("no access to repository %s/%s: %s", owner, repository, resp.Status)
+	default:
+		return fmt.Errorf("github repository validation returned status %s", resp.Status)
+	}
 }

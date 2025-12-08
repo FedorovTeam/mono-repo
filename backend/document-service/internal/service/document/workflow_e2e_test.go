@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -75,7 +77,13 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	})
 	defer publisherConn.Close()
 
-	activities := NewActivities(&memoryRepo{}, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main")
+	githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer githubServer.Close()
+
+	activities := NewActivities(&memoryRepo{}, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main", githubServer.URL)
+	activities.httpClient = githubServer.Client()
 	workerInstance := worker.New(temporalClient, "document-processing", worker.Options{})
 	workerInstance.RegisterWorkflow(DocumentProcessingWorkflow)
 	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: ActivityUploadOriginalName})
