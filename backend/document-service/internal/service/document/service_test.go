@@ -25,7 +25,9 @@ func (r *repoMock) CreateDocument(ctx context.Context, doc *model.Document, vers
 	if r.err != nil {
 		return nil, r.err
 	}
-	doc.ID = uuid.NewString()
+	if doc.ID == "" {
+		doc.ID = uuid.NewString()
+	}
 	doc.CreatedAt = time.Now()
 	doc.UpdatedAt = doc.CreatedAt
 	doc.Versions = []model.DocumentVersion{*version}
@@ -100,10 +102,22 @@ func TestCreateDocumentSuccess(t *testing.T) {
 	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
+	require.Equal(t, doc.ID, doc.WorkflowID)
 	require.Equal(t, "orig", doc.OriginalBucket)
 	require.Equal(t, "md", doc.MarkdownBucket)
 	require.Equal(t, model.StatusUploaded, doc.Status)
 	require.Len(t, doc.Versions, 1)
+}
+
+func TestCreateDocumentRespectsProvidedID(t *testing.T) {
+	repo := &repoMock{}
+	svc := New(repo, keyMock{}, nil, "", nil, "orig", "md")
+	existingID := uuid.NewString()
+
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{ID: existingID, FileName: "name", FilenameExt: "docx"})
+	require.NoError(t, err)
+	require.Equal(t, existingID, doc.ID)
+	require.Equal(t, existingID, doc.WorkflowID)
 }
 
 type workflowStarterMock struct {
@@ -149,8 +163,8 @@ func TestConfirmUploadStartsWorkflow(t *testing.T) {
 	doc, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
 	require.Equal(t, model.StatusStoredOriginal, repo.savedStatus)
-	require.Equal(t, "run-123", doc.WorkflowID)
-	require.Equal(t, "run-123", repo.workflowID)
+	require.Equal(t, "doc-123", doc.WorkflowID)
+	require.Equal(t, "doc-123", repo.workflowID)
 }
 
 func TestUpdateStatusValidation(t *testing.T) {

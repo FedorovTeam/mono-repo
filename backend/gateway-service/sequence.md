@@ -16,8 +16,7 @@ sequenceDiagram
     StorageService-->>Gateway: uploadUrl + bucket/objectKey
     Gateway->>DocumentService: CreateDocument (metadata + size + upload bucket/objectKey + correlation-id)
     DocumentService-->>Gateway: документ (id/status[/workflowId])
-    Gateway->>Temporal: StartUploadWorkflow (upload url + bucket/objectKey + metadata + correlation-id)
-    Temporal-->>Gateway: WorkflowID
+    Note over DocumentService,Temporal: Workflow запускается сервисом документов после подтверждения загрузки
     Gateway-->>Client: uploadUrl + uploadMethod=PUT + document{id,status,workflowId}
     Client-->>StorageService: PUT DOCX по signed URL
 ```

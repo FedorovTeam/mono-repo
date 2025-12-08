@@ -26,7 +26,6 @@ gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `doc
 - `documentService.address` — `document.backend.svc.cluster.local:50051`.
 - `storageService.address` — `storage.backend.svc.cluster.local:50052`.
 - `uploads.maxSizeBytes`, `uploads.allowedExtensions`, `uploads.signedUrlTtlSeconds` — лимиты загрузки и TTL presigned ссылок.
-- `temporal.address` — `temporal-frontend.temporal.svc.cluster.local:7233`, `temporal.namespace` — `knowledge-base`, `temporal.taskQueue` — очередь воркеров.
 - `observability.otlpEndpoint`/`observability.serviceName` — адрес OTLP-коллектора и сервисное имя.
 - `logging.level` — уровень логирования.
 

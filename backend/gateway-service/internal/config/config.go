@@ -21,11 +21,6 @@ type Config struct {
 	StorageService struct {
 		Address string `yaml:"address"`
 	} `yaml:"storageService"`
-	Temporal struct {
-		Address   string `yaml:"address"`
-		Namespace string `yaml:"namespace"`
-		TaskQueue string `yaml:"taskQueue"`
-	} `yaml:"temporal"`
 	Uploads struct {
 		MaxSizeBytes       int64    `yaml:"maxSizeBytes"`
 		AllowedExtensions  []string `yaml:"allowedExtensions"`
@@ -62,9 +57,6 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.StorageService.Address == "" {
 		return Config{}, fmt.Errorf("storageService.address is required")
-	}
-	if cfg.Temporal.TaskQueue == "" {
-		return Config{}, fmt.Errorf("temporal.taskQueue is required")
 	}
 	if cfg.Uploads.MaxSizeBytes <= 0 {
 		return Config{}, fmt.Errorf("uploads.maxSizeBytes must be positive")

@@ -20,7 +20,6 @@ import (
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/graph/model"
 	storageclient "backend-gateway-service/internal/clients/storage"
-	"backend-gateway-service/internal/clients/temporal"
 	"backend-gateway-service/internal/ctxutils"
 	"backend-gateway-service/internal/middleware"
 	pb "backend-gateway-service/proto/backend/document/v1"
@@ -52,16 +51,6 @@ func (m *mockDocumentClient) RetryProcessing(ctx context.Context, in *pb.RetryPr
 
 func (m *mockDocumentClient) Close() error { return nil }
 
-type mockTemporalClient struct {
-	startFunc func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error)
-}
-
-func (m *mockTemporalClient) StartUploadWorkflow(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
-	return m.startFunc(ctx, input)
-}
-
-func (m *mockTemporalClient) Close() {}
-
 type mockStorageClient struct {
 	generateFunc func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error)
 }
@@ -73,7 +62,7 @@ func (m *mockStorageClient) GenerateUploadURL(ctx context.Context, in *storagepb
 func (m *mockStorageClient) Close() error { return nil }
 
 func TestUploadValidation(t *testing.T) {
-	resolver := &Resolver{DocumentClient: &mockDocumentClient{}, TemporalClient: &mockTemporalClient{}, StorageClient: &mockStorageClient{}, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024, AllowedExtensions: []string{"docx"}}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: &mockDocumentClient{}, StorageClient: &mockStorageClient{}, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024, AllowedExtensions: []string{"docx"}}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	_, err := mr.UploadKnowledgeDocument(context.Background(), model.UploadKnowledgeDocumentInput{})
@@ -85,7 +74,6 @@ func TestUploadValidation(t *testing.T) {
 func TestUploadHappyPath(t *testing.T) {
 	ctx := ctxutils.WithCorrelationID(context.Background(), "corr-test")
 	docCalled := false
-	temporalCalled := false
 	storageDocID := ""
 	storageCalled := false
 
@@ -118,23 +106,12 @@ func TestUploadHappyPath(t *testing.T) {
 		if in.GetUploadBucket() != "docs" || in.GetUploadObjectKey() == "" {
 			t.Fatalf("bucket info not forwarded")
 		}
-		return &pb.Document{Id: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil }, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
 	}}
 
-	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
-		temporalCalled = true
-		if input.CorrelationId != "corr-test" {
-			t.Fatalf("workflow correlation id missing")
-		}
-		if input.DocumentId != storageDocID || input.UploadBucket != "docs" || input.UploadObjectKey == "" || input.UploadURL == "" || input.FileSizeBytes != 1024 {
-			t.Fatalf("unexpected workflow input: %+v", input)
-		}
-		return "wf-1", nil
-	}}
-
-	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2 * 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2 * 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{
@@ -147,10 +124,10 @@ func TestUploadHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !docCalled || !temporalCalled || !storageCalled {
+	if !docCalled || !storageCalled {
 		t.Fatalf("expected downstream calls")
 	}
-	if payload.Document.WorkflowID == nil || *payload.Document.WorkflowID != "wf-1" {
+	if payload.Document.WorkflowID == nil || *payload.Document.WorkflowID != storageDocID {
 		t.Fatalf("workflow id not returned")
 	}
 	if payload.UploadURL == "" || payload.UploadMethod == "" {
@@ -178,24 +155,14 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 		if in.GetId() != capturedDocID {
 			t.Fatalf("document id mismatch: %s vs %s", in.GetId(), capturedDocID)
 		}
-		return &pb.Document{Id: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		return &pb.Document{Id: capturedDocID, WorkflowId: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
 		return nil, nil
 	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
 	}}
 
-	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
-		if input.CorrelationId != capturedCorrelation {
-			t.Fatalf("workflow correlation mismatch: %s vs %s", input.CorrelationId, capturedCorrelation)
-		}
-		if input.DocumentId != capturedDocID {
-			t.Fatalf("workflow document mismatch: %s vs %s", input.DocumentId, capturedDocID)
-		}
-		return "wf-99", nil
-	}}
-
-	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2048, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2048, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	payload, err := mr.UploadKnowledgeDocument(ctxutils.WithAPIKey(context.Background(), "secret"), model.UploadKnowledgeDocumentInput{
@@ -258,7 +225,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 			if in.GetId() != capturedDocID {
 				t.Fatalf("document id mismatch: %s vs %s", in.GetId(), capturedDocID)
 			}
-			return &pb.Document{Id: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+			return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 		},
 		getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -266,16 +233,6 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 		},
 		retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil },
 	}
-	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
-		if input.CorrelationId != "corr-integration" {
-			t.Fatalf("correlation id missing in workflow")
-		}
-		if input.DocumentId != capturedDocID {
-			t.Fatalf("workflow document mismatch: %s vs %s", input.DocumentId, capturedDocID)
-		}
-		return "wf-99", nil
-	}}
-
 	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
 		if in.CorrelationId != "corr-integration" {
 			t.Fatalf("correlation id missing in storage")
@@ -287,7 +244,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/signed", Bucket: "docx", ObjectKey: fmt.Sprintf("docx/%s.docx", capturedDocID), ExpiresInSeconds: 600}, nil
 	}}
 
-	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
 	gqlServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
@@ -335,7 +292,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	if len(resp.Errors) > 0 {
 		t.Fatalf("unexpected graphql errors: %+v", resp.Errors)
 	}
-	if resp.Data.UploadKnowledgeDocument.Document.ID == "" || resp.Data.UploadKnowledgeDocument.Document.ID != capturedDocID || resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != "wf-99" {
+	if resp.Data.UploadKnowledgeDocument.Document.ID == "" || resp.Data.UploadKnowledgeDocument.Document.ID != capturedDocID || resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != capturedDocID {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
 	}
 	if resp.Data.UploadKnowledgeDocument.UploadURL == "" || resp.Data.UploadKnowledgeDocument.UploadMethod == "" {
@@ -373,7 +330,7 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 			if in.GetId() == "" || in.GetId() != storageServer.lastDocumentID {
 				t.Fatalf("document id mismatch: %s vs %s", in.GetId(), storageServer.lastDocumentID)
 			}
-			return &pb.Document{Id: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+			return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 		},
 		getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -381,20 +338,8 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 		},
 		retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil },
 	}
-	temporalClient := &mockTemporalClient{startFunc: func(ctx context.Context, input temporal.UploadWorkflowInput) (string, error) {
-		if input.CorrelationId != "corr-grpc" {
-			t.Fatalf("correlation id missing in workflow")
-		}
-		if input.DocumentId != storageServer.lastDocumentID {
-			t.Fatalf("workflow document mismatch: %s vs %s", input.DocumentId, storageServer.lastDocumentID)
-		}
-		if input.UploadURL != "http://minio/presigned" {
-			t.Fatalf("unexpected upload url: %s", input.UploadURL)
-		}
-		return "wf-42", nil
-	}}
 
-	resolver := &Resolver{DocumentClient: docClient, TemporalClient: temporalClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
 	gqlServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
@@ -450,6 +395,9 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	}
 	if resp.Data.UploadKnowledgeDocument.Document.ID != storageServer.lastDocumentID || resp.Data.UploadKnowledgeDocument.UploadURL != "http://minio/presigned" {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
+	}
+	if resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != storageServer.lastDocumentID {
+		t.Fatalf("workflow id not forwarded: %+v", resp.Data.UploadKnowledgeDocument.Document)
 	}
 	if storageServer.lastCorrelation != "corr-grpc" {
 		t.Fatalf("correlation id not forwarded to storage service: %s", storageServer.lastCorrelation)
