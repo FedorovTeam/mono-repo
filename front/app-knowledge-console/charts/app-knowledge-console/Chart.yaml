@@ -1,0 +1,5 @@
+apiVersion: v2
+name: app-knowledge-console
+version: 0.1.0
+description: Knowledge console frontend
+appVersion: "0.1.0"
