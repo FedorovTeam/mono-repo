@@ -30,6 +30,9 @@ message Document {
   string markdown_object_key = 12;
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp updated_at = 14;
+  string owner = 15;
+  string base_branch = 16;
+  bool create_pr = 17;
 }
 
 message CreateDocumentRequest {
@@ -44,6 +47,9 @@ message CreateDocumentRequest {
   string upload_object_key = 9;
   string markdown_bucket = 10;
   string markdown_object_key = 11;
+  string owner = 12;
+  string base_branch = 13;
+  bool create_pr = 14;
 }
 
 message GetDocumentRequest {

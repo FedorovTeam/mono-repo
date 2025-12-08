@@ -8,4 +8,4 @@ protoc -I. \
   backend/document/v1/document.proto \
   backend/storage/v1/storage.proto \
   backend/transformer/v1/transformer.proto \
-  backend/githubpublisher/v1/publisher.proto
+  backend/githubpublisher/v1/githubpublisher.proto

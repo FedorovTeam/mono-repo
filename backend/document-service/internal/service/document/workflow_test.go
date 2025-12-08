@@ -85,7 +85,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: []byte("md"), MediaType: "text/markdown", MarkdownObjectKey: "md-key"}}
 	storage := &fakeStorageClient{}
 
-	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "repo", "main")
+	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main")
 
 	result, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        "doc-1",

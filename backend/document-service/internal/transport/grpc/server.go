@@ -48,8 +48,10 @@ func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocum
 	doc, err := s.service.CreateDocument(ctx, svc.CreateInput{
 		ID:                req.GetId(),
 		FileName:          req.GetFileName(),
+		Owner:             req.GetOwner(),
 		Repository:        req.GetRepository(),
 		Branch:            req.GetBranch(),
+		BaseBranch:        req.GetBaseBranch(),
 		Path:              req.GetPath(),
 		UploadBucket:      req.GetUploadBucket(),
 		UploadObjectKey:   req.GetUploadObjectKey(),
@@ -57,6 +59,7 @@ func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocum
 		MarkdownObjectKey: req.GetMarkdownObjectKey(),
 		FilenameExt:       ext,
 		PublishPath:       req.GetPath(), // можно собрать сложнее, если надо
+		CreatePR:          req.GetCreatePr(),
 	})
 	if err != nil {
 		return nil, err
@@ -126,8 +129,10 @@ func toProto(doc *model.Document) *documentv1.Document {
 	p := &documentv1.Document{
 		Id:                doc.ID,
 		FileName:          doc.Name,
+		Owner:             doc.Owner,
 		Repository:        doc.Repository,
 		Branch:            doc.Branch,
+		BaseBranch:        doc.BaseBranch,
 		Path:              doc.Path,
 		Status:            toProtoStatus(doc.Status),
 		WorkflowId:        doc.WorkflowID,
@@ -136,6 +141,7 @@ func toProto(doc *model.Document) *documentv1.Document {
 		UploadObjectKey:   doc.OriginalObjectKey,
 		MarkdownBucket:    doc.MarkdownBucket,
 		MarkdownObjectKey: doc.MarkdownObjectKey,
+		CreatePr:          doc.CreatePR,
 		CreatedAt:         timestamppb.New(doc.CreatedAt),
 		UpdatedAt:         timestamppb.New(doc.UpdatedAt),
 	}

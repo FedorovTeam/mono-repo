@@ -19,5 +19,7 @@ services:
   transformer_service: "docling-transformer-service.docling-transformer-service.svc.cluster.local:9090"
   github_publisher_service: "github-publisher-service.github-publisher-service.svc.cluster.local:9090"
 github:
-  repository: "FedorovTeam/knowledge-base"
+  owner: "FedorovTeam"
+  repository: "knowledge-base"
   branch: "main"
+  base_branch: "main"

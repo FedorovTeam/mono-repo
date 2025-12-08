@@ -113,8 +113,10 @@ func main() {
 		storageClient,
 		transformerClient,
 		publisherClient,
+		cfg.Github.Owner,
 		cfg.Github.Repository,
 		cfg.Github.Branch,
+		cfg.Github.BaseBranch,
 	)
 
 	workerInstance.RegisterWorkflow(docservice.DocumentProcessingWorkflow)
@@ -145,6 +147,10 @@ func main() {
 		activities,
 		cfg.Minio.OriginalBucket,
 		cfg.Minio.MarkdownBucket,
+		cfg.Github.Owner,
+		cfg.Github.Repository,
+		cfg.Github.Branch,
+		cfg.Github.BaseBranch,
 	)
 
 	server := transport.NewServer(service)

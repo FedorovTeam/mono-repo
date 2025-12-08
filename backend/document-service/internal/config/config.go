@@ -33,8 +33,10 @@ type Config struct {
 		GithubPublisherService string `yaml:"github_publisher_service"`
 	} `yaml:"services"`
 	Github struct {
+		Owner      string `yaml:"owner"`
 		Repository string `yaml:"repository"`
 		Branch     string `yaml:"branch"`
+		BaseBranch string `yaml:"base_branch"`
 	} `yaml:"github"`
 }
 
