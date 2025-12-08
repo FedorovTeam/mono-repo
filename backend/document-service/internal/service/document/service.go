@@ -126,7 +126,22 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	if originalBucket == "" || markdownBucket == "" {
 		return nil, errors.New("buckets are required")
 	}
-	pair, err := s.keyManager.GenerateKeys(ctx)
+	path := strings.TrimSpace(in.Path)
+	if path == "" {
+		path = in.FileName
+	}
+
+	publishPath := strings.TrimSpace(in.PublishPath)
+	if publishPath == "" {
+		publishPath = path
+	}
+
+	pair, err := s.keyManager.GenerateKeys(ctx, storage.KeyGenerationData{
+		DocumentID:  in.ID,
+		FileName:    in.FileName,
+		Path:        path,
+		PublishPath: publishPath,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("generate keys: %w", err)
 	}
@@ -137,11 +152,6 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	markdownKey := in.MarkdownObjectKey
 	if markdownKey == "" {
 		markdownKey = pair.MarkdownObjectKey
-	}
-
-	path := strings.TrimSpace(in.Path)
-	if path == "" {
-		path = in.FileName
 	}
 
 	doc := &model.Document{

@@ -3,7 +3,7 @@
 1. **Создание документа**
    - Клиент вызывает `CreateDocument` с именем и информацией о бакетах.
    - Если владелец репозитория, имя репозитория или ветка не переданы, сервис подставляет значения по умолчанию из `config.yaml` (`github.owner`, `github.repository`, `github.branch`, `github.base_branch`).
-   - Сервис генерирует ключи MinIO и создаёт запись в `documents` и `document_versions`.
+   - Сервис генерирует ключи MinIO с шаблоном `<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<entity_path>` и создаёт запись в `documents` и `document_versions`.
    - Статус фиксируется как `Uploaded`, добавляется запись в `document_status_logs`, поле `workflow_id` резервируется и равно `document_id`.
    - Workflow не запускается до получения события `ConfirmUpload` от storage-service.
 

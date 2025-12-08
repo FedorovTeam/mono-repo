@@ -41,7 +41,7 @@ func dialer(server *grpc.Server) (*grpc.ClientConn, func(), error) {
 
 type staticKey struct{}
 
-func (staticKey) GenerateKeys(ctx context.Context) (storage.KeyPair, error) {
+func (staticKey) GenerateKeys(ctx context.Context, data storage.KeyGenerationData) (storage.KeyPair, error) {
 	return storage.KeyPair{OriginalObjectKey: "orig/key", MarkdownObjectKey: "md/key"}, nil
 }
 

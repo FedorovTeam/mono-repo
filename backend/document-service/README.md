@@ -7,6 +7,16 @@
 - MinIO — хранение оригинала и конвертированного Markdown (только ключи на стороне сервиса).
 - gRPC — внутренний API `proto/backend/document/document.proto`.
 
+## Формат ключей в MinIO
+Сервис формирует ключи по шаблону `<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<entity_specific_path>/{original|markdown}`.
+По умолчанию в доменный путь добавляется `document_id` и путь публикации/файла. Пример итогового ключа:
+
+```
+documents/year=2024/month=05/day=09/6c0c24a8-4c83-4e5b-8ab5-21f0db363e51/docs/guide.md/original
+```
+
+Группировка по дате (`year=`/`month=`/`day=`) позволяет на уровне lifecycle policy назначать разные правила хранения для старых объектов, а доменный путь внутри сохраняет контекст документа и читаемость структуры.
+
 ## Конфигурация
 Все обязательные параметры находятся в `config.yaml` (путь передается через `CONFIG_PATH`). Значения по умолчанию настроены под инфраструктурные домены и DNS-шаблон `<context>.backend.svc.cluster.local`:
 - `server.addr` — адрес gRPC сервера (по умолчанию `:50051`).
