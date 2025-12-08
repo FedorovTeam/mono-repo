@@ -1,3 +1,5 @@
+# infra/argocd/budibase-app.yaml
+
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -5,12 +7,17 @@ metadata:
   namespace: argocd
 spec:
   project: default
+
+  # Официальный Helm-репозиторий Budibase
   source:
-    repoURL: https://budibase.github.io/budibase      # helm-репо Budibase
+    repoURL: https://budibase.github.io/budibase/
     chart: budibase
-    targetRevision: 3.0.493                          # или другая существующая версия
+    # Версия чарта
+    targetRevision: 3.1.2
+
     helm:
-      values: |
+      values: |-
+        # --- Ingress через Traefik + cert-manager ---
         ingress:
           enabled: true
           className: "traefik"
@@ -59,3 +66,14 @@ spec:
           jwtSecret: "super-long-random-jwt-secret"
           internalApiKey: "super-long-random-internal-api-key"
           apiEncryptionKey: "super-long-random-encryption-key"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: budibase
+
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true
