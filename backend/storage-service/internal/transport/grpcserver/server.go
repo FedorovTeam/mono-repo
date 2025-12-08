@@ -3,10 +3,7 @@ package grpcserver
 import (
 	"context"
 	"errors"
-	"net/http"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/minio/minio-go/v7"
 	"google.golang.org/grpc"
@@ -154,43 +151,27 @@ func (s *Server) GenerateUploadURL(ctx context.Context, req *storagev1.GenerateU
 		return nil, status.Error(codes.InvalidArgument, "document_id и file_name должны быть заполнены")
 	}
 
-	if req.GetExpiresInSeconds() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "expires_in_seconds должен быть больше нуля")
-	}
-
-	ext := strings.TrimPrefix(filepath.Ext(req.GetFileName()), ".")
-	if ext == "" {
-		return nil, status.Error(codes.InvalidArgument, "некорректное расширение файла")
-	}
-
-	if err := s.ensureBucket(ctx, s.uploadBucket); err != nil {
-		return nil, err
-	}
-
-	key, err := s.keyGenerator.BuildKey(s.orgSlug, s.projectSlug, req.GetDocumentId(), ext)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "cannot build object key: %v", err)
-	}
-
 	correlationID := s.correlationID(ctx, req.GetCorrelationId())
+	upload, err := s.service.GenerateUploadURL(ctx, s.uploadBucket, storage.GenerateUploadURLParams{
+		OrgSlug:          s.orgSlug,
+		ProjectSlug:      s.projectSlug,
+		DocumentID:       req.GetDocumentId(),
+		FileName:         req.GetFileName(),
+		ContentLength:    req.GetContentLength(),
+		CorrelationID:    correlationID,
+		ExpiresInSeconds: req.GetExpiresInSeconds(),
+	})
+	if err != nil {
+		return nil, s.mapStorageError(err)
+	}
+
 	s.attachResponseMetadata(ctx, correlationID, s.orgSlug, s.projectSlug)
 
-	headers := http.Header{}
-	if correlationID != "" {
-		headers.Set("x-amz-meta-correlation-id", correlationID)
-	}
-
-	expires := time.Duration(req.GetExpiresInSeconds()) * time.Second
-	url, err := s.client.PresignHeader(ctx, http.MethodPut, s.uploadBucket, key, expires, nil, headers)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "cannot presign upload url: %v", err)
-	}
-
 	return &storagev1.GenerateUploadURLResponse{
-		UploadUrl:        url.String(),
-		Bucket:           s.uploadBucket,
-		ObjectKey:        key,
-		ExpiresInSeconds: req.GetExpiresInSeconds(),
+		UploadUrl:        upload.UploadURL.String(),
+		Bucket:           upload.Bucket,
+		ObjectKey:        upload.ObjectKey,
+		ExpiresInSeconds: upload.ExpiresInSeconds,
 	}, nil
 }
 
@@ -265,6 +246,10 @@ func (s *Server) attachResponseMetadata(ctx context.Context, correlationID, orgS
 func (s *Server) mapStorageError(err error) error {
 	if err == nil {
 		return nil
+	}
+
+	if errors.Is(err, storage.ErrInvalidArgument) {
+		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	var minioErr minio.ErrorResponse

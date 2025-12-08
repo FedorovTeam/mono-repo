@@ -13,7 +13,9 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"backend-storage-service/internal/storage"
 	storagev1 "backend-storage-service/proto/backend/storage/v1"
@@ -78,6 +80,30 @@ func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
 	if got := client.lastHeaders.Get("x-amz-meta-correlation-id"); got != "corr-meta" {
 		t.Fatalf("metadata correlation id not propagated: %s", got)
 	}
+}
+
+func TestGenerateUploadURL_ValidatesLengthAndExtension(t *testing.T) {
+	client := &mockPresignClient{bucketExists: true}
+	generator := storage.NewObjectKeyGenerator(time.Now)
+	server := New(client, generator, "knowledge-docx", storage.NewService(client, generator, "knowledge-docx", "knowledge-md"))
+
+	_, err := server.GenerateUploadURL(context.Background(), &storagev1.GenerateUploadURLRequest{
+		DocumentId:       "doc-1",
+		FileName:         "malware.exe",
+		ContentLength:    100,
+		ExpiresInSeconds: 10,
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	_, err = server.GenerateUploadURL(context.Background(), &storagev1.GenerateUploadURLRequest{
+		DocumentId:       "doc-1",
+		FileName:         "demo.docx",
+		ContentLength:    0,
+		ExpiresInSeconds: 10,
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 func TestUploadOriginalStoresContent(t *testing.T) {

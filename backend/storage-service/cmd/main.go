@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -24,16 +25,26 @@ func main() {
 		log.Fatal("не удалось загрузить конфигурацию storage-service")
 	}
 
+	uploadBucket := cfg.Events.UploadBucket
+	if uploadBucket == "" {
+		uploadBucket = cfg.Minio.Buckets.KnowledgeDocx
+	}
+
+	buckets := []string{
+		cfg.Minio.Buckets.KnowledgeDocx,
+		cfg.Minio.Buckets.KnowledgeMD,
+	}
+	if uploadBucket != "" && uploadBucket != cfg.Minio.Buckets.KnowledgeDocx && uploadBucket != cfg.Minio.Buckets.KnowledgeMD {
+		buckets = append(buckets, uploadBucket)
+	}
+
 	ctx := context.Background()
 	minioAPI, err := storage.NewMinioClient(ctx, storage.MinioClientConfig{
 		Endpoint:  cfg.Minio.Endpoint,
 		AccessKey: cfg.Minio.AccessKey,
 		SecretKey: cfg.Minio.SecretKey,
 		UseSSL:    cfg.Minio.UseSSL,
-		Buckets: []string{
-			cfg.Minio.Buckets.KnowledgeDocx,
-			cfg.Minio.Buckets.KnowledgeMD,
-		},
+		Buckets:   buckets,
 	})
 	if err != nil {
 		log.Fatalf("не удалось инициализировать MinIO клиент: %v", err)
@@ -47,23 +58,29 @@ func main() {
 		cfg.Minio.Buckets.KnowledgeMD,
 	)
 
-	documentConn, err := grpc.DialContext(ctx, cfg.Service.DocumentService, grpc.WithInsecure())
+	documentConn, err := grpc.DialContext(
+		ctx,
+		cfg.Service.DocumentService,
+		grpc.WithInsecure(),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	)
 	if err != nil {
 		log.Fatalf("не удалось подключиться к document-service: %v", err)
 	}
 	defer documentConn.Close()
-
-	uploadBucket := cfg.Events.UploadBucket
-	if uploadBucket == "" {
-		uploadBucket = cfg.Minio.Buckets.KnowledgeDocx
-	}
 
 	handler := storage.NewUploadEventHandler(documentv1.NewDocumentServiceClient(documentConn), log.Default())
 	storage.ListenAndForward(ctx, minioAPI, uploadBucket, handler)
 
 	log.Printf("инициализированы бакеты: docx=%s, md=%s", cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD)
 
-	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(correlationLoggingInterceptor()))
+	grpcServer := grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.ChainUnaryInterceptor(
+			otelgrpc.UnaryServerInterceptor(),
+			correlationLoggingInterceptor(),
+		),
+	)
 	storagev1.RegisterStorageServiceServer(grpcServer, grpcserver.New(minioAPI, keyGenerator, cfg.Minio.Buckets.KnowledgeDocx, storageService))
 
 	listener, err := net.Listen("tcp", cfg.Service.GRPCPort)

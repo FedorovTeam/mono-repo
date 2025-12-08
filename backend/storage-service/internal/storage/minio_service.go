@@ -3,11 +3,14 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -76,6 +79,35 @@ type Service struct {
 	keyGenerator   *ObjectKeyGenerator
 	docxBucket     string
 	markdownBucket string
+}
+
+var (
+	ErrInvalidArgument = errors.New("invalid argument")
+
+	allowedExtensions = map[string]struct{}{
+		"doc":  {},
+		"docx": {},
+		"pdf":  {},
+	}
+)
+
+// GenerateUploadURLParams описывает данные для подготовки presigned PUT ссылки.
+type GenerateUploadURLParams struct {
+	OrgSlug          string
+	ProjectSlug      string
+	DocumentID       string
+	FileName         string
+	ContentLength    int64
+	CorrelationID    string
+	ExpiresInSeconds int64
+}
+
+// PresignedUpload содержит ссылку и ключ объекта для загрузки.
+type PresignedUpload struct {
+	UploadURL        *url.URL
+	Bucket           string
+	ObjectKey        string
+	ExpiresInSeconds int64
 }
 
 // ObjectLocation описывает размещение объекта в хранилище.
@@ -178,6 +210,61 @@ func (s *Service) DownloadObject(ctx context.Context, bucket, key string) ([]byt
 	}
 
 	return data, nil
+}
+
+// GenerateUploadURL валидирует параметры и подписывает ссылку для загрузки исходного документа.
+func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params GenerateUploadURLParams) (PresignedUpload, error) {
+	if params.DocumentID == "" {
+		return PresignedUpload{}, fmt.Errorf("%w: document_id is required", ErrInvalidArgument)
+	}
+
+	if params.FileName == "" {
+		return PresignedUpload{}, fmt.Errorf("%w: file_name is required", ErrInvalidArgument)
+	}
+
+	if params.ContentLength <= 0 {
+		return PresignedUpload{}, fmt.Errorf("%w: content_length must be greater than zero", ErrInvalidArgument)
+	}
+
+	if params.ExpiresInSeconds <= 0 {
+		return PresignedUpload{}, fmt.Errorf("%w: expires_in_seconds must be greater than zero", ErrInvalidArgument)
+	}
+
+	extension := strings.TrimPrefix(strings.ToLower(filepath.Ext(params.FileName)), ".")
+	if extension == "" {
+		return PresignedUpload{}, fmt.Errorf("%w: invalid file extension", ErrInvalidArgument)
+	}
+
+	if _, ok := allowedExtensions[extension]; !ok {
+		return PresignedUpload{}, fmt.Errorf("%w: unsupported file extension %s", ErrInvalidArgument, extension)
+	}
+
+	if err := s.ensureBucket(ctx, bucket); err != nil {
+		return PresignedUpload{}, err
+	}
+
+	key, err := s.keyGenerator.BuildKey(params.OrgSlug, params.ProjectSlug, params.DocumentID, extension)
+	if err != nil {
+		return PresignedUpload{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+	}
+
+	headers := http.Header{}
+	if params.CorrelationID != "" {
+		headers.Set("x-amz-meta-correlation-id", params.CorrelationID)
+	}
+
+	expires := time.Duration(params.ExpiresInSeconds) * time.Second
+	url, err := s.client.PresignHeader(ctx, http.MethodPut, bucket, key, expires, nil, headers)
+	if err != nil {
+		return PresignedUpload{}, fmt.Errorf("cannot presign upload url: %w", err)
+	}
+
+	return PresignedUpload{
+		UploadURL:        url,
+		Bucket:           bucket,
+		ObjectKey:        key,
+		ExpiresInSeconds: params.ExpiresInSeconds,
+	}, nil
 }
 
 func (s *Service) ensureBucket(ctx context.Context, bucket string) error {

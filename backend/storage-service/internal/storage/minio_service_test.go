@@ -140,3 +140,48 @@ func TestService_ErrorsOnMissingBucket(t *testing.T) {
 	_, err := svc.UploadMarkdown(context.Background(), "org", "proj", "id-1", []byte("md"))
 	require.Error(t, err)
 }
+
+func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
+	client := newMockClient("knowledge-docx")
+	generator := NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
+	svc := NewService(client, generator, "knowledge-docx", "knowledge-md")
+
+	ctx := context.Background()
+
+	params := GenerateUploadURLParams{
+		OrgSlug:          "org",
+		ProjectSlug:      "proj",
+		DocumentID:       "doc-1",
+		FileName:         "test.docx",
+		ContentLength:    1024,
+		CorrelationID:    "corr-1",
+		ExpiresInSeconds: 600,
+	}
+
+	resp, err := svc.GenerateUploadURL(ctx, "knowledge-docx", params)
+	require.NoError(t, err)
+	require.Equal(t, "knowledge-docx", resp.Bucket)
+	require.Contains(t, resp.ObjectKey, "doc-1.docx")
+	require.Equal(t, int64(600), resp.ExpiresInSeconds)
+	require.Equal(t, "http://example.com/presigned", resp.UploadURL.String())
+	require.Equal(t, "corr-1", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
+
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-docx", GenerateUploadURLParams{})
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-docx", GenerateUploadURLParams{
+		DocumentID:       "doc-1",
+		FileName:         "unsafe.exe",
+		ContentLength:    10,
+		ExpiresInSeconds: 10,
+	})
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-docx", GenerateUploadURLParams{
+		DocumentID:       "doc-1",
+		FileName:         "demo.pdf",
+		ContentLength:    -1,
+		ExpiresInSeconds: 10,
+	})
+	require.ErrorIs(t, err, ErrInvalidArgument)
+}
