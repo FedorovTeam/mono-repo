@@ -12,10 +12,15 @@
    - Сервис проверяет допустимый переход (`Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`) или `Failed`.
    - При корректном шаге пишет лог и обновляет статус документа.
 
-3. **Подтверждение загрузки**
+3. **Подтверждение загрузки и обработка**
    - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после уведомления MinIO.
-   - Document-service фиксирует статус `StoredOriginal`, сохраняет workflow-id/RunID и запускает Temporal workflow с тем же `workflow_id`.
-   - В ходе Workflow шаг публикации отправляет `commit_message`, сформированный из имени документа, прокидывает `correlation_id` = workflow-id, передаёт `create_pr` и использует либо содержимое Markdown, либо пару `bucket/object_key` из хранилища, если контент отсутствует.
+   - Document-service валидирует бакет/ключ, сохраняет RunID workflow и запускает Temporal workflow с `workflow_id = document_id`.
+   - Workflow включает активности:
+     - `AwaitOriginal` — опрашивает storage-service (`GetObject`) до готовности исходника, после чего выставляет статус `StoredOriginal` в PostgreSQL.
+     - `ConvertToMarkdown` — вызывает docling-transformer-service и записывает `ConvertedToMarkdown` с ключом Markdown.
+     - `PublishMarkdown` — вызывает github-publisher-service, прокидывая `correlation-id = workflow_id`, commit message из имени документа и флаг `create_pr`, после успешной публикации переводит статус в `PublishedToGitHub`.
+   - При ошибке любая активность пишет статус `Failed` и причину в `documents.error_reason`, Temporal применяет retry-политику для временных сбоев.
+   - Повторная загрузка исходника с тем же `document_id` (повторный `ConfirmUpload`) перезапускает workflow и даёт новый цикл статусов.
 
 3. **Чтение документа**
    - `GetDocument` возвращает документ с последней версией и текущим статусом.

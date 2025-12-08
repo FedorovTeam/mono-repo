@@ -9,6 +9,9 @@ sequenceDiagram
     participant R as Репозиторий (PostgreSQL)
     participant T as Temporal Client
     participant M as MinIO
+    participant ST as storage-service
+    participant TR as docling-transformer-service
+    participant GP as github-publisher-service
 
     C->>G: CreateDocument(id?, fileName, owner?, repository, branch, baseBranch?, path,
     uploadBucket?, uploadObjectKey?, markdownBucket?, markdownObjectKey?, contentLength, createPr?)
@@ -26,8 +29,14 @@ sequenceDiagram
 
     M-->>G: Event ObjectCreated(bucket=knowledge-docx, object_key)
     G->>S: ConfirmUpload(document_id, bucket, object_key)
-    S-->>S: Проверка bucket/object_key и обновление статуса StoredOriginal
-    S->>T: Запуск DocumentProcessingWorkflow(taskQueue, input{bucket'ы, object key, ext, publishPath, version, owner/repo/branch})
-    T->>G: Activity PublishMarkdown(commit_message из имени документа, correlation_id=workflow_id, create_pr, content или bucket/object_key)
-    T-->>S: Workflow запущен, сохранение workflow_id
+    S-->>S: Проверка bucket/object_key, возврат документа и запуск Workflow (ID=document_id, taskQueue из config)
+    S->>T: Start DocumentProcessingWorkflow(document_id)
+    T->>S: Activity AwaitOriginal → GetObject в storage-service, статус StoredOriginal в БД
+    T->>TR: Activity ConvertToMarkdown(bucket/object_key) с correlation-id
+    TR-->>T: MarkdownContent + markdown_object_key
+    T->>S: Update статус ConvertedToMarkdown, сохранение версии
+    T->>GP: Activity PublishMarkdown(bucket/object_key или content, create_pr, commit_message)
+    GP-->>T: Publish result
+    T->>S: Update статус PublishedToGitHub, reason при ошибке = Failed
+    T-->>S: Workflow завершён, RunID сохранён
 ```

@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,6 +18,7 @@ type fakeRepo struct {
 	lastStatus  model.Status
 	lastVersion *model.DocumentVersion
 	lastError   string
+	doc         *model.Document
 }
 
 func (f *fakeRepo) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -24,7 +26,10 @@ func (f *fakeRepo) CreateDocument(ctx context.Context, doc *model.Document, vers
 }
 
 func (f *fakeRepo) GetDocument(ctx context.Context, id string) (*model.Document, error) {
-	return nil, nil
+	if f.doc != nil && f.doc.ID == id {
+		return f.doc, nil
+	}
+	return nil, fmt.Errorf("document %s not found", id)
 }
 
 func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
@@ -57,6 +62,7 @@ type fakeStorageClient struct {
 	markdownReq *storagev1.UploadMarkdownRequest
 	resp        *storagev1.UploadObjectResponse
 	err         error
+	getReq      *storagev1.GetObjectRequest
 }
 
 func (f *fakeStorageClient) UploadOriginal(ctx context.Context, in *storagev1.UploadOriginalRequest, opts ...grpc.CallOption) (*storagev1.UploadObjectResponse, error) {
@@ -69,7 +75,8 @@ func (f *fakeStorageClient) UploadMarkdown(ctx context.Context, in *storagev1.Up
 }
 
 func (f *fakeStorageClient) GetObject(ctx context.Context, in *storagev1.GetObjectRequest, opts ...grpc.CallOption) (*storagev1.GetObjectResponse, error) {
-	return nil, nil
+	f.getReq = in
+	return &storagev1.GetObjectResponse{Bucket: in.GetBucket(), ObjectKey: in.GetObjectKey()}, nil
 }
 
 func (f *fakeStorageClient) GenerateUploadURL(ctx context.Context, in *storagev1.GenerateUploadURLRequest, opts ...grpc.CallOption) (*storagev1.GenerateUploadURLResponse, error) {
@@ -132,6 +139,41 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 
 	if repo.lastVersion == nil || repo.lastVersion.Version != 3 || repo.lastVersion.MarkdownObjectKey != "md-key" {
 		t.Fatalf("version was not saved correctly: %+v", repo.lastVersion)
+	}
+}
+
+func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
+	doc := &model.Document{
+		ID:                "doc-1",
+		Name:              "Document title",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc-1.md",
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "orig/doc-1.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "md/doc-1.md",
+		Versions:          []model.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/doc-1.docx", MarkdownObjectKey: "md/doc-1.md"}},
+	}
+	repo := &fakeRepo{doc: doc}
+	storage := &fakeStorageClient{}
+	activities := NewActivities(repo, storage, nil, nil, "owner", "repo", "main", "main", "https://api.github.com")
+
+	snapshot, err := activities.AwaitOriginal(context.Background(), doc.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if storage.getReq == nil || storage.getReq.GetBucket() != doc.OriginalBucket || storage.getReq.GetObjectKey() != doc.OriginalObjectKey {
+		t.Fatalf("storage GetObject not called with expected params: %+v", storage.getReq)
+	}
+	if repo.lastStatus != model.StatusStoredOriginal {
+		t.Fatalf("expected status StoredOriginal, got %v", repo.lastStatus)
+	}
+	if snapshot.PublishPath != doc.Path {
+		t.Fatalf("unexpected publish path: %s", snapshot.PublishPath)
 	}
 }
 

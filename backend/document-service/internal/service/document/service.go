@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -196,13 +195,20 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		return nil, errors.New("bucket is required")
 	}
 
-	doc, err := s.repo.UpdateStatus(ctx, in.DocumentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: 1, OriginalObjectKey: in.ObjectKey})
+	doc, err := s.repo.GetDocument(ctx, in.DocumentID)
 	if err != nil {
 		return nil, err
+	}
+	if doc == nil {
+		return nil, errors.New("document not found")
 	}
 	if doc.OriginalBucket != "" && doc.OriginalBucket != in.Bucket {
 		return nil, fmt.Errorf("bucket mismatch: expected %s, got %s", doc.OriginalBucket, in.Bucket)
 	}
+	if doc.OriginalObjectKey != "" && doc.OriginalObjectKey != in.ObjectKey {
+		return nil, fmt.Errorf("object key mismatch: expected %s, got %s", doc.OriginalObjectKey, in.ObjectKey)
+	}
+
 	if s.temporal == nil {
 		return doc, nil
 	}
@@ -212,34 +218,7 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		TaskQueue: s.taskQueue,
 	}
 
-	publishPath := doc.Path
-	if publishPath == "" {
-		publishPath = doc.Name
-	}
-	version := int32(1)
-	if len(doc.Versions) > 0 {
-		version = doc.Versions[len(doc.Versions)-1].Version
-	}
-
-	input := WorkflowInput{
-		DocumentID:        doc.ID,
-		DocumentName:      doc.Name,
-		Owner:             doc.Owner,
-		Repository:        doc.Repository,
-		Branch:            doc.Branch,
-		BaseBranch:        doc.BaseBranch,
-		OriginalBucket:    doc.OriginalBucket,
-		MarkdownBucket:    doc.MarkdownBucket,
-		OriginalObjectKey: doc.OriginalObjectKey,
-		MarkdownObjectKey: doc.MarkdownObjectKey,
-		FilenameExt:       strings.TrimPrefix(filepath.Ext(in.ObjectKey), "."),
-		PublishPath:       publishPath,
-		Path:              doc.Path,
-		Version:           version,
-		CreatePR:          doc.CreatePR,
-	}
-
-	run, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input)
+	run, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, WorkflowInput{DocumentID: doc.ID})
 	if err != nil {
 		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, fmt.Sprintf("start workflow: %v", err), fmt.Sprintf("start workflow: %v", err), nil)
 		return nil, fmt.Errorf("start workflow: %w", err)

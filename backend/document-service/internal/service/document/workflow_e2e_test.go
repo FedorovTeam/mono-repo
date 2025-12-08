@@ -82,10 +82,30 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	}))
 	defer githubServer.Close()
 
-	activities := NewActivities(&memoryRepo{}, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main", githubServer.URL)
+	docID := uuid.NewString()
+	repo := &memoryRepo{doc: &model.Document{
+		ID:                docID,
+		Name:              "Document title",
+		Owner:             "custom-owner",
+		Repository:        "custom-repo",
+		Branch:            "custom-branch",
+		BaseBranch:        "main",
+		Path:              "docs/key.md",
+		WorkflowID:        docID,
+		Status:            model.StatusUploaded,
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "orig/key.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "md/key.md",
+		Versions:          []model.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/key.docx", MarkdownObjectKey: "md/key.md"}},
+		CreatePR:          true,
+	}}
+
+	activities := NewActivities(repo, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main", githubServer.URL)
 	activities.httpClient = githubServer.Client()
 	workerInstance := worker.New(temporalClient, "document-processing", worker.Options{})
 	workerInstance.RegisterWorkflow(DocumentProcessingWorkflow)
+	workerInstance.RegisterActivityWithOptions(activities.AwaitOriginal, activity.RegisterOptions{Name: ActivityAwaitOriginalName})
 	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: ActivityUploadOriginalName})
 	workerInstance.RegisterActivityWithOptions(activities.ConvertToMarkdown, activity.RegisterOptions{Name: ActivityConvertToMarkdownName})
 	workerInstance.RegisterActivityWithOptions(activities.PublishMarkdown, activity.RegisterOptions{Name: ActivityPublishMarkdownName})
@@ -94,24 +114,7 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 		_ = workerInstance.Run(worker.InterruptCh())
 	}()
 
-	input := WorkflowInput{
-		DocumentID:        uuid.NewString(),
-		DocumentName:      "Document title",
-		Owner:             "custom-owner",
-		Repository:        "custom-repo",
-		Branch:            "custom-branch",
-		BaseBranch:        "main",
-		OriginalBucket:    "orig",
-		MarkdownBucket:    "md",
-		OriginalObjectKey: "orig/key.docx",
-		MarkdownObjectKey: "md/key.md",
-		FilenameExt:       ".docx",
-		PublishPath:       "docs/key.md",
-		Path:              "docs/key.md",
-		OriginalContent:   []byte("content"),
-		Version:           1,
-		CreatePR:          true,
-	}
+	input := WorkflowInput{DocumentID: docID}
 	options := client.StartWorkflowOptions{ID: input.DocumentID, TaskQueue: "document-processing"}
 	run, err := temporalClient.ExecuteWorkflow(ctx, options, DocumentProcessingWorkflow, input)
 	if err != nil {
@@ -145,7 +148,7 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	if publisherServer.lastBucket != "md" || publisherServer.lastObjectKey != "md/key.md" {
 		t.Fatalf("bucket/object not passed: %s/%s", publisherServer.lastBucket, publisherServer.lastObjectKey)
 	}
-	if publisherServer.lastCommitMessage != input.DocumentName {
+	if publisherServer.lastCommitMessage != repo.doc.Name {
 		t.Fatalf("unexpected commit message: %s", publisherServer.lastCommitMessage)
 	}
 }
@@ -213,8 +216,9 @@ func (f *fakeStorageServer) UploadMarkdown(ctx context.Context, req *storagev1.U
 	return &storagev1.UploadObjectResponse{Bucket: "md", ObjectKey: fmt.Sprintf("md/%s", req.GetDocumentId())}, nil
 }
 
-func (f *fakeStorageServer) GetObject(context.Context, *storagev1.GetObjectRequest) (*storagev1.GetObjectResponse, error) {
-	return nil, fmt.Errorf("not implemented")
+func (f *fakeStorageServer) GetObject(ctx context.Context, req *storagev1.GetObjectRequest) (*storagev1.GetObjectResponse, error) {
+	f.recorder.record(ctx)
+	return &storagev1.GetObjectResponse{Bucket: req.GetBucket(), ObjectKey: req.GetObjectKey()}, nil
 }
 
 func (f *fakeStorageServer) GenerateUploadURL(context.Context, *storagev1.GenerateUploadURLRequest) (*storagev1.GenerateUploadURLResponse, error) {
@@ -268,13 +272,19 @@ type memoryRepo struct {
 	lastStatus model.Status
 	workflowID string
 	lastError  string
+	doc        *model.Document
 }
 
 func (m *memoryRepo) CreateDocument(context.Context, *model.Document, *model.DocumentVersion, *model.DocumentStatusLog) (*model.Document, error) {
 	return nil, nil
 }
 
-func (m *memoryRepo) GetDocument(context.Context, string) (*model.Document, error) { return nil, nil }
+func (m *memoryRepo) GetDocument(_ context.Context, id string) (*model.Document, error) {
+	if m.doc != nil && m.doc.ID == id {
+		return m.doc, nil
+	}
+	return nil, fmt.Errorf("not found")
+}
 
 func (m *memoryRepo) ListDocuments(context.Context, int, int, *model.Status) ([]model.Document, error) {
 	return nil, nil
@@ -283,10 +293,22 @@ func (m *memoryRepo) ListDocuments(context.Context, int, int, *model.Status) ([]
 func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	m.lastStatus = to
 	m.lastError = errorReason
-	return &model.Document{ID: id, Status: to}, nil
+	if m.doc == nil || m.doc.ID != id {
+		return &model.Document{ID: id, Status: to}, nil
+	}
+	m.doc.Status = to
+	m.doc.ErrorReason = errorReason
+	if version != nil {
+		m.doc.Versions = append(m.doc.Versions, *version)
+	}
+	return m.doc, nil
 }
 
 func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
 	m.workflowID = workflowID
+	if m.doc != nil && m.doc.ID == id {
+		m.doc.WorkflowID = workflowID
+		return m.doc, nil
+	}
 	return &model.Document{ID: id, WorkflowID: workflowID}, nil
 }

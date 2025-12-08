@@ -122,6 +122,10 @@ func main() {
 
 	workerInstance.RegisterWorkflow(docservice.DocumentProcessingWorkflow)
 	workerInstance.RegisterActivityWithOptions(
+		activities.AwaitOriginal,
+		activity.RegisterOptions{Name: docservice.ActivityAwaitOriginalName},
+	)
+	workerInstance.RegisterActivityWithOptions(
 		activities.UploadOriginal,
 		activity.RegisterOptions{Name: docservice.ActivityUploadOriginalName},
 	)

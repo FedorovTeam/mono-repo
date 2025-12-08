@@ -180,12 +180,11 @@ func (workflowStarterSuccess) ExecuteWorkflow(ctx context.Context, options clien
 }
 
 func TestConfirmUploadStartsWorkflow(t *testing.T) {
-	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "path/docx"}}}}
+	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
 	svc := New(repo, &keyMock{}, workflowStarterSuccess{}, "queue", nil, "orig", "md", "owner", "repo", "main", "main")
 
 	doc, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
-	require.Equal(t, model.StatusStoredOriginal, repo.savedStatus)
 	require.Equal(t, "doc-123", doc.WorkflowID)
 	require.Equal(t, "doc-123", repo.workflowID)
 }
