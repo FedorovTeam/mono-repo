@@ -20,7 +20,7 @@
 
 Построить минимально жизнеспособную, но расширяемую платформу, которая:
 
-1. Принимает от пользователя файлы **DOC/DOCX** через публичный API.
+1. Принимает от пользователя файлы **DOC/DOCX/PDF** через публичный API.
 2. Сохраняет оригинал в **MinIO**.
 3. Конвертирует документ в **Markdown** с помощью **Docling-конвертера** (HTTP/gRPC).
 4. Сохраняет результат в MinIO.
@@ -204,9 +204,9 @@ backend/
 
 Минимальный набор bucket’ов:
 
-| Назначение | Bucket | Права | Пример ключа |
-| --- | --- | --- | --- |
-| Оригиналы DOC/DOCX | `knowledge-docx` | private | `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<doc_id>.docx` |
+| Назначение                | Bucket | Права | Пример ключа |
+|---------------------------| --- | --- | --- |
+| Оригиналы DOC/DOCX/PDF    | `knowledge-docx` | private | `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<doc_id>.docx` |
 | Конвертированный Markdown | `knowledge-md` | private | `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<doc_id>.md` |
 
 **Правила:**

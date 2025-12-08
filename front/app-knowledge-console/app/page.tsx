@@ -155,7 +155,7 @@ export default function HomePage() {
       <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
         <div className="w-full max-w-xl mx-auto p-6 bg-slate-900 rounded-2xl shadow-lg border border-slate-800">
           <h1 className="text-2xl font-semibold mb-4">
-            Загрузка DOC/DOCX в knowledge-base
+            Загрузка DOC/DOCX/PDF в knowledge-base
           </h1>
 
           <form onSubmit={handleSubmit} className="space-y-4">
