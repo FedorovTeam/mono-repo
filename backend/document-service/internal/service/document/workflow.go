@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	ActivityAwaitOriginalName     = "document.awaitOriginal"
 	ActivityUploadOriginalName    = "document.uploadOriginal"
 	ActivityConvertToMarkdownName = "document.convertToMarkdown"
 	ActivityPublishMarkdownName   = "document.publishMarkdown"
@@ -32,6 +33,10 @@ type WorkflowStarter interface {
 }
 
 type WorkflowInput struct {
+	DocumentID string
+}
+
+type documentSnapshot struct {
 	DocumentID        string
 	DocumentName      string
 	Owner             string
@@ -42,10 +47,8 @@ type WorkflowInput struct {
 	MarkdownBucket    string
 	OriginalObjectKey string
 	MarkdownObjectKey string
-	FilenameExt       string
 	PublishPath       string
 	Path              string
-	OriginalContent   []byte
 	Version           int32
 	CreatePR          bool
 }
@@ -126,31 +129,18 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 	}
 	ctx = workflow.WithActivityOptions(ctx, options)
 
-	currentVersion := input.Version
-
-	// 👇 Если байты есть — сами кладём оригинал в MinIO
-	if len(input.OriginalContent) > 0 {
-		uploadArg := uploadOriginalInput{
-			DocumentID:      input.DocumentID,
-			FilenameExt:     input.FilenameExt,
-			OriginalContent: input.OriginalContent,
-			Version:         currentVersion + 1,
-		}
-
-		if err := workflow.ExecuteActivity(ctx, ActivityUploadOriginalName, uploadArg).Get(ctx, nil); err != nil {
-			return err
-		}
-
-		currentVersion = uploadArg.Version
+	var snapshot documentSnapshot
+	if err := workflow.ExecuteActivity(ctx, ActivityAwaitOriginalName, input.DocumentID).Get(ctx, &snapshot); err != nil {
+		return err
 	}
 
 	convArg := convertInput{
-		DocumentID:        input.DocumentID,
-		OriginalBucket:    input.OriginalBucket,
-		MarkdownBucket:    input.MarkdownBucket,
-		OriginalObjectKey: input.OriginalObjectKey,
-		MarkdownObjectKey: input.MarkdownObjectKey,
-		Version:           currentVersion + 1,
+		DocumentID:        snapshot.DocumentID,
+		OriginalBucket:    snapshot.OriginalBucket,
+		MarkdownBucket:    snapshot.MarkdownBucket,
+		OriginalObjectKey: snapshot.OriginalObjectKey,
+		MarkdownObjectKey: snapshot.MarkdownObjectKey,
+		Version:           snapshot.Version + 1,
 	}
 
 	var convRes convertResult
@@ -160,22 +150,22 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 
 	markdownKey := convRes.MarkdownKey
 	if markdownKey == "" {
-		markdownKey = input.MarkdownObjectKey
+		markdownKey = snapshot.MarkdownObjectKey
 	}
 
 	pubArg := publishInput{
-		DocumentID:        input.DocumentID,
-		DocumentName:      input.DocumentName,
-		Owner:             input.Owner,
+		DocumentID:        snapshot.DocumentID,
+		DocumentName:      snapshot.DocumentName,
+		Owner:             snapshot.Owner,
 		MarkdownContent:   convRes.MarkdownContent,
-		MarkdownBucket:    input.MarkdownBucket,
+		MarkdownBucket:    snapshot.MarkdownBucket,
 		MarkdownObjectKey: markdownKey,
 		Version:           convArg.Version + 1,
-		Repository:        input.Repository,
-		Branch:            input.Branch,
-		BaseBranch:        input.BaseBranch,
-		Path:              input.PublishPath,
-		CreatePR:          input.CreatePR,
+		Repository:        snapshot.Repository,
+		Branch:            snapshot.Branch,
+		BaseBranch:        snapshot.BaseBranch,
+		Path:              snapshot.PublishPath,
+		CreatePR:          snapshot.CreatePR,
 	}
 
 	if err := workflow.ExecuteActivity(ctx, ActivityPublishMarkdownName, pubArg).Get(ctx, nil); err != nil {
@@ -183,6 +173,64 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 	}
 
 	return nil
+}
+
+func (a *Activities) AwaitOriginal(ctx context.Context, documentID string) (documentSnapshot, error) {
+	ctx = a.withCorrelationID(ctx)
+	if a.storage == nil {
+		return documentSnapshot{}, fmt.Errorf("storage client is not configured")
+	}
+
+	doc, err := a.repo.GetDocument(ctx, documentID)
+	if err != nil {
+		return documentSnapshot{}, err
+	}
+	if doc == nil {
+		return documentSnapshot{}, fmt.Errorf("document %s not found", documentID)
+	}
+	if doc.OriginalBucket == "" || doc.OriginalObjectKey == "" {
+		return documentSnapshot{}, fmt.Errorf("document %s has no original object key", documentID)
+	}
+
+	if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: doc.OriginalBucket, ObjectKey: doc.OriginalObjectKey}); err != nil {
+		_ = a.fail(ctx, documentID, fmt.Sprintf("wait original: %v", err))
+		return documentSnapshot{}, err
+	}
+
+	version := int32(1)
+	if len(doc.Versions) > 0 {
+		version = doc.Versions[len(doc.Versions)-1].Version
+	}
+
+	if _, err := a.repo.UpdateStatus(ctx, documentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey}); err != nil {
+		return documentSnapshot{}, err
+	}
+
+	publishPath := doc.Path
+	if publishPath == "" {
+		publishPath = doc.Name
+	}
+	baseBranch := doc.BaseBranch
+	if baseBranch == "" {
+		baseBranch = doc.Branch
+	}
+
+	return documentSnapshot{
+		DocumentID:        documentID,
+		DocumentName:      doc.Name,
+		Owner:             doc.Owner,
+		Repository:        doc.Repository,
+		Branch:            doc.Branch,
+		BaseBranch:        baseBranch,
+		OriginalBucket:    doc.OriginalBucket,
+		MarkdownBucket:    doc.MarkdownBucket,
+		OriginalObjectKey: doc.OriginalObjectKey,
+		MarkdownObjectKey: doc.MarkdownObjectKey,
+		PublishPath:       publishPath,
+		Path:              doc.Path,
+		Version:           version,
+		CreatePR:          doc.CreatePR,
+	}, nil
 }
 
 func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInput) error {
@@ -302,11 +350,16 @@ func (a *Activities) fail(ctx context.Context, documentID, reason string) error 
 }
 
 func (a *Activities) withCorrelationID(ctx context.Context) context.Context {
-	info, ok := activityInfo(ctx)
-	if !ok || info.WorkflowExecution.ID == "" {
+	id := correlationIDFromContext(ctx)
+	if id == "" {
+		if info, ok := activityInfo(ctx); ok {
+			id = info.WorkflowExecution.ID
+		}
+	}
+	if id == "" {
 		return ctx
 	}
-	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, info.WorkflowExecution.ID)
+	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, id)
 }
 
 func activityInfo(ctx context.Context) (activity.Info, bool) {
@@ -314,6 +367,20 @@ func activityInfo(ctx context.Context) (activity.Info, bool) {
 		_ = recover()
 	}()
 	return activity.GetInfo(ctx), true
+}
+
+func correlationIDFromContext(ctx context.Context) string {
+	if md, ok := metadata.FromOutgoingContext(ctx); ok {
+		if vals := md.Get(correlationIDHeader); len(vals) > 0 {
+			return vals[0]
+		}
+	}
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get(correlationIDHeader); len(vals) > 0 {
+			return vals[0]
+		}
+	}
+	return ""
 }
 
 func (a *Activities) validateRepository(ctx context.Context, owner, repository string) error {

@@ -7,6 +7,12 @@
 - MinIO — хранение оригинала и конвертированного Markdown (только ключи на стороне сервиса).
 - gRPC — внутренний API `proto/backend/document/document.proto`.
 
+## Статусы и повторная обработка
+- Жизненный цикл документа фиксируется в статусах `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub` с отдельным состоянием `Failed`.
+- Workflow запускается по событию `ConfirmUpload` (после загрузки исходника в MinIO) и проходит шаги `await original → convert → publish`, обновляя статус в PostgreSQL после каждого вызова внешних сервисов.
+- Встроенная retry-политика Temporal повторяет активности при временных ошибках; при постоянной ошибке статус меняется на `Failed` с причиной из активности.
+- Для повторной обработки достаточно заново вызвать `ConfirmUpload` с тем же `document_id` и новым объектом в MinIO — новый Workflow стартует с тем же идентификатором и перезапишет статусы.
+
 ## Формат ключей в MinIO
 Сервис формирует ключи по шаблону `<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<entity_specific_path>/{original|markdown}`.
 По умолчанию в доменный путь добавляется `document_id` и путь публикации/файла. Пример итогового ключа:
