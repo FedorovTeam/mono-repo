@@ -1,76 +1,76 @@
-# infra/argocd/budibase-app.yaml
-
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: budibase
-  namespace: argocd
-spec:
-  project: default
-
-  # Официальный Helm-репозиторий Budibase
-  source:
-    repoURL: https://budibase.github.io/budibase/
-    chart: budibase
-    # Версия чарта
-    targetRevision: 3.0.493
-
-    helm:
-      values: |-
-        ingress:
-          enabled: true
-          className: "traefik"
-          annotations:
-            cert-manager.io/cluster-issuer: "letsencrypt"
-            traefik.ingress.kubernetes.io/router.entrypoints: websecure
-          hosts:
-            - host: budibase.tech.fedorov-team.tech
-              paths:
-                - path: /
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: proxy-service
-                      port:
-                        number: 10000
-          tls:
-            - hosts:
-                - budibase.tech.fedorov-team.tech
-              secretName: budibase-tls
-
-        couchdb:
-          persistentVolume:
-            enabled: true
-            size: 10Gi
-
-        services:
-          redis:
-            enabled: false
-            url: redis-master.redis.svc.cluster.local
-            port: 6379
-            password: ""
-
-          objectStore:
-            minio: false
-            url: "https://api.minio.tech.fedorov-team.tech"
-            accessKey: 0t4IWkzYzMKfFsfNOdWs
-            secretKey: dJ1CiwAjlLdpui0erccAeC1DaPv0USrUP2Uvd3rv
-            bucket: budibase
-
-        globals:
-          createSecrets: true
-          jwtSecret: "4ecb9dcdee1507c2f1a9c72f5736dfdc281607ad35db49aba2f39431484f0002"
-          internalApiKey: "f0bbeae0f1960580f3b9d3599a4ae35d3334e5ed589c6f73fd81870cb872e30a"
-          apiEncryptionKey: "742f0a0321838ae81d6807963113aa4dcca878573ebb072a4059d90e18527d88"
-
-
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: budibase
-
-  syncPolicy:
-    automated:
-      selfHeal: true
-      prune: true
-    syncOptions:
-      - CreateNamespace=true
+## infra/argocd/budibase-app.yaml
+#
+#apiVersion: argoproj.io/v1alpha1
+#kind: Application
+#metadata:
+#  name: budibase
+#  namespace: argocd
+#spec:
+#  project: default
+#
+#  # Официальный Helm-репозиторий Budibase
+#  source:
+#    repoURL: https://budibase.github.io/budibase/
+#    chart: budibase
+#    # Версия чарта
+#    targetRevision: 3.0.493
+#
+#    helm:
+#      values: |-
+#        ingress:
+#          enabled: true
+#          className: "traefik"
+#          annotations:
+#            cert-manager.io/cluster-issuer: "letsencrypt"
+#            traefik.ingress.kubernetes.io/router.entrypoints: websecure
+#          hosts:
+#            - host: budibase.tech.fedorov-team.tech
+#              paths:
+#                - path: /
+#                  pathType: Prefix
+#                  backend:
+#                    service:
+#                      name: proxy-service
+#                      port:
+#                        number: 10000
+#          tls:
+#            - hosts:
+#                - budibase.tech.fedorov-team.tech
+#              secretName: budibase-tls
+#
+#        couchdb:
+#          persistentVolume:
+#            enabled: true
+#            size: 10Gi
+#
+#        services:
+#          redis:
+#            enabled: false
+#            url: redis-master.redis.svc.cluster.local
+#            port: 6379
+#            password: ""
+#
+#          objectStore:
+#            minio: false
+#            url: "https://api.minio.tech.fedorov-team.tech"
+#            accessKey: 0t4IWkzYzMKfFsfNOdWs
+#            secretKey: dJ1CiwAjlLdpui0erccAeC1DaPv0USrUP2Uvd3rv
+#            bucket: budibase
+#
+#        globals:
+#          createSecrets: true
+#          jwtSecret: "4ecb9dcdee1507c2f1a9c72f5736dfdc281607ad35db49aba2f39431484f0002"
+#          internalApiKey: "f0bbeae0f1960580f3b9d3599a4ae35d3334e5ed589c6f73fd81870cb872e30a"
+#          apiEncryptionKey: "742f0a0321838ae81d6807963113aa4dcca878573ebb072a4059d90e18527d88"
+#
+#
+#  destination:
+#    server: https://kubernetes.default.svc
+#    namespace: budibase
+#
+#  syncPolicy:
+#    automated:
+#      selfHeal: true
+#      prune: true
+#    syncOptions:
+#      - CreateNamespace=true

@@ -1,0 +1,141 @@
+# manifests/outline/outline.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: outline
+  namespace: outline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: outline
+  template:
+    metadata:
+      labels:
+        app: outline
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: outline
+      containers:
+        - name: outline
+          image: docker.getoutline.com/outlinewiki/outline:latest
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 300m
+              memory: 1024Mi
+          env:
+            - name: LOG_LEVEL
+              value: "debug"
+            - name: SECRET_KEY
+              value: "bf8830ab8aed998aea5f05d824e469be47601e77e28612a4086bffcd8879b21d"
+            - name: UTILS_SECRET
+              value: "dc743f8376ec5a2dcb3c27b0cd38c70ed5e46f4537709defed462f482960a9ca"
+            - name: DATABASE_URL
+              value: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/outline?sslmode=disable"
+            - name: REDIS_URL
+              value: "redis://redis-master.redis.svc.cluster.local:6379"
+            - name: DEFAULT_LANGUAGE
+              value: "en_US"
+            - name: FILE_STORAGE
+              value: "s3"
+            - name: FILE_STORAGE_UPLOAD_MAX_SIZE
+              value: "26214400"
+            - name: AWS_ACCESS_KEY_ID
+              value: "qbOdyeo5uzaPs2ERSIQK"
+            - name: AWS_SECRET_ACCESS_KEY
+              value: "hwkNM8i9o2bhU5LrTMvYfCdnhXJJ5MrjcneQy473"
+            - name: AWS_REGION
+              value: "ru-central"
+            - name: AWS_S3_UPLOAD_BUCKET_URL
+              value: "https://api.minio.tech.fedorov-team.tech/"
+            - name: AWS_S3_UPLOAD_BUCKET_NAME
+              value: "outline"
+            - name: AWS_S3_FORCE_PATH_STYLE
+              value: "true"
+            - name: AWS_S3_ACL
+              value: "private"
+            - name: OIDC_CLIENT_ID
+              value: "pcUSCuLaDzWyI0pC6Mog0LaoHfJpTQMvoMCdSBa5"
+            - name: OIDC_CLIENT_SECRET
+              value: "rQJMOP6VXMNwrM4j03smW913YDp3pKBtEIdkvDp21aK1Ano7zJIrWdyhkGFjuh0LfKICKxgFSVj1QKCcqIvI2drNoaBq8Mwtup4K164rrl8kEq14a32SszLf8F64bcct"
+            - name: OIDC_AUTH_URI
+              value: "https://auth.tech.fedorov-team.tech/application/o/authorize/"
+            - name: OIDC_TOKEN_URI
+              value: "https://auth.tech.fedorov-team.tech/application/o/token/"
+            - name: OIDC_USERINFO_URI
+              value: "https://auth.tech.fedorov-team.tech/application/o/userinfo/"
+            - name: OIDC_LOGOUT_URI
+              value: "https://auth.tech.fedorov-team.tech/application/o/wiki/end-session/"
+            - name: OIDC_USERNAME_CLAIM
+              value: "preferred_username"
+            - name: OIDC_DISPLAY_NAME
+              value: "authentik"
+            - name: OIDC_SCOPES
+              value: "email openid profile"
+            - name: FORCE_HTTPS
+              value: "true"
+            - name: SMTP_HOST
+              value: "smtp.mail.ru"
+            - name: SMTP_PORT
+              value: "465"
+            - name: SMTP_USERNAME
+              value: "growth-story@mail.ru"
+            - name: SMTP_PASSWORD
+              value: "ZhVYLBdWTDjTG9xUR5yC"
+            - name: SMTP_FROM_EMAIL
+              value: "growth-story@mail.ru"
+            - name: URL
+              value: "https://docs.tech.fedorov-team.tech"
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: outline-data
+              mountPath: /var/lib/outline/data
+      volumes:
+        - name: outline-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: outline
+  namespace: outline
+spec:
+  selector:
+    app: outline
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: outline
+  namespace: outline
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - docs.tech.fedorov-team.tech
+      secretName: outline-tls
+  rules:
+    - host: docs.tech.fedorov-team.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: outline
+                port:
+                  number: 3000
