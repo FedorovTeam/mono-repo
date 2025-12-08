@@ -19,6 +19,7 @@ type repoMock struct {
 	err         error
 	savedStatus model.Status
 	workflowID  string
+	savedError  string
 }
 
 func (r *repoMock) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -44,7 +45,7 @@ func (r *repoMock) ListDocuments(ctx context.Context, limit, offset int, status 
 	}
 	return []model.Document{*r.doc}, nil
 }
-func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status, reason string, version *model.DocumentVersion) (*model.Document, error) {
+func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -52,7 +53,11 @@ func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status,
 		return nil, errors.New("missing doc")
 	}
 	r.savedStatus = to
+	r.savedError = errorReason
 	r.doc.Status = to
+	if errorReason != "" {
+		r.doc.ErrorReason = errorReason
+	}
 	if version != nil {
 		if len(r.doc.Versions) == 0 {
 			r.doc.Versions = []model.DocumentVersion{*version}
@@ -99,10 +104,13 @@ func TestCreateDocumentValidation(t *testing.T) {
 func TestCreateDocumentSuccess(t *testing.T) {
 	repo := &repoMock{}
 	svc := New(repo, keyMock{}, nil, "", nil, "orig", "md")
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx"})
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx", Repository: "repo/name", Branch: "main", Path: "docs/name.md"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
 	require.Equal(t, doc.ID, doc.WorkflowID)
+	require.Equal(t, "repo/name", doc.Repository)
+	require.Equal(t, "main", doc.Branch)
+	require.Equal(t, "docs/name.md", doc.Path)
 	require.Equal(t, "orig", doc.OriginalBucket)
 	require.Equal(t, "md", doc.MarkdownBucket)
 	require.Equal(t, model.StatusUploaded, doc.Status)
@@ -180,6 +188,16 @@ func TestUpdateStatusDelegates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.StatusStoredOriginal, doc.Status)
 	require.Equal(t, model.StatusStoredOriginal, repo.savedStatus)
+}
+
+func TestUpdateStatusSavesErrorReason(t *testing.T) {
+	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
+	svc := New(repo, keyMock{}, nil, "", nil, "orig", "md")
+
+	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusFailed, Reason: "boom"})
+	require.NoError(t, err)
+	require.Equal(t, "boom", repo.savedError)
+	require.Equal(t, "boom", doc.ErrorReason)
 }
 
 func TestCreateDocumentKeyFailure(t *testing.T) {
