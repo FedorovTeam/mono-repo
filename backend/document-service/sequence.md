@@ -16,8 +16,8 @@ sequenceDiagram
     G->>S: Вызов CreateDocument с извлечённым расширением файла
     S-->>S: Проверка имени и id (UUID)
     S-->>S: Определение bucket'ов (заданые или значения по умолчанию)
-    S->>K: GenerateKeys()
-    K-->>S: originalKey, markdownKey (с валидацией существования bucket'ов)
+    S->>K: GenerateKeys(documentId, publishPath)
+    K-->>S: originalKey, markdownKey (<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<entity_path>/...)
     S-->>S: Выбор итоговых object key (переданные или сгенерированные)
     S->>R: Транзакция: вставка document со статусом Uploaded,
     версия v1, запись в document_status_logs
