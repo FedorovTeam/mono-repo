@@ -10,12 +10,12 @@ import (
 
 func TestBuildBasePathUsesDateAndEntityPath(t *testing.T) {
 	manager := &MinioKeyManager{prefix: "documents"}
-	data := KeyGenerationData{DocumentID: "doc-123", PublishPath: "content/docs/readme.md"}
+	data := KeyGenerationData{DocumentID: "doc-123", PublishPath: "content/docs/readme.md", EntitySpecificPath: "domain/readme"}
 
 	now := time.Now().UTC()
 	base := manager.buildBasePath(data)
 
-	expected := fmt.Sprintf("documents/year=%04d/month=%02d/day=%02d/doc-123/content/docs/readme.md", now.Year(), now.Month(), now.Day())
+	expected := fmt.Sprintf("documents/year=%04d/month=%02d/day=%02d/doc-123/domain/readme", now.Year(), now.Month(), now.Day())
 	require.Equal(t, expected, base)
 }
 

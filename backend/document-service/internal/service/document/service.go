@@ -51,21 +51,22 @@ func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarte
 }
 
 type CreateInput struct {
-	ID                string
-	FileName          string
-	Owner             string
-	Repository        string
-	Branch            string
-	BaseBranch        string
-	Path              string
-	UploadBucket      string
-	UploadObjectKey   string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	OriginalContent   []byte
-	FilenameExt       string
-	PublishPath       string
-	CreatePR          bool
+	ID                 string
+	FileName           string
+	Owner              string
+	Repository         string
+	Branch             string
+	BaseBranch         string
+	Path               string
+	UploadBucket       string
+	UploadObjectKey    string
+	MarkdownBucket     string
+	MarkdownObjectKey  string
+	OriginalContent    []byte
+	FilenameExt        string
+	PublishPath        string
+	EntitySpecificPath string
+	CreatePR           bool
 }
 
 type ConfirmUploadInput struct {
@@ -137,10 +138,11 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	}
 
 	pair, err := s.keyManager.GenerateKeys(ctx, storage.KeyGenerationData{
-		DocumentID:  in.ID,
-		FileName:    in.FileName,
-		Path:        path,
-		PublishPath: publishPath,
+		DocumentID:         in.ID,
+		FileName:           in.FileName,
+		Path:               path,
+		PublishPath:        publishPath,
+		EntitySpecificPath: strings.TrimSpace(in.EntitySpecificPath),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate keys: %w", err)
