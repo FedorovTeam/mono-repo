@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,6 +37,12 @@ func newMockClient(buckets ...string) *mockClient {
 
 func (m *mockClient) BucketExists(_ context.Context, bucketName string) (bool, error) {
 	return m.buckets[bucketName], nil
+}
+
+func (m *mockClient) ListenBucketNotification(ctx context.Context, bucketName, prefix, suffix string, events []string) <-chan notification.Info {
+	ch := make(chan notification.Info)
+	close(ch)
+	return ch
 }
 
 func (m *mockClient) MakeBucket(_ context.Context, bucketName string, _ minio.MakeBucketOptions) error {

@@ -212,6 +212,7 @@ func (f *fakePublisherServer) PublishMarkdown(ctx context.Context, req *githubpu
 
 type memoryRepo struct {
 	lastStatus model.Status
+	workflowID string
 }
 
 func (m *memoryRepo) CreateDocument(context.Context, *model.Document, *model.DocumentVersion, *model.DocumentStatusLog) (*model.Document, error) {
@@ -227,4 +228,9 @@ func (m *memoryRepo) ListDocuments(context.Context, int, int, *model.Status) ([]
 func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason string, version *model.DocumentVersion) (*model.Document, error) {
 	m.lastStatus = to
 	return &model.Document{ID: id, Status: to}, nil
+}
+
+func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
+	m.workflowID = workflowID
+	return &model.Document{ID: id, WorkflowID: workflowID}, nil
 }

@@ -23,7 +23,7 @@ func TestCreateDocument(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO documents")).
-		WithArgs(sqlmock.AnyArg(), "file.docx", string(model.StatusUploaded), "orig", "orig/key", "md", "md/key", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "file.docx", string(model.StatusUploaded), "", "orig", "orig/key", "md", "md/key", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO document_versions")).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -61,8 +61,8 @@ func TestUpdateStatusFlow(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id, name, status").
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", model.StatusUploaded, "orig", "orig/key", "md", "md/key", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", model.StatusUploaded, "", "orig", "orig/key", "md", "md/key", now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
 		WillReturnError(sql.ErrNoRows)
@@ -99,8 +99,8 @@ func TestUpdateStatusIdempotent(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id, name, status").
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", model.StatusStoredOriginal, "orig", "orig/key2", "md", "md/key2", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", model.StatusStoredOriginal, "wf", "orig", "orig/key2", "md", "md/key2", now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
@@ -132,8 +132,8 @@ func TestUpdateStatusVersionConflict(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id, name, status").
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", model.StatusStoredOriginal, "orig", "orig/key", "md", "md/key", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", model.StatusStoredOriginal, "wf", "orig", "orig/key", "md", "md/key", now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
@@ -154,8 +154,8 @@ func TestListDocuments(t *testing.T) {
 	ctx := context.Background()
 
 	mock.ExpectQuery("SELECT id, name, status").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", model.StatusUploaded, "orig", "orig/key", "md", "md/key", time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", model.StatusUploaded, "", "orig", "orig/key", "md", "md/key", time.Now(), time.Now()))
 
 	docs, err := repo.ListDocuments(ctx, 0, 0, nil)
 	require.NoError(t, err)

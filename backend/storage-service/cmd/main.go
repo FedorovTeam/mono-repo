@@ -14,6 +14,7 @@ import (
 	"backend-storage-service/config"
 	"backend-storage-service/internal/storage"
 	"backend-storage-service/internal/transport/grpcserver"
+	documentv1 "backend-storage-service/proto/backend/document/v1"
 	storagev1 "backend-storage-service/proto/backend/storage/v1"
 )
 
@@ -45,6 +46,20 @@ func main() {
 		cfg.Minio.Buckets.KnowledgeDocx,
 		cfg.Minio.Buckets.KnowledgeMD,
 	)
+
+	documentConn, err := grpc.DialContext(ctx, cfg.Service.DocumentService, grpc.WithInsecure())
+	if err != nil {
+		log.Fatalf("не удалось подключиться к document-service: %v", err)
+	}
+	defer documentConn.Close()
+
+	uploadBucket := cfg.Events.UploadBucket
+	if uploadBucket == "" {
+		uploadBucket = cfg.Minio.Buckets.KnowledgeDocx
+	}
+
+	handler := storage.NewUploadEventHandler(documentv1.NewDocumentServiceClient(documentConn), log.Default())
+	storage.ListenAndForward(ctx, minioAPI, uploadBucket, handler)
 
 	log.Printf("инициализированы бакеты: docx=%s, md=%s", cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD)
 

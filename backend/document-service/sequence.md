@@ -8,6 +8,7 @@ sequenceDiagram
     participant K as KeyManager (MinIO)
     participant R as Репозиторий (PostgreSQL)
     participant T as Temporal Client
+    participant M as MinIO
 
     C->>G: CreateDocument(id?, fileName, repository, branch, path,
     uploadBucket?, uploadObjectKey?, markdownBucket?, markdownObjectKey?, contentLength)
@@ -21,9 +22,11 @@ sequenceDiagram
     S->>R: Транзакция: вставка document со статусом Uploaded,
     версия v1, запись в document_status_logs
     R-->>S: Сохранённый документ
-    alt Temporal подключен
-        S->>T: Запуск DocumentProcessingWorkflow(taskQueue, input{bucket'ы, object key, ext, publishPath, originalContent, version})
-        T-->>S: Workflow запущен
-    end
     S-->>C: Document{status=Uploaded, object key, bucket'ы}
+
+    M-->>G: Event ObjectCreated(bucket=knowledge-docx, object_key)
+    G->>S: ConfirmUpload(document_id, bucket, object_key)
+    S-->>S: Проверка bucket/object_key и обновление статуса StoredOriginal
+    S->>T: Запуск DocumentProcessingWorkflow(taskQueue, input{bucket'ы, object key, ext, publishPath, version})
+    T-->>S: Workflow запущен, сохранение workflow_id
 ```

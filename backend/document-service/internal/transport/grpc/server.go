@@ -108,11 +108,25 @@ func (s *Server) UpdateDocumentStatus(ctx context.Context, req *documentv1.Updat
 	return toProto(doc), nil
 }
 
+func (s *Server) ConfirmUpload(ctx context.Context, req *documentv1.ConfirmUploadRequest) (*documentv1.Document, error) {
+	s.logWithCorrelation(ctx, "ConfirmUpload")
+	doc, err := s.service.ConfirmUpload(ctx, svc.ConfirmUploadInput{
+		DocumentID: req.GetDocumentId(),
+		Bucket:     req.GetBucket(),
+		ObjectKey:  req.GetObjectKey(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toProto(doc), nil
+}
+
 func toProto(doc *model.Document) *documentv1.Document {
 	p := &documentv1.Document{
 		Id:                doc.ID,
 		FileName:          doc.Name,
 		Status:            toProtoStatus(doc.Status),
+		WorkflowId:        doc.WorkflowID,
 		UploadBucket:      doc.OriginalBucket,
 		UploadObjectKey:   doc.OriginalObjectKey,
 		MarkdownBucket:    doc.MarkdownBucket,

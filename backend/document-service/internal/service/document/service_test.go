@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/client"
 
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/storage"
@@ -17,6 +18,7 @@ type repoMock struct {
 	doc         *model.Document
 	err         error
 	savedStatus model.Status
+	workflowID  string
 }
 
 func (r *repoMock) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -49,6 +51,22 @@ func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status,
 	}
 	r.savedStatus = to
 	r.doc.Status = to
+	if version != nil {
+		if len(r.doc.Versions) == 0 {
+			r.doc.Versions = []model.DocumentVersion{*version}
+		} else {
+			r.doc.Versions[len(r.doc.Versions)-1] = *version
+		}
+	}
+	return r.doc, nil
+}
+
+func (r *repoMock) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
+	if r.doc == nil {
+		return nil, errors.New("missing doc")
+	}
+	r.workflowID = workflowID
+	r.doc.WorkflowID = workflowID
 	return r.doc, nil
 }
 
@@ -86,6 +104,53 @@ func TestCreateDocumentSuccess(t *testing.T) {
 	require.Equal(t, "md", doc.MarkdownBucket)
 	require.Equal(t, model.StatusUploaded, doc.Status)
 	require.Len(t, doc.Versions, 1)
+}
+
+type workflowStarterMock struct {
+	called bool
+}
+
+func (w *workflowStarterMock) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
+	w.called = true
+	return nil, nil
+}
+
+func TestCreateDocumentDoesNotStartWorkflowUntilConfirmation(t *testing.T) {
+	repo := &repoMock{}
+	starter := &workflowStarterMock{}
+	svc := New(repo, keyMock{}, starter, "queue", nil, "orig", "md")
+
+	_, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name.docx", FilenameExt: "docx"})
+	require.NoError(t, err)
+	require.False(t, starter.called)
+}
+
+type workflowRunMock struct{}
+
+func (workflowRunMock) GetID() string    { return "doc-123" }
+func (workflowRunMock) GetRunID() string { return "run-123" }
+func (workflowRunMock) Get(ctx context.Context, valuePtr interface{}) error {
+	return nil
+}
+func (workflowRunMock) GetWithOptions(ctx context.Context, valuePtr interface{}, options client.WorkflowRunGetOptions) error {
+	return nil
+}
+
+type workflowStarterSuccess struct{}
+
+func (workflowStarterSuccess) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
+	return workflowRunMock{}, nil
+}
+
+func TestConfirmUploadStartsWorkflow(t *testing.T) {
+	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", OriginalBucket: "bucket", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "path/docx"}}}}
+	svc := New(repo, keyMock{}, workflowStarterSuccess{}, "queue", nil, "orig", "md")
+
+	doc, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
+	require.NoError(t, err)
+	require.Equal(t, model.StatusStoredOriginal, repo.savedStatus)
+	require.Equal(t, "run-123", doc.WorkflowID)
+	require.Equal(t, "run-123", repo.workflowID)
 }
 
 func TestUpdateStatusValidation(t *testing.T) {

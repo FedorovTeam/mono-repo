@@ -5,6 +5,7 @@ sequenceDiagram
     participant Client as Клиент / Gateway
     participant Storage as StorageService (gRPC)
     participant MinIO
+    participant Doc as DocumentService
 
     %% UploadOriginal
     Client->>Storage: UploadOriginal(org_slug?, project_slug?, document_id, filename_extension, content)
@@ -15,6 +16,8 @@ sequenceDiagram
     Storage->>MinIO: PutObject(bucket=knowledge-docx, key, ContentType=по расширению)
     MinIO-->>Storage: OK
     Storage-->>Client: bucket/key, created_at (+ response metadata: correlation-id, org-slug, project-slug)
+    MinIO-->>Storage: Notification ObjectCreated (knowledge-docx)
+    Storage->>Doc: ConfirmUpload(document_id, bucket, object_key)
 
     %% UploadMarkdown
     Client->>Storage: UploadMarkdown(org_slug?, project_slug?, document_id, content)

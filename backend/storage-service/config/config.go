@@ -9,13 +9,20 @@ import (
 
 // Config описывает параметры сервиса хранения.
 type Config struct {
-	Service ServiceConfig `yaml:"service"`
-	Minio   MinioConfig   `yaml:"minio"`
+        Service ServiceConfig `yaml:"service"`
+        Minio   MinioConfig   `yaml:"minio"`
+        Events  EventsConfig  `yaml:"events"`
 }
 
 // ServiceConfig содержит сетевые настройки сервисного слоя.
 type ServiceConfig struct {
-	GRPCPort string `yaml:"grpc_port"`
+        GRPCPort string `yaml:"grpc_port"`
+        DocumentService string `yaml:"document_service"`
+}
+
+// EventsConfig описывает настройки подписок на события MinIO.
+type EventsConfig struct {
+        UploadBucket string `yaml:"upload_bucket"`
 }
 
 // MinioConfig хранит доступы и информацию о бакетах.
