@@ -80,6 +80,8 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 		if _, err := uuid.Parse(in.ID); err != nil {
 			return nil, errors.New("id is not a valid uuid")
 		}
+	} else {
+		in.ID = uuid.NewString()
 	}
 	originalBucket := in.UploadBucket
 	if originalBucket == "" {
@@ -108,6 +110,7 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	doc := &model.Document{
 		ID:                in.ID,
 		Name:              in.FileName,
+		WorkflowID:        in.ID,
 		Status:            model.StatusUploaded,
 		OriginalBucket:    originalBucket,
 		OriginalObjectKey: originalKey,
@@ -177,7 +180,7 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		return nil, fmt.Errorf("start workflow: %w", err)
 	}
 
-	return s.repo.UpdateWorkflowID(ctx, doc.ID, run.GetRunID())
+	return s.repo.UpdateWorkflowID(ctx, doc.ID, run.GetID())
 }
 
 func (s *Service) GetDocument(ctx context.Context, id string) (*model.Document, error) {

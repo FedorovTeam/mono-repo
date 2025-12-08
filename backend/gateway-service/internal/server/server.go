@@ -16,7 +16,6 @@ import (
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/internal/clients/document"
 	"backend-gateway-service/internal/clients/storage"
-	"backend-gateway-service/internal/clients/temporal"
 	"backend-gateway-service/internal/config"
 	"backend-gateway-service/internal/logging"
 	"backend-gateway-service/internal/middleware"
@@ -28,7 +27,6 @@ type Server struct {
 	cfg            config.Config
 	logger         *zap.Logger
 	documentClient document.Client
-	temporalClient temporal.Client
 	storageClient  storage.Client
 	otelProviders  observability.Providers
 	shutdownOTEL   func(context.Context) error
@@ -58,16 +56,10 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to init storage client: %w", err)
 	}
 
-	temporalClient, err := temporal.NewSDKClient(cfg.Temporal.Address, cfg.Temporal.Namespace, cfg.Temporal.TaskQueue)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init temporal client: %w", err)
-	}
-
 	return &Server{
 		cfg:            cfg,
 		logger:         logger,
 		documentClient: docClient,
-		temporalClient: temporalClient,
 		storageClient:  storageClient,
 		otelProviders:  providers,
 		shutdownOTEL:   shutdown,
@@ -77,14 +69,12 @@ func New(cfg config.Config) (*Server, error) {
 // Run запускает HTTP сервер.
 func (s *Server) Run(ctx context.Context) error {
 	defer s.documentClient.Close()
-	defer s.temporalClient.Close()
 	defer s.storageClient.Close()
 	defer s.shutdownOTEL(context.Background())
 	defer s.logger.Sync()
 
 	gqlHandler := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: &graph.Resolver{
 		DocumentClient: s.documentClient,
-		TemporalClient: s.temporalClient,
 		StorageClient:  s.storageClient,
 		Logger:         s.logger,
 		UploadConfig: graph.UploadValidationConfig{

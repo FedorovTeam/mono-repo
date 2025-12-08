@@ -55,7 +55,7 @@ func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadVal
 	return nil
 }
 
-func mapDocument(doc *pb.Document, workflowID string) *model.KnowledgeDocument {
+func mapDocument(doc *pb.Document) *model.KnowledgeDocument {
 	if doc == nil {
 		return nil
 	}
@@ -71,7 +71,7 @@ func mapDocument(doc *pb.Document, workflowID string) *model.KnowledgeDocument {
 
 	wf := doc.GetWorkflowId()
 	if wf == "" {
-		wf = workflowID
+		wf = doc.GetId()
 	}
 	if wf != "" {
 		result.WorkflowID = &wf

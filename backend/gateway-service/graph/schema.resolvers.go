@@ -7,7 +7,6 @@ package graph
 import (
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/graph/model"
-	"backend-gateway-service/internal/clients/temporal"
 	"backend-gateway-service/internal/ctxutils"
 	pb "backend-gateway-service/proto/backend/document/v1"
 	storagepb "backend-gateway-service/proto/backend/storage/v1"
@@ -61,29 +60,8 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		return nil, fmt.Errorf("cannot create document: %w", err)
 	}
 
-	workflowID, err := r.TemporalClient.StartUploadWorkflow(ctx, temporal.UploadWorkflowInput{
-		DocumentId:      created.GetId(),
-		FileName:        input.FileName,
-		Repository:      input.Repository,
-		Branch:          input.Branch,
-		Path:            input.Path,
-		UploadBucket:    uploadURL.GetBucket(),
-		UploadObjectKey: uploadURL.GetObjectKey(),
-		UploadURL:       uploadURL.GetUploadUrl(),
-		FileSizeBytes:   input.FileSizeBytes,
-		CorrelationId:   correlationID,
-	})
-	if err != nil {
-		logger.Error("failed to start workflow", zap.Error(err))
-		return nil, fmt.Errorf("cannot start workflow: %w", err)
-	}
-
-	if created.WorkflowId == "" {
-		created.WorkflowId = workflowID
-	}
-
-	logger.Info("upload request handled", zap.String("document_id", created.GetId()), zap.String("workflow_id", workflowID), zap.String("upload_bucket", uploadURL.GetBucket()), zap.String("upload_object_key", uploadURL.GetObjectKey()))
-	return &model.UploadKnowledgeDocumentPayload{Document: mapDocument(created, workflowID), UploadURL: uploadURL.GetUploadUrl(), UploadMethod: http.MethodPut}, nil
+	logger.Info("upload request handled", zap.String("document_id", created.GetId()), zap.String("workflow_id", created.GetWorkflowId()), zap.String("upload_bucket", uploadURL.GetBucket()), zap.String("upload_object_key", uploadURL.GetObjectKey()))
+	return &model.UploadKnowledgeDocumentPayload{Document: mapDocument(created), UploadURL: uploadURL.GetUploadUrl(), UploadMethod: http.MethodPut}, nil
 }
 
 // RetryProcessing is the resolver for the retryProcessing field.
@@ -98,7 +76,7 @@ func (r *mutationResolver) RetryProcessing(ctx context.Context, documentID strin
 	}
 
 	logger.Info("retry initiated")
-	return mapDocument(doc, doc.GetWorkflowId()), nil
+	return mapDocument(doc), nil
 }
 
 // KnowledgeDocument is the resolver for the knowledgeDocument field.
@@ -112,7 +90,7 @@ func (r *queryResolver) KnowledgeDocument(ctx context.Context, id string) (*mode
 		return nil, fmt.Errorf("cannot get document: %w", err)
 	}
 
-	return mapDocument(doc, doc.GetWorkflowId()), nil
+	return mapDocument(doc), nil
 }
 
 // KnowledgeDocuments is the resolver for the knowledgeDocuments field.
@@ -140,7 +118,7 @@ func (r *queryResolver) KnowledgeDocuments(ctx context.Context, filter *model.Kn
 
 	nodes := make([]*model.KnowledgeDocument, 0, len(resp.GetDocuments()))
 	for _, doc := range resp.GetDocuments() {
-		nodes = append(nodes, mapDocument(doc, doc.GetWorkflowId()))
+		nodes = append(nodes, mapDocument(doc))
 	}
 
 	logger.Info("documents fetched", zap.Int("count", len(nodes)), zap.Int64("total", resp.GetTotalCount()))

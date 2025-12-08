@@ -3,9 +3,9 @@
 ## Upload → Convert → Publish
 1. Клиент отправляет `uploadKnowledgeDocument` с `fileName`, `fileSizeBytes`, целевым репозиторием и путём.
 2. gateway проверяет `X-API-Key`, пробрасывает/создаёт `correlation-id` и запрашивает presigned ссылку через gRPC `storage-service.GenerateUploadURL` (с TTL из `uploads.signedUrlTtlSeconds`).
-3. После успешного ответа создаётся запись через gRPC `document-service.CreateDocument` с размером, путём и `correlation-id`, затем стартует Temporal workflow `KnowledgeDocumentWorkflow` с bucket/objectKey/uploadUrl.
-4. Клиент загружает DOCX по выданному `uploadUrl` (HTTP PUT). Workflow читает объект из MinIO, конвертирует в Markdown и публикует в GitHub.
-5. document-service обновляет статусы, gateway возвращает ID, статус и signed URL. Ошибки повторяются через `retryProcessing`.
+3. После успешного ответа создаётся запись через gRPC `document-service.CreateDocument` с размером, путём и `correlation-id`. `document-service` возвращает `workflow_id`, заранее выбранный под будущий запуск.
+4. Клиент загружает DOCX по выданному `uploadUrl` (HTTP PUT). После подтверждения загрузки `document-service` запускает Temporal workflow и ведёт статусы.
+5. gateway возвращает ID, статус и signed URL. Ошибки повторяются через `retryProcessing`.
 
 ## Получение статуса
 1. Запрос `knowledgeDocument` или `knowledgeDocuments` направляется в backend-document-service с `x-correlation-id`.
