@@ -49,6 +49,13 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 
 	assertEnumValues(t, ctx, db)
 	assertIndexes(t, ctx, db)
+
+	assertColumnExists(t, ctx, db, "documents", "repository")
+	assertColumnExists(t, ctx, db, "documents", "branch")
+	assertColumnExists(t, ctx, db, "documents", "path")
+	assertColumnExists(t, ctx, db, "documents", "error_reason")
+	assertColumnExists(t, ctx, db, "documents", "workflow_id")
+	assertColumnExists(t, ctx, db, "document_status_logs", "workflow_id")
 }
 
 func assertTableExists(t *testing.T, ctx context.Context, db *sql.DB, name string) {
@@ -94,4 +101,16 @@ func assertIndexes(t *testing.T, ctx context.Context, db *sql.DB) {
 	}
 	require.True(t, indexes["idx_documents_markdown_key"])
 	require.True(t, indexes["idx_documents_original_key"])
+}
+
+func assertColumnExists(t *testing.T, ctx context.Context, db *sql.DB, table, column string) {
+	t.Helper()
+	var exists bool
+	row := db.QueryRowContext(ctx, `
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+        )
+    `, table, column)
+	require.NoError(t, row.Scan(&exists))
+	require.Truef(t, exists, "column %s.%s does not exist", table, column)
 }

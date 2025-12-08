@@ -31,12 +31,15 @@ type WorkflowStarter interface {
 
 type WorkflowInput struct {
 	DocumentID        string
+	Repository        string
+	Branch            string
 	OriginalBucket    string
 	MarkdownBucket    string
 	OriginalObjectKey string
 	MarkdownObjectKey string
 	FilenameExt       string
 	PublishPath       string
+	Path              string
 	OriginalContent   []byte
 	Version           int32
 }
@@ -61,6 +64,8 @@ type publishInput struct {
 	DocumentID      string
 	MarkdownContent []byte
 	Version         int32
+	Repository      string
+	Branch          string
 	Path            string
 }
 
@@ -137,6 +142,8 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		DocumentID:      input.DocumentID,
 		MarkdownContent: convRes.MarkdownContent,
 		Version:         convArg.Version + 1,
+		Repository:      input.Repository,
+		Branch:          input.Branch,
 		Path:            input.PublishPath,
 	}
 
@@ -161,7 +168,7 @@ func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInp
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("upload original: %v", err))
 		return err
 	}
-	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusStoredOriginal, "", &model.DocumentVersion{Version: input.Version})
+	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: input.Version})
 	return err
 }
 
@@ -182,7 +189,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: resp.MarkdownObjectKey}); err != nil {
+	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: resp.MarkdownObjectKey}); err != nil {
 		return convertResult{}, err
 	}
 	return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: resp.MarkdownObjectKey, MediaType: resp.MediaType}, nil
@@ -193,22 +200,32 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
+	repository := input.Repository
+	if repository == "" {
+		repository = a.repoName
+	}
+	branch := input.Branch
+	if branch == "" {
+		branch = a.branch
+	}
+	path := input.Path
+
 	_, err := a.publisher.PublishMarkdown(ctx, &githubpublisherv1.PublishMarkdownRequest{
-		Repository: a.repoName,
-		Branch:     a.branch,
-		Path:       input.Path,
+		Repository: repository,
+		Branch:     branch,
+		Path:       path,
 		Content:    input.MarkdownContent,
 	})
 	if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("publish: %v", err))
 		return err
 	}
-	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, "", &model.DocumentVersion{Version: input.Version})
+	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, "", "", &model.DocumentVersion{Version: input.Version})
 	return err
 }
 
 func (a *Activities) fail(ctx context.Context, documentID, reason string) error {
-	_, err := a.repo.UpdateStatus(ctx, documentID, model.StatusFailed, reason, nil)
+	_, err := a.repo.UpdateStatus(ctx, documentID, model.StatusFailed, reason, reason, nil)
 	return err
 }
 

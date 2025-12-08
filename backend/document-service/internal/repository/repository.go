@@ -35,9 +35,9 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 	doc.UpdatedAt = now
 
 	_, err = tx.ExecContext(ctx, `
-        INSERT INTO documents (id, name, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-    `, doc.ID, doc.Name, string(doc.Status), doc.WorkflowID, doc.OriginalBucket, doc.OriginalObjectKey, doc.MarkdownBucket, doc.MarkdownObjectKey, doc.CreatedAt, doc.UpdatedAt)
+        INSERT INTO documents (id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+    `, doc.ID, doc.Name, doc.Repository, doc.Branch, doc.Path, string(doc.Status), doc.WorkflowID, doc.OriginalBucket, doc.OriginalObjectKey, doc.MarkdownBucket, doc.MarkdownObjectKey, doc.ErrorReason, doc.CreatedAt, doc.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -59,6 +59,7 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 	if log != nil {
 		log.ID = uuid.NewString()
 		log.DocumentID = doc.ID
+		log.WorkflowID = doc.WorkflowID
 		log.CreatedAt = now
 
 		var fromStatus sql.NullString
@@ -68,9 +69,9 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 		} // иначе Valid=false → NULL в БД
 
 		if _, err = tx.ExecContext(ctx, `
-            INSERT INTO document_status_logs (id, document_id, from_status, to_status, reason, created_at)
-            VALUES ($1,$2,$3,$4,$5,$6)
-        `, log.ID, log.DocumentID, fromStatus, string(log.ToStatus), log.Reason, log.CreatedAt); err != nil {
+            INSERT INTO document_status_logs (id, document_id, from_status, to_status, workflow_id, reason, created_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `, log.ID, log.DocumentID, fromStatus, string(log.ToStatus), log.WorkflowID, log.Reason, log.CreatedAt); err != nil {
 			return nil, err
 		}
 	}
@@ -83,12 +84,12 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 
 func (r *Repository) GetDocument(ctx context.Context, id string) (*model.Document, error) {
 	row := r.db.QueryRowContext(ctx, `
-        SELECT id, name, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, created_at, updated_at
+        SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at
         FROM documents WHERE id=$1
     `, id)
 
 	var doc model.Document
-	if err := row.Scan(&doc.ID, &doc.Name, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+	if err := row.Scan(&doc.ID, &doc.Name, &doc.Repository, &doc.Branch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
 
@@ -101,7 +102,7 @@ func (r *Repository) GetDocument(ctx context.Context, id string) (*model.Documen
 }
 
 func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
-	base := `SELECT id, name, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, created_at, updated_at FROM documents`
+	base := `SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at FROM documents`
 	args := []any{}
 	if status != nil {
 		base += " WHERE status=$1"
@@ -126,7 +127,7 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	var result []model.Document
 	for rows.Next() {
 		var doc model.Document
-		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Repository, &doc.Branch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, doc)
@@ -134,7 +135,7 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	return result, nil
 }
 
-func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Status, reason string, version *model.DocumentVersion) (*model.Document, error) {
+func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -143,10 +144,10 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 
 	var doc model.Document
 	row := tx.QueryRowContext(ctx, `
-        SELECT id, name, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, created_at, updated_at
+        SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at
         FROM documents WHERE id=$1 FOR UPDATE
     `, id)
-	if err := row.Scan(&doc.ID, &doc.Name, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+	if err := row.Scan(&doc.ID, &doc.Name, &doc.Repository, &doc.Branch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
 
@@ -199,13 +200,18 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 		}
 	}
 
+	if errorReason != "" && doc.ErrorReason != errorReason {
+		doc.ErrorReason = errorReason
+		docUpdated = true
+	}
+
 	if docUpdated {
 		previousStatus := doc.Status
 		doc.Status = to
 		doc.UpdatedAt = now
 		if _, err = tx.ExecContext(ctx, `
-            UPDATE documents SET status=$1, original_object_key=$2, markdown_object_key=$3, updated_at=$4 WHERE id=$5
-        `, string(doc.Status), doc.OriginalObjectKey, doc.MarkdownObjectKey, doc.UpdatedAt, id); err != nil {
+            UPDATE documents SET status=$1, original_object_key=$2, markdown_object_key=$3, error_reason=$4, updated_at=$5 WHERE id=$6
+        `, string(doc.Status), doc.OriginalObjectKey, doc.MarkdownObjectKey, doc.ErrorReason, doc.UpdatedAt, id); err != nil {
 			return nil, err
 		}
 		if statusChanged || versionInserted || reason != "" {
@@ -214,6 +220,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 				DocumentID: id,
 				FromStatus: previousStatus,
 				ToStatus:   to,
+				WorkflowID: doc.WorkflowID,
 				Reason:     reason,
 				CreatedAt:  now,
 			}
@@ -225,9 +232,9 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 			}
 
 			if _, err = tx.ExecContext(ctx, `
-            INSERT INTO document_status_logs (id, document_id, from_status, to_status, reason, created_at)
-            VALUES ($1,$2,$3,$4,$5,$6)
-        `, log.ID, log.DocumentID, fromStatus, string(log.ToStatus), log.Reason, log.CreatedAt); err != nil {
+            INSERT INTO document_status_logs (id, document_id, from_status, to_status, workflow_id, reason, created_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `, log.ID, log.DocumentID, fromStatus, string(log.ToStatus), log.WorkflowID, log.Reason, log.CreatedAt); err != nil {
 				return nil, err
 			}
 		}
@@ -255,10 +262,10 @@ func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string
 
 	var doc model.Document
 	row := tx.QueryRowContext(ctx, `
-        SELECT id, name, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, created_at, updated_at
+        SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at
         FROM documents WHERE id=$1 FOR UPDATE
     `, id)
-	if err := row.Scan(&doc.ID, &doc.Name, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+	if err := row.Scan(&doc.ID, &doc.Name, &doc.Repository, &doc.Branch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
 

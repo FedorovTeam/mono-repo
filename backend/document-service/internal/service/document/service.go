@@ -18,7 +18,7 @@ type Repository interface {
 	CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error)
 	GetDocument(ctx context.Context, id string) (*model.Document, error)
 	ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
-	UpdateStatus(ctx context.Context, id string, to model.Status, reason string, version *model.DocumentVersion) (*model.Document, error)
+	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
 	UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error)
 }
 
@@ -67,6 +67,7 @@ type UpdateStatusInput struct {
 	DocumentID        string
 	Status            model.Status
 	Reason            string
+	ErrorReason       string
 	MarkdownObjectKey string
 	OriginalObjectKey string
 	Version           int32
@@ -107,9 +108,17 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 		markdownKey = pair.MarkdownObjectKey
 	}
 
+	path := strings.TrimSpace(in.Path)
+	if path == "" {
+		path = in.FileName
+	}
+
 	doc := &model.Document{
 		ID:                in.ID,
 		Name:              in.FileName,
+		Repository:        in.Repository,
+		Branch:            in.Branch,
+		Path:              path,
 		WorkflowID:        in.ID,
 		Status:            model.StatusUploaded,
 		OriginalBucket:    originalBucket,
@@ -141,7 +150,7 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		return nil, errors.New("bucket is required")
 	}
 
-	doc, err := s.repo.UpdateStatus(ctx, in.DocumentID, model.StatusStoredOriginal, "", &model.DocumentVersion{Version: 1, OriginalObjectKey: in.ObjectKey})
+	doc, err := s.repo.UpdateStatus(ctx, in.DocumentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: 1, OriginalObjectKey: in.ObjectKey})
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +166,10 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		TaskQueue: s.taskQueue,
 	}
 
-	publishPath := doc.Name
+	publishPath := doc.Path
+	if publishPath == "" {
+		publishPath = doc.Name
+	}
 	version := int32(1)
 	if len(doc.Versions) > 0 {
 		version = doc.Versions[len(doc.Versions)-1].Version
@@ -165,18 +177,21 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 
 	input := WorkflowInput{
 		DocumentID:        doc.ID,
+		Repository:        doc.Repository,
+		Branch:            doc.Branch,
 		OriginalBucket:    doc.OriginalBucket,
 		MarkdownBucket:    doc.MarkdownBucket,
 		OriginalObjectKey: doc.OriginalObjectKey,
 		MarkdownObjectKey: doc.MarkdownObjectKey,
 		FilenameExt:       strings.TrimPrefix(filepath.Ext(in.ObjectKey), "."),
 		PublishPath:       publishPath,
+		Path:              doc.Path,
 		Version:           version,
 	}
 
 	run, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input)
 	if err != nil {
-		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, fmt.Sprintf("start workflow: %v", err), nil)
+		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, fmt.Sprintf("start workflow: %v", err), fmt.Sprintf("start workflow: %v", err), nil)
 		return nil, fmt.Errorf("start workflow: %w", err)
 	}
 
@@ -207,6 +222,10 @@ func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*mode
 		return nil, err
 	}
 
+	if in.ErrorReason == "" && in.Status == model.StatusFailed {
+		in.ErrorReason = in.Reason
+	}
+
 	var version *model.DocumentVersion
 	if in.MarkdownObjectKey != "" || in.OriginalObjectKey != "" || in.Version > 0 {
 		version = &model.DocumentVersion{
@@ -218,5 +237,5 @@ func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*mode
 			version.Version = 1
 		}
 	}
-	return s.repo.UpdateStatus(ctx, in.DocumentID, in.Status, in.Reason, version)
+	return s.repo.UpdateStatus(ctx, in.DocumentID, in.Status, in.Reason, in.ErrorReason, version)
 }

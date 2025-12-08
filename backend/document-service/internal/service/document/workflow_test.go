@@ -14,6 +14,7 @@ import (
 type fakeRepo struct {
 	lastStatus  model.Status
 	lastVersion *model.DocumentVersion
+	lastError   string
 }
 
 func (f *fakeRepo) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -28,9 +29,10 @@ func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status 
 	return nil, nil
 }
 
-func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason string, version *model.DocumentVersion) (*model.Document, error) {
+func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	f.lastStatus = to
 	f.lastVersion = version
+	f.lastError = errorReason
 	return &model.Document{ID: id, Status: to}, nil
 }
 

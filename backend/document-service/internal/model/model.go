@@ -50,8 +50,12 @@ func ValidateStatus(val Status) error {
 type Document struct {
 	ID                string
 	Name              string
+	Repository        string
+	Branch            string
+	Path              string
 	Status            Status
 	WorkflowID        string
+	ErrorReason       string
 	OriginalBucket    string
 	OriginalObjectKey string
 	MarkdownBucket    string
@@ -76,6 +80,7 @@ type DocumentStatusLog struct {
 	DocumentID string
 	FromStatus Status
 	ToStatus   Status
+	WorkflowID string
 	Reason     string
 	CreatedAt  time.Time
 }
