@@ -9,7 +9,7 @@ spec:
   source:
     repoURL: git@github.com:FedorovTeam/mono-repo.git
     targetRevision: HEAD
-    path: manifests/outline
+    path: infra/manifests/outline
   destination:
     server: https://kubernetes.default.svc
     namespace: outline
