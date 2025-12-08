@@ -68,7 +68,7 @@ metadata:
     kubernetes.io/ingress.class: traefik
     # или так (если используете ingressClassName, можно убрать аннотацию выше):
     # cert-manager для TLS
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/cluster-issuer: letsencrypt
 spec:
   ingressClassName: traefik
   tls:
