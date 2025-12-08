@@ -106,8 +106,7 @@ func (c *Client) CommitMarkdown(ctx context.Context, path, content, message, bra
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", c.unexpectedStatusError(resp, branch, url)
 	}
 
 	var commitResp struct {
@@ -153,8 +152,7 @@ func (c *Client) CreatePullRequest(ctx context.Context, branch, baseBranch, titl
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		return 0, "", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+		return 0, "", c.unexpectedStatusError(resp, branch, url)
 	}
 
 	var prResp struct {
@@ -175,4 +173,23 @@ func (c *Client) setHeaders(req *http.Request, correlationID string) {
 	if correlationID != "" {
 		req.Header.Set(c.correlationHeader, correlationID)
 	}
+}
+
+func (c *Client) unexpectedStatusError(resp *http.Response, branch, url string) error {
+	body, _ := io.ReadAll(resp.Body)
+	repo := fmt.Sprintf("%s/%s", c.owner, c.repository)
+	hint := ""
+	if resp.StatusCode == http.StatusNotFound {
+		hint = "; возможно, указан некорректный репозиторий или токен не имеет нужных прав"
+	}
+
+	return fmt.Errorf(
+		"unexpected status %d%s (repo=%s, branch=%s, url=%s): %s",
+		resp.StatusCode,
+		hint,
+		repo,
+		branch,
+		url,
+		string(body),
+	)
 }
