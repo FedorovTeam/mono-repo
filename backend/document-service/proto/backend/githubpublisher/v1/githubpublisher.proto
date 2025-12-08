@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package backend.githubpublisher.v1;
+
+option go_package = "backend-document-service/proto/backend/githubpublisher/v1;githubpublisherv1";
+
+message PublishMarkdownRequest {
+  string owner = 1;
+  string repository = 2;
+  string branch = 3;
+  string base_branch = 4;
+  string path = 5;
+  string content = 6;
+  string commit_message = 7;
+  string pr_title = 8;
+  string pr_body = 9;
+  bool create_pr = 10;
+  string correlation_id = 11;
+  string author_name = 12;
+  string author_email = 13;
+  string bucket = 14;
+  string object_key = 15;
+}
+
+message PublishMarkdownResponse {
+  string commit_sha = 1;
+  int64 pull_request_number = 2;
+  string pull_request_url = 3;
+}
+
+service GithubPublisherService {
+  rpc PublishMarkdown(PublishMarkdownRequest) returns (PublishMarkdownResponse);
+}

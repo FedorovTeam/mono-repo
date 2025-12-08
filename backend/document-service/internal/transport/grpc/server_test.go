@@ -121,7 +121,7 @@ func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string
 
 func TestGRPCWorkflow(t *testing.T) {
 	repo := &memoryRepo{}
-	svc := document.New(repo, staticKey{}, nil, "", nil, "orig", "md")
+	svc := document.New(repo, staticKey{}, nil, "", nil, "orig", "md", "owner", "repo", "main", "main")
 	srv := NewServer(svc)
 	grpcServer := grpc.NewServer()
 	documentv1.RegisterDocumentServiceServer(grpcServer, srv)
@@ -133,11 +133,12 @@ func TestGRPCWorkflow(t *testing.T) {
 	client := documentv1.NewDocumentServiceClient(conn)
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "test-corr"))
 
-	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{FileName: "doc", Repository: "repo/name", Branch: "main", Path: "docs/doc.md", UploadBucket: "orig", MarkdownBucket: "md"})
+	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{FileName: "doc", Repository: "repo/name", Branch: "main", BaseBranch: "main", Path: "docs/doc.md", UploadBucket: "orig", MarkdownBucket: "md", Owner: "owner"})
 	require.NoError(t, err)
 	require.Equal(t, documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED, created.Status)
 	require.Equal(t, "repo/name", created.Repository)
 	require.Equal(t, "main", created.Branch)
+	require.Equal(t, "owner", created.Owner)
 	require.Equal(t, "docs/doc.md", created.Path)
 
 	updated, err := client.UpdateDocumentStatus(ctx, &documentv1.UpdateDocumentStatusRequest{Id: created.Id, Status: documentv1.DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL, Version: 2, MarkdownObjectKey: "md/key2"})

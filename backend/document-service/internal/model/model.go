@@ -48,21 +48,24 @@ func ValidateStatus(val Status) error {
 }
 
 type Document struct {
-	ID                string
-	Name              string
-	Repository        string
-	Branch            string
-	Path              string
-	Status            Status
-	WorkflowID        string
-	ErrorReason       string
-	OriginalBucket    string
-	OriginalObjectKey string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	Versions          []DocumentVersion
+        ID                string
+        Name              string
+        Owner             string
+        Repository        string
+        Branch            string
+        BaseBranch        string
+        Path              string
+        Status            Status
+        WorkflowID        string
+        ErrorReason       string
+        OriginalBucket    string
+        OriginalObjectKey string
+        MarkdownBucket    string
+        MarkdownObjectKey string
+        CreatePR          bool
+        CreatedAt         time.Time
+        UpdatedAt         time.Time
+        Versions          []DocumentVersion
 }
 
 type DocumentVersion struct {

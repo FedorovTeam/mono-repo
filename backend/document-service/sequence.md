@@ -10,8 +10,8 @@ sequenceDiagram
     participant T as Temporal Client
     participant M as MinIO
 
-    C->>G: CreateDocument(id?, fileName, repository, branch, path,
-    uploadBucket?, uploadObjectKey?, markdownBucket?, markdownObjectKey?, contentLength)
+    C->>G: CreateDocument(id?, fileName, owner?, repository, branch, baseBranch?, path,
+    uploadBucket?, uploadObjectKey?, markdownBucket?, markdownObjectKey?, contentLength, createPr?)
     G->>G: Логирование correlation-id
     G->>S: Вызов CreateDocument с извлечённым расширением файла
     S-->>S: Проверка имени и id (UUID)
@@ -27,6 +27,7 @@ sequenceDiagram
     M-->>G: Event ObjectCreated(bucket=knowledge-docx, object_key)
     G->>S: ConfirmUpload(document_id, bucket, object_key)
     S-->>S: Проверка bucket/object_key и обновление статуса StoredOriginal
-    S->>T: Запуск DocumentProcessingWorkflow(taskQueue, input{bucket'ы, object key, ext, publishPath, version})
+    S->>T: Запуск DocumentProcessingWorkflow(taskQueue, input{bucket'ы, object key, ext, publishPath, version, owner/repo/branch})
+    T->>G: Activity PublishMarkdown(commit_message из имени документа, correlation_id=workflow_id, create_pr, content или bucket/object_key)
     T-->>S: Workflow запущен, сохранение workflow_id
 ```

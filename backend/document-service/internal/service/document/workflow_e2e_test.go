@@ -75,7 +75,7 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	})
 	defer publisherConn.Close()
 
-	activities := NewActivities(&memoryRepo{}, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "repo", "main")
+	activities := NewActivities(&memoryRepo{}, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main")
 	workerInstance := worker.New(temporalClient, "document-processing", worker.Options{})
 	workerInstance.RegisterWorkflow(DocumentProcessingWorkflow)
 	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: ActivityUploadOriginalName})
@@ -88,8 +88,11 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 
 	input := WorkflowInput{
 		DocumentID:        uuid.NewString(),
+		DocumentName:      "Document title",
+		Owner:             "custom-owner",
 		Repository:        "custom-repo",
 		Branch:            "custom-branch",
+		BaseBranch:        "main",
 		OriginalBucket:    "orig",
 		MarkdownBucket:    "md",
 		OriginalObjectKey: "orig/key.docx",
@@ -99,6 +102,7 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 		Path:              "docs/key.md",
 		OriginalContent:   []byte("content"),
 		Version:           1,
+		CreatePR:          true,
 	}
 	options := client.StartWorkflowOptions{ID: input.DocumentID, TaskQueue: "document-processing"}
 	run, err := temporalClient.ExecuteWorkflow(ctx, options, DocumentProcessingWorkflow, input)
@@ -118,8 +122,23 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	if publisherRecorder.firstCorrelationID() == "" {
 		t.Fatalf("correlation id was not propagated to publisher service")
 	}
-	if publisherServer.lastRepository != "custom-repo" || publisherServer.lastBranch != "custom-branch" || publisherServer.lastPath != "docs/key.md" {
-		t.Fatalf("unexpected publish request: repo=%s branch=%s path=%s", publisherServer.lastRepository, publisherServer.lastBranch, publisherServer.lastPath)
+	if publisherServer.lastCorrelationID == "" {
+		t.Fatalf("correlation id was not propagated inside request")
+	}
+	if publisherServer.lastCorrelationID != input.DocumentID {
+		t.Fatalf("unexpected correlation id: %s", publisherServer.lastCorrelationID)
+	}
+	if publisherServer.lastOwner != "custom-owner" || publisherServer.lastRepository != "custom-repo" || publisherServer.lastBranch != "custom-branch" || publisherServer.lastBaseBranch != "main" || publisherServer.lastPath != "docs/key.md" {
+		t.Fatalf("unexpected publish request: owner=%s repo=%s branch=%s base=%s path=%s", publisherServer.lastOwner, publisherServer.lastRepository, publisherServer.lastBranch, publisherServer.lastBaseBranch, publisherServer.lastPath)
+	}
+	if !publisherServer.lastCreatePR {
+		t.Fatalf("create_pr flag was not propagated")
+	}
+	if publisherServer.lastBucket != "md" || publisherServer.lastObjectKey != "md/key.md" {
+		t.Fatalf("bucket/object not passed: %s/%s", publisherServer.lastBucket, publisherServer.lastObjectKey)
+	}
+	if publisherServer.lastCommitMessage != input.DocumentName {
+		t.Fatalf("unexpected commit message: %s", publisherServer.lastCommitMessage)
 	}
 }
 
@@ -201,23 +220,37 @@ type fakeTransformerServer struct {
 
 func (f *fakeTransformerServer) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
 	f.recorder.record(ctx)
-	return &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: []byte("markdown"), MarkdownObjectKey: req.GetMarkdownObjectKey(), MediaType: "text/markdown"}, nil
+	return &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: nil, MarkdownObjectKey: req.GetMarkdownObjectKey(), MediaType: "text/markdown"}, nil
 }
 
 type fakePublisherServer struct {
 	githubpublisherv1.UnimplementedGithubPublisherServiceServer
-	recorder       *metadataRecorder
-	lastRepository string
-	lastBranch     string
-	lastPath       string
+	recorder          *metadataRecorder
+	lastOwner         string
+	lastRepository    string
+	lastBranch        string
+	lastBaseBranch    string
+	lastPath          string
+	lastCommitMessage string
+	lastCorrelationID string
+	lastBucket        string
+	lastObjectKey     string
+	lastCreatePR      bool
 }
 
 func (f *fakePublisherServer) PublishMarkdown(ctx context.Context, req *githubpublisherv1.PublishMarkdownRequest) (*githubpublisherv1.PublishMarkdownResponse, error) {
 	f.recorder.record(ctx)
+	f.lastOwner = req.GetOwner()
 	f.lastRepository = req.GetRepository()
 	f.lastBranch = req.GetBranch()
+	f.lastBaseBranch = req.GetBaseBranch()
 	f.lastPath = req.GetPath()
-	if len(req.GetContent()) == 0 {
+	f.lastCommitMessage = req.GetCommitMessage()
+	f.lastCorrelationID = req.GetCorrelationId()
+	f.lastBucket = req.GetBucket()
+	f.lastObjectKey = req.GetObjectKey()
+	f.lastCreatePR = req.GetCreatePr()
+	if req.GetContent() == "" && (req.GetBucket() == "" || req.GetObjectKey() == "") {
 		return nil, fmt.Errorf("empty content")
 	}
 	return &githubpublisherv1.PublishMarkdownResponse{}, nil

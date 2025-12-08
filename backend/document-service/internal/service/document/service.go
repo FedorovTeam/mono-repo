@@ -29,9 +29,13 @@ type Service struct {
 	taskQueue             string
 	defaultOriginalBucket string
 	defaultMarkdownBucket string
+	defaultOwner          string
+	defaultRepository     string
+	defaultBranch         string
+	defaultBaseBranch     string
 }
 
-func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarter, taskQueue string, activities *Activities, defaultOriginalBucket, defaultMarkdownBucket string) *Service {
+func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarter, taskQueue string, _ *Activities, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
 	return &Service{
 		repo:                  repo,
 		keyManager:            keyManager,
@@ -39,14 +43,20 @@ func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarte
 		taskQueue:             taskQueue,
 		defaultOriginalBucket: defaultOriginalBucket,
 		defaultMarkdownBucket: defaultMarkdownBucket,
+		defaultOwner:          defaultOwner,
+		defaultRepository:     defaultRepository,
+		defaultBranch:         defaultBranch,
+		defaultBaseBranch:     defaultBaseBranch,
 	}
 }
 
 type CreateInput struct {
 	ID                string
 	FileName          string
+	Owner             string
 	Repository        string
 	Branch            string
+	BaseBranch        string
 	Path              string
 	UploadBucket      string
 	UploadObjectKey   string
@@ -55,6 +65,7 @@ type CreateInput struct {
 	OriginalContent   []byte
 	FilenameExt       string
 	PublishPath       string
+	CreatePR          bool
 }
 
 type ConfirmUploadInput struct {
@@ -84,6 +95,26 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	} else {
 		in.ID = uuid.NewString()
 	}
+	owner := strings.TrimSpace(in.Owner)
+	if owner == "" {
+		owner = s.defaultOwner
+	}
+	repository := strings.TrimSpace(in.Repository)
+	if repository == "" {
+		repository = s.defaultRepository
+	}
+	branch := strings.TrimSpace(in.Branch)
+	if branch == "" {
+		branch = s.defaultBranch
+	}
+	baseBranch := strings.TrimSpace(in.BaseBranch)
+	if baseBranch == "" {
+		baseBranch = s.defaultBaseBranch
+	}
+	if baseBranch == "" {
+		baseBranch = branch
+	}
+
 	originalBucket := in.UploadBucket
 	if originalBucket == "" {
 		originalBucket = s.defaultOriginalBucket
@@ -116,8 +147,10 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	doc := &model.Document{
 		ID:                in.ID,
 		Name:              in.FileName,
-		Repository:        in.Repository,
-		Branch:            in.Branch,
+		Owner:             owner,
+		Repository:        repository,
+		Branch:            branch,
+		BaseBranch:        baseBranch,
 		Path:              path,
 		WorkflowID:        in.ID,
 		Status:            model.StatusUploaded,
@@ -125,6 +158,7 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 		OriginalObjectKey: originalKey,
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
+		CreatePR:          in.CreatePR,
 	}
 	version := &model.DocumentVersion{
 		Version:           1,
@@ -177,8 +211,11 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 
 	input := WorkflowInput{
 		DocumentID:        doc.ID,
+		DocumentName:      doc.Name,
+		Owner:             doc.Owner,
 		Repository:        doc.Repository,
 		Branch:            doc.Branch,
+		BaseBranch:        doc.BaseBranch,
 		OriginalBucket:    doc.OriginalBucket,
 		MarkdownBucket:    doc.MarkdownBucket,
 		OriginalObjectKey: doc.OriginalObjectKey,
@@ -187,6 +224,7 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		PublishPath:       publishPath,
 		Path:              doc.Path,
 		Version:           version,
+		CreatePR:          doc.CreatePR,
 	}
 
 	run, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, input)

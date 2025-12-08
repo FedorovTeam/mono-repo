@@ -31,8 +31,11 @@ type WorkflowStarter interface {
 
 type WorkflowInput struct {
 	DocumentID        string
+	DocumentName      string
+	Owner             string
 	Repository        string
 	Branch            string
+	BaseBranch        string
 	OriginalBucket    string
 	MarkdownBucket    string
 	OriginalObjectKey string
@@ -42,6 +45,7 @@ type WorkflowInput struct {
 	Path              string
 	OriginalContent   []byte
 	Version           int32
+	CreatePR          bool
 }
 
 type uploadOriginalInput struct {
@@ -61,12 +65,18 @@ type convertInput struct {
 }
 
 type publishInput struct {
-	DocumentID      string
-	MarkdownContent []byte
-	Version         int32
-	Repository      string
-	Branch          string
-	Path            string
+	DocumentID        string
+	DocumentName      string
+	Owner             string
+	MarkdownContent   []byte
+	Version           int32
+	MarkdownBucket    string
+	MarkdownObjectKey string
+	Repository        string
+	Branch            string
+	BaseBranch        string
+	Path              string
+	CreatePR          bool
 }
 
 type convertResult struct {
@@ -80,18 +90,22 @@ type Activities struct {
 	storage     storagev1.StorageServiceClient
 	transformer transformerv1.TransformerServiceClient
 	publisher   githubpublisherv1.GithubPublisherServiceClient
+	repoOwner   string
 	repoName    string
 	branch      string
+	baseBranch  string
 }
 
-func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoName, branch string) *Activities {
+func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string) *Activities {
 	return &Activities{
 		repo:        repo,
 		storage:     storageClient,
 		transformer: transformerClient,
 		publisher:   publisherClient,
+		repoOwner:   repoOwner,
 		repoName:    repoName,
 		branch:      branch,
+		baseBranch:  baseBranch,
 	}
 }
 
@@ -138,13 +152,24 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		return err
 	}
 
+	markdownKey := convRes.MarkdownKey
+	if markdownKey == "" {
+		markdownKey = input.MarkdownObjectKey
+	}
+
 	pubArg := publishInput{
-		DocumentID:      input.DocumentID,
-		MarkdownContent: convRes.MarkdownContent,
-		Version:         convArg.Version + 1,
-		Repository:      input.Repository,
-		Branch:          input.Branch,
-		Path:            input.PublishPath,
+		DocumentID:        input.DocumentID,
+		DocumentName:      input.DocumentName,
+		Owner:             input.Owner,
+		MarkdownContent:   convRes.MarkdownContent,
+		MarkdownBucket:    input.MarkdownBucket,
+		MarkdownObjectKey: markdownKey,
+		Version:           convArg.Version + 1,
+		Repository:        input.Repository,
+		Branch:            input.Branch,
+		BaseBranch:        input.BaseBranch,
+		Path:              input.PublishPath,
+		CreatePR:          input.CreatePR,
 	}
 
 	if err := workflow.ExecuteActivity(ctx, ActivityPublishMarkdownName, pubArg).Get(ctx, nil); err != nil {
@@ -200,6 +225,10 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
+	owner := input.Owner
+	if owner == "" {
+		owner = a.repoOwner
+	}
 	repository := input.Repository
 	if repository == "" {
 		repository = a.repoName
@@ -208,14 +237,46 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if branch == "" {
 		branch = a.branch
 	}
+	baseBranch := input.BaseBranch
+	if baseBranch == "" {
+		baseBranch = a.baseBranch
+	}
+	if baseBranch == "" {
+		baseBranch = branch
+	}
 	path := input.Path
 
-	_, err := a.publisher.PublishMarkdown(ctx, &githubpublisherv1.PublishMarkdownRequest{
-		Repository: repository,
-		Branch:     branch,
-		Path:       path,
-		Content:    input.MarkdownContent,
-	})
+	correlationID := ""
+	if info, ok := activityInfo(ctx); ok {
+		correlationID = info.WorkflowExecution.ID
+	}
+
+	commitMessage := input.DocumentName
+	if commitMessage == "" {
+		commitMessage = path
+	}
+
+	req := &githubpublisherv1.PublishMarkdownRequest{
+		Owner:         owner,
+		Repository:    repository,
+		Branch:        branch,
+		BaseBranch:    baseBranch,
+		Path:          path,
+		CommitMessage: commitMessage,
+		CreatePr:      input.CreatePR,
+		CorrelationId: correlationID,
+	}
+
+	if len(input.MarkdownContent) > 0 {
+		req.Content = string(input.MarkdownContent)
+	} else {
+		req.Bucket = input.MarkdownBucket
+		req.ObjectKey = input.MarkdownObjectKey
+		if req.Bucket == "" || req.ObjectKey == "" {
+			return fmt.Errorf("markdown content is empty and no bucket/object_key provided")
+		}
+	}
+	_, err := a.publisher.PublishMarkdown(ctx, req)
 	if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("publish: %v", err))
 		return err

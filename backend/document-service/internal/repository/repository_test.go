@@ -23,7 +23,7 @@ func TestCreateDocument(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO documents")).
-		WithArgs(sqlmock.AnyArg(), "file.docx", "", "", "", string(model.StatusUploaded), "", "orig", "orig/key", "md", "md/key", "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "file.docx", "", "", "", "", "", string(model.StatusUploaded), "", "orig", "orig/key", "md", "md/key", "", false, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO document_versions")).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -59,10 +59,10 @@ func TestUpdateStatusFlow(t *testing.T) {
 
 	now := time.Now()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at FROM documents WHERE id=$1 FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents WHERE id=$1 FOR UPDATE")).
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "repository", "branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", "", "", "", model.StatusUploaded, "", "orig", "orig/key", "md", "md/key", "", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", "", "", "", "", "", model.StatusUploaded, "", "orig", "orig/key", "md", "md/key", "", false, now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
 		WillReturnError(sql.ErrNoRows)
@@ -97,10 +97,10 @@ func TestUpdateStatusIdempotent(t *testing.T) {
 
 	now := time.Now()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at FROM documents WHERE id=$1 FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents WHERE id=$1 FOR UPDATE")).
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "repository", "branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", "", "", "", model.StatusStoredOriginal, "wf", "orig", "orig/key2", "md", "md/key2", "", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", "", "", "", "", "", model.StatusStoredOriginal, "wf", "orig", "orig/key2", "md", "md/key2", "", false, now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
@@ -130,10 +130,10 @@ func TestUpdateStatusVersionConflict(t *testing.T) {
 
 	now := time.Now()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at FROM documents WHERE id=$1 FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents WHERE id=$1 FOR UPDATE")).
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "repository", "branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", "", "", "", model.StatusStoredOriginal, "wf", "orig", "orig/key", "md", "md/key", "", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", "", "", "", "", "", model.StatusStoredOriginal, "wf", "orig", "orig/key", "md", "md/key", "", false, now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
@@ -153,9 +153,9 @@ func TestListDocuments(t *testing.T) {
 	repo := New(db)
 	ctx := context.Background()
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, repository, branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, created_at, updated_at FROM documents ORDER BY created_at DESC")).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "repository", "branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "created_at", "updated_at"}).
-			AddRow("doc-1", "name", "", "", "", model.StatusUploaded, "", "orig", "orig/key", "md", "md/key", "", time.Now(), time.Now()))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents ORDER BY created_at DESC")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", "", "", "", "", "", model.StatusUploaded, "", "orig", "orig/key", "md", "md/key", "", false, time.Now(), time.Now()))
 
 	docs, err := repo.ListDocuments(ctx, 0, 0, nil)
 	require.NoError(t, err)
