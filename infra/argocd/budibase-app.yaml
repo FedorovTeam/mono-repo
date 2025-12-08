@@ -57,7 +57,7 @@ spec:
             bucket: budibase
 
         globals:
-          createSecrets: false
+          createSecrets: true
           jwtSecret: "4ecb9dcdee1507c2f1a9c72f5736dfdc281607ad35db49aba2f39431484f0002"
           internalApiKey: "f0bbeae0f1960580f3b9d3599a4ae35d3334e5ed589c6f73fd81870cb872e30a"
           apiEncryptionKey: "742f0a0321838ae81d6807963113aa4dcca878573ebb072a4059d90e18527d88"
