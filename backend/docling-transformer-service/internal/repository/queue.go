@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -384,12 +385,16 @@ func countRows(rows pgx.Rows) (int, error) {
 }
 
 func scanTask(row pgx.Row) (*TransformationTask, error) {
-	var task TransformationTask
+	var (
+		task         TransformationTask
+		doclingJobID sql.NullString
+	)
+
 	if err := row.Scan(
 		&task.ID,
 		&task.Status,
 		&task.RetryCount,
-		&task.DoclingJobID,
+		&doclingJobID,
 		&task.DoclingPollCount,
 		&task.NextPollAt,
 		&task.DocumentID,
@@ -410,6 +415,8 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
+
+	task.DoclingJobID = doclingJobID.String
 
 	return &task, nil
 }
