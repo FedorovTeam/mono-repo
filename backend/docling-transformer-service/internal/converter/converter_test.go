@@ -102,6 +102,75 @@ func TestDoclingConverterSuccess(t *testing.T) {
 	}
 }
 
+func TestDoclingConverterPDF(t *testing.T) {
+	var receivedFileName, receivedPartContentType, receivedSourceHeader, receivedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("failed to parse multipart form: %v", err)
+		}
+
+		fileHeader := r.MultipartForm.File["files"][0]
+		receivedFileName = fileHeader.Filename
+		receivedPartContentType = fileHeader.Header.Get("Content-Type")
+		receivedSourceHeader = r.Header.Get("X-Docling-Source-Filename")
+
+		file, err := fileHeader.Open()
+		if err != nil {
+			t.Fatalf("failed to open file: %v", err)
+		}
+		defer file.Close()
+
+		bodyBytes, _ := io.ReadAll(file)
+		receivedBody = string(bodyBytes)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"document": map[string]any{
+				"filename":   receivedFileName,
+				"md_content": "# pdf markdown",
+			},
+			"status":          "success",
+			"processing_time": 0.2,
+		})
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(server.URL, "", zap.NewNop())
+	result, err := conv.Convert(context.Background(), DoclingConvertRequest{
+		Content:     []byte("pdf-bytes"),
+		ContentType: "application/pdf",
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.MediaType != "text/markdown" {
+		t.Fatalf("unexpected media type: %s", result.MediaType)
+	}
+
+	if string(result.Content) != "# pdf markdown" {
+		t.Fatalf("unexpected markdown: %s", string(result.Content))
+	}
+
+	if receivedPartContentType != "application/pdf" {
+		t.Fatalf("unexpected part content-type: %s", receivedPartContentType)
+	}
+
+	if receivedFileName != "document.pdf" {
+		t.Fatalf("unexpected file name: %s", receivedFileName)
+	}
+
+	if receivedSourceHeader != "document.pdf" {
+		t.Fatalf("unexpected source header: %s", receivedSourceHeader)
+	}
+
+	if receivedBody != "pdf-bytes" {
+		t.Fatalf("unexpected body: %s", receivedBody)
+	}
+}
+
 func TestDoclingConverterErrorStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "docling failed", http.StatusBadGateway)

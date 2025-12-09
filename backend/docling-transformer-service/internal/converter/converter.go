@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,12 +20,25 @@ import (
 
 const (
 	doclingConvertPath  = "/v1/convert/file"
-	defaultContentType  = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	correlationIDHeader = "X-Correlation-Id"
 	sourceFileHeader    = "X-Docling-Source-Filename"
 	endpointHeader      = "X-Docling-Endpoint"
 	apiKeyHeader        = "X-Api-Key"
 )
+
+const defaultExtension = "docx"
+
+var extensionToContentType = map[string]string{
+	"doc":  "application/msword",
+	"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	"pdf":  "application/pdf",
+}
+
+var contentTypeToExtension = map[string]string{
+	"application/msword": "doc",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+	"application/pdf": "pdf",
+}
 
 // DoclingConvertRequest описывает входные данные для конвертации DOCX в Markdown.
 type DoclingConvertRequest struct {
@@ -80,6 +94,27 @@ func NewDoclingConverter(endpoint, apiKey string, logger *zap.Logger) *DoclingCo
 	}
 }
 
+func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, error) {
+	normalizedContentType := strings.ToLower(reqContentType)
+	if ext, ok := contentTypeToExtension[normalizedContentType]; ok {
+		return normalizedContentType, ext, nil
+	}
+
+	fileExt := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+	if fileExt != "" {
+		if contentType, ok := extensionToContentType[fileExt]; ok {
+			return contentType, fileExt, nil
+		}
+		return "", "", fmt.Errorf("unsupported file extension: %s", fileExt)
+	}
+
+	if normalizedContentType != "" {
+		return "", "", fmt.Errorf("unsupported content type: %s", reqContentType)
+	}
+
+	return extensionToContentType[defaultExtension], defaultExtension, nil
+}
+
 // Convert выполняет HTTP-вызов в Docling-сервис и возвращает Markdown.
 func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertRequest) (DoclingConvertResult, error) {
 	if len(req.Content) == 0 {
@@ -88,16 +123,17 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
+	contentType, fileExt, err := resolveContentTypeAndExt(req.ContentType, req.FileName)
+	if err != nil {
+		return DoclingConvertResult{}, err
+	}
+
 	filename := req.FileName
 	if filename == "" {
-		filename = "document.docx"
+		filename = fmt.Sprintf("document.%s", fileExt)
 	}
 
 	var lastErr error
-	contentType := req.ContentType
-	if contentType == "" {
-		contentType = defaultContentType
-	}
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingConvertPath)
