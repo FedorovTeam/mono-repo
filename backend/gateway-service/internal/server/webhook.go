@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 
@@ -23,9 +24,15 @@ func (s *Server) handleStorageNotification(w http.ResponseWriter, r *http.Reques
 
 	processed := 0
 	for _, record := range payload.Records {
-		documentID := extractDocumentID(record.S3.Object.Key)
+		decodedKey, err := url.PathUnescape(record.S3.Object.Key)
+		if err != nil {
+			s.logger.Warn("cannot decode object key", zap.String("object_key", record.S3.Object.Key), zap.Error(err))
+			continue
+		}
+
+		documentID := extractDocumentID(decodedKey)
 		if documentID == "" {
-			s.logger.Warn("skip notification without document id", zap.String("object_key", record.S3.Object.Key))
+			s.logger.Warn("skip notification without document id", zap.String("object_key", decodedKey))
 			continue
 		}
 
@@ -41,13 +48,13 @@ func (s *Server) handleStorageNotification(w http.ResponseWriter, r *http.Reques
 			zap.String("correlation_id", correlationID),
 			zap.String("document_id", documentID),
 			zap.String("bucket", record.S3.Bucket.Name),
-			zap.String("object_key", record.S3.Object.Key),
+			zap.String("object_key", decodedKey),
 		)
 
-		_, err := s.documentClient.ConfirmUpload(ctx, &documentpb.ConfirmUploadRequest{
+		_, err = s.documentClient.ConfirmUpload(ctx, &documentpb.ConfirmUploadRequest{
 			DocumentId:    documentID,
 			Bucket:        record.S3.Bucket.Name,
-			ObjectKey:     record.S3.Object.Key,
+			ObjectKey:     decodedKey,
 			CorrelationId: correlationID,
 		})
 		if err != nil {
