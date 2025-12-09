@@ -50,6 +50,11 @@ var contentTypeToExtension = map[string]string{
 	"application/pdf": "pdf",
 }
 
+var (
+	ErrDoclingPollingTimeout          = errors.New("docling polling timeout")
+	ErrDoclingPollingAttemptsExceeded = errors.New("docling polling attempts exceeded")
+)
+
 // ResolveContentTypeByExtension возвращает content-type для заданного расширения.
 func ResolveContentTypeByExtension(fileExt string) (string, error) {
 	normalized := strings.TrimPrefix(strings.ToLower(fileExt), ".")
@@ -419,7 +424,7 @@ func (c *DoclingConverter) pollStatus(ctx context.Context, correlationID, jobID 
 
 		elapsed := time.Since(start)
 		if elapsed >= normalizedTimeout {
-			return doclingStatusResponse{}, attempt, fmt.Errorf("docling polling timeout for job %s", jobID)
+			return doclingStatusResponse{}, attempt, fmt.Errorf("%w for job %s", ErrDoclingPollingTimeout, jobID)
 		}
 
 		select {
@@ -428,8 +433,7 @@ func (c *DoclingConverter) pollStatus(ctx context.Context, correlationID, jobID 
 		case <-time.After(normalizedInterval):
 		}
 	}
-
-	return doclingStatusResponse{}, normalizedAttempts, fmt.Errorf("docling polling attempts exceeded for job %s", jobID)
+	return doclingStatusResponse{}, normalizedAttempts, fmt.Errorf("%w for job %s", ErrDoclingPollingAttemptsExceeded, jobID)
 }
 
 func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID string) (doclingStatusResponse, error) {

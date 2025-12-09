@@ -76,19 +76,23 @@ func (s *stubQueueRepo) MarkFailed(_ context.Context, id uuid.UUID, _ string) er
 	return nil
 }
 
-func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, error) {
-	if s.countErr != nil {
-		return 0, 0, s.countErr
-	}
-	return s.pending, s.processing, nil
+func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
+        if s.countErr != nil {
+                return 0, 0, 0, s.countErr
+        }
+        return s.pending, s.processing, 0, nil
 }
 
-func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int) (int, int, error) {
-	s.restoreCalls++
-	if s.restoreErr != nil {
-		return 0, 0, s.restoreErr
-	}
-	return s.restored, s.rejected, nil
+func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
+        s.restoreCalls++
+        if s.restoreErr != nil {
+                return 0, 0, s.restoreErr
+        }
+        return s.restored, s.rejected, nil
+}
+
+func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
+        return nil
 }
 
 func (s *stubQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) {

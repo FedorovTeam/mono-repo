@@ -30,10 +30,10 @@ type fakeQueueRepo struct {
 }
 
 func (f *fakeQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
-	f.enqueueCalls = append(f.enqueueCalls, params)
-	if f.enqueueErr != nil {
-		return uuid.Nil, f.enqueueErr
-	}
+        f.enqueueCalls = append(f.enqueueCalls, params)
+        if f.enqueueErr != nil {
+                return uuid.Nil, f.enqueueErr
+        }
 	if f.queueID == uuid.Nil {
 		f.queueID = uuid.New()
 	}
@@ -48,13 +48,16 @@ func (f *fakeQueueRepo) CountActive(context.Context) (int, error) {
 }
 
 func (*fakeQueueRepo) AcquireNext(context.Context) (*repository.TransformationTask, error) {
-	return nil, nil
+        return nil, nil
 }
 func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
 func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
-func (*fakeQueueRepo) CountByStatus(context.Context) (int, int, error)           { return 0, 0, nil }
-func (*fakeQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int) (int, int, error) {
-	return 0, 0, nil
+func (*fakeQueueRepo) CountByStatus(context.Context) (int, int, int, error)      { return 0, 0, 0, nil }
+func (*fakeQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
+        return nil
+}
+func (*fakeQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
+        return 0, 0, nil
 }
 func (*fakeQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) { return 0, nil }
 
