@@ -8,16 +8,23 @@ sequenceDiagram
     participant DL as Docling HTTP Stub
 
     GW->>TR: ConvertDocxToMarkdown(document_id, original_bucket, original_object_key,\nmarkdown_bucket?, markdown_object_key?)\n+x-correlation-id
-    TR->>TR: LoggingInterceptor\nобеспечивает correlation-id
-    opt markdown_bucket not provided
-        TR->>TR: использовать бакет по умолчанию из конфигурации
+    TR->>TR: LoggingInterceptor\nобеспечивает/проставляет correlation-id
+    alt document_id или original_bucket/original_object_key пустые
+        TR-->>GW: InvalidArgument
+    else
+        opt markdown_bucket not provided
+            TR->>TR: использовать markdownBucket из конфигурации\n(иначе вернуть InvalidArgument)
+        end
+        TR->>MN: GET original_object_key из original_bucket\n(повторение при NoSuchKey)
+        TR->>DL: POST /convert c телом DOCX\nContent-Type: переданный или docx по умолчанию\nX-Correlation-Id\nX-Docling-Source-Filename: basename(original_object_key) или document.docx\nX-Docling-Endpoint: <docling.endpoint>
+        loop до 3 попыток
+            DL-->>TR: Markdown (text/markdown или JSON с md_content)
+        end
+        opt markdown_object_key not provided
+            TR->>TR: buildMarkdownKey(original_object_key) -> *.md
+        end
+        TR->>TR: media_type = Content-Type ответа или text/markdown
+        TR->>MN: PUT markdown_object_key в markdown_bucket\ncontent-type = media_type
+        TR-->>GW: markdown_content, media_type, markdown_bucket, markdown_object_key
     end
-    TR->>MN: GET original_object_key из original_bucket
-    TR->>DL: POST /v1/convert/file\nX-Correlation-Id + исходное имя файла
-    DL-->>TR: md_content (text/markdown)
-    opt markdown_object_key not provided
-        TR->>TR: buildMarkdownKey(original_object_key) -> *.md
-    end
-    TR->>MN: PUT markdown_object_key в markdown_bucket\ncontent-type из Docling или text/markdown
-    TR-->>GW: markdown_content, media_type, markdown_bucket, markdown_object_key
 ```
