@@ -13,8 +13,8 @@
 - `service.processing_timeout` — максимальное время нахождения задачи в статусе `processing`; по превышению задача восстанавливается в `pending` (или переводится в `failed`, если превышен лимит ретраев или опросов Docling).
 - `service.io_timeout` — ограничение на быстрые операции (скачивание/загрузка, submit в Docling), не влияющее на ожидание внешнего сервиса.
 - `service.cleanup_interval` — период фонового цикла, который выполняет восстановление зависших задач и очистку завершённых.
-- `docling.status_poll_timeout` и `docling.status_max_attempts` — контроль длительности короткого окна опроса Docling.
-- `docling.status_recheck_interval` — интервал между повторными окнами опроса Docling для задач в статусе `waiting_docling`.
+- `docling.status_initial_interval` / `docling.status_backoff_factor` / `docling.status_max_interval` — параметры экспоненциального backoff для опроса статуса Docling (рост до 30–60 минут при ожидании 1–2 часов).
+- `docling.status_max_attempts` — ограничение на общее число запросов статуса (0 — без ограничений).
 - `docling.max_job_lifetime` — максимальное время нахождения задачи Docling в ожидании; по превышению задача помечается как `failed`.
 
 ## Управление конфигурацией

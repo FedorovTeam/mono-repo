@@ -10,12 +10,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
 )
 
-func TestDoclingConverterSubmitAndPollSuccess(t *testing.T) {
+func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 	var submitCalls, statusCalls int32
 	var receivedCorrelationSubmit, receivedCorrelationStatus string
 	var receivedFilename, receivedBody string
@@ -54,11 +55,6 @@ func TestDoclingConverterSubmitAndPollSuccess(t *testing.T) {
 			receivedCorrelationStatus = r.Header.Get(correlationIDHeader)
 
 			w.Header().Set("Content-Type", "application/json")
-			if atomic.LoadInt32(&statusCalls) == 1 {
-				_ = json.NewEncoder(w).Encode(doclingStatusResponse{Status: "processing"})
-				return
-			}
-
 			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
 				JobID:  path.Base(r.URL.Path),
 				Status: "success",
@@ -76,35 +72,42 @@ func TestDoclingConverterSubmitAndPollSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(Config{
-		Endpoint:           server.URL,
-		StatusPollInterval: 10 * time.Millisecond,
-		StatusPollTimeout:  500 * time.Millisecond,
-	}, zap.NewNop())
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	result, err := conv.Convert(context.Background(), DoclingConvertRequest{
+	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "corr-submit")
+
+	jobID, err := conv.Submit(ctx, DoclingConvertRequest{
 		FileName:    "sample.docx",
 		Content:     []byte("docx-bytes"),
 		ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	if got := string(result.Content); got != "# converted" {
+	status, err := conv.CheckStatus(ctx, jobID)
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Result == nil {
+		t.Fatalf("expected result to be present")
+	}
+
+	if got := string(status.Result.Content); got != "# converted" {
 		t.Fatalf("unexpected markdown: %s", got)
 	}
 
-	if result.MediaType != "text/markdown" {
-		t.Fatalf("unexpected media type: %s", result.MediaType)
+	if status.Result.MediaType != "text/markdown" {
+		t.Fatalf("unexpected media type: %s", status.Result.MediaType)
 	}
 
 	if atomic.LoadInt32(&submitCalls) != 1 {
 		t.Fatalf("expected single submit call, got %d", submitCalls)
 	}
 
-	if atomic.LoadInt32(&statusCalls) != 2 {
-		t.Fatalf("expected two status polls, got %d", statusCalls)
+	if atomic.LoadInt32(&statusCalls) != 1 {
+		t.Fatalf("expected single status call, got %d", statusCalls)
 	}
 
 	if receivedFilename != "sample.docx" {
@@ -115,7 +118,7 @@ func TestDoclingConverterSubmitAndPollSuccess(t *testing.T) {
 		t.Fatalf("unexpected body: %s", receivedBody)
 	}
 
-	if receivedCorrelationSubmit == "" || receivedCorrelationSubmit != receivedCorrelationStatus {
+	if receivedCorrelationSubmit == "" || receivedCorrelationSubmit != receivedCorrelationStatus || receivedCorrelationSubmit != "corr-submit" {
 		t.Fatalf("correlation id was not propagated across requests")
 	}
 }
@@ -155,13 +158,20 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	result, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
+	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "retry-corr")
+
+	jobID, err := conv.Submit(ctx, DoclingConvertRequest{Content: []byte("doc")})
 	if err != nil {
-		t.Fatalf("unexpected error after retry: %v", err)
+		t.Fatalf("unexpected submit error after retry: %v", err)
 	}
 
-	if got := string(result.Content); got != "ok" {
-		t.Fatalf("unexpected content: %s", got)
+	status, err := conv.CheckStatus(ctx, jobID)
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Result == nil || string(status.Result.Content) != "ok" {
+		t.Fatalf("unexpected content: %+v", status.Result)
 	}
 
 	if atomic.LoadInt32(&submitAttempts) != 2 {
@@ -169,12 +179,12 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 	}
 }
 
-func TestDoclingConverterPollTimeout(t *testing.T) {
+func TestDoclingConverterCheckStatusPending(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-timeout"})
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-wait"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doclingStatusResponse{Status: "processing"})
@@ -184,19 +194,26 @@ func TestDoclingConverterPollTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(Config{
-		Endpoint:           server.URL,
-		StatusPollInterval: 20 * time.Millisecond,
-		StatusPollTimeout:  60 * time.Millisecond,
-	}, zap.NewNop())
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
-	if err == nil {
-		t.Fatalf("expected timeout error")
+	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "pending-corr")
+
+	jobID, err := conv.Submit(ctx, DoclingConvertRequest{Content: []byte("doc")})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "timeout") {
-		t.Fatalf("unexpected error message: %v", err)
+	status, err := conv.CheckStatus(ctx, jobID)
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Result != nil {
+		t.Fatalf("expected nil result for processing status")
+	}
+
+	if status.Status == "" {
+		t.Fatalf("status should be propagated")
 	}
 }
 

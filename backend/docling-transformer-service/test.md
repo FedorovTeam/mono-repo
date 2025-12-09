@@ -7,8 +7,8 @@
 - `service.processing_timeout` — верхняя граница на нахождение задачи в статусе `processing`; по превышению задача возвращается в `pending`, `docling_job_id`/`docling_poll_count` сбрасываются и воркер начинает конвертацию с нуля.
 - `service.io_timeout` — ограничение на короткие операции (MinIO/submit Docling), не распространяется на ожидание Docling.
 - `service.cleanup_interval` — частота фоновой проверки зависших задач и очистки завершённых записей.
-- `docling.status_poll_timeout` и `docling.status_max_attempts` — ограничения на окно опроса Docling внутри одного цикла воркера.
-- `docling.status_recheck_interval` — пауза между попытками опроса Docling для задач в статусе `waiting_docling`.
+- `docling.status_initial_interval` / `docling.status_backoff_factor` / `docling.status_max_interval` — экспоненциальный backoff между запросами статуса Docling (до 30–60 минут при длительном ожидании).
+- `docling.status_max_attempts` — лимит количества запросов статуса (0 — без ограничения).
 - `docling.max_job_lifetime` — предел жизни задачи Docling; после его превышения задача завершается с ошибкой.
 
 ## Ручные проверки
