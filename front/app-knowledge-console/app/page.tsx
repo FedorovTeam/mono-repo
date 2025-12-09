@@ -163,7 +163,7 @@ export default function HomePage() {
               <label className="block text-sm mb-1">Файл</label>
               <input
                   type="file"
-                  accept=".doc,.docx"
+                  accept=".doc,.docx,.pdf"
                   onChange={handleFileChange}
                   className="block w-full text-sm text-slate-100 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-500 file:text-white hover:file:bg-indigo-400 cursor-pointer"
               />
