@@ -1,9 +1,9 @@
 # Flows
 
 ## Конвертация DOCX → Markdown
-1. Gateway/Temporal вызывает gRPC метод `ConvertDocxToMarkdown` с `document_id`, `original_bucket`, `original_object_key` и `x-correlation-id` (опционально `markdown_bucket`/`markdown_object_key`).
+1. Gateway/Temporal вызывает gRPC метод `ConvertDocumentToMarkdown` с `document_id`, `original_bucket`, `original_object_key`, `filename_extension` и `x-correlation-id` (опционально `markdown_bucket`/`markdown_object_key`).
 2. Интерсептор (включается флагом `observability.loggingEnabled`) сохраняет/генерирует correlation-id и пишет входные метаданные в лог.
-3. Сервис проверяет наличие `document_id`, `original_bucket` и `original_object_key`; если `markdown_bucket` не указан, используется значение из `config.yaml`.
+3. Сервис проверяет наличие `document_id`, `original_bucket` и `original_object_key`, валидирует расширение (`doc`, `docx`, `pdf`); если `markdown_bucket` не указан, используется значение из `config.yaml`.
 4. MinIO-адаптер скачивает оригинал с повторными попытками при ошибке `NoSuchKey` (до 10 попыток с увеличивающейся паузой).
 5. `DoclingConverter` отправляет POST `${docling.endpoint}/v1/convert/file` (до 3 попыток). В запрос передаются `X-Correlation-Id`, `X-Docling-Source-Filename` (имя берётся из `original_object_key` или подставляется `document.docx`), `X-Api-Key` (если задан в конфиге), `X-Docling-Endpoint`, а тело — `multipart/form-data` с полем `files` (один файл с `Content-Type` исходника).
 6. Ответ Docling обрабатывается как Markdown: при `Content-Type: application/json` читается `document.md_content` со статусом `success/partial_success`, в остальных случаях берётся тело ответа и `Content-Type` из заголовка (если пусто — `text/markdown`).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ type convertInput struct {
 	MarkdownBucket    string
 	OriginalObjectKey string
 	MarkdownObjectKey string
+	FilenameExtension string
 	Version           int32
 }
 
@@ -140,6 +142,7 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		MarkdownBucket:    snapshot.MarkdownBucket,
 		OriginalObjectKey: snapshot.OriginalObjectKey,
 		MarkdownObjectKey: snapshot.MarkdownObjectKey,
+		FilenameExtension: strings.TrimPrefix(strings.ToLower(filepath.Ext(snapshot.OriginalObjectKey)), "."),
 		Version:           snapshot.Version + 1,
 	}
 
@@ -256,12 +259,18 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	if a.transformer == nil {
 		return convertResult{}, fmt.Errorf("transformer client is not configured")
 	}
-	resp, err := a.transformer.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
+	extension := input.FilenameExtension
+	if extension == "" {
+		extension = strings.TrimPrefix(strings.ToLower(filepath.Ext(input.OriginalObjectKey)), ".")
+	}
+
+	resp, err := a.transformer.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        input.DocumentID,
 		OriginalBucket:    input.OriginalBucket,
 		OriginalObjectKey: input.OriginalObjectKey,
 		MarkdownBucket:    input.MarkdownBucket,
 		MarkdownObjectKey: input.MarkdownObjectKey,
+		FilenameExtension: extension,
 	})
 	if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("convert: %v", err))

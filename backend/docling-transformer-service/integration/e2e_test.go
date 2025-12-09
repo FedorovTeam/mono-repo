@@ -103,12 +103,13 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
+	resp, err := client.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-1",
 		OriginalBucket:    "orig",
 		OriginalObjectKey: "path/file.docx",
 		MarkdownBucket:    "md",
 		MarkdownObjectKey: "dest/file.md",
+		FilenameExtension: "docx",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -10,7 +10,7 @@
 
 3. **Пошаговая обработка Temporal‑воркфлоу**
    - Activity `AwaitOriginal` запрашивает наличие объекта в MinIO через `StorageService.GetObject` и обновляет статус на `StoredOriginal` (версия берётся из последней сохранённой записи).
-   - Activity `ConvertToMarkdown` вызывает `TransformerService.ConvertDocxToMarkdown`, сохраняет новый `markdown_object_key` (если пришёл другой ключ) и выставляет статус `ConvertedToMarkdown`.
+   - Activity `ConvertToMarkdown` вызывает `TransformerService.ConvertDocumentToMarkdown`, передавая расширение исходника (из `original_object_key`), сохраняет новый `markdown_object_key` (если пришёл другой ключ) и выставляет статус `ConvertedToMarkdown`.
    - Activity `PublishMarkdown` публикует markdown в GitHub через `GithubPublisherService.PublishMarkdown`, используя owner/repository/branch/baseBranch/path из документа и опцию `create_pr`. При успешном коммите статус становится `PublishedToGitHub`.
 
 4. **Ручное обновление статуса**

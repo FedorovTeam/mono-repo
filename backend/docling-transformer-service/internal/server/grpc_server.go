@@ -34,14 +34,15 @@ func NewTransformerAPI(conv converter.Converter, storage storage.ObjectStorage, 
 	return &TransformerAPI{converter: conv, storage: storage, markdownBucket: markdownBucket, logger: logger}
 }
 
-// ConvertDocxToMarkdown выполняет преобразование документа через конвертер.
-func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+// ConvertDocumentToMarkdown выполняет преобразование документа через конвертер.
+func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *transformerv1.ConvertDocumentToMarkdownRequest) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
-	s.logger.Info("ConvertDocxToMarkdown started", zap.String("correlation_id", correlationID),
+	s.logger.Info("ConvertDocumentToMarkdown started", zap.String("correlation_id", correlationID),
 		zap.String("document_id", req.GetDocumentId()),
 		zap.String("original_bucket", req.GetOriginalBucket()),
-		zap.String("original_object_key", req.GetOriginalObjectKey()))
+		zap.String("original_object_key", req.GetOriginalObjectKey()),
+		zap.String("filename_extension", req.GetFilenameExtension()))
 
 	if req.GetDocumentId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "document_id is required")
@@ -58,15 +59,41 @@ func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transfo
 		return nil, status.Error(codes.InvalidArgument, "markdown bucket is required")
 	}
 
+	fileExt := strings.TrimPrefix(strings.ToLower(req.GetFilenameExtension()), ".")
+	if fileExt == "" {
+		fileExt = strings.TrimPrefix(strings.ToLower(filepath.Ext(req.GetOriginalObjectKey())), ".")
+	}
+
+	if fileExt == "" {
+		return nil, status.Error(codes.InvalidArgument, "file extension is required")
+	}
+
+	supportedExt := map[string]string{
+		"doc":  "application/msword",
+		"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"pdf":  "application/pdf",
+	}
+
+	contentType, ok := supportedExt[fileExt]
+	if !ok {
+		return nil, status.Errorf(codes.InvalidArgument, "unsupported file extension: %s", fileExt)
+	}
+
 	originalContent, err := s.storage.Download(ctx, req.GetOriginalBucket(), req.GetOriginalObjectKey())
 	if err != nil {
 		s.logger.Error("download original failed", zap.String("correlation_id", correlationID), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "download original: %v", err)
 	}
 
+	originalFileName := filepath.Base(req.GetOriginalObjectKey())
+	if filepath.Ext(originalFileName) == "" && fileExt != "" {
+		originalFileName = fmt.Sprintf("document.%s", fileExt)
+	}
+
 	result, err := s.converter.Convert(ctx, converter.DoclingConvertRequest{
-		FileName: filepath.Base(req.GetOriginalObjectKey()),
-		Content:  originalContent,
+		FileName:    originalFileName,
+		Content:     originalContent,
+		ContentType: contentType,
 	})
 	if err != nil {
 		s.logger.Error("conversion failed", zap.String("correlation_id", correlationID), zap.Error(err))
@@ -78,19 +105,19 @@ func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transfo
 		markdownKey = buildMarkdownKey(req.GetOriginalObjectKey())
 	}
 
-	contentType := result.MediaType
-	if contentType == "" {
-		contentType = "text/markdown"
+	markdownContentType := result.MediaType
+	if markdownContentType == "" {
+		markdownContentType = "text/markdown"
 	}
 
-	if err := s.storage.Upload(ctx, markdownBucket, markdownKey, contentType, result.Content); err != nil {
+	if err := s.storage.Upload(ctx, markdownBucket, markdownKey, markdownContentType, result.Content); err != nil {
 		s.logger.Error("upload markdown failed", zap.String("correlation_id", correlationID), zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "upload markdown: %v", err)
 	}
 
-	s.logger.Info("ConvertDocxToMarkdown completed", zap.String("correlation_id", correlationID), zap.String("markdown_bucket", markdownBucket), zap.String("markdown_key", markdownKey))
+	s.logger.Info("ConvertDocumentToMarkdown completed", zap.String("correlation_id", correlationID), zap.String("markdown_bucket", markdownBucket), zap.String("markdown_key", markdownKey))
 
-	return &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: result.Content, MediaType: result.MediaType, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}, nil
+	return &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownContent: result.Content, MediaType: result.MediaType, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}, nil
 }
 
 func buildMarkdownKey(originalKey string) string {

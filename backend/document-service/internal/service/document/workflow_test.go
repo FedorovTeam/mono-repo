@@ -48,12 +48,12 @@ func (f *fakeRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) 
 }
 
 type fakeTransformerClient struct {
-	lastRequest *transformerv1.ConvertDocxToMarkdownRequest
-	resp        *transformerv1.ConvertDocxToMarkdownResponse
+	lastRequest *transformerv1.ConvertDocumentToMarkdownRequest
+	resp        *transformerv1.ConvertDocumentToMarkdownResponse
 	err         error
 }
 
-func (f *fakeTransformerClient) ConvertDocxToMarkdown(ctx context.Context, in *transformerv1.ConvertDocxToMarkdownRequest, opts ...grpc.CallOption) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+func (f *fakeTransformerClient) ConvertDocumentToMarkdown(ctx context.Context, in *transformerv1.ConvertDocumentToMarkdownRequest, opts ...grpc.CallOption) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
 	f.lastRequest = in
 	return f.resp, f.err
 }
@@ -100,7 +100,7 @@ func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpubli
 
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{}
-	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: []byte("md"), MediaType: "text/markdown", MarkdownObjectKey: "md-key"}}
+	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownContent: []byte("md"), MediaType: "text/markdown", MarkdownObjectKey: "md-key"}}
 	storage := &fakeStorageClient{}
 
 	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main", "https://api.github.com")
@@ -111,6 +111,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		MarkdownBucket:    "md-bucket",
 		OriginalObjectKey: "path/doc-1.docx",
 		MarkdownObjectKey: "path/doc-1.md",
+		FilenameExtension: "docx",
 		Version:           3,
 	})
 	if err != nil {
@@ -127,6 +128,10 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 
 	if transformer.lastRequest.GetMarkdownObjectKey() != "path/doc-1.md" {
 		t.Fatalf("unexpected markdown key: %s", transformer.lastRequest.GetMarkdownObjectKey())
+	}
+
+	if transformer.lastRequest.GetFilenameExtension() != "docx" {
+		t.Fatalf("unexpected filename extension: %s", transformer.lastRequest.GetFilenameExtension())
 	}
 
 	if result.MediaType != "text/markdown" {
