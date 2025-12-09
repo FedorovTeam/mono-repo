@@ -18,7 +18,7 @@
    ```
 3. Обновить статус:
    ```bash
-   grpcurl -plaintext -d '{"id":"<uuid>","status":"DOCUMENT_STATUS_STORED_ORIGINAL","version":2,"markdown_object_key":"documents/<uuid>/markdown"}' localhost:50051 backend.document.v1.DocumentService/UpdateDocumentStatus
+   grpcurl -plaintext -d '{"id":"<uuid>","status":"DOCUMENT_STATUS_STORED_ORIGINAL","version":2,"markdown_object_key":"documents/<uuid>/<uuid>.md"}' localhost:50051 backend.document.v1.DocumentService/UpdateDocumentStatus
    ```
 4. Список документов:
    ```bash
