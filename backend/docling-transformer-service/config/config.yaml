@@ -16,10 +16,10 @@ postgres:
 docling:
   endpoint: https://docling.tech.fedorov-team.tech
   api_key: ""
-  status_poll_interval: 5s
-  status_poll_timeout: 20s
+  status_initial_interval: 15s
+  status_backoff_factor: 2
+  status_max_interval: 30m
   status_max_attempts: 0
-  status_recheck_interval: 1m
   max_job_lifetime: 24h
 
 minio:

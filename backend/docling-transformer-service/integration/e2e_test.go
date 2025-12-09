@@ -148,19 +148,12 @@ func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest)
 	return "job-1", nil
 }
 
-func (s *stubConverter) Poll(context.Context, string, time.Duration, time.Duration, int) (converter.DoclingConvertResult, time.Duration, int, error) {
+func (s *stubConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
 	if s.err != nil {
-		return converter.DoclingConvertResult{}, 0, 0, s.err
+		return converter.StatusCheckResult{}, s.err
 	}
 
-	return s.result, 0, 1, nil
-}
-
-func (s *stubConverter) Convert(context.Context, converter.DoclingConvertRequest) (converter.DoclingConvertResult, error) {
-	if s.err != nil {
-		return converter.DoclingConvertResult{}, s.err
-	}
-	return s.result, nil
+	return converter.StatusCheckResult{Status: "success", Result: &s.result}, nil
 }
 
 var _ repository.QueueRepository = (*stubQueueRepo)(nil)

@@ -35,10 +35,10 @@ type ServiceConfig struct {
 type DoclingConfig struct {
 	Endpoint              string        `yaml:"endpoint"`
 	APIKey                string        `yaml:"api_key"`
-	StatusPollInterval    time.Duration `yaml:"status_poll_interval"`
-	StatusPollTimeout     time.Duration `yaml:"status_poll_timeout"`
+	StatusInitialInterval time.Duration `yaml:"status_initial_interval"`
+	StatusBackoffFactor   float64       `yaml:"status_backoff_factor"`
+	StatusMaxInterval     time.Duration `yaml:"status_max_interval"`
 	StatusMaxAttempts     int           `yaml:"status_max_attempts"`
-	StatusRecheckInterval time.Duration `yaml:"status_recheck_interval"`
 	MaxJobLifetime        time.Duration `yaml:"max_job_lifetime"`
 }
 

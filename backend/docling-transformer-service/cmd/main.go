@@ -91,11 +91,8 @@ func main() {
 
 	queueRepo := repository.NewQueueRepository(pool)
 	conv := converter.NewDoclingConverter(converter.Config{
-		Endpoint:           cfg.Docling.Endpoint,
-		APIKey:             cfg.Docling.APIKey,
-		StatusPollInterval: cfg.Docling.StatusPollInterval,
-		StatusPollTimeout:  cfg.Docling.StatusPollTimeout,
-		StatusMaxAttempts:  cfg.Docling.StatusMaxAttempts,
+		Endpoint: cfg.Docling.Endpoint,
+		APIKey:   cfg.Docling.APIKey,
 	}, logger)
 
 	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{
@@ -107,10 +104,10 @@ func main() {
 		MaxProcessingRetries:   cfg.Service.MaxProcessingRetries,
 		CleanupInterval:        cfg.Service.CleanupInterval,
 		CleanupRetention:       cfg.Service.RetentionPeriod,
-		DoclingPollInterval:    cfg.Docling.StatusPollInterval,
-		DoclingPollTimeout:     cfg.Docling.StatusPollTimeout,
+		DoclingInitialInterval: cfg.Docling.StatusInitialInterval,
+		DoclingMaxInterval:     cfg.Docling.StatusMaxInterval,
+		DoclingBackoffFactor:   cfg.Docling.StatusBackoffFactor,
 		DoclingMaxAttempts:     cfg.Docling.StatusMaxAttempts,
-		DoclingRecheckInterval: cfg.Docling.StatusRecheckInterval,
 		DoclingMaxLifetime:     cfg.Docling.MaxJobLifetime,
 	})
 	workerProcessor.Run(ctx)

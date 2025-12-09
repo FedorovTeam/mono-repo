@@ -17,6 +17,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - `service.max_workers` — количество одновременных воркеров очереди (по умолчанию 1; используется также как лимит слотов для входящих gRPC запросов).
 - `postgres.dsn` и `postgres.max_connections` — строка подключения и лимит коннектов пула для очереди `transformations_queue`.
 - `docling.endpoint` — HTTPS endpoint Docling: `https://docling.tech.fedorov-team.tech`.
+- `docling.status_initial_interval` / `docling.status_backoff_factor` / `docling.status_max_interval` / `docling.status_max_attempts` — шаг, экспоненциальный backoff и лимит запросов статуса Docling (для ожидания длительных задач без блокировки воркеров).
 - `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — учётные данные, `minio.bucket` — обязательный бакет для результата, `minio.region` и `minio.use_ssl` — параметры подключения.
 - `observability.tracingEnabled` / `observability.metricsEnabled` / `observability.loggingEnabled` — флаги включения трассировки, метрик и логов (при `false` провайдеры и middleware не поднимаются).
 - `temporal` блок оставлен для совместимости, но в текущей версии не используется.
