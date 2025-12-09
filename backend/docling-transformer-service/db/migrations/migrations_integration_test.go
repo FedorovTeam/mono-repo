@@ -72,6 +72,7 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 		{"transformations_queue", "correlation_id"},
 		{"transformations_queue", "docling_job_id"},
 		{"transformations_queue", "docling_poll_count"},
+		{"transformations_queue", "next_poll_at"},
 	}
 	for _, c := range columns {
 		assertColumnExists(t, ctx, db, c.table, c.column)
@@ -80,6 +81,7 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 	assertIndexExists(t, ctx, db, "transformations_queue_status_idx")
 	assertIndexExists(t, ctx, db, "transformations_queue_started_at_idx")
 	assertIndexExists(t, ctx, db, "transformations_queue_docling_idx")
+	assertIndexExists(t, ctx, db, "transformations_queue_waiting_idx")
 }
 
 func assertTableExists(t *testing.T, ctx context.Context, db *sql.DB, name string) {

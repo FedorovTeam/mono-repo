@@ -25,6 +25,7 @@ type ServiceConfig struct {
 	MaxWorkers           int           `yaml:"max_workers"`
 	PollInterval         time.Duration `yaml:"poll_interval"`
 	ProcessingTimeout    time.Duration `yaml:"processing_timeout"`
+	IOTimeout            time.Duration `yaml:"io_timeout"`
 	MaxProcessingRetries int           `yaml:"max_processing_retries"`
 	CleanupInterval      time.Duration `yaml:"cleanup_interval"`
 	RetentionPeriod      time.Duration `yaml:"retention_period"`
@@ -32,11 +33,13 @@ type ServiceConfig struct {
 
 // DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.
 type DoclingConfig struct {
-	Endpoint           string        `yaml:"endpoint"`
-	APIKey             string        `yaml:"api_key"`
-	StatusPollInterval time.Duration `yaml:"status_poll_interval"`
-	StatusPollTimeout  time.Duration `yaml:"status_poll_timeout"`
-	StatusMaxAttempts  int           `yaml:"status_max_attempts"`
+	Endpoint              string        `yaml:"endpoint"`
+	APIKey                string        `yaml:"api_key"`
+	StatusPollInterval    time.Duration `yaml:"status_poll_interval"`
+	StatusPollTimeout     time.Duration `yaml:"status_poll_timeout"`
+	StatusMaxAttempts     int           `yaml:"status_max_attempts"`
+	StatusRecheckInterval time.Duration `yaml:"status_recheck_interval"`
+	MaxJobLifetime        time.Duration `yaml:"max_job_lifetime"`
 }
 
 // MinioConfig описывает параметры доступа к MinIO.
