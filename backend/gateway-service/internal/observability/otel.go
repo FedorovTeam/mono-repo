@@ -12,21 +12,38 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 )
 
 // Providers содержит настроенные провайдеры метрик и трейсинга.
 type Providers struct {
-	TracerProvider *sdktrace.TracerProvider
-	MeterProvider  *sdkmetric.MeterProvider
+	TracerProvider trace.TracerProvider
+	MeterProvider  metric.MeterProvider
+	Enabled        bool
 }
 
 // Setup инициализирует OpenTelemetry провайдеры и возвращает функцию graceful shutdown.
-func Setup(ctx context.Context, otlpEndpoint, serviceName string) (Providers, func(context.Context) error, error) {
+func Setup(ctx context.Context, enabled bool, otlpEndpoint, serviceName string) (Providers, func(context.Context) error, error) {
+	var tracerProvider *sdktrace.TracerProvider
+	var meterProvider *sdkmetric.MeterProvider
+
+	if !enabled {
+		tracerProvider := trace.NewNoopTracerProvider()
+		meterProvider := noop.NewMeterProvider()
+
+		otel.SetTracerProvider(tracerProvider)
+		otel.SetMeterProvider(meterProvider)
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+
+		return Providers{TracerProvider: tracerProvider, MeterProvider: meterProvider, Enabled: false}, func(context.Context) error { return nil }, nil
+	}
 	if otlpEndpoint == "" {
 		return Providers{}, func(context.Context) error { return nil }, errors.New("otlp endpoint is required")
 	}
@@ -46,11 +63,11 @@ func Setup(ctx context.Context, otlpEndpoint, serviceName string) (Providers, fu
 		return Providers{}, nil, fmt.Errorf("failed to init metric exporter: %w", err)
 	}
 
-	tracerProvider := sdktrace.NewTracerProvider(
+	tracerProvider = sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
 		sdktrace.WithBatcher(traceExporter),
 	)
-	meterProvider := sdkmetric.NewMeterProvider(
+	meterProvider = sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
 		sdkmetric.WithResource(res),
 	)
@@ -61,29 +78,41 @@ func Setup(ctx context.Context, otlpEndpoint, serviceName string) (Providers, fu
 
 	shutdown := func(ctx context.Context) error {
 		var shutdownErr error
-		if err := tracerProvider.Shutdown(ctx); err != nil {
-			shutdownErr = fmt.Errorf("trace shutdown: %w", err)
+		if tracerProvider != nil {
+			if err := tracerProvider.Shutdown(ctx); err != nil {
+				shutdownErr = fmt.Errorf("trace shutdown: %w", err)
+			}
 		}
-		if err := meterProvider.Shutdown(ctx); err != nil {
-			if shutdownErr != nil {
-				shutdownErr = fmt.Errorf("%v; metric shutdown: %w", shutdownErr, err)
-			} else {
-				shutdownErr = fmt.Errorf("metric shutdown: %w", err)
+		if meterProvider != nil {
+			if err := meterProvider.Shutdown(ctx); err != nil {
+				if shutdownErr != nil {
+					shutdownErr = fmt.Errorf("%v; metric shutdown: %w", shutdownErr, err)
+				} else {
+					shutdownErr = fmt.Errorf("metric shutdown: %w", err)
+				}
 			}
 		}
 		return shutdownErr
 	}
 
-	return Providers{TracerProvider: tracerProvider, MeterProvider: meterProvider}, shutdown, nil
+	return Providers{TracerProvider: tracerProvider, MeterProvider: meterProvider, Enabled: true}, shutdown, nil
 }
 
 // HTTPHandler wraps http handlers with otelhttp middleware.
-func HTTPHandler(handlerName string, h http.Handler) http.Handler {
+func HTTPHandler(handlerName string, h http.Handler, providers Providers) http.Handler {
+	if !providers.Enabled {
+		return h
+	}
+
 	return otelhttp.NewHandler(h, handlerName)
 }
 
 // GRPCDialOptions возвращает набор dial-опций для gRPC клиентов с interceptors.
 func GRPCDialOptions(provider Providers) []grpc.DialOption {
+	if !provider.Enabled {
+		return nil
+	}
+
 	handler := otelgrpc.NewClientHandler(
 		otelgrpc.WithTracerProvider(provider.TracerProvider),
 		otelgrpc.WithMeterProvider(provider.MeterProvider),

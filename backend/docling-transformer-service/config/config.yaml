@@ -16,3 +16,8 @@ minio:
 temporal:
   address: temporal-frontend.temporal.svc.cluster.local:7233
   namespace: knowledge-base
+
+observability:
+  tracingEnabled: true
+  metricsEnabled: true
+  loggingEnabled: true

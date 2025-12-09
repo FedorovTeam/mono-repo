@@ -89,6 +89,11 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 		return r.Method == i.Method && r.URL.Path == recordedURL.Path
 	})
 
+	rec.SetMatcher(func(r *http.Request, i cassette.Request) bool {
+		recordedURL, _ := url.Parse(i.URL)
+		return r.Method == i.Method && r.URL.Path == recordedURL.Path
+	})
+
 	cfg := &config.Config{
 		GitHub: config.GitHubConfig{
 			BaseURL:           server.URL,

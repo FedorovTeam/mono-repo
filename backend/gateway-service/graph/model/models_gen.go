@@ -3,6 +3,7 @@
 package model
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strconv"
@@ -29,6 +30,7 @@ type KnowledgeDocumentFilter struct {
 	Repository *string                  `json:"repository,omitempty"`
 }
 
+// Мутации, отражающие цепочку Upload → Convert → Publish.
 type Mutation struct {
 }
 
@@ -37,6 +39,7 @@ type Pagination struct {
 	Offset *int `json:"offset,omitempty"`
 }
 
+// Запросы статуса и списка документов знаний.
 type Query struct {
 }
 
@@ -84,7 +87,7 @@ func (e KnowledgeDocumentStatus) String() string {
 	return string(e)
 }
 
-func (e *KnowledgeDocumentStatus) UnmarshalGQL(v interface{}) error {
+func (e *KnowledgeDocumentStatus) UnmarshalGQL(v any) error {
 	str, ok := v.(string)
 	if !ok {
 		return fmt.Errorf("enums must be strings")
@@ -99,4 +102,18 @@ func (e *KnowledgeDocumentStatus) UnmarshalGQL(v interface{}) error {
 
 func (e KnowledgeDocumentStatus) MarshalGQL(w io.Writer) {
 	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *KnowledgeDocumentStatus) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e KnowledgeDocumentStatus) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }

@@ -27,7 +27,8 @@ gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `doc
 - `documentService.address` — `document.backend.svc.cluster.local:50051`.
 - `storageService.address` — `storage.backend.svc.cluster.local:50052`.
 - `uploads.maxSizeBytes`, `uploads.allowedExtensions`, `uploads.signedUrlTtlSeconds` — лимиты загрузки и TTL presigned ссылок.
-- `observability.otlpEndpoint`/`observability.serviceName` — адрес OTLP-коллектора и сервисное имя.
+- `observability.enabled` — включает/отключает экспорт метрик и трассировок (при `false` вместо экспортеров используются no-op провайдеры и обработчики).
+- `observability.otlpEndpoint`/`observability.serviceName` — адрес OTLP-коллектора и сервисное имя (обязателен при включённой телеметрии).
 - `logging.level` — уровень логирования.
 
 ## Локальный запуск

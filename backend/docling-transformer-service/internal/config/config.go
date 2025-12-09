@@ -9,10 +9,11 @@ import (
 
 // Config описывает параметры для gRPC сервера, подключения к Docling и инфраструктурных сервисов.
 type Config struct {
-	Service  ServiceConfig  `yaml:"service"`
-	Docling  DoclingConfig  `yaml:"docling"`
-	Minio    MinioConfig    `yaml:"minio"`
-	Temporal TemporalConfig `yaml:"temporal"`
+	Service       ServiceConfig       `yaml:"service"`
+	Docling       DoclingConfig       `yaml:"docling"`
+	Minio         MinioConfig         `yaml:"minio"`
+	Temporal      TemporalConfig      `yaml:"temporal"`
+	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 // ServiceConfig описывает базовые настройки сервиса.
@@ -28,18 +29,25 @@ type DoclingConfig struct {
 
 // MinioConfig описывает параметры доступа к MinIO.
 type MinioConfig struct {
-        Endpoint  string `yaml:"endpoint"`
-        AccessKey string `yaml:"access_key"`
-        SecretKey string `yaml:"secret_key"`
-        Bucket    string `yaml:"bucket"`
-        Region    string `yaml:"region"`
-        UseSSL    bool   `yaml:"use_ssl"`
+	Endpoint  string `yaml:"endpoint"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+	Bucket    string `yaml:"bucket"`
+	Region    string `yaml:"region"`
+	UseSSL    bool   `yaml:"use_ssl"`
 }
 
 // TemporalConfig описывает подключение к Temporal.
 type TemporalConfig struct {
 	Address   string `yaml:"address"`
 	Namespace string `yaml:"namespace"`
+}
+
+// ObservabilityConfig описывает флаги включения подсистем наблюдаемости.
+type ObservabilityConfig struct {
+	TracingEnabled bool `yaml:"tracingEnabled"`
+	MetricsEnabled bool `yaml:"metricsEnabled"`
+	LoggingEnabled bool `yaml:"loggingEnabled"`
 }
 
 // Load загружает конфигурацию из файла YAML.

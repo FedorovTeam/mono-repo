@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	doclingConvertPath  = "/v1/convert/file"
+	doclingConvertPath  = "/convert"
 	defaultContentType  = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	correlationIDHeader = "X-Correlation-Id"
 	sourceFileHeader    = "X-Docling-Source-Filename"
@@ -88,35 +88,20 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 	}
 
 	var lastErr error
+	contentType := req.ContentType
+	if contentType == "" {
+		contentType = defaultContentType
+	}
 
 	for attempt := 1; attempt <= 3; attempt++ {
-		var buf bytes.Buffer
-		writer := multipart.NewWriter(&buf)
-
-		// Основной файл
-		filePart, err := writer.CreateFormFile("files", filename)
-		if err != nil {
-			return DoclingConvertResult{}, fmt.Errorf("create multipart file: %w", err)
-		}
-		if _, err := filePart.Write(req.Content); err != nil {
-			return DoclingConvertResult{}, fmt.Errorf("write multipart file: %w", err)
-		}
-
-		// Явно просим Markdown (опционально, но красиво)
-		_ = writer.WriteField("to_formats", "md")
-
-		if err := writer.Close(); err != nil {
-			return DoclingConvertResult{}, fmt.Errorf("close multipart writer: %w", err)
-		}
-
 		endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingConvertPath)
 
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(req.Content))
 		if err != nil {
 			return DoclingConvertResult{}, fmt.Errorf("build docling request: %w", err)
 		}
 
-		httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+		httpReq.Header.Set("Content-Type", contentType)
 		httpReq.Header.Set(correlationIDHeader, correlationID)
 		if filename != "" {
 			httpReq.Header.Set(sourceFileHeader, filename)
@@ -152,26 +137,34 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 					zap.String("body", string(body)),
 				)
 			} else {
-				var dres doclingFileResponse
-				if err := json.Unmarshal(body, &dres); err != nil {
-					lastErr = fmt.Errorf("unmarshal docling response: %w", err)
-					c.logger.Error("docling json unmarshal failed",
-						zap.String("correlation_id", correlationID),
-						zap.Int("attempt", attempt),
-						zap.Error(err),
-					)
-				} else if dres.Document.MdContent == "" {
-					lastErr = fmt.Errorf("docling response has empty md_content, status=%s", dres.Status)
-					c.logger.Error("docling empty md_content",
-						zap.String("correlation_id", correlationID),
-						zap.String("status", dres.Status),
-					)
+				mediaType := resp.Header.Get("Content-Type")
+				if mediaType == "" {
+					mediaType = "text/markdown"
+				}
+
+				if strings.Contains(mediaType, "application/json") {
+					var dres doclingFileResponse
+					if err := json.Unmarshal(body, &dres); err != nil {
+						lastErr = fmt.Errorf("unmarshal docling response: %w", err)
+						c.logger.Error("docling json unmarshal failed",
+							zap.String("correlation_id", correlationID),
+							zap.Int("attempt", attempt),
+							zap.Error(err),
+						)
+					} else if dres.Document.MdContent == "" {
+						lastErr = fmt.Errorf("docling response has empty md_content, status=%s", dres.Status)
+						c.logger.Error("docling empty md_content",
+							zap.String("correlation_id", correlationID),
+							zap.String("status", dres.Status),
+						)
+					} else {
+						return DoclingConvertResult{
+							Content:   []byte(dres.Document.MdContent),
+							MediaType: "text/markdown",
+						}, nil
+					}
 				} else {
-					// Успех 🎉
-					return DoclingConvertResult{
-						Content:   []byte(dres.Document.MdContent),
-						MediaType: "text/markdown",
-					}, nil
+					return DoclingConvertResult{Content: body, MediaType: mediaType}, nil
 				}
 			}
 		}

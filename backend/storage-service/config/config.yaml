@@ -6,6 +6,11 @@ events:
   upload_bucket: "knowledge-docx"
   webhook_arn: "arn:minio:sqs::1:gateway-webhook"
 
+observability:
+  enable_metrics: true
+  enable_traces: true
+  enable_logs: true
+
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"
   access_key: "xUCM3lvYME7MrYTwegSA"

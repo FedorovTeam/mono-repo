@@ -7,6 +7,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ObservabilityConfig описывает параметры телеметрии.
+type ObservabilityConfig struct {
+	Enabled      *bool  `yaml:"enabled"`
+	OTLPEndpoint string `yaml:"otlpEndpoint"`
+	ServiceName  string `yaml:"serviceName"`
+}
+
+// EnabledOrDefault возвращает true, если флаг не задан, и значение флага, если он задан явно.
+func (o ObservabilityConfig) EnabledOrDefault() bool {
+	if o.Enabled == nil {
+		return true
+	}
+
+	return *o.Enabled
+}
+
 // Config описывает конфигурацию сервиса.
 type Config struct {
 	Server struct {
@@ -26,11 +42,8 @@ type Config struct {
 		AllowedExtensions  []string `yaml:"allowedExtensions"`
 		SignedURLTTLSecond int64    `yaml:"signedUrlTtlSeconds"`
 	} `yaml:"uploads"`
-	Observability struct {
-		OTLPEndpoint string `yaml:"otlpEndpoint"`
-		ServiceName  string `yaml:"serviceName"`
-	} `yaml:"observability"`
-	Logging struct {
+	Observability ObservabilityConfig `yaml:"observability"`
+	Logging       struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
 }
@@ -69,6 +82,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Observability.ServiceName == "" {
 		cfg.Observability.ServiceName = "backend-gateway-service"
+	}
+	if cfg.Observability.EnabledOrDefault() && cfg.Observability.OTLPEndpoint == "" {
+		return Config{}, fmt.Errorf("observability.otlpEndpoint is required when observability.enabled is true")
 	}
 
 	return cfg, nil
