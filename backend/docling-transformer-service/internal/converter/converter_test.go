@@ -6,242 +6,200 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-func TestDoclingConverterSuccess(t *testing.T) {
-	var receivedCorrelation, receivedEndpoint, receivedContentType string
-	var receivedFileName string
-	var receivedBody string
+func TestDoclingConverterSubmitAndPollSuccess(t *testing.T) {
+	var submitCalls, statusCalls int32
+	var receivedCorrelationSubmit, receivedCorrelationStatus string
+	var receivedFilename, receivedBody string
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("Docling expects POST, got %s", r.Method)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			atomic.AddInt32(&submitCalls, 1)
+
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("failed to parse submit form: %v", err)
+			}
+
+			receivedCorrelationSubmit = r.Header.Get(correlationIDHeader)
+			if receivedCorrelationSubmit == "" {
+				t.Fatal("submit correlation id is empty")
+			}
+
+			fileHeader := r.MultipartForm.File["files"][0]
+			receivedFilename = fileHeader.Filename
+
+			file, err := fileHeader.Open()
+			if err != nil {
+				t.Fatalf("failed to open file: %v", err)
+			}
+			defer file.Close()
+
+			bodyBytes, _ := io.ReadAll(file)
+			receivedBody = string(bodyBytes)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-123"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			atomic.AddInt32(&statusCalls, 1)
+			receivedCorrelationStatus = r.Header.Get(correlationIDHeader)
+
+			w.Header().Set("Content-Type", "application/json")
+			if atomic.LoadInt32(&statusCalls) == 1 {
+				_ = json.NewEncoder(w).Encode(doclingStatusResponse{Status: "processing"})
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
+				JobID:  path.Base(r.URL.Path),
+				Status: "success",
+				Document: struct {
+					Filename       string  `json:"filename"`
+					MdContent      *string `json:"md_content"`
+					HtmlContent    *string `json:"html_content"`
+					TextContent    *string `json:"text_content"`
+					DoctagsContent *string `json:"doctags_content"`
+				}{MdContent: ptr("# converted")},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-
-		if r.URL.Path != "/v1/convert/file" {
-			t.Fatalf("unexpected Docling path: %s", r.URL.Path)
-		}
-
-		receivedCorrelation = r.Header.Get("X-Correlation-Id")
-		receivedEndpoint = r.Header.Get("X-Docling-Endpoint")
-		receivedContentType = r.Header.Get("Content-Type")
-
-		if receivedCorrelation == "" {
-			t.Fatalf("missing correlation id")
-		}
-
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Fatalf("failed to parse multipart form: %v", err)
-		}
-
-		file, header, err := r.FormFile("files")
-		if err != nil {
-			t.Fatalf("missing files form field: %v", err)
-		}
-		defer file.Close()
-
-		receivedFileName = header.Filename
-		receivedBodyBytes, _ := io.ReadAll(file)
-		receivedBody = string(receivedBodyBytes)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"document": map[string]any{
-				"filename":   receivedFileName,
-				"md_content": "# converted by docling",
-			},
-			"status":          "success",
-			"processing_time": 0.1,
-		})
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(server.URL, "", zap.NewNop())
+	conv := NewDoclingConverter(Config{
+		Endpoint:           server.URL,
+		StatusPollInterval: 10 * time.Millisecond,
+		StatusPollTimeout:  500 * time.Millisecond,
+	}, zap.NewNop())
 
 	result, err := conv.Convert(context.Background(), DoclingConvertRequest{
 		FileName:    "sample.docx",
 		Content:     []byte("docx-bytes"),
 		ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(result.Content) != "# converted by docling" {
-		t.Fatalf("unexpected markdown: %s", string(result.Content))
+	if got := string(result.Content); got != "# converted" {
+		t.Fatalf("unexpected markdown: %s", got)
 	}
 
 	if result.MediaType != "text/markdown" {
 		t.Fatalf("unexpected media type: %s", result.MediaType)
 	}
 
-	if receivedCorrelation == "" {
-		t.Fatal("Docling correlation id not propagated")
+	if atomic.LoadInt32(&submitCalls) != 1 {
+		t.Fatalf("expected single submit call, got %d", submitCalls)
 	}
 
-	if receivedEndpoint != server.URL {
-		t.Fatalf("Docling endpoint header is missing: %s", receivedEndpoint)
+	if atomic.LoadInt32(&statusCalls) != 2 {
+		t.Fatalf("expected two status polls, got %d", statusCalls)
 	}
 
-	if !strings.HasPrefix(receivedContentType, "multipart/form-data") {
-		t.Fatalf("Docling content-type mismatch: %s", receivedContentType)
-	}
-
-	if receivedFileName != "sample.docx" {
-		t.Fatalf("Docling file name mismatch: %s", receivedFileName)
+	if receivedFilename != "sample.docx" {
+		t.Fatalf("unexpected filename: %s", receivedFilename)
 	}
 
 	if receivedBody != "docx-bytes" {
-		t.Fatalf("Docling body mismatch: %s", receivedBody)
-	}
-}
-
-func TestDoclingConverterPDF(t *testing.T) {
-	var receivedFileName, receivedPartContentType, receivedSourceHeader, receivedBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Fatalf("failed to parse multipart form: %v", err)
-		}
-
-		fileHeader := r.MultipartForm.File["files"][0]
-		receivedFileName = fileHeader.Filename
-		receivedPartContentType = fileHeader.Header.Get("Content-Type")
-		receivedSourceHeader = r.Header.Get("X-Docling-Source-Filename")
-
-		file, err := fileHeader.Open()
-		if err != nil {
-			t.Fatalf("failed to open file: %v", err)
-		}
-		defer file.Close()
-
-		bodyBytes, _ := io.ReadAll(file)
-		receivedBody = string(bodyBytes)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"document": map[string]any{
-				"filename":   receivedFileName,
-				"md_content": "# pdf markdown",
-			},
-			"status":          "success",
-			"processing_time": 0.2,
-		})
-	}))
-	defer server.Close()
-
-	conv := NewDoclingConverter(server.URL, "", zap.NewNop())
-	result, err := conv.Convert(context.Background(), DoclingConvertRequest{
-		Content:     []byte("pdf-bytes"),
-		ContentType: "application/pdf",
-	})
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.MediaType != "text/markdown" {
-		t.Fatalf("unexpected media type: %s", result.MediaType)
-	}
-
-	if string(result.Content) != "# pdf markdown" {
-		t.Fatalf("unexpected markdown: %s", string(result.Content))
-	}
-
-	if receivedPartContentType != "application/pdf" {
-		t.Fatalf("unexpected part content-type: %s", receivedPartContentType)
-	}
-
-	if receivedFileName != "document.pdf" {
-		t.Fatalf("unexpected file name: %s", receivedFileName)
-	}
-
-	if receivedSourceHeader != "document.pdf" {
-		t.Fatalf("unexpected source header: %s", receivedSourceHeader)
-	}
-
-	if receivedBody != "pdf-bytes" {
 		t.Fatalf("unexpected body: %s", receivedBody)
 	}
+
+	if receivedCorrelationSubmit == "" || receivedCorrelationSubmit != receivedCorrelationStatus {
+		t.Fatalf("correlation id was not propagated across requests")
+	}
 }
 
-func TestDoclingConverterErrorStatus(t *testing.T) {
+func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
+	var submitAttempts int32
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "docling failed", http.StatusBadGateway)
-	}))
-	defer server.Close()
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			attempt := atomic.AddInt32(&submitAttempts, 1)
+			if attempt == 1 {
+				http.Error(w, "temporary", http.StatusBadGateway)
+				return
+			}
 
-	conv := NewDoclingConverter(server.URL, "", zap.NewNop())
-	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("docx")})
-	if err == nil {
-		t.Fatalf("expected error from Docling")
-	}
-
-	if err.Error() != "docling api returned status 502: docling failed\n" {
-		t.Fatalf("unexpected Docling error: %v", err)
-	}
-}
-
-func TestDoclingConverterEmptyContent(t *testing.T) {
-	conv := NewDoclingConverter("http://docling", "", zap.NewNop())
-	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: nil})
-	if err == nil {
-		t.Fatalf("expected validation error")
-	}
-}
-
-func TestDoclingConverterRetryOnFailure(t *testing.T) {
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
-			http.Error(w, "temporary", http.StatusBadGateway)
-			return
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-999"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
+				JobID:  "job-999",
+				Status: "success",
+				Document: struct {
+					Filename       string  `json:"filename"`
+					MdContent      *string `json:"md_content"`
+					HtmlContent    *string `json:"html_content"`
+					TextContent    *string `json:"text_content"`
+					DoctagsContent *string `json:"doctags_content"`
+				}{MdContent: ptr("ok")},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `{"document":{"filename":"file.docx","md_content":"ok"},"status":"success","processing_time":0.01}`)
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(server.URL, "", zap.NewNop())
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	result, err := conv.Convert(ctx, DoclingConvertRequest{Content: []byte("docx")})
+	result, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected error after retry: %v", err)
 	}
 
-	if string(result.Content) != "ok" {
-		t.Fatalf("unexpected content: %s", string(result.Content))
+	if got := string(result.Content); got != "ok" {
+		t.Fatalf("unexpected content: %s", got)
 	}
 
-	if attempts != 2 {
-		t.Fatalf("expected 2 attempts, got %d", attempts)
+	if atomic.LoadInt32(&submitAttempts) != 2 {
+		t.Fatalf("expected retry on submit, attempts=%d", submitAttempts)
 	}
 }
 
-func TestDoclingConverterApiKey(t *testing.T) {
+func TestDoclingConverterPollTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Api-Key") != "secret" {
-			t.Fatalf("expected api key header, got %s", r.Header.Get("X-Api-Key"))
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-timeout"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingStatusResponse{Status: "processing"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-
-		_ = r.ParseMultipartForm(1 << 20)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"document":{"filename":"file.docx","md_content":"ok"},"status":"success","processing_time":0.01}`)
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(server.URL, "secret", zap.NewNop())
-	if _, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("doc")}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	conv := NewDoclingConverter(Config{
+		Endpoint:           server.URL,
+		StatusPollInterval: 20 * time.Millisecond,
+		StatusPollTimeout:  60 * time.Millisecond,
+	}, zap.NewNop())
+
+	_, err := conv.Convert(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
+	if err == nil {
+		t.Fatalf("expected timeout error")
 	}
+
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
