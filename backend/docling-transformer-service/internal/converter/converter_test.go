@@ -35,7 +35,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 				t.Fatal("submit correlation id is empty")
 			}
 
-			fileHeader := r.MultipartForm.File["files"][0]
+			fileHeader := r.MultipartForm.File["file"][0]
 			receivedFilename = fileHeader.Filename
 
 			file, err := fileHeader.Open()
@@ -49,22 +49,16 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-123"})
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-123"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			atomic.AddInt32(&statusCalls, 1)
 			receivedCorrelationStatus = r.Header.Get(correlationIDHeader)
 
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
-				JobID:  path.Base(r.URL.Path),
-				Status: "success",
-				Document: struct {
-					Filename       string  `json:"filename"`
-					MdContent      *string `json:"md_content"`
-					HtmlContent    *string `json:"html_content"`
-					TextContent    *string `json:"text_content"`
-					DoctagsContent *string `json:"doctags_content"`
-				}{MdContent: ptr("# converted")},
+				TaskID:  path.Base(r.URL.Path),
+				Status:  "SUCCESS",
+				Content: doclingStatusContent{Markdown: ptr("# converted")},
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -136,19 +130,13 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-999"})
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-999"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
-				JobID:  "job-999",
-				Status: "success",
-				Document: struct {
-					Filename       string  `json:"filename"`
-					MdContent      *string `json:"md_content"`
-					HtmlContent    *string `json:"html_content"`
-					TextContent    *string `json:"text_content"`
-					DoctagsContent *string `json:"doctags_content"`
-				}{MdContent: ptr("ok")},
+				TaskID:  "task-999",
+				Status:  "completed",
+				Content: doclingStatusContent{Markdown: ptr("ok")},
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -184,10 +172,10 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{JobID: "job-wait"})
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-wait"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingStatusResponse{Status: "processing"})
+			_ = json.NewEncoder(w).Encode(doclingStatusResponse{TaskID: "task-wait", Status: "processing"})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}

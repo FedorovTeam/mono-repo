@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	doclingSubmitPath   = "/v1/convert/submit"
-	doclingStatusPath   = "/v1/convert/status/"
+	doclingSubmitPath   = "/v1/convert/file/async"
+	doclingStatusPath   = "/v1/status/poll/"
 	correlationIDHeader = "X-Correlation-Id"
 	sourceFileHeader    = "X-Docling-Source-Filename"
 	endpointHeader      = "X-Docling-Endpoint"
@@ -42,6 +42,38 @@ var contentTypeToExtension = map[string]string{
 	"application/msword": "doc",
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
 	"application/pdf": "pdf",
+}
+
+var successStatuses = map[string]struct{}{
+	"success":         {},
+	"partial_success": {},
+	"succeeded":       {},
+	"completed":       {},
+	"done":            {},
+	"finished":        {},
+}
+
+var pendingStatuses = map[string]struct{}{
+	"pending":     {},
+	"processing":  {},
+	"queued":      {},
+	"running":     {},
+	"in_progress": {},
+	"accepted":    {},
+	"waiting":     {},
+	"created":     {},
+	"in-progress": {},
+	"in progress": {},
+}
+
+func isSuccessStatus(status string) bool {
+	_, ok := successStatuses[status]
+	return ok
+}
+
+func isPendingStatus(status string) bool {
+	_, ok := pendingStatuses[status]
+	return ok
 }
 
 var ErrDoclingPollingAttemptsExceeded = errors.New("docling polling attempts exceeded")
@@ -80,22 +112,68 @@ type Config struct {
 	APIKey   string
 }
 
+func (resp doclingStatusResponse) mergedContent() doclingStatusContent {
+	content := resp.Content
+	if resp.Document == nil {
+		return content
+	}
+
+	if content.Markdown == nil {
+		content.Markdown = resp.Document.Markdown
+	}
+	if content.Html == nil {
+		content.Html = resp.Document.Html
+	}
+	if content.Text == nil {
+		content.Text = resp.Document.Text
+	}
+	if content.Doctags == nil {
+		content.Doctags = resp.Document.Doctags
+	}
+	if content.MdContent == nil {
+		content.MdContent = resp.Document.MdContent
+	}
+	if content.HtmlContent == nil {
+		content.HtmlContent = resp.Document.HtmlContent
+	}
+	if content.TextContent == nil {
+		content.TextContent = resp.Document.TextContent
+	}
+	if content.DoctagsContent == nil {
+		content.DoctagsContent = resp.Document.DoctagsContent
+	}
+
+	return content
+}
+
+func normalizeStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
+type doclingStatusContent struct {
+	Markdown       *string `json:"markdown"`
+	Html           *string `json:"html"`
+	Text           *string `json:"text"`
+	Doctags        *string `json:"doctags"`
+	MdContent      *string `json:"md_content"`
+	HtmlContent    *string `json:"html_content"`
+	TextContent    *string `json:"text_content"`
+	DoctagsContent *string `json:"doctags_content"`
+}
+
 type doclingStatusResponse struct {
-	JobID    string `json:"job_id"`
-	Document struct {
-		Filename       string  `json:"filename"`
-		MdContent      *string `json:"md_content"`
-		HtmlContent    *string `json:"html_content"`
-		TextContent    *string `json:"text_content"`
-		DoctagsContent *string `json:"doctags_content"`
-	} `json:"document"`
-	Status         string  `json:"status"`
-	Errors         []any   `json:"errors"`
-	ProcessingTime float64 `json:"processing_time"`
+	TaskID         string                `json:"task_id"`
+	JobID          string                `json:"job_id"`
+	Status         string                `json:"status"`
+	Content        doclingStatusContent  `json:"content"`
+	Document       *doclingStatusContent `json:"document"`
+	Errors         []any                 `json:"errors"`
+	ProcessingTime float64               `json:"processing_time"`
 }
 
 type doclingSubmitResponse struct {
-	JobID string `json:"job_id"`
+	JobID  string `json:"job_id"`
+	TaskID string `json:"task_id"`
 }
 
 // StatusCheckResult содержит статус задачи Docling и, при завершении, результат конвертации.
@@ -199,8 +277,10 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		return StatusCheckResult{}, err
 	}
 
-	switch statusResp.Status {
-	case "success", "partial_success":
+	normalizedStatus := normalizeStatus(statusResp.Status)
+
+	switch {
+	case isSuccessStatus(normalizedStatus):
 		result, buildErr := buildConvertResult(statusResp)
 		if buildErr != nil {
 			return StatusCheckResult{}, fmt.Errorf("docling result: %w", buildErr)
@@ -209,14 +289,14 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 			zap.String("job_id", jobID),
 			zap.String("correlation_id", correlationID),
 		)
-		return StatusCheckResult{Status: statusResp.Status, Result: &result}, nil
-	case "pending", "processing", "queued", "running":
+		return StatusCheckResult{Status: normalizedStatus, Result: &result}, nil
+	case isPendingStatus(normalizedStatus):
 		c.logger.Debug("docling still processing",
 			zap.String("job_id", jobID),
 			zap.String("correlation_id", correlationID),
-			zap.String("status", statusResp.Status),
+			zap.String("status", normalizedStatus),
 		)
-		return StatusCheckResult{Status: statusResp.Status, Result: nil}, nil
+		return StatusCheckResult{Status: normalizedStatus, Result: nil}, nil
 	default:
 		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s", statusResp.Status, jobID)
 	}
@@ -257,7 +337,7 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 	writer := multipart.NewWriter(payload)
 
 	partHeaders := textproto.MIMEHeader{}
-	partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="files"; filename="%s"`, filename))
+	partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
 	partHeaders.Set("Content-Type", contentType)
 
 	part, err := writer.CreatePart(partHeaders)
@@ -306,11 +386,16 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 		return "", fmt.Errorf("unmarshal docling submit response: %w", err)
 	}
 
-	if submitResp.JobID == "" {
+	jobID := submitResp.JobID
+	if jobID == "" {
+		jobID = submitResp.TaskID
+	}
+
+	if jobID == "" {
 		return "", errors.New("docling submit response has empty job_id")
 	}
 
-	return submitResp.JobID, nil
+	return jobID, nil
 }
 
 func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID string) (doclingStatusResponse, error) {
@@ -347,6 +432,12 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 		return doclingStatusResponse{}, fmt.Errorf("unmarshal docling status response: %w", err)
 	}
 
+	if statusResp.TaskID == "" {
+		statusResp.TaskID = jobID
+	}
+	if statusResp.JobID == "" {
+		statusResp.JobID = statusResp.TaskID
+	}
 	if statusResp.JobID == "" {
 		statusResp.JobID = jobID
 	}
@@ -355,17 +446,33 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 }
 
 func buildConvertResult(resp doclingStatusResponse) (DoclingConvertResult, error) {
-	if resp.Status != "success" && resp.Status != "partial_success" {
+	if !isSuccessStatus(normalizeStatus(resp.Status)) {
 		return DoclingConvertResult{}, fmt.Errorf("docling response status=%s", resp.Status)
 	}
 
-	if resp.Document.MdContent != nil && *resp.Document.MdContent != "" {
-		return DoclingConvertResult{Content: []byte(*resp.Document.MdContent), MediaType: "text/markdown"}, nil
+	content := resp.mergedContent()
+
+	if md := firstNonEmpty(content.Markdown, content.MdContent); md != "" {
+		return DoclingConvertResult{Content: []byte(md), MediaType: "text/markdown"}, nil
 	}
 
-	if resp.Document.HtmlContent != nil && *resp.Document.HtmlContent != "" {
-		return DoclingConvertResult{Content: []byte(*resp.Document.HtmlContent), MediaType: "text/html"}, nil
+	if html := firstNonEmpty(content.Html, content.HtmlContent); html != "" {
+		return DoclingConvertResult{Content: []byte(html), MediaType: "text/html"}, nil
+	}
+
+	if text := firstNonEmpty(content.Text, content.TextContent); text != "" {
+		return DoclingConvertResult{Content: []byte(text), MediaType: "text/plain"}, nil
 	}
 
 	return DoclingConvertResult{}, errors.New("docling response has empty content")
+}
+
+func firstNonEmpty(values ...*string) string {
+	for _, value := range values {
+		if value != nil && *value != "" {
+			return *value
+		}
+	}
+
+	return ""
 }
