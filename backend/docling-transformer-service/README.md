@@ -16,6 +16,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - `docling.endpoint` — HTTPS endpoint Docling: `https://docling.tech.fedorov-team.tech`.
 - `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — учётные данные, `minio.bucket` — обязательный бакет для результата, `minio.region` и `minio.use_ssl` — параметры подключения.
 - `temporal.address` — `temporal-frontend.temporal.svc.cluster.local:7233`, `temporal.namespace` — `knowledge-base`.
+- `observability.tracingEnabled` / `observability.metricsEnabled` / `observability.loggingEnabled` — флаги включения трассировки, метрик и логов (при `false` провайдеры и middleware не поднимаются).
 
 ## Локальный запуск
 ```bash
@@ -42,4 +43,4 @@ go test ./...
 - `proto/backend/transformer/v1` — контракт и сгенерированные gRPC артефакты.
 
 ## Логи и наблюдаемость
-Каждый запрос логируется с `correlation_id` и входными метаданными. Заголовок `x-correlation-id` генерируется, если не пришёл снаружи.
+Каждый запрос логируется с `correlation_id` и входными метаданными, если разрешён `observability.loggingEnabled`. Заголовок `x-correlation-id` генерируется, если не пришёл снаружи. Трассировка и метрики отправляются через OTEL только при активных флагах `observability.tracingEnabled` и `observability.metricsEnabled`.
