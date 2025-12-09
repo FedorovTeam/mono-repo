@@ -87,6 +87,8 @@ func GRPCDialOptions(provider Providers) []grpc.DialOption {
 	handler := otelgrpc.NewClientHandler(
 		otelgrpc.WithTracerProvider(provider.TracerProvider),
 		otelgrpc.WithMeterProvider(provider.MeterProvider),
+		otelgrpc.WithPropagators(otel.GetTextMapPropagator()),
 	)
+
 	return []grpc.DialOption{grpc.WithStatsHandler(handler)}
 }

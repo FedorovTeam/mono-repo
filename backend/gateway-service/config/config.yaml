@@ -11,6 +11,7 @@ uploads:
   allowedExtensions:
     - doc
     - docx
+    - pdf
   signedUrlTtlSeconds: 900
 observability:
   otlpEndpoint: "localhost:4317"

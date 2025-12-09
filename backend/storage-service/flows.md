@@ -4,7 +4,7 @@
    - gRPC-клиент передает org_slug, project_slug, document_id, расширение и байты файла.
    - Service генерирует ключ по шаблону и пишет объект в приватный бакет `knowledge-docx`.
    - Возвращается bucket/key для последующей записи статуса документом.
-   - При старте сервиса включена подписка на события MinIO: после `ObjectCreated` отправляется `ConfirmUpload` в document-service.
+   - При старте сервиса включается webhook-уведомление MinIO (s3:ObjectCreated) на адрес gateway, чтобы после загрузки исходника вызвать подтверждение.
 
 2. **UploadMarkdown**
    - После конвертации docling-трансформером вызывается загрузка Markdown.

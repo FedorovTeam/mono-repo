@@ -23,6 +23,7 @@ const (
 	DocumentService_GetDocument_FullMethodName     = "/backend.document.v1.DocumentService/GetDocument"
 	DocumentService_ListDocuments_FullMethodName   = "/backend.document.v1.DocumentService/ListDocuments"
 	DocumentService_RetryProcessing_FullMethodName = "/backend.document.v1.DocumentService/RetryProcessing"
+	DocumentService_ConfirmUpload_FullMethodName   = "/backend.document.v1.DocumentService/ConfirmUpload"
 )
 
 // DocumentServiceClient is the client API for DocumentService service.
@@ -33,6 +34,7 @@ type DocumentServiceClient interface {
 	GetDocument(ctx context.Context, in *GetDocumentRequest, opts ...grpc.CallOption) (*Document, error)
 	ListDocuments(ctx context.Context, in *ListDocumentsRequest, opts ...grpc.CallOption) (*ListDocumentsResponse, error)
 	RetryProcessing(ctx context.Context, in *RetryProcessingRequest, opts ...grpc.CallOption) (*Document, error)
+	ConfirmUpload(ctx context.Context, in *ConfirmUploadRequest, opts ...grpc.CallOption) (*Document, error)
 }
 
 type documentServiceClient struct {
@@ -83,6 +85,16 @@ func (c *documentServiceClient) RetryProcessing(ctx context.Context, in *RetryPr
 	return out, nil
 }
 
+func (c *documentServiceClient) ConfirmUpload(ctx context.Context, in *ConfirmUploadRequest, opts ...grpc.CallOption) (*Document, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Document)
+	err := c.cc.Invoke(ctx, DocumentService_ConfirmUpload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DocumentServiceServer is the server API for DocumentService service.
 // All implementations must embed UnimplementedDocumentServiceServer
 // for forward compatibility.
@@ -91,6 +103,7 @@ type DocumentServiceServer interface {
 	GetDocument(context.Context, *GetDocumentRequest) (*Document, error)
 	ListDocuments(context.Context, *ListDocumentsRequest) (*ListDocumentsResponse, error)
 	RetryProcessing(context.Context, *RetryProcessingRequest) (*Document, error)
+	ConfirmUpload(context.Context, *ConfirmUploadRequest) (*Document, error)
 	mustEmbedUnimplementedDocumentServiceServer()
 }
 
@@ -112,6 +125,9 @@ func (UnimplementedDocumentServiceServer) ListDocuments(context.Context, *ListDo
 }
 func (UnimplementedDocumentServiceServer) RetryProcessing(context.Context, *RetryProcessingRequest) (*Document, error) {
 	return nil, status.Error(codes.Unimplemented, "method RetryProcessing not implemented")
+}
+func (UnimplementedDocumentServiceServer) ConfirmUpload(context.Context, *ConfirmUploadRequest) (*Document, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfirmUpload not implemented")
 }
 func (UnimplementedDocumentServiceServer) mustEmbedUnimplementedDocumentServiceServer() {}
 func (UnimplementedDocumentServiceServer) testEmbeddedByValue()                         {}
@@ -206,6 +222,24 @@ func _DocumentService_RetryProcessing_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DocumentService_ConfirmUpload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfirmUploadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DocumentServiceServer).ConfirmUpload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DocumentService_ConfirmUpload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DocumentServiceServer).ConfirmUpload(ctx, req.(*ConfirmUploadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DocumentService_ServiceDesc is the grpc.ServiceDesc for DocumentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -228,6 +262,10 @@ var DocumentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RetryProcessing",
 			Handler:    _DocumentService_RetryProcessing_Handler,
+		},
+		{
+			MethodName: "ConfirmUpload",
+			Handler:    _DocumentService_ConfirmUpload_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

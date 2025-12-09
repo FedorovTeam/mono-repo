@@ -1,0 +1,98 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
+	documentpb "backend-gateway-service/proto/backend/document/v1"
+)
+
+type stubDocumentClient struct {
+	lastRequest *documentpb.ConfirmUploadRequest
+	calls       int
+	err         error
+}
+
+func (s *stubDocumentClient) ConfirmUpload(ctx context.Context, in *documentpb.ConfirmUploadRequest, opts ...grpc.CallOption) (*documentpb.Document, error) {
+	s.lastRequest = in
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &documentpb.Document{Id: in.GetDocumentId(), WorkflowId: "wf"}, nil
+}
+func (s *stubDocumentClient) CreateDocument(context.Context, *documentpb.CreateDocumentRequest, ...grpc.CallOption) (*documentpb.Document, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *stubDocumentClient) GetDocument(context.Context, *documentpb.GetDocumentRequest, ...grpc.CallOption) (*documentpb.Document, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *stubDocumentClient) ListDocuments(context.Context, *documentpb.ListDocumentsRequest, ...grpc.CallOption) (*documentpb.ListDocumentsResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *stubDocumentClient) RetryProcessing(context.Context, *documentpb.RetryProcessingRequest, ...grpc.CallOption) (*documentpb.Document, error) {
+	return nil, errors.New("not implemented")
+}
+func (s *stubDocumentClient) Close() error { return nil }
+
+func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {
+	docClient := &stubDocumentClient{}
+	srv := &Server{logger: zap.NewNop(), documentClient: docClient}
+
+	payload := map[string]any{
+		"Records": []map[string]any{
+			{
+				"s3": map[string]any{
+					"bucket": map[string]any{"name": "knowledge-docx"},
+					"object": map[string]any{
+						"key":          "org/project/1234.docx",
+						"userMetadata": map[string]string{"x-amz-meta-correlation-id": "corr-1"},
+					},
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/internal/storage/uploaded", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	srv.handleStorageNotification(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, rr.Code)
+	}
+	if docClient.calls != 1 {
+		t.Fatalf("expected 1 confirm call, got %d", docClient.calls)
+	}
+	if docClient.lastRequest.GetCorrelationId() == "" {
+		t.Fatal("expected correlation id to be propagated")
+	}
+	if docClient.lastRequest.GetDocumentId() != "1234" {
+		t.Fatalf("unexpected document id: %s", docClient.lastRequest.GetDocumentId())
+	}
+}
+
+func TestHandleStorageNotification_NoRecords(t *testing.T) {
+	srv := &Server{logger: zap.NewNop(), documentClient: &stubDocumentClient{}}
+	payload := map[string]any{
+		"Records": []map[string]any{{"s3": map[string]any{"object": map[string]any{"key": "/"}}}},
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/internal/storage/uploaded", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	srv.handleStorageNotification(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
+	}
+}

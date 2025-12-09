@@ -1,18 +1,9 @@
-// Protocol Buffers - Google's data interchange format
-// Source: https://github.com/protocolbuffers/protobuf/blob/v3.21.12/src/google/protobuf/timestamp.proto
 syntax = "proto3";
-
 package google.protobuf;
 
-option csharp_namespace = "Google.Protobuf.WellKnownTypes";
 option go_package = "google.golang.org/protobuf/types/known/timestamppb";
-option java_package = "com.google.protobuf";
-option java_outer_classname = "TimestampProto";
-option java_multiple_files = true;
-option objc_class_prefix = "GPB";
-option php_namespace = "Google\\Protobuf\\WellKnownTypes";
-option ruby_package = "Google::Protobuf";
 
+// A Timestamp represents a point in time independent of any time zone.
 message Timestamp {
   int64 seconds = 1;
   int32 nanos = 2;

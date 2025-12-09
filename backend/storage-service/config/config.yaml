@@ -4,6 +4,7 @@ service:
 
 events:
   upload_bucket: "knowledge-docx"
+  webhook_arn: "arn:minio:sqs::1:gateway-webhook"
 
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"

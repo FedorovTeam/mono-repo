@@ -576,6 +576,74 @@ func (x *ListDocumentsResponse) GetTotalCount() int64 {
 	return 0
 }
 
+type ConfirmUploadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DocumentId    string                 `protobuf:"bytes,1,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
+	Bucket        string                 `protobuf:"bytes,2,opt,name=bucket,proto3" json:"bucket,omitempty"`
+	ObjectKey     string                 `protobuf:"bytes,3,opt,name=object_key,json=objectKey,proto3" json:"object_key,omitempty"`
+	CorrelationId string                 `protobuf:"bytes,4,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfirmUploadRequest) Reset() {
+	*x = ConfirmUploadRequest{}
+	mi := &file_backend_document_v1_document_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfirmUploadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfirmUploadRequest) ProtoMessage() {}
+
+func (x *ConfirmUploadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_backend_document_v1_document_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfirmUploadRequest.ProtoReflect.Descriptor instead.
+func (*ConfirmUploadRequest) Descriptor() ([]byte, []int) {
+	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ConfirmUploadRequest) GetDocumentId() string {
+	if x != nil {
+		return x.DocumentId
+	}
+	return ""
+}
+
+func (x *ConfirmUploadRequest) GetBucket() string {
+	if x != nil {
+		return x.Bucket
+	}
+	return ""
+}
+
+func (x *ConfirmUploadRequest) GetObjectKey() string {
+	if x != nil {
+		return x.ObjectKey
+	}
+	return ""
+}
+
+func (x *ConfirmUploadRequest) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
+}
+
 var File_backend_document_v1_document_proto protoreflect.FileDescriptor
 
 const file_backend_document_v1_document_proto_rawDesc = "" +
@@ -633,19 +701,27 @@ const file_backend_document_v1_document_proto_rawDesc = "" +
 	"\x15ListDocumentsResponse\x12;\n" +
 	"\tdocuments\x18\x01 \x03(\v2\x1d.backend.document.v1.DocumentR\tdocuments\x12\x1f\n" +
 	"\vtotal_count\x18\x02 \x01(\x03R\n" +
-	"totalCount*\xe4\x01\n" +
+	"totalCount\"\x95\x01\n" +
+	"\x14ConfirmUploadRequest\x12\x1f\n" +
+	"\vdocument_id\x18\x01 \x01(\tR\n" +
+	"documentId\x12\x16\n" +
+	"\x06bucket\x18\x02 \x01(\tR\x06bucket\x12\x1d\n" +
+	"\n" +
+	"object_key\x18\x03 \x01(\tR\tobjectKey\x12%\n" +
+	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId*\xe4\x01\n" +
 	"\x0eDocumentStatus\x12\x1f\n" +
 	"\x1bDOCUMENT_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18DOCUMENT_STATUS_UPLOADED\x10\x01\x12#\n" +
 	"\x1fDOCUMENT_STATUS_STORED_ORIGINAL\x10\x02\x12)\n" +
 	"%DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN\x10\x03\x12'\n" +
 	"#DOCUMENT_STATUS_PUBLISHED_TO_GITHUB\x10\x04\x12\x1a\n" +
-	"\x16DOCUMENT_STATUS_FAILED\x10\x052\x8c\x03\n" +
+	"\x16DOCUMENT_STATUS_FAILED\x10\x052\xe7\x03\n" +
 	"\x0fDocumentService\x12[\n" +
 	"\x0eCreateDocument\x12*.backend.document.v1.CreateDocumentRequest\x1a\x1d.backend.document.v1.Document\x12U\n" +
 	"\vGetDocument\x12'.backend.document.v1.GetDocumentRequest\x1a\x1d.backend.document.v1.Document\x12f\n" +
 	"\rListDocuments\x12).backend.document.v1.ListDocumentsRequest\x1a*.backend.document.v1.ListDocumentsResponse\x12]\n" +
-	"\x0fRetryProcessing\x12+.backend.document.v1.RetryProcessingRequest\x1a\x1d.backend.document.v1.DocumentB6Z4backend-gateway-service/proto/backend/document/v1;pbb\x06proto3"
+	"\x0fRetryProcessing\x12+.backend.document.v1.RetryProcessingRequest\x1a\x1d.backend.document.v1.Document\x12Y\n" +
+	"\rConfirmUpload\x12).backend.document.v1.ConfirmUploadRequest\x1a\x1d.backend.document.v1.DocumentB6Z4backend-gateway-service/proto/backend/document/v1;pbb\x06proto3"
 
 var (
 	file_backend_document_v1_document_proto_rawDescOnce sync.Once
@@ -660,7 +736,7 @@ func file_backend_document_v1_document_proto_rawDescGZIP() []byte {
 }
 
 var file_backend_document_v1_document_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_backend_document_v1_document_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_backend_document_v1_document_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_backend_document_v1_document_proto_goTypes = []any{
 	(DocumentStatus)(0),            // 0: backend.document.v1.DocumentStatus
 	(*Document)(nil),               // 1: backend.document.v1.Document
@@ -669,27 +745,30 @@ var file_backend_document_v1_document_proto_goTypes = []any{
 	(*RetryProcessingRequest)(nil), // 4: backend.document.v1.RetryProcessingRequest
 	(*ListDocumentsRequest)(nil),   // 5: backend.document.v1.ListDocumentsRequest
 	(*ListDocumentsResponse)(nil),  // 6: backend.document.v1.ListDocumentsResponse
-	(*timestamppb.Timestamp)(nil),  // 7: google.protobuf.Timestamp
+	(*ConfirmUploadRequest)(nil),   // 7: backend.document.v1.ConfirmUploadRequest
+	(*timestamppb.Timestamp)(nil),  // 8: google.protobuf.Timestamp
 }
 var file_backend_document_v1_document_proto_depIdxs = []int32{
-	0, // 0: backend.document.v1.Document.status:type_name -> backend.document.v1.DocumentStatus
-	7, // 1: backend.document.v1.Document.created_at:type_name -> google.protobuf.Timestamp
-	7, // 2: backend.document.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
-	0, // 3: backend.document.v1.ListDocumentsRequest.status_filter:type_name -> backend.document.v1.DocumentStatus
-	1, // 4: backend.document.v1.ListDocumentsResponse.documents:type_name -> backend.document.v1.Document
-	2, // 5: backend.document.v1.DocumentService.CreateDocument:input_type -> backend.document.v1.CreateDocumentRequest
-	3, // 6: backend.document.v1.DocumentService.GetDocument:input_type -> backend.document.v1.GetDocumentRequest
-	5, // 7: backend.document.v1.DocumentService.ListDocuments:input_type -> backend.document.v1.ListDocumentsRequest
-	4, // 8: backend.document.v1.DocumentService.RetryProcessing:input_type -> backend.document.v1.RetryProcessingRequest
-	1, // 9: backend.document.v1.DocumentService.CreateDocument:output_type -> backend.document.v1.Document
-	1, // 10: backend.document.v1.DocumentService.GetDocument:output_type -> backend.document.v1.Document
-	6, // 11: backend.document.v1.DocumentService.ListDocuments:output_type -> backend.document.v1.ListDocumentsResponse
-	1, // 12: backend.document.v1.DocumentService.RetryProcessing:output_type -> backend.document.v1.Document
-	9, // [9:13] is the sub-list for method output_type
-	5, // [5:9] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	0,  // 0: backend.document.v1.Document.status:type_name -> backend.document.v1.DocumentStatus
+	8,  // 1: backend.document.v1.Document.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 2: backend.document.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
+	0,  // 3: backend.document.v1.ListDocumentsRequest.status_filter:type_name -> backend.document.v1.DocumentStatus
+	1,  // 4: backend.document.v1.ListDocumentsResponse.documents:type_name -> backend.document.v1.Document
+	2,  // 5: backend.document.v1.DocumentService.CreateDocument:input_type -> backend.document.v1.CreateDocumentRequest
+	3,  // 6: backend.document.v1.DocumentService.GetDocument:input_type -> backend.document.v1.GetDocumentRequest
+	5,  // 7: backend.document.v1.DocumentService.ListDocuments:input_type -> backend.document.v1.ListDocumentsRequest
+	4,  // 8: backend.document.v1.DocumentService.RetryProcessing:input_type -> backend.document.v1.RetryProcessingRequest
+	7,  // 9: backend.document.v1.DocumentService.ConfirmUpload:input_type -> backend.document.v1.ConfirmUploadRequest
+	1,  // 10: backend.document.v1.DocumentService.CreateDocument:output_type -> backend.document.v1.Document
+	1,  // 11: backend.document.v1.DocumentService.GetDocument:output_type -> backend.document.v1.Document
+	6,  // 12: backend.document.v1.DocumentService.ListDocuments:output_type -> backend.document.v1.ListDocumentsResponse
+	1,  // 13: backend.document.v1.DocumentService.RetryProcessing:output_type -> backend.document.v1.Document
+	1,  // 14: backend.document.v1.DocumentService.ConfirmUpload:output_type -> backend.document.v1.Document
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_backend_document_v1_document_proto_init() }
@@ -703,7 +782,7 @@ func file_backend_document_v1_document_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_backend_document_v1_document_proto_rawDesc), len(file_backend_document_v1_document_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

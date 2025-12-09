@@ -4,8 +4,9 @@
 1. Клиент отправляет `uploadKnowledgeDocument` с `fileName`, `fileSizeBytes`, целевым репозиторием и путём.
 2. gateway проверяет `X-API-Key`, пробрасывает/создаёт `correlation-id` и запрашивает presigned ссылку через gRPC `storage-service.GenerateUploadURL` (с TTL из `uploads.signedUrlTtlSeconds`).
 3. После успешного ответа создаётся запись через gRPC `document-service.CreateDocument` с размером, путём и `correlation-id`. `document-service` возвращает `workflow_id`, заранее выбранный под будущий запуск.
-4. Клиент загружает DOCX по выданному `uploadUrl` (HTTP PUT). После подтверждения загрузки `document-service` запускает Temporal workflow и ведёт статусы.
-5. gateway возвращает ID, статус и signed URL. Ошибки повторяются через `retryProcessing`.
+4. Клиент загружает DOCX по выданному `uploadUrl` (HTTP PUT). MinIO отправляет webhook на gateway (`/internal/storage/uploaded`) после события `s3:ObjectCreated:*`.
+5. gateway подтверждает загрузку через gRPC `document-service.ConfirmUpload` и инициирует Temporal workflow (через document-service).
+6. gateway возвращает ID, статус и signed URL. Ошибки повторяются через `retryProcessing`.
 
 ## Получение статуса
 1. Запрос `knowledgeDocument` или `knowledgeDocuments` направляется в backend-document-service с `x-correlation-id`.

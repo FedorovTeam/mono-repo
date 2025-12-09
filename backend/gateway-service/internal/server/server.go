@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -83,17 +86,24 @@ func (s *Server) Run(ctx context.Context) error {
 			SignedURLTTLSeconds: s.cfg.Uploads.SignedURLTTLSecond,
 		},
 	}}))
+	gqlHandler.AroundOperations(traceGraphQLOperation)
 
 	instrumentedHandler := observability.HTTPHandler("graphql", gqlHandler)
 
-	mux := http.NewServeMux()
-	mux.Handle("/query", instrumentedHandler)
-	mux.Handle("/playground", playground.Handler("GraphQL playground", "/query"))
+	webhookHandler := observability.HTTPHandler("storage-webhook", http.HandlerFunc(s.handleStorageNotification))
 
-	handlerWithMiddleware :=
-		middleware.CorrelationIDMiddleware(s.logger)(
-			middleware.APIKeyMiddleware(s.cfg.Security.APIKey, s.logger)(mux),
-		)
+	gqlMux := http.NewServeMux()
+	gqlMux.Handle("/query", instrumentedHandler)
+	gqlMux.Handle("/playground", playground.Handler("GraphQL playground", "/query"))
+
+	protectedGraphQL := middleware.APIKeyMiddleware(s.cfg.Security.APIKey, s.logger)(gqlMux)
+
+	mux := http.NewServeMux()
+	mux.Handle("/query", protectedGraphQL)
+	mux.Handle("/playground", protectedGraphQL)
+	mux.Handle("/internal/storage/uploaded", webhookHandler)
+
+	handlerWithMiddleware := middleware.CorrelationIDMiddleware(s.logger)(mux)
 
 	allowedOrigins := []string{
 		"https://console.fedorov-team.tech",
@@ -119,4 +129,25 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func traceGraphQLOperation(ctx context.Context, next graphql.OperationHandler) graphql.ResponseHandler {
+	opCtx := graphql.GetOperationContext(ctx)
+	operationName := opCtx.OperationName
+	if operationName == "" && opCtx.Operation != nil {
+		operationName = string(opCtx.Operation.Operation)
+	}
+
+	tracer := otel.Tracer("gateway.graphql")
+	ctx, span := tracer.Start(ctx, fmt.Sprintf("graphql %s", operationName))
+	span.SetAttributes(
+		attribute.String("graphql.operation.name", opCtx.OperationName),
+		attribute.String("graphql.operation.type", string(opCtx.Operation.Operation)),
+	)
+
+	handler := next(ctx)
+	return func(ctx context.Context) *graphql.Response {
+		defer span.End()
+		return handler(ctx)
+	}
 }
