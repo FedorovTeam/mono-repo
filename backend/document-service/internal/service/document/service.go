@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/client"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/storage"
@@ -96,12 +98,25 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 		in.ID = uuid.NewString()
 	}
 	owner := strings.TrimSpace(in.Owner)
-	if owner == "" {
-		owner = s.defaultOwner
-	}
 	repository := strings.TrimSpace(in.Repository)
 	if repository == "" {
 		repository = s.defaultRepository
+	}
+	if strings.Contains(repository, "/") {
+		ownerPart, repoPart, found := strings.Cut(repository, "/")
+		if !found || ownerPart == "" || repoPart == "" || strings.Contains(repoPart, "/") {
+			return nil, status.Error(codes.InvalidArgument, "repository must be in owner/repo format")
+		}
+		if owner != "" && ownerPart != owner {
+			return nil, status.Error(codes.InvalidArgument, "owner does not match repository")
+		}
+		if owner == "" {
+			owner = ownerPart
+		}
+		repository = repoPart
+	}
+	if owner == "" {
+		owner = s.defaultOwner
 	}
 	branch := strings.TrimSpace(in.Branch)
 	if branch == "" {

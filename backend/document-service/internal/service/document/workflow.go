@@ -288,11 +288,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
-	owner := input.Owner
+	owner := strings.TrimSpace(input.Owner)
 	if owner == "" {
 		owner = a.repoOwner
 	}
-	repository := input.Repository
+	repository := strings.TrimSpace(input.Repository)
 	if repository == "" {
 		repository = a.repoName
 	}
@@ -320,6 +320,17 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if commitMessage == "" {
 		commitMessage = path
 	}
+
+        if owner == "" || repository == "" {
+                reason := "owner and repository are required"
+                _ = a.fail(ctx, input.DocumentID, reason)
+                return fmt.Errorf("%s", reason)
+        }
+        if strings.Contains(repository, "/") {
+                reason := fmt.Sprintf("repository should not contain owner prefix: %s", repository)
+                _ = a.fail(ctx, input.DocumentID, reason)
+                return fmt.Errorf("%s", reason)
+        }
 
 	if err := a.validateRepository(ctx, owner, repository); err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))

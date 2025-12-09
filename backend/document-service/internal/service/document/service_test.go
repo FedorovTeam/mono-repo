@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"go.temporal.io/sdk/client"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/storage"
@@ -83,13 +85,13 @@ type keyMock struct {
 }
 
 func (k *keyMock) GenerateKeys(ctx context.Context, data storage.KeyGenerationData) (storage.KeyPair, error) {
-k.lastData = data
-entityPath := strings.Trim(data.EntitySpecificPath, "/")
-if entityPath == "" {
-entityPath = "key"
-}
-base := entityPath
-return storage.KeyPair{OriginalObjectKey: base + "/original", MarkdownObjectKey: base}, nil
+	k.lastData = data
+	entityPath := strings.Trim(data.EntitySpecificPath, "/")
+	if entityPath == "" {
+		entityPath = "key"
+	}
+	base := entityPath
+	return storage.KeyPair{OriginalObjectKey: base + "/original", MarkdownObjectKey: base}, nil
 }
 
 type failingKey struct{}
@@ -108,17 +110,23 @@ func TestCreateDocumentValidation(t *testing.T) {
 
 	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a", ID: "bad-uuid"})
 	require.Error(t, err)
+
+	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a", Repository: "owner/repo/extra"})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
 }
 
 func TestCreateDocumentSuccess(t *testing.T) {
 	repo := &repoMock{}
 	keys := &keyMock{}
 	svc := New(repo, keys, nil, "", nil, "orig", "md", "owner", "repo", "main", "main")
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx", Repository: "repo/name", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", EntitySpecificPath: "docs/articles/name", Owner: "owner", BaseBranch: "main"})
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx", Repository: "owner/repo", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", EntitySpecificPath: "docs/articles/name", BaseBranch: "main"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
 	require.Equal(t, doc.ID, doc.WorkflowID)
-	require.Equal(t, "repo/name", doc.Repository)
+	require.Equal(t, "repo", doc.Repository)
 	require.Equal(t, "main", doc.Branch)
 	require.Equal(t, "docs/name.md", doc.Path)
 	require.Equal(t, "orig", doc.OriginalBucket)
@@ -131,6 +139,28 @@ func TestCreateDocumentSuccess(t *testing.T) {
 	require.Equal(t, "docs/name.md", keys.lastData.Path)
 	require.Equal(t, "docs/publish/name.md", keys.lastData.PublishPath)
 	require.Equal(t, "docs/articles/name", keys.lastData.EntitySpecificPath)
+	require.Equal(t, "owner", doc.Owner)
+}
+
+func TestCreateDocumentSplitsOwnerFromRepository(t *testing.T) {
+	repo := &repoMock{}
+	keys := &keyMock{}
+	svc := New(repo, keys, nil, "", nil, "orig", "md", "", "", "main", "main")
+
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "team/docs", Branch: "dev"})
+	require.NoError(t, err)
+	require.Equal(t, "team", doc.Owner)
+	require.Equal(t, "docs", doc.Repository)
+}
+
+func TestCreateDocumentRejectsConflictingOwner(t *testing.T) {
+	svc := New(&repoMock{}, &keyMock{}, nil, "", nil, "orig", "md", "default-owner", "repo", "main", "main")
+
+	_, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Owner: "other", Repository: "owner/repo"})
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	require.Equal(t, codes.InvalidArgument, st.Code())
 }
 
 func TestCreateDocumentRespectsProvidedID(t *testing.T) {
