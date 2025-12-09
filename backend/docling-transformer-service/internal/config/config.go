@@ -36,6 +36,7 @@ type DoclingConfig struct {
 	APIKey             string        `yaml:"api_key"`
 	StatusPollInterval time.Duration `yaml:"status_poll_interval"`
 	StatusPollTimeout  time.Duration `yaml:"status_poll_timeout"`
+	StatusMaxAttempts  int           `yaml:"status_max_attempts"`
 }
 
 // MinioConfig описывает параметры доступа к MinIO.

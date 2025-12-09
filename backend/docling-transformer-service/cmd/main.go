@@ -68,6 +68,7 @@ func main() {
 		APIKey:             cfg.Docling.APIKey,
 		StatusPollInterval: cfg.Docling.StatusPollInterval,
 		StatusPollTimeout:  cfg.Docling.StatusPollTimeout,
+		StatusMaxAttempts:  cfg.Docling.StatusMaxAttempts,
 	}, logger)
 
 	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{
@@ -78,6 +79,9 @@ func main() {
 		MaxProcessingRetries: cfg.Service.MaxProcessingRetries,
 		CleanupInterval:      cfg.Service.CleanupInterval,
 		CleanupRetention:     cfg.Service.RetentionPeriod,
+		DoclingPollInterval:  cfg.Docling.StatusPollInterval,
+		DoclingPollTimeout:   cfg.Docling.StatusPollTimeout,
+		DoclingMaxAttempts:   cfg.Docling.StatusMaxAttempts,
 	})
 	workerProcessor.Run(ctx)
 
