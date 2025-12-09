@@ -214,6 +214,40 @@ func TestPublishMarkdownValidatesRepositoryBeforePublish(t *testing.T) {
 	}
 }
 
+func TestPublishMarkdownRejectsRepositoryWithSlash(t *testing.T) {
+	repo := &fakeRepo{}
+	publisher := &trackingPublisher{}
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	activities := NewActivities(repo, nil, nil, publisher, "owner", "repo", "main", "main", server.URL)
+	activities.httpClient = server.Client()
+
+	err := activities.PublishMarkdown(context.Background(), publishInput{
+		DocumentID:        "doc-3",
+		MarkdownBucket:    "bucket",
+		MarkdownObjectKey: "object",
+		Path:              "doc.md",
+		Repository:        "owner/repo",
+	})
+	if err == nil {
+		t.Fatal("expected repository format error")
+	}
+	if repo.lastStatus != model.StatusFailed {
+		t.Fatalf("expected failed status, got %v", repo.lastStatus)
+	}
+	if called {
+		t.Fatal("github validation should not be called for invalid repository format")
+	}
+	if publisher.called {
+		t.Fatal("publisher should not be called for invalid repository format")
+	}
+}
+
 func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	repo := &fakeRepo{}
 	publisher := &trackingPublisher{}

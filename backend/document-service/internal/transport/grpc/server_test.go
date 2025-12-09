@@ -160,10 +160,10 @@ func TestGRPCWorkflow(t *testing.T) {
 	client := documentv1.NewDocumentServiceClient(conn)
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "test-corr"))
 
-	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{FileName: "doc", Repository: "repo/name", Branch: "main", BaseBranch: "main", Path: "docs/doc.md", UploadBucket: "orig", MarkdownBucket: "md", Owner: "owner"})
+	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{FileName: "doc", Repository: "owner/repo", Branch: "main", BaseBranch: "main", Path: "docs/doc.md", UploadBucket: "orig", MarkdownBucket: "md", Owner: "owner"})
 	require.NoError(t, err)
 	require.Equal(t, documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED, created.Status)
-	require.Equal(t, "repo/name", created.Repository)
+	require.Equal(t, "repo", created.Repository)
 	require.Equal(t, "main", created.Branch)
 	require.Equal(t, "owner", created.Owner)
 	require.Equal(t, "docs/doc.md", created.Path)
