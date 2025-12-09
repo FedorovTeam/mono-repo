@@ -2,6 +2,11 @@ service:
   name: docling-transformer-service
   grpc_port: 9090
   max_workers: 1
+  poll_interval: 1s
+  processing_timeout: 30s
+  max_processing_retries: 3
+  cleanup_interval: 1m
+  retention_period: 168h
 
 postgres:
   dsn: postgres://user:password@postgres:5432/docling?sslmode=disable

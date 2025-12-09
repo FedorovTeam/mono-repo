@@ -95,6 +95,7 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		FilenameExtension: fileExt,
+		CorrelationID:     correlationID,
 	})
 	if err != nil {
 		s.logger.Error("enqueue transformation failed", zap.String("correlation_id", correlationID), zap.Error(err))
