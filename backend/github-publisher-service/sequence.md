@@ -16,7 +16,7 @@ sequenceDiagram
             Publisher-->>Publisher: correlation_id = request.correlation_id
         else заголовок correlation_header (config or X-Correlation-ID) в метаданных
             Metadata-->>Publisher: correlation_id
-        else
+    else
             Publisher-->>Publisher: correlation_id = ""
         end
         opt content пустой
@@ -32,7 +32,19 @@ sequenceDiagram
         Publisher-->>Publisher: owner/repository из запроса либо из конфигурации
         Publisher-->>Publisher: branch = request.branch or default_branch
         Publisher-->>Publisher: base_branch = request.base_branch or default_branch
-        Publisher->>GitHub: PUT /repos/{owner}/{repo}/contents/{path}\n(base64 content, message, branch, committer from request or config, correlation header)
+        Publisher->>GitHub: GET /repos/{owner}/{repo}/contents/{path}?ref=branch\n(correlation header)
+        alt файл отсутствует
+            GitHub-->>Publisher: 404 Not Found
+            Publisher-->>Publisher: подготовка создания файла
+        else файл существует
+            GitHub-->>Publisher: sha + base64 content
+            alt контент совпадает
+                Publisher-->>Client: commit_sha (без PUT)
+            else контент отличается
+                Publisher-->>Publisher: sha + If-Match для обновления
+            end
+        end
+        Publisher->>GitHub: PUT /repos/{owner}/{repo}/contents/{path}\n(base64 content, message, branch, sha?, committer from request or config, correlation header)
         GitHub-->>Publisher: commit.sha или ошибка FailedPrecondition
         opt create_pr = true
             Publisher->>GitHub: POST /repos/{owner}/{repo}/pulls\n(head=branch, base=base_branch, title/body, correlation header)
