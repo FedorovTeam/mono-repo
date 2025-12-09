@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -9,8 +11,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/mono-repo/docling-transformer-service/db/migrations"
 	"github.com/mono-repo/docling-transformer-service/internal/config"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/repository"
@@ -22,7 +26,11 @@ import (
 )
 
 func main() {
-	cfg := config.MustLoad()
+	configPath := flag.String("config", "", "path to config file")
+	migrateOnly := flag.Bool("migrate-only", false, "apply migrations and exit")
+	flag.Parse()
+
+	cfg := config.MustLoadFromPath(resolveConfigPath(*configPath))
 
 	logger, err := telemetry.NewLogger(cfg.Observability.LoggingEnabled)
 	if err != nil {
@@ -37,6 +45,25 @@ func main() {
 		logger.Fatal("failed to setup observability", zap.Error(err))
 	}
 	defer telemetry.ShutdownWithTimeout(context.Background(), 5*time.Second, logger, shutdownObservability)
+
+	db, err := sql.Open("pgx", cfg.Postgres.DSN)
+	if err != nil {
+		logger.Fatal("failed to open postgres connection", zap.Error(err))
+	}
+	defer db.Close()
+
+	if cfg.Postgres.MaxConnections > 0 {
+		db.SetMaxOpenConns(int(cfg.Postgres.MaxConnections))
+	}
+
+	if err := migrations.Run(ctx, db); err != nil {
+		logger.Fatal("failed to run migrations", zap.Error(err))
+	}
+
+	if *migrateOnly {
+		logger.Info("migrations applied, exiting due to -migrate-only flag")
+		return
+	}
 
 	minioClient, err := minio.New(cfg.Minio.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.Minio.AccessKey, cfg.Minio.SecretKey, ""),
@@ -88,4 +115,16 @@ func main() {
 	if err := server.Run(ctx, logger, queueRepo, cfg.Minio.Bucket, cfg.Service.MaxWorkers, cfg.Service.GRPCPort, cfg.Observability); err != nil {
 		logger.Fatal("server failed", zap.Error(err))
 	}
+}
+
+func resolveConfigPath(flagPath string) string {
+	if flagPath != "" {
+		return flagPath
+	}
+
+	if envPath := os.Getenv("CONFIG_PATH"); envPath != "" {
+		return envPath
+	}
+
+	return "config/config.yaml"
 }

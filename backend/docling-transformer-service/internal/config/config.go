@@ -90,6 +90,11 @@ func MustLoad() *Config {
 		path = "config/config.yaml"
 	}
 
+	return MustLoadFromPath(path)
+}
+
+// MustLoadFromPath загружает конфигурацию из указанного пути и паникует при ошибке.
+func MustLoadFromPath(path string) *Config {
 	cfg, err := Load(path)
 	if err != nil {
 		panic(err)

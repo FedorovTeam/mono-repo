@@ -7,7 +7,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - Проверка на переполнение слотов (`service.max_workers`): при превышении лимита задач в статусах `pending`/`processing` возвращается gRPC код `ResourceExhausted`.
 - HTTP-запрос к Docling-конвертеру выполняется воркером в фоне; результат сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
 - Проксирование correlation-id во все внешние вызовы (Docling, MinIO) из воркера.
-- Очередь хранится в PostgreSQL, схема создаётся через миграции `migrations/001_create_transformations_queue.sql`–`migrations/003_add_docling_fields.sql`.
+- Очередь хранится в PostgreSQL, схема создаётся через миграции `db/migrations/001_create_transformations_queue.sql`–`db/migrations/003_add_docling_fields.sql` и применяется автоматически при старте сервиса.
 - Настройки Docling, MinIO, PostgreSQL и наблюдаемости в одном конфигурационном файле.
 - Unit-тесты покрывают постановку задач в очередь и работу воркера.
 
@@ -23,14 +23,13 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 
 ## Локальный запуск
 ```bash
-# создать таблицу очереди (dsn из конфига)
-psql "$POSTGRES_DSN" -f migrations/001_create_transformations_queue.sql
-psql "$POSTGRES_DSN" -f migrations/002_add_retry_and_correlation.sql
-psql "$POSTGRES_DSN" -f migrations/003_add_docling_fields.sql
+# применить миграции без запуска сервиса
+go run ./cmd/main.go -config config/config.yaml -migrate-only
 
-CONFIG_PATH=config/config.yaml go run ./cmd/server
+# запустить сервис с автоматическим прогоном миграций
+go run ./cmd/main.go -config config/config.yaml
 ```
-Логи выводятся в STDOUT с correlation-id и метаданными gRPC вызова.
+Логи выводятся в STDOUT с correlation-id и метаданными gRPC вызова. Флаг `-config` переопределяет путь до `config.yaml`, по умолчанию используется `CONFIG_PATH` или `config/config.yaml`.
 
 ## Тестирование
 ```bash
@@ -43,7 +42,7 @@ go test ./...
 - **MinIO**: хранение исходников и Markdown результата (bucket задаётся в конфиге).
 
 ## Структура проекта
-- `cmd/server` — точка входа, загрузка конфига, инициализация MinIO/PostgreSQL, запуск gRPC и воркера очереди.
+- `cmd/main.go` — точка входа, загрузка конфига, инициализация MinIO/PostgreSQL, запуск gRPC и воркера очереди.
 - `internal/config` — чтение `config.yaml`.
 - `internal/converter` — HTTP-клиент Docling с прокидыванием correlation-id.
 - `internal/server` — gRPC сервер и интерсептор логирования; постановка задач в очередь и лимитирование слотов.
