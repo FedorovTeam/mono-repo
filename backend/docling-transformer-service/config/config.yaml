@@ -9,7 +9,7 @@ service:
   retention_period: 24h
 
 postgres:
-  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/docling?sslmode=disable"
+  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/docling_adapter?sslmode=disable"
   max_connections: 5
 
 docling:
