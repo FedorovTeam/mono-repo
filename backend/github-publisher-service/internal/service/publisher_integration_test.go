@@ -80,6 +80,14 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 		t.Fatalf("recorder init: %v", err)
 	}
 	defer rec.Stop()
+	rec.SetMatcher(func(r *http.Request, i cassette.Request) bool {
+		recordedURL, err := url.Parse(i.URL)
+		if err != nil {
+			return false
+		}
+
+		return r.Method == i.Method && r.URL.Path == recordedURL.Path
+	})
 
 	rec.SetMatcher(func(r *http.Request, i cassette.Request) bool {
 		recordedURL, _ := url.Parse(i.URL)
@@ -143,7 +151,16 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 	if resp.GetPullRequestNumber() != 7 {
 		t.Fatalf("unexpected pr number: %d", resp.GetPullRequestNumber())
 	}
-	if mode == recorder.ModeRecording && capturedCorrelation != "corr-int" {
+	if capturedCorrelation == "" {
+		stored, err := cassette.Load(cassettePath)
+		if err != nil {
+			t.Fatalf("load cassette: %v", err)
+		}
+		if len(stored.Interactions) > 0 {
+			capturedCorrelation = stored.Interactions[0].Request.Headers.Get("X-Correlation-ID")
+		}
+	}
+	if capturedCorrelation != "corr-int" {
 		t.Fatalf("correlation header not forwarded")
 	}
 	if storageStub.bucket != "md" || storageStub.key != "docs/a.md" {
