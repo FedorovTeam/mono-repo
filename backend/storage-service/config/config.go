@@ -23,6 +23,7 @@ type ServiceConfig struct {
 // EventsConfig описывает настройки подписок на события MinIO.
 type EventsConfig struct {
         UploadBucket string `yaml:"upload_bucket"`
+        WebhookArn   string `yaml:"webhook_arn"`
 }
 
 // MinioConfig хранит доступы и информацию о бакетах.

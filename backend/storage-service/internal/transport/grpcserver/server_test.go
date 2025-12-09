@@ -197,6 +197,10 @@ func (m *mockPresignClient) ListenBucketNotification(context.Context, string, st
 	return ch
 }
 
+func (m *mockPresignClient) SetBucketNotification(context.Context, string, notification.Configuration) error {
+	return nil
+}
+
 type mockClient struct {
 	buckets    map[string]bool
 	storedData map[string]map[string][]byte
@@ -242,6 +246,10 @@ func (m *mockClient) ListenBucketNotification(context.Context, string, string, s
 	ch := make(chan notification.Info)
 	close(ch)
 	return ch
+}
+
+func (m *mockClient) SetBucketNotification(context.Context, string, notification.Configuration) error {
+	return nil
 }
 
 func (m *mockClient) GetObject(_ context.Context, bucketName, objectName string) (io.ReadCloser, error) {

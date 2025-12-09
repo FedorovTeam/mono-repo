@@ -15,7 +15,6 @@ import (
 	"backend-storage-service/config"
 	"backend-storage-service/internal/storage"
 	"backend-storage-service/internal/transport/grpcserver"
-	documentv1 "backend-storage-service/proto/backend/document/v1"
 	storagev1 "backend-storage-service/proto/backend/storage/v1"
 )
 
@@ -50,6 +49,10 @@ func main() {
 		log.Fatalf("не удалось инициализировать MinIO клиент: %v", err)
 	}
 
+	if err := storage.ConfigureUploadNotification(ctx, minioAPI, uploadBucket, cfg.Events.WebhookArn); err != nil {
+		log.Fatalf("не удалось настроить webhook уведомления: %v", err)
+	}
+
 	keyGenerator := storage.NewObjectKeyGenerator(nil)
 	storageService := storage.NewService(
 		minioAPI,
@@ -57,20 +60,6 @@ func main() {
 		cfg.Minio.Buckets.KnowledgeDocx,
 		cfg.Minio.Buckets.KnowledgeMD,
 	)
-
-	documentConn, err := grpc.DialContext(
-		ctx,
-		cfg.Service.DocumentService,
-		grpc.WithInsecure(),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-	)
-	if err != nil {
-		log.Fatalf("не удалось подключиться к document-service: %v", err)
-	}
-	defer documentConn.Close()
-
-	handler := storage.NewUploadEventHandler(documentv1.NewDocumentServiceClient(documentConn), log.Default())
-	storage.ListenAndForward(ctx, minioAPI, uploadBucket, handler)
 
 	log.Printf("инициализированы бакеты: docx=%s, md=%s", cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD)
 

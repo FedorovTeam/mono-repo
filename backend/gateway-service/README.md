@@ -8,6 +8,7 @@
 - Валидация размера/расширения и прокладка `correlation-id` в логи и метаданные gRPC/Temporal/MinIO.
 - Подключение метрик и трейсинга (OTLP exporter), отдача `X-Correlation-ID` в ответах.
 - Проверка API-ключа, заданного в конфигурации.
+- Приём webhook уведомлений MinIO (`/internal/storage/uploaded`) и передача `ConfirmUpload` в document-service для запуска Workflow.
 
 ## Внешние зависимости
 - **Temporal** — запуск workflow загрузки/конвертации/публикации.

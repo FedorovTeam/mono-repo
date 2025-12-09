@@ -5,6 +5,7 @@ sequenceDiagram
     participant Client
     participant Gateway
     participant StorageService
+    participant MinIO
     participant DocumentService
     participant Temporal
 
@@ -16,8 +17,10 @@ sequenceDiagram
     StorageService-->>Gateway: uploadUrl + bucket/objectKey
     Gateway->>DocumentService: CreateDocument (metadata + size + upload bucket/objectKey + correlation-id)
     DocumentService-->>Gateway: документ (id/status[/workflowId])
-    Note over DocumentService,Temporal: Workflow запускается сервисом документов после подтверждения загрузки
     Gateway-->>Client: uploadUrl + uploadMethod=PUT + document{id,status,workflowId}
-    Client-->>StorageService: PUT DOCX по signed URL
+    Client-->>MinIO: PUT DOCX по signed URL
+    MinIO-->>Gateway: webhook s3:ObjectCreated:Put (correlation-id в метаданных)
+    Gateway->>DocumentService: ConfirmUpload(document_id, bucket, object_key, correlation-id)
+    DocumentService->>Temporal: старт Workflow
 ```
 

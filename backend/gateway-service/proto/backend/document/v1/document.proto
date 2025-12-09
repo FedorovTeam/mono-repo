@@ -68,9 +68,17 @@ message ListDocumentsResponse {
   int64 total_count = 2;
 }
 
+message ConfirmUploadRequest {
+  string document_id = 1;
+  string bucket = 2;
+  string object_key = 3;
+  string correlation_id = 4;
+}
+
 service DocumentService {
   rpc CreateDocument(CreateDocumentRequest) returns (Document);
   rpc GetDocument(GetDocumentRequest) returns (Document);
   rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
   rpc RetryProcessing(RetryProcessingRequest) returns (Document);
+  rpc ConfirmUpload(ConfirmUploadRequest) returns (Document);
 }

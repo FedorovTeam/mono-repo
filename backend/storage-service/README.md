@@ -15,6 +15,8 @@
 - `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — ключи доступа, `minio.use_ssl=true`.
 - `minio.buckets.knowledge_docx` — приватный бакет для оригиналов и загрузки через signed URL.
 - `minio.buckets.knowledge_md` — приватный бакет для Markdown.
+- `events.upload_bucket` — бакет, для которого включается webhook-уведомление о завершенной загрузке.
+- `events.webhook_arn` — ARN MinIO webhook/queue для доставки события `s3:ObjectCreated:*` в gateway.
 
 ## Локальный запуск
 1. Поднимите MinIO (например, через `docker-compose` шаблона template-service) и создайте бакеты `knowledge-docx` и `knowledge-md` с приватной политикой.

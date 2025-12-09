@@ -45,6 +45,10 @@ func (m *mockClient) ListenBucketNotification(ctx context.Context, bucketName, p
 	return ch
 }
 
+func (m *mockClient) SetBucketNotification(ctx context.Context, bucketName string, config notification.Configuration) error {
+	return nil
+}
+
 func (m *mockClient) MakeBucket(_ context.Context, bucketName string, _ minio.MakeBucketOptions) error {
 	m.buckets[bucketName] = true
 	return nil

@@ -27,10 +27,11 @@ import (
 )
 
 type mockDocumentClient struct {
-	createFunc func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error)
-	getFunc    func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error)
-	listFunc   func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error)
-	retryFunc  func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error)
+	createFunc  func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error)
+	getFunc     func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error)
+	listFunc    func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error)
+	retryFunc   func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error)
+	confirmFunc func(ctx context.Context, in *pb.ConfirmUploadRequest) (*pb.Document, error)
 }
 
 func (m *mockDocumentClient) CreateDocument(ctx context.Context, in *pb.CreateDocumentRequest, _ ...grpc.CallOption) (*pb.Document, error) {
@@ -47,6 +48,13 @@ func (m *mockDocumentClient) ListDocuments(ctx context.Context, in *pb.ListDocum
 
 func (m *mockDocumentClient) RetryProcessing(ctx context.Context, in *pb.RetryProcessingRequest, _ ...grpc.CallOption) (*pb.Document, error) {
 	return m.retryFunc(ctx, in)
+}
+
+func (m *mockDocumentClient) ConfirmUpload(ctx context.Context, in *pb.ConfirmUploadRequest, _ ...grpc.CallOption) (*pb.Document, error) {
+	if m.confirmFunc == nil {
+		return nil, nil
+	}
+	return m.confirmFunc(ctx, in)
 }
 
 func (m *mockDocumentClient) Close() error { return nil }
