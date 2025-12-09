@@ -3,13 +3,13 @@ module backend-storage-service
 go 1.24.3
 
 require (
-github.com/johannesboyne/gofakes3 v0.0.0-20250916175020-ebf3e50324d3
-github.com/minio/minio-go/v7 v7.0.97
-github.com/stretchr/testify v1.11.1
-go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.58.0
-google.golang.org/grpc v1.77.0
-google.golang.org/protobuf v1.36.10
-gopkg.in/yaml.v3 v3.0.1
+	github.com/johannesboyne/gofakes3 v0.0.0-20250916175020-ebf3e50324d3
+	github.com/minio/minio-go/v7 v7.0.97
+	github.com/stretchr/testify v1.11.1
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.58.0
+	google.golang.org/grpc v1.77.0
+	google.golang.org/protobuf v1.36.10
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -30,7 +30,6 @@ require (
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.58.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
