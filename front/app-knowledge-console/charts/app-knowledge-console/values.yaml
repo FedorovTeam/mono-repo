@@ -3,7 +3,7 @@ fullnameOverride: app-knowledge-console
 
 image:
   repository: harbor.tech.fedorov-team.tech/frontend/app-knowledge-console
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
   tag: "latest"
 
 imagePullSecrets:
