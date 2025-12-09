@@ -8,8 +8,8 @@ events:
 
 observability:
   enable_metrics: true
-  enable_traces: true
-  enable_logs: true
+  enable_traces: false
+  enable_logs: false
 
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"

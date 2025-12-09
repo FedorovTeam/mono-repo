@@ -21,6 +21,6 @@ minio:
 observability:
   otlp_endpoint: otel-collector:4317
   service_name: github-publisher-service
-  metrics_enabled: true
-  traces_enabled: true
+  metrics_enabled: false
+  traces_enabled: false
   logs_enabled: true
