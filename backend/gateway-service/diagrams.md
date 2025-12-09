@@ -9,3 +9,5 @@ flowchart LR
     DocumentService -->|Postgres| DB
 ```
 
+- OTLP-коллектор показан отдельно: при `observability.enabled=false` сервис не создаёт экспортеры и работает с no-op провайдерами/хендлерами.
+
