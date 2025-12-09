@@ -45,17 +45,19 @@ func NewMinioKeyManager(client *minio.Client, prefix, originalBucket, markdownBu
 }
 
 func (m *MinioKeyManager) GenerateKeys(ctx context.Context, data KeyGenerationData) (KeyPair, error) {
-if err := m.ensureBucket(ctx, m.originalBucket); err != nil {
-return KeyPair{}, err
-}
-if err := m.ensureBucket(ctx, m.markdownBucket); err != nil {
-return KeyPair{}, err
-}
-base := m.buildBasePath(data)
-return KeyPair{
-OriginalObjectKey: base + "/original",
-MarkdownObjectKey: base,
-}, nil
+	if err := m.ensureBucket(ctx, m.originalBucket); err != nil {
+		return KeyPair{}, err
+	}
+	if err := m.ensureBucket(ctx, m.markdownBucket); err != nil {
+		return KeyPair{}, err
+	}
+	base := m.buildBasePath(data)
+	markdownKey := ensureMarkdownExtension(base)
+
+	return KeyPair{
+		OriginalObjectKey: base + "/original",
+		MarkdownObjectKey: markdownKey,
+	}, nil
 }
 
 func (m *MinioKeyManager) ensureBucket(ctx context.Context, bucket string) error {
@@ -98,6 +100,15 @@ func buildEntitySpecificPath(data KeyGenerationData) string {
 	segments = append(segments, fileName)
 
 	return path.Join(segments...)
+}
+
+func ensureMarkdownExtension(base string) string {
+	ext := path.Ext(base)
+	if ext == "" {
+		return base + ".md"
+	}
+
+	return strings.TrimSuffix(base, ext) + ".md"
 }
 
 func extractExtension(data KeyGenerationData) string {

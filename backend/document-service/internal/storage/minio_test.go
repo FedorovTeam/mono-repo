@@ -50,3 +50,23 @@ func TestBuildEntityPathFallsBackToUUIDWithoutDocumentID(t *testing.T) {
 	require.True(t, strings.HasSuffix(fileName, ".docx"))
 	require.Regexp(t, regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.docx$`), fileName)
 }
+
+func TestEnsureMarkdownExtension_ReplacesExistingExtension(t *testing.T) {
+	base := "documents/doc-1.docx"
+
+	markdown := ensureMarkdownExtension(base)
+
+	if markdown != "documents/doc-1.md" {
+		t.Fatalf("unexpected markdown key: %s", markdown)
+	}
+}
+
+func TestEnsureMarkdownExtension_AppendsMarkdownExtension(t *testing.T) {
+	base := "documents/doc-1"
+
+	markdown := ensureMarkdownExtension(base)
+
+	if markdown != "documents/doc-1.md" {
+		t.Fatalf("unexpected markdown key: %s", markdown)
+	}
+}
