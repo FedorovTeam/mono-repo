@@ -3,6 +3,11 @@
 ## Автотесты
 - `go test ./...` — unit тесты конвертера, воркера и gRPC-обвязки, e2e против заглушки Docling (bufconn + httptest).
 
+## SLA и таймауты
+- `service.processing_timeout` — верхняя граница на нахождение задачи в статусе `processing`; по превышению задача возвращается в `pending`, `docling_job_id`/`docling_poll_count` сбрасываются и воркер начинает конвертацию с нуля.
+- `service.cleanup_interval` — частота фоновой проверки зависших задач и очистки завершённых записей.
+- `docling.status_poll_timeout` и `docling.status_max_attempts` — ограничения на общее время/число опросов Docling, приводят к немедленному `failed`, чтобы не занимать воркер бесконечно.
+
 ## Ручные проверки
 ### gRPC через grpcurl
 ```bash
@@ -23,12 +28,12 @@ grpcurl -plaintext -d '{"documentId":"doc-1","originalBucket":"orig","originalOb
 ### Восстановление зависших задач
 1. В БД вставить запись в `transformations_queue` со статусом `processing`, `started_at` в прошлом (более `service.processing_timeout`) и валидным `correlation_id`.
 2. Запустить сервис с включённым воркером и дождаться тика `service.cleanup_interval`.
-3. Задача должна перейти в `pending` (если не превысила `max_processing_retries`) или `failed` с ошибкой `processing timeout exceeded`; в логах отобразится предупреждение `stuck tasks processed` с соответствующими счётчиками.
+3. Задача должна перейти в `pending` (если не превысила `max_processing_retries`) или `failed` с ошибкой `processing timeout exceeded`; при восстановлении `started_at` станет `NULL`, а поля Docling очистятся. В логах отобразится предупреждение `stuck tasks processed` с соответствующими счётчиками.
 
 ### Повторный запуск после рестарта
 1. Создать задачу, дождаться перевода в `processing`, затем принудительно остановить сервис (например, `docker stop`).
 2. Перезапустить сервис с теми же параметрами.
-3. Убедиться, что фоновая проверка вернула задачу в `pending`/`failed` и что новый воркер забрал её в обработку либо пометил отказом; метрика `docling_transformer_tasks_restored` должна увеличиться.
+3. Убедиться, что фоновая проверка вернула задачу в `pending`/`failed`, обнулила `docling_job_id`/`docling_poll_count` и что новый воркер забрал её в обработку либо пометил отказом; метрика `docling_transformer_tasks_restored` должна увеличиться.
 
 ### Очистка завершённых задач
 1. В таблице `transformations_queue` создать записи со статусом `done` и `failed` со старыми `finished_at`.

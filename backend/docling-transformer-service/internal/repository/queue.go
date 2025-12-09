@@ -208,7 +208,8 @@ failed AS (
 ),
 restored AS (
     UPDATE transformations_queue
-    SET status = 'pending', started_at = NULL, error = 'restored after timeout'
+    SET status = 'pending', started_at = NULL, error = 'restored after timeout',
+        docling_job_id = NULL, docling_poll_count = 0
     WHERE id IN (SELECT id FROM stalled EXCEPT SELECT id FROM failed)
     RETURNING id
 )
