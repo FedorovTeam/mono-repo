@@ -83,12 +83,13 @@ type keyMock struct {
 }
 
 func (k *keyMock) GenerateKeys(ctx context.Context, data storage.KeyGenerationData) (storage.KeyPair, error) {
-	k.lastData = data
-	entityPath := strings.Trim(data.EntitySpecificPath, "/")
-	if entityPath == "" {
-		entityPath = "key"
-	}
-	return storage.KeyPair{OriginalObjectKey: "orig/" + entityPath, MarkdownObjectKey: "md/" + entityPath}, nil
+k.lastData = data
+entityPath := strings.Trim(data.EntitySpecificPath, "/")
+if entityPath == "" {
+entityPath = "key"
+}
+base := entityPath
+return storage.KeyPair{OriginalObjectKey: base + "/original", MarkdownObjectKey: base}, nil
 }
 
 type failingKey struct{}

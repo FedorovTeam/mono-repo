@@ -45,17 +45,17 @@ func NewMinioKeyManager(client *minio.Client, prefix, originalBucket, markdownBu
 }
 
 func (m *MinioKeyManager) GenerateKeys(ctx context.Context, data KeyGenerationData) (KeyPair, error) {
-	if err := m.ensureBucket(ctx, m.originalBucket); err != nil {
-		return KeyPair{}, err
-	}
-	if err := m.ensureBucket(ctx, m.markdownBucket); err != nil {
-		return KeyPair{}, err
-	}
-	base := m.buildBasePath(data)
-	return KeyPair{
-		OriginalObjectKey: base + "/original",
-		MarkdownObjectKey: base + "/markdown",
-	}, nil
+if err := m.ensureBucket(ctx, m.originalBucket); err != nil {
+return KeyPair{}, err
+}
+if err := m.ensureBucket(ctx, m.markdownBucket); err != nil {
+return KeyPair{}, err
+}
+base := m.buildBasePath(data)
+return KeyPair{
+OriginalObjectKey: base + "/original",
+MarkdownObjectKey: base,
+}, nil
 }
 
 func (m *MinioKeyManager) ensureBucket(ctx context.Context, bucket string) error {
