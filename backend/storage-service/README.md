@@ -17,6 +17,7 @@
 - `minio.buckets.knowledge_md` — приватный бакет для Markdown.
 - `events.upload_bucket` — бакет, для которого включается webhook-уведомление о завершенной загрузке.
 - `events.webhook_arn` — ARN MinIO webhook/queue для доставки события `s3:ObjectCreated:*` в gateway.
+- `observability.enable_metrics` / `observability.enable_traces` / `observability.enable_logs` — включают экспорт метрик, трейсинга и логов соответственно (по умолчанию все включено).
 
 ## Локальный запуск
 1. Поднимите MinIO (например, через `docker-compose` шаблона template-service) и создайте бакеты `knowledge-docx` и `knowledge-md` с приватной политикой.
