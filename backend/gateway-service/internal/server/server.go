@@ -42,7 +42,7 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to init logger: %w", err)
 	}
 
-	providers, shutdown, err := observability.Setup(context.Background(), cfg.Observability.OTLPEndpoint, cfg.Observability.ServiceName)
+	providers, shutdown, err := observability.Setup(context.Background(), cfg.Observability.EnabledOrDefault(), cfg.Observability.OTLPEndpoint, cfg.Observability.ServiceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init telemetry: %w", err)
 	}
@@ -88,9 +88,9 @@ func (s *Server) Run(ctx context.Context) error {
 	}}))
 	gqlHandler.AroundOperations(traceGraphQLOperation)
 
-	instrumentedHandler := observability.HTTPHandler("graphql", gqlHandler)
+	instrumentedHandler := observability.HTTPHandler("graphql", gqlHandler, s.otelProviders)
 
-	webhookHandler := observability.HTTPHandler("storage-webhook", http.HandlerFunc(s.handleStorageNotification))
+	webhookHandler := observability.HTTPHandler("storage-webhook", http.HandlerFunc(s.handleStorageNotification), s.otelProviders)
 
 	gqlMux := http.NewServeMux()
 	gqlMux.Handle("/query", instrumentedHandler)
