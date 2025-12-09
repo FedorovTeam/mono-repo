@@ -22,6 +22,7 @@ type Repository interface {
 	ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
 	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
 	UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error)
+	LastNonFailedStatus(ctx context.Context, id string) (model.Status, error)
 }
 
 type Service struct {

@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"sync"
@@ -75,6 +76,7 @@ func (staticKey) GenerateKeys(ctx context.Context, data storage.KeyGenerationDat
 type memoryRepo struct {
 	mu        sync.Mutex
 	documents map[string]model.Document
+	logs      map[string][]model.Status
 }
 
 func (m *memoryRepo) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -130,6 +132,10 @@ func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Statu
 		doc.Versions = append(doc.Versions, *version)
 		doc.MarkdownObjectKey = version.MarkdownObjectKey
 	}
+	if m.logs == nil {
+		m.logs = make(map[string][]model.Status)
+	}
+	m.logs[id] = append(m.logs[id], to)
 	m.documents[id] = doc
 	return &doc, nil
 }
@@ -144,6 +150,28 @@ func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string
 	doc.WorkflowID = workflowID
 	m.documents[id] = doc
 	return &doc, nil
+}
+
+func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc, ok := m.documents[id]
+	if !ok {
+		return "", errors.New("not found")
+	}
+	history := m.logs[id]
+	if len(history) == 0 {
+		if doc.Status != model.StatusFailed {
+			return doc.Status, nil
+		}
+		return "", sql.ErrNoRows
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i] != model.StatusFailed {
+			return history[i], nil
+		}
+	}
+	return "", sql.ErrNoRows
 }
 
 func TestGRPCWorkflow(t *testing.T) {
