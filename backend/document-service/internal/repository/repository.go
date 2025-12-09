@@ -118,6 +118,18 @@ func (r *Repository) LastNonFailedStatus(ctx context.Context, id string) (model.
 	return model.Status(strings.TrimSpace(status.String)), nil
 }
 
+func (r *Repository) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+	row := r.db.QueryRowContext(ctx, `
+        SELECT count(*) FROM document_status_logs WHERE document_id=$1 AND to_status=$2 AND reason LIKE $3
+    `, id, string(status), reasonPrefix+"%")
+
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
 	base := `SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents`
 	args := []any{}

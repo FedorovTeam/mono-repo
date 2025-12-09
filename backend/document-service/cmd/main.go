@@ -184,6 +184,16 @@ func main() {
 
 	go reconciler.Run(ctx, cfg.Reconciler.Interval)
 
+	retrier := docservice.NewWorkflowRetrier(
+		repo,
+		temporalClient,
+		cfg.Temporal.TaskQueue,
+		cfg.Retryer.BatchSize,
+		cfg.Retryer.MaxAttempts,
+	)
+
+	go retrier.Run(ctx, cfg.Retryer.Interval)
+
 	server := transport.NewServer(service)
 	if err := server.ListenAndServe(ctx, cfg.Server.Addr); err != nil {
 		log.Printf("server stopped: %v", err)

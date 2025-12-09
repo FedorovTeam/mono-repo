@@ -11,6 +11,7 @@
    - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после уведомления от MinIO.
    - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями. Если Temporal не сконфигурирован, возвращает документ без запуска обработки.
    - При наличии Temporal запускается `DocumentProcessingWorkflow` с идентификатором `workflow_id=document_id` в указанной очереди. В случае ошибки старта статус переводится в `Failed`; при успехе в `documents.workflow_id` сохраняется идентификатор запущенного workflow.
+   - Фоновый ретраер раз в заданный интервал просматривает документы в статусе `Failed` с причиной, начинающейся на `start workflow:`. Если количество неудачных запусков меньше лимита, он логирует `correlation_id=workflow_id`, повторно инициирует `DocumentProcessingWorkflow` через Temporal client и сохраняет новый `workflow_id`.
 
 3. **Workflow обработки**
    - Для всех активностей установлены таймауты `2m` и retry-политика Temporal.

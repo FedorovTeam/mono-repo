@@ -445,6 +445,10 @@ func (m *memoryRepo) ListDocuments(context.Context, int, int, *model.Status) ([]
 	return nil, nil
 }
 
+func (m *memoryRepo) CountStatusLogsWithReasonPrefix(context.Context, string, model.Status, string) (int, error) {
+	return len(m.logs), nil
+}
+
 func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	m.lastStatus = to
 	m.lastError = errorReason

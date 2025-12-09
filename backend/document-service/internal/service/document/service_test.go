@@ -25,6 +25,7 @@ type repoMock struct {
 	savedStatus model.Status
 	workflowID  string
 	savedError  string
+	attempts    int
 }
 
 func (r *repoMock) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -62,6 +63,16 @@ func (r *repoMock) ListDocuments(ctx context.Context, limit, offset int, status 
 		return nil, nil
 	}
 	return []model.Document{*r.doc}, nil
+}
+
+func (r *repoMock) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+	if r.doc != nil {
+		return r.doc.Status, nil
+	}
+	return "", nil
+}
+func (r *repoMock) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+	return r.attempts, r.err
 }
 func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	if r.err != nil {

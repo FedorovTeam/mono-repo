@@ -114,6 +114,12 @@ func (m *memoryRepo) ListDocuments(ctx context.Context, limit, offset int, statu
 	return out, nil
 }
 
+func (m *memoryRepo) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.logs[id]), nil
+}
+
 func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
