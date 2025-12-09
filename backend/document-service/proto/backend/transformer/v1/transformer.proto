@@ -5,18 +5,19 @@ package backend.transformer.v1;
 option go_package = "backend-document-service/proto/backend/transformer/v1;transformerv1";
 
 service TransformerService {
-  rpc ConvertDocxToMarkdown(ConvertDocxToMarkdownRequest) returns (ConvertDocxToMarkdownResponse);
+  rpc ConvertDocumentToMarkdown(ConvertDocumentToMarkdownRequest) returns (ConvertDocumentToMarkdownResponse);
 }
 
-message ConvertDocxToMarkdownRequest {
+message ConvertDocumentToMarkdownRequest {
   string document_id = 1;
   string original_bucket = 2;
   string original_object_key = 3;
   string markdown_bucket = 4;
   string markdown_object_key = 5;
+  string filename_extension = 6;
 }
 
-message ConvertDocxToMarkdownResponse {
+message ConvertDocumentToMarkdownResponse {
   bytes markdown_content = 1;
   string media_type = 2;
   string markdown_bucket = 3;

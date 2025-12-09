@@ -1,9 +1,9 @@
 # Docling Transformer Service
 
-Docling Transformer Service — gRPC-обёртка над Docling для конвертации DOCX в Markdown с обязательным прокидыванием `x-correlation-id`. Сервис повторяет структуру `template-service` и конфигурируется через один `config.yaml`.
+Docling Transformer Service — gRPC-обёртка над Docling для конвертации DOC/DOCX/PDF в Markdown с обязательным прокидыванием `x-correlation-id`. Сервис повторяет структуру `template-service` и конфигурируется через один `config.yaml`.
 
 ## Возможности
-- gRPC метод `ConvertDocxToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` (принимает `document_id`, `original_bucket`/`original_object_key`, опционально `markdown_bucket`/`markdown_object_key`).
+- gRPC метод `ConvertDocumentToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` (принимает `document_id`, `original_bucket`/`original_object_key`, опционально `markdown_bucket`/`markdown_object_key` и `filename_extension` для валидации формата).
 - HTTP-запрос к Docling-конвертеру для получения Markdown.
 - Проксирование correlation-id во все внешние вызовы.
 - Загрузка исходника из MinIO, сохранение результата в бакет Markdown.

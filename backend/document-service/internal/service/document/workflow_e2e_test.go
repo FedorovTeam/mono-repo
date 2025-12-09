@@ -256,9 +256,9 @@ type fakeTransformerServer struct {
 	recorder *metadataRecorder
 }
 
-func (f *fakeTransformerServer) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+func (f *fakeTransformerServer) ConvertDocumentToMarkdown(ctx context.Context, req *transformerv1.ConvertDocumentToMarkdownRequest) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
 	f.recorder.record(ctx)
-	return &transformerv1.ConvertDocxToMarkdownResponse{MarkdownContent: nil, MarkdownObjectKey: req.GetMarkdownObjectKey(), MediaType: "text/markdown"}, nil
+	return &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownContent: nil, MarkdownObjectKey: req.GetMarkdownObjectKey(), MediaType: "text/markdown"}, nil
 }
 
 type fakePublisherServer struct {
