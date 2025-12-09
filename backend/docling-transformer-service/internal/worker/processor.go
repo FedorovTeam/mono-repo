@@ -281,6 +281,13 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 		task.MarkdownObjectKey = transformations.BuildMarkdownKey(task.OriginalObjectKey)
 	}
 
+	jobID := task.DoclingJobID
+	pollOffset := task.DoclingPollCount
+
+	if jobID != "" {
+		return p.pollDoclingJob(ctx, task, jobID, pollOffset)
+	}
+
 	fileExt := task.FilenameExtension
 	if fileExt == "" {
 		fileExt = transformations.NormalizeExtension(filepath.Ext(task.OriginalObjectKey))
@@ -304,36 +311,33 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 		originalFileName = fmt.Sprintf("document.%s", fileExt)
 	}
 
-	jobID := task.DoclingJobID
-	pollOffset := task.DoclingPollCount
+	submitCtx, cancelSubmit := p.fastPhaseContext(ctx)
+	defer cancelSubmit()
 
-	if jobID == "" {
-		submitCtx, cancelSubmit := p.fastPhaseContext(ctx)
-		defer cancelSubmit()
-
-		jobID, err = p.conv.Submit(submitCtx, converter.DoclingConvertRequest{
-			FileName:    originalFileName,
-			Content:     originalContent,
-			ContentType: contentType,
-		})
-		if err != nil {
-			return fmt.Errorf("docling submit: %w", err)
-		}
-
-		nextPoll := p.nextPollTime(time.Now(), 0)
-		if err := p.repo.MarkDoclingWaiting(ctx, task.ID, jobID, 0, nextPoll); err != nil {
-			return fmt.Errorf("store docling job: %w", err)
-		}
-
-		task.DoclingJobID = jobID
-		task.DoclingPollCount = 0
-		task.NextPollAt = &nextPoll
-
-		p.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.String("correlation_id", correlationID), zap.Time("next_poll_at", nextPoll))
-
-		return errDoclingWaiting
+	jobID, err = p.conv.Submit(submitCtx, converter.DoclingConvertRequest{
+		FileName:    originalFileName,
+		Content:     originalContent,
+		ContentType: contentType,
+	})
+	if err != nil {
+		return fmt.Errorf("docling submit: %w", err)
 	}
 
+	nextPoll := p.nextPollTime(time.Now(), 0)
+	if err := p.repo.MarkDoclingWaiting(ctx, task.ID, jobID, 0, nextPoll); err != nil {
+		return fmt.Errorf("store docling job: %w", err)
+	}
+
+	task.DoclingJobID = jobID
+	task.DoclingPollCount = 0
+	task.NextPollAt = &nextPoll
+
+	p.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.String("correlation_id", correlationID), zap.Time("next_poll_at", nextPoll))
+
+	return errDoclingWaiting
+}
+
+func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.TransformationTask, jobID string, pollOffset int) error {
 	if p.cfg.DoclingMaxAttempts > 0 && pollOffset >= p.cfg.DoclingMaxAttempts {
 		return fmt.Errorf("%w: job %s has no remaining attempts after %d polls", converter.ErrDoclingPollingAttemptsExceeded, jobID, pollOffset)
 	}

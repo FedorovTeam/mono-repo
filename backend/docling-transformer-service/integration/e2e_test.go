@@ -124,10 +124,12 @@ func (s *stubQueueRepo) CleanupFinished(context.Context, time.Duration) (int, er
 
 type stubStorage struct {
 	downloadContent []byte
+	downloadCalls   int
 	uploaded        []byte
 }
 
 func (s *stubStorage) Download(context.Context, string, string) ([]byte, error) {
+	s.downloadCalls++
 	return s.downloadContent, nil
 }
 
@@ -231,6 +233,10 @@ func TestWorkerProcessesTask(t *testing.T) {
 		defer repo.markMutex.Unlock()
 		return len(repo.markDoneIDs) == 1
 	})
+
+	if storage.downloadCalls != 1 {
+		t.Fatalf("expected original content to be downloaded once, got %d", storage.downloadCalls)
+	}
 
 	if string(storage.uploaded) != "converted" {
 		t.Fatalf("expected markdown to be uploaded")
