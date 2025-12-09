@@ -19,7 +19,7 @@ sequenceDiagram
     S-->>S: Проверка имени и id (UUID), подстановка owner/repository/branch/baseBranch из config
     S-->>S: Определение bucket'ов (переданные или значения по умолчанию)
     S->>K: GenerateKeys(documentId, publishPath, entitySpecificPath)
-    K-->>S: originalKey, markdownKey (<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<entity_path>/...)
+    K-->>S: originalKey, markdownKey (<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<uuid>[.<ext>]/...)
     S-->>S: Выбор итоговых object key (переданные или сгенерированные)
     S->>R: Транзакция: вставка document со статусом Uploaded,
     версия v1, запись в document_status_logs, workflow_id = documentId
