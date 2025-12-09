@@ -11,9 +11,10 @@ const defaultConfigPath = "config/config.yaml"
 
 // Config описывает настройки сервиса и GitHub клиента.
 type Config struct {
-	Service ServiceConfig `yaml:"service"`
-	GitHub  GitHubConfig  `yaml:"github"`
-	Minio   MinioConfig   `yaml:"minio"`
+	Service       ServiceConfig       `yaml:"service"`
+	GitHub        GitHubConfig        `yaml:"github"`
+	Minio         MinioConfig         `yaml:"minio"`
+	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 // ServiceConfig содержит основные параметры запуска.
@@ -42,6 +43,15 @@ type MinioConfig struct {
 	Secure    bool   `yaml:"secure"`
 }
 
+// ObservabilityConfig описывает настройки телеметрии.
+type ObservabilityConfig struct {
+	OTLPEndpoint   string `yaml:"otlp_endpoint"`
+	ServiceName    string `yaml:"service_name"`
+	MetricsEnabled bool   `yaml:"metrics_enabled"`
+	TracesEnabled  bool   `yaml:"traces_enabled"`
+	LogsEnabled    bool   `yaml:"logs_enabled"`
+}
+
 // Load загружает конфигурацию из CONFIG_PATH или файла по умолчанию.
 func Load() (*Config, error) {
 	path := os.Getenv("CONFIG_PATH")
@@ -61,6 +71,19 @@ func Load() (*Config, error) {
 
 	if cfg.GitHub.CorrelationHeader == "" {
 		cfg.GitHub.CorrelationHeader = "X-Correlation-ID"
+	}
+
+	if cfg.Observability.ServiceName == "" {
+		cfg.Observability.ServiceName = cfg.Service.Name
+	}
+	if cfg.Observability.ServiceName == "" {
+		cfg.Observability.ServiceName = "github-publisher-service"
+	}
+
+	if !cfg.Observability.MetricsEnabled && !cfg.Observability.TracesEnabled && !cfg.Observability.LogsEnabled {
+		cfg.Observability.MetricsEnabled = true
+		cfg.Observability.TracesEnabled = true
+		cfg.Observability.LogsEnabled = true
 	}
 
 	return &cfg, nil

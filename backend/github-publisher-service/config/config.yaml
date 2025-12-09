@@ -17,3 +17,10 @@ minio:
   access_key: access_key
   secret_key: secret_key
   secure: false
+
+observability:
+  otlp_endpoint: otel-collector:4317
+  service_name: github-publisher-service
+  metrics_enabled: true
+  traces_enabled: true
+  logs_enabled: true

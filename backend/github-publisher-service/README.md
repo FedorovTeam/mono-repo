@@ -19,6 +19,8 @@
 - `github.author_name` / `github.author_email` — метаданные коммита.
 - `github.correlation_header` — заголовок для прокидывания correlation-id.
 - `minio.*` — endpoint, ключи доступа и флаг `secure` для скачивания Markdown по bucket/key.
+- `observability.otlp_endpoint` — адрес OTLP-коллектора для отдачи метрик и трейсов.
+- `observability.metrics_enabled` / `observability.traces_enabled` / `observability.logs_enabled` — отдельные флаги включения экспорта. При выключении используются no-op провайдеры, HTTP/gRPC остаются без внешних отправок, а логи можно полностью заглушить.
 
 ## Структура
 - `cmd/server` — точка входа gRPC сервера.

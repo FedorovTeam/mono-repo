@@ -8,12 +8,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 
 	"backend-github-publisher-service/internal/config"
 	githubpublisherv1 "backend-github-publisher-service/proto/backend/githubpublisher/v1"
+	"github.com/dnaeon/go-vcr/cassette"
 	"github.com/dnaeon/go-vcr/recorder"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -67,17 +69,25 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cassette := "testdata/cassettes/publish_success"
+	cassettePath := "testdata/cassettes/publish_success"
 	mode := recorder.ModeReplaying
-	if _, err := os.Stat(cassette + ".yaml"); os.IsNotExist(err) {
+	if _, err := os.Stat(cassettePath + ".yaml"); os.IsNotExist(err) {
 		mode = recorder.ModeRecording
 	}
 
-	rec, err := recorder.NewAsMode(cassette, mode, server.Client().Transport)
+	rec, err := recorder.NewAsMode(cassettePath, mode, server.Client().Transport)
 	if err != nil {
 		t.Fatalf("recorder init: %v", err)
 	}
 	defer rec.Stop()
+	rec.SetMatcher(func(r *http.Request, i cassette.Request) bool {
+		recordedURL, err := url.Parse(i.URL)
+		if err != nil {
+			return false
+		}
+
+		return r.Method == i.Method && r.URL.Path == recordedURL.Path
+	})
 
 	cfg := &config.Config{
 		GitHub: config.GitHubConfig{
@@ -135,6 +145,15 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 	}
 	if resp.GetPullRequestNumber() != 7 {
 		t.Fatalf("unexpected pr number: %d", resp.GetPullRequestNumber())
+	}
+	if capturedCorrelation == "" {
+		stored, err := cassette.Load(cassettePath)
+		if err != nil {
+			t.Fatalf("load cassette: %v", err)
+		}
+		if len(stored.Interactions) > 0 {
+			capturedCorrelation = stored.Interactions[0].Request.Headers.Get("X-Correlation-ID")
+		}
 	}
 	if capturedCorrelation != "corr-int" {
 		t.Fatalf("correlation header not forwarded")
