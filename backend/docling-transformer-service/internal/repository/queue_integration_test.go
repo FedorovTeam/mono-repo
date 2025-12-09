@@ -93,4 +93,29 @@ INSERT INTO transformations_queue (
 	require.Equal(t, StatusProcessing, task.Status)
 	require.Equal(t, "", task.DoclingJobID)
 	require.Equal(t, 0, task.DoclingPollCount)
+
+	waitingID := uuid.New()
+	expiredID := uuid.New()
+	now := time.Now()
+	_, err = pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, correlation_id, docling_job_id, docling_poll_count, next_poll_at
+) VALUES ($1, 'waiting_docling', 'doc-2', 'orig', 'path/another.docx', 'md', 'dest/another.md', 'docx', $4, 'corr-wait', 'job-456', 2, $2),
+         ($3, 'waiting_docling', 'doc-3', 'orig', 'path/third.docx', 'md', 'dest/third.md', 'docx', $5, 'corr-exp', 'job-789', 5, $2)
+`, waitingID, now.Add(-time.Minute), expiredID, now.Add(-30*time.Minute), now.Add(-3*time.Hour))
+	require.NoError(t, err)
+
+	ready, expired, err := repo.ActivateWaiting(ctx, time.Now(), time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, 1, ready)
+	require.Equal(t, 1, expired)
+
+	var waitingStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, waitingID).Scan(&waitingStatus))
+	require.Equal(t, StatusPending, waitingStatus)
+
+	var expiredStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, expiredID).Scan(&expiredStatus))
+	require.Equal(t, StatusFailed, expiredStatus)
 }

@@ -35,6 +35,7 @@ type stubQueueRepo struct {
 	cleanupErr     error
 	restoreCalls   int
 	cleanupCalls   int
+	currentTask    *repository.TransformationTask
 }
 
 func (s *stubQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
@@ -59,6 +60,7 @@ func (s *stubQueueRepo) AcquireNext(context.Context) (*repository.Transformation
 
 	task := s.acquireTasks[0]
 	s.acquireTasks = s.acquireTasks[1:]
+	s.currentTask = task
 	return task, nil
 }
 
@@ -77,22 +79,39 @@ func (s *stubQueueRepo) MarkFailed(_ context.Context, id uuid.UUID, _ string) er
 }
 
 func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
-        if s.countErr != nil {
-                return 0, 0, 0, s.countErr
-        }
-        return s.pending, s.processing, 0, nil
+	if s.countErr != nil {
+		return 0, 0, 0, s.countErr
+	}
+	return s.pending, s.processing, 0, nil
 }
 
 func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
-        s.restoreCalls++
-        if s.restoreErr != nil {
-                return 0, 0, s.restoreErr
-        }
-        return s.restored, s.rejected, nil
+	s.restoreCalls++
+	if s.restoreErr != nil {
+		return 0, 0, s.restoreErr
+	}
+	return s.restored, s.rejected, nil
 }
 
 func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
-        return nil
+	return nil
+}
+
+func (s *stubQueueRepo) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, jobID string, pollCount int, _ time.Time) error {
+	if s.currentTask != nil {
+		clone := *s.currentTask
+		clone.StartedAt = nil
+		clone.Status = repository.StatusDocling
+		clone.DoclingJobID = jobID
+		clone.DoclingPollCount = pollCount
+		s.acquireTasks = append(s.acquireTasks, &clone)
+	}
+
+	return nil
+}
+
+func (s *stubQueueRepo) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
+	return 0, 0, nil
 }
 
 func (s *stubQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) {

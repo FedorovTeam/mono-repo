@@ -16,6 +16,7 @@ type TransformationStatus string
 const (
 	StatusPending    TransformationStatus = "pending"
 	StatusProcessing TransformationStatus = "processing"
+	StatusDocling    TransformationStatus = "waiting_docling"
 	StatusDone       TransformationStatus = "done"
 	StatusFailed     TransformationStatus = "failed"
 )
@@ -26,6 +27,7 @@ type TransformationTask struct {
 	RetryCount        int
 	DoclingJobID      string
 	DoclingPollCount  int
+	NextPollAt        *time.Time
 	DocumentID        string
 	OriginalBucket    string
 	OriginalObjectKey string
@@ -56,6 +58,8 @@ type QueueRepository interface {
 	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
+	MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPollAt time.Time) error
+	ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error)
 	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error)
 	CleanupFinished(ctx context.Context, retention time.Duration) (int, error)
 	CountByStatus(ctx context.Context) (pending, processing, waitingDocling int, err error)
@@ -75,8 +79,8 @@ func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueuePar
 
 	query := `
 INSERT INTO transformations_queue (
-    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, correlation_id, docling_poll_count
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, 0)
+ id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, correlation_id, docling_poll_count, next_poll_at
+ ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, 0, NULL)
 `
 
 	_, err := r.pool.Exec(ctx, query, id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey, params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt, params.CorrelationID)
@@ -88,7 +92,7 @@ INSERT INTO transformations_queue (
 }
 
 func (r *PostgresQueueRepository) CountActive(ctx context.Context) (int, error) {
-	const query = `SELECT COUNT(*) FROM transformations_queue WHERE status IN ('pending', 'processing')`
+	const query = `SELECT COUNT(*) FROM transformations_queue WHERE status IN ('pending', 'processing', 'waiting_docling')`
 
 	var count int
 	if err := r.pool.QueryRow(ctx, query).Scan(&count); err != nil {
@@ -101,9 +105,9 @@ func (r *PostgresQueueRepository) CountActive(ctx context.Context) (int, error) 
 func (r *PostgresQueueRepository) CountByStatus(ctx context.Context) (pending, processing, waitingDocling int, err error) {
 	const query = `
 SELECT
-    COUNT(*) FILTER (WHERE status = 'pending') AS pending,
-    COUNT(*) FILTER (WHERE status = 'processing' AND (docling_job_id IS NULL OR docling_job_id = '')) AS processing,
-    COUNT(*) FILTER (WHERE status = 'processing' AND (docling_job_id IS NOT NULL AND docling_job_id <> '')) AS waiting_docling
+COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+COUNT(*) FILTER (WHERE status = 'processing') AS processing,
+COUNT(*) FILTER (WHERE status = 'waiting_docling') AS waiting_docling
 FROM transformations_queue`
 
 	if err := r.pool.QueryRow(ctx, query).Scan(&pending, &processing, &waitingDocling); err != nil {
@@ -120,15 +124,7 @@ func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*Transformat
 	}
 	defer tx.Rollback(ctx)
 
-	const selectQuery = `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
-FROM transformations_queue
-WHERE status = 'pending'
-ORDER BY created_at
-LIMIT 1
-FOR UPDATE SKIP LOCKED`
-
-	task, err := scanTask(tx.QueryRow(ctx, selectQuery))
+	task, err := r.selectNextTask(ctx, tx)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			if commitErr := tx.Commit(ctx); commitErr != nil {
@@ -136,20 +132,69 @@ FOR UPDATE SKIP LOCKED`
 			}
 			return nil, nil
 		}
+
 		return nil, err
 	}
 
-	const updateQuery = `UPDATE transformations_queue SET status = 'processing', started_at = NOW(), retry_count = retry_count + 1 WHERE id = $1 RETURNING started_at, retry_count`
-	if err := tx.QueryRow(ctx, updateQuery, task.ID).Scan(&task.StartedAt, &task.RetryCount); err != nil {
-		return nil, fmt.Errorf("mark processing: %w", err)
+	if err := r.markProcessing(ctx, tx, task); err != nil {
+		return nil, err
 	}
-	task.Status = StatusProcessing
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit acquire: %w", err)
 	}
 
 	return task, nil
+}
+
+func (r *PostgresQueueRepository) selectNextTask(ctx context.Context, tx pgx.Tx) (*TransformationTask, error) {
+	const selectPendingQuery = `
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+FROM transformations_queue
+WHERE status = 'pending'
+ORDER BY created_at
+LIMIT 1
+FOR UPDATE SKIP LOCKED`
+
+	task, err := scanTask(tx.QueryRow(ctx, selectPendingQuery))
+	if err == nil {
+		return task, nil
+	}
+
+	if err != pgx.ErrNoRows {
+		return nil, err
+	}
+
+	const selectWaitingQuery = `
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+FROM transformations_queue
+WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
+ORDER BY COALESCE(next_poll_at, created_at), created_at
+LIMIT 1
+FOR UPDATE SKIP LOCKED`
+
+	return scanTask(tx.QueryRow(ctx, selectWaitingQuery))
+}
+
+func (r *PostgresQueueRepository) markProcessing(ctx context.Context, tx pgx.Tx, task *TransformationTask) error {
+	if task == nil {
+		return fmt.Errorf("nil task")
+	}
+
+	const pendingUpdateQuery = `UPDATE transformations_queue SET status = 'processing', started_at = NOW(), retry_count = retry_count + 1, next_poll_at = NULL WHERE id = $1 RETURNING started_at, retry_count`
+	const waitingUpdateQuery = `UPDATE transformations_queue SET status = 'processing', started_at = NOW(), next_poll_at = NULL WHERE id = $1 RETURNING started_at, retry_count`
+
+	query := pendingUpdateQuery
+	if task.Status == StatusDocling {
+		query = waitingUpdateQuery
+	}
+
+	if err := tx.QueryRow(ctx, query, task.ID).Scan(&task.StartedAt, &task.RetryCount); err != nil {
+		return fmt.Errorf("mark processing: %w", err)
+	}
+	task.Status = StatusProcessing
+
+	return nil
 }
 
 func (r *PostgresQueueRepository) MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error {
@@ -186,6 +231,80 @@ func (r *PostgresQueueRepository) UpdateDoclingInfo(ctx context.Context, id uuid
 	return nil
 }
 
+func (r *PostgresQueueRepository) MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPollAt time.Time) error {
+	if pollCount < 0 {
+		pollCount = 0
+	}
+
+	const query = `
+UPDATE transformations_queue
+SET status = 'waiting_docling', docling_job_id = $2, docling_poll_count = $3, next_poll_at = $4, started_at = NULL, error = NULL
+WHERE id = $1`
+
+	if _, err := r.pool.Exec(ctx, query, id, jobID, pollCount, nextPollAt); err != nil {
+		return fmt.Errorf("mark docling waiting: %w", err)
+	}
+
+	return nil
+}
+
+func (r *PostgresQueueRepository) ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin activate tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	expired, err := r.failExpiredWaiting(ctx, tx, now, maxDoclingLifetime)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	ready, err := r.releaseWaiting(ctx, tx, now)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("commit activate waiting: %w", err)
+	}
+
+	return ready, expired, nil
+}
+
+func (r *PostgresQueueRepository) failExpiredWaiting(ctx context.Context, tx pgx.Tx, now time.Time, maxDoclingLifetime time.Duration) (int, error) {
+	if maxDoclingLifetime <= 0 {
+		return 0, nil
+	}
+
+	const query = `UPDATE transformations_queue SET status = 'failed', finished_at = NOW(), error = 'docling job lifetime exceeded' WHERE status = 'waiting_docling' AND created_at < $1 RETURNING 1`
+
+	rows, err := tx.Query(ctx, query, now.Add(-maxDoclingLifetime))
+	if err != nil {
+		return 0, fmt.Errorf("expire waiting: %w", err)
+	}
+	defer rows.Close()
+
+	return countRows(rows)
+}
+
+func (r *PostgresQueueRepository) releaseWaiting(ctx context.Context, tx pgx.Tx, now time.Time) (int, error) {
+	const query = `UPDATE transformations_queue SET status = 'pending', started_at = NULL, next_poll_at = NULL, error = NULL WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= $1) RETURNING 1`
+
+	rows, err := tx.Query(ctx, query, now)
+	if err != nil {
+		return 0, fmt.Errorf("release waiting: %w", err)
+	}
+	defer rows.Close()
+
+	ready, err := countRows(rows)
+	if err != nil {
+		return 0, err
+	}
+
+	return ready, nil
+}
+
 func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error) {
 	const query = `
 WITH stalled AS (
@@ -209,7 +328,7 @@ failed AS (
 restored AS (
     UPDATE transformations_queue
     SET status = 'pending', started_at = NULL, error = 'restored after timeout',
-        docling_job_id = NULL, docling_poll_count = 0
+        docling_job_id = NULL, docling_poll_count = 0, next_poll_at = NULL
     WHERE id IN (SELECT id FROM stalled EXCEPT SELECT id FROM failed)
     RETURNING id
 )
@@ -251,6 +370,19 @@ func (r *PostgresQueueRepository) CleanupFinished(ctx context.Context, retention
 	return count, nil
 }
 
+func countRows(rows pgx.Rows) (int, error) {
+	count := 0
+	for rows.Next() {
+		count++
+	}
+
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
 func scanTask(row pgx.Row) (*TransformationTask, error) {
 	var task TransformationTask
 	if err := row.Scan(
@@ -259,6 +391,7 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&task.RetryCount,
 		&task.DoclingJobID,
 		&task.DoclingPollCount,
+		&task.NextPollAt,
 		&task.DocumentID,
 		&task.OriginalBucket,
 		&task.OriginalObjectKey,

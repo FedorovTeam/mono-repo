@@ -99,16 +99,19 @@ func main() {
 	}, logger)
 
 	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{
-		MarkdownBucket:       cfg.Minio.Bucket,
-		MaxWorkers:           cfg.Service.MaxWorkers,
-		PollInterval:         cfg.Service.PollInterval,
-		ProcessingTimeout:    cfg.Service.ProcessingTimeout,
-		MaxProcessingRetries: cfg.Service.MaxProcessingRetries,
-		CleanupInterval:      cfg.Service.CleanupInterval,
-		CleanupRetention:     cfg.Service.RetentionPeriod,
-		DoclingPollInterval:  cfg.Docling.StatusPollInterval,
-		DoclingPollTimeout:   cfg.Docling.StatusPollTimeout,
-		DoclingMaxAttempts:   cfg.Docling.StatusMaxAttempts,
+		MarkdownBucket:         cfg.Minio.Bucket,
+		MaxWorkers:             cfg.Service.MaxWorkers,
+		PollInterval:           cfg.Service.PollInterval,
+		ProcessingTimeout:      cfg.Service.ProcessingTimeout,
+		FastOperationTimeout:   cfg.Service.IOTimeout,
+		MaxProcessingRetries:   cfg.Service.MaxProcessingRetries,
+		CleanupInterval:        cfg.Service.CleanupInterval,
+		CleanupRetention:       cfg.Service.RetentionPeriod,
+		DoclingPollInterval:    cfg.Docling.StatusPollInterval,
+		DoclingPollTimeout:     cfg.Docling.StatusPollTimeout,
+		DoclingMaxAttempts:     cfg.Docling.StatusMaxAttempts,
+		DoclingRecheckInterval: cfg.Docling.StatusRecheckInterval,
+		DoclingMaxLifetime:     cfg.Docling.MaxJobLifetime,
 	})
 	workerProcessor.Run(ctx)
 
