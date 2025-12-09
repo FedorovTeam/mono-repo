@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -19,6 +20,7 @@ import (
 
 type repoMock struct {
 	doc         *model.Document
+	docs        []model.Document
 	err         error
 	savedStatus model.Status
 	workflowID  string
@@ -43,6 +45,19 @@ func (r *repoMock) GetDocument(ctx context.Context, id string) (*model.Document,
 	return r.doc, r.err
 }
 func (r *repoMock) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
+	if len(r.docs) > 0 {
+		if limit == 0 {
+			limit = len(r.docs)
+		}
+		if offset >= len(r.docs) {
+			return nil, nil
+		}
+		end := offset + limit
+		if end > len(r.docs) {
+			end = len(r.docs)
+		}
+		return r.docs[offset:end], nil
+	}
 	if r.doc == nil {
 		return nil, nil
 	}
@@ -210,6 +225,12 @@ func (workflowStarterSuccess) ExecuteWorkflow(ctx context.Context, options clien
 	return workflowRunMock{}, nil
 }
 
+type workflowStarterAlreadyStarted struct{}
+
+func (workflowStarterAlreadyStarted) ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error) {
+	return nil, serviceerror.NewWorkflowExecutionAlreadyStarted("already started", "", options.ID)
+}
+
 func TestConfirmUploadStartsWorkflow(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
 	svc := New(repo, &keyMock{}, workflowStarterSuccess{}, "queue", nil, "orig", "md", "owner", "repo", "main", "main")
@@ -218,6 +239,17 @@ func TestConfirmUploadStartsWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "doc-123", doc.WorkflowID)
 	require.Equal(t, "doc-123", repo.workflowID)
+}
+
+func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
+	doc := &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded}
+	repo := &repoMock{doc: doc}
+	svc := New(repo, &keyMock{}, workflowStarterAlreadyStarted{}, "queue", nil, "orig", "md", "owner", "repo", "main", "main")
+
+	returned, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
+	require.NoError(t, err)
+	require.Equal(t, doc, returned)
+	require.Empty(t, repo.savedStatus)
 }
 
 func TestUpdateStatusValidation(t *testing.T) {
