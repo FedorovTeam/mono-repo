@@ -3,9 +3,121 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// GRPCBackoffConfig описывает параметры экспоненциального бэкоффа.
+type GRPCBackoffConfig struct {
+	BaseDelay  time.Duration `yaml:"baseDelay"`
+	Multiplier float64       `yaml:"multiplier"`
+	Jitter     float64       `yaml:"jitter"`
+	MaxDelay   time.Duration `yaml:"maxDelay"`
+}
+
+// GRPCKeepaliveConfig описывает параметры keepalive для gRPC клиентов.
+type GRPCKeepaliveConfig struct {
+	Time                time.Duration `yaml:"time"`
+	Timeout             time.Duration `yaml:"timeout"`
+	PermitWithoutStream bool          `yaml:"permitWithoutStream"`
+}
+
+// GRPCClientConfig описывает параметры соединения gRPC клиента.
+type GRPCClientConfig struct {
+	Insecure          *bool               `yaml:"insecure"`
+	DialTimeout       time.Duration       `yaml:"dialTimeout"`
+	MinConnectTimeout time.Duration       `yaml:"minConnectTimeout"`
+	Keepalive         GRPCKeepaliveConfig `yaml:"keepalive"`
+	Backoff           GRPCBackoffConfig   `yaml:"backoff"`
+}
+
+// InsecureOrDefault возвращает true, если соединение должно устанавливаться без TLS.
+func (g GRPCClientConfig) InsecureOrDefault() bool {
+	if g.Insecure == nil {
+		return true
+	}
+
+	return *g.Insecure
+}
+
+// setDefaults подставляет значения по умолчанию при отсутствии явной настройки.
+func (g *GRPCClientConfig) setDefaults() {
+	if g.DialTimeout == 0 {
+		g.DialTimeout = 5 * time.Second
+	}
+
+	if g.MinConnectTimeout == 0 {
+		g.MinConnectTimeout = 3 * time.Second
+	}
+
+	if g.Keepalive.Time == 0 {
+		g.Keepalive.Time = 30 * time.Second
+	}
+
+	if g.Keepalive.Timeout == 0 {
+		g.Keepalive.Timeout = 10 * time.Second
+	}
+
+	if g.Backoff.BaseDelay == 0 {
+		g.Backoff.BaseDelay = time.Second
+	}
+
+	if g.Backoff.Multiplier == 0 {
+		g.Backoff.Multiplier = 1.6
+	}
+
+	if g.Backoff.Jitter == 0 {
+		g.Backoff.Jitter = 0.2
+	}
+
+	if g.Backoff.MaxDelay == 0 {
+		g.Backoff.MaxDelay = 30 * time.Second
+	}
+}
+
+// validate проверяет, что установлены корректные значения таймаутов.
+func (g GRPCClientConfig) validate(service string) error {
+	if g.DialTimeout <= 0 {
+		return fmt.Errorf("%s.grpc.dialTimeout must be positive", service)
+	}
+
+	if g.MinConnectTimeout <= 0 {
+		return fmt.Errorf("%s.grpc.minConnectTimeout must be positive", service)
+	}
+
+	if g.Keepalive.Time <= 0 {
+		return fmt.Errorf("%s.grpc.keepalive.time must be positive", service)
+	}
+
+	if g.Keepalive.Timeout <= 0 {
+		return fmt.Errorf("%s.grpc.keepalive.timeout must be positive", service)
+	}
+
+	if g.Backoff.BaseDelay <= 0 {
+		return fmt.Errorf("%s.grpc.backoff.baseDelay must be positive", service)
+	}
+
+	if g.Backoff.MaxDelay <= 0 {
+		return fmt.Errorf("%s.grpc.backoff.maxDelay must be positive", service)
+	}
+
+	if g.Backoff.Multiplier <= 0 {
+		return fmt.Errorf("%s.grpc.backoff.multiplier must be positive", service)
+	}
+
+	if g.Backoff.Jitter < 0 {
+		return fmt.Errorf("%s.grpc.backoff.jitter must be non-negative", service)
+	}
+
+	return nil
+}
+
+// GRPCServiceConfig описывает адрес и настройки подключения к gRPC сервису.
+type GRPCServiceConfig struct {
+	Address string           `yaml:"address"`
+	GRPC    GRPCClientConfig `yaml:"grpc"`
+}
 
 // ObservabilityConfig описывает параметры телеметрии.
 type ObservabilityConfig struct {
@@ -31,13 +143,9 @@ type Config struct {
 	Security struct {
 		APIKey string `yaml:"apiKey"`
 	} `yaml:"security"`
-	DocumentService struct {
-		Address string `yaml:"address"`
-	} `yaml:"documentService"`
-	StorageService struct {
-		Address string `yaml:"address"`
-	} `yaml:"storageService"`
-	Uploads struct {
+	DocumentService GRPCServiceConfig `yaml:"documentService"`
+	StorageService  GRPCServiceConfig `yaml:"storageService"`
+	Uploads         struct {
 		MaxSizeBytes       int64    `yaml:"maxSizeBytes"`
 		AllowedExtensions  []string `yaml:"allowedExtensions"`
 		SignedURLTTLSecond int64    `yaml:"signedUrlTtlSeconds"`
@@ -70,6 +178,16 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.StorageService.Address == "" {
 		return Config{}, fmt.Errorf("storageService.address is required")
+	}
+
+	cfg.DocumentService.GRPC.setDefaults()
+	if err := cfg.DocumentService.GRPC.validate("documentService"); err != nil {
+		return Config{}, err
+	}
+
+	cfg.StorageService.GRPC.setDefaults()
+	if err := cfg.StorageService.GRPC.validate("storageService"); err != nil {
+		return Config{}, err
 	}
 	if cfg.Uploads.MaxSizeBytes <= 0 {
 		return Config{}, fmt.Errorf("uploads.maxSizeBytes must be positive")

@@ -12,14 +12,13 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"backend-gateway-service/graph"
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/internal/clients/document"
 	"backend-gateway-service/internal/clients/storage"
 	"backend-gateway-service/internal/config"
+	"backend-gateway-service/internal/grpcdial"
 	"backend-gateway-service/internal/logging"
 	"backend-gateway-service/internal/middleware"
 	"backend-gateway-service/internal/observability"
@@ -47,14 +46,21 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to init telemetry: %w", err)
 	}
 
-	dialOpts := append(observability.GRPCDialOptions(providers), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	dialOpts := grpcdial.DefaultOptions(cfg.DocumentService.GRPC, providers)
 
-	docClient, err := document.NewGRPCClient(cfg.DocumentService.Address, dialOpts...)
+	docDialCtx, cancelDocDial := context.WithTimeout(context.Background(), cfg.DocumentService.GRPC.DialTimeout)
+	defer cancelDocDial()
+
+	docClient, err := document.NewGRPCClient(docDialCtx, cfg.DocumentService.Address, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init document client: %w", err)
 	}
 
-	storageClient, err := storage.NewGRPCClient(cfg.StorageService.Address, dialOpts...)
+	storageDialOpts := grpcdial.DefaultOptions(cfg.StorageService.GRPC, providers)
+	storageDialCtx, cancelStorageDial := context.WithTimeout(context.Background(), cfg.StorageService.GRPC.DialTimeout)
+	defer cancelStorageDial()
+
+	storageClient, err := storage.NewGRPCClient(storageDialCtx, cfg.StorageService.Address, storageDialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init storage client: %w", err)
 	}
