@@ -34,14 +34,15 @@ type Config struct {
 		GithubPublisherService string     `yaml:"github_publisher_service"`
 		GRPC                   GRPCClient `yaml:"grpc"`
 	} `yaml:"services"`
-	Github struct {
-		Owner      string `yaml:"owner"`
-		Repository string `yaml:"repository"`
-		Branch     string `yaml:"branch"`
-		BaseBranch string `yaml:"base_branch"`
-		BaseURL    string `yaml:"base_url"`
-	} `yaml:"github"`
-	Observability Observability `yaml:"observability"`
+Github struct {
+Owner      string `yaml:"owner"`
+Repository string `yaml:"repository"`
+Branch     string `yaml:"branch"`
+BaseBranch string `yaml:"base_branch"`
+BaseURL    string `yaml:"base_url"`
+} `yaml:"github"`
+Observability Observability `yaml:"observability"`
+Reconciler    Reconciler    `yaml:"reconciler"`
 }
 
 type GRPCClient struct {
@@ -65,15 +66,21 @@ type Keepalive struct {
 }
 
 type Observability struct {
-	Logs struct {
-		Enabled bool `yaml:"enabled"`
-	} `yaml:"logs"`
+Logs struct {
+Enabled bool `yaml:"enabled"`
+} `yaml:"logs"`
 	Traces struct {
 		Enabled bool `yaml:"enabled"`
 	} `yaml:"traces"`
-	Metrics struct {
-		Enabled bool `yaml:"enabled"`
-	} `yaml:"metrics"`
+Metrics struct {
+Enabled bool `yaml:"enabled"`
+} `yaml:"metrics"`
+}
+
+type Reconciler struct {
+Interval        time.Duration `yaml:"interval"`
+MinUploadedAge  time.Duration `yaml:"min_uploaded_age"`
+BatchSize       int           `yaml:"batch_size"`
 }
 
 func Load(path string) (*Config, error) {

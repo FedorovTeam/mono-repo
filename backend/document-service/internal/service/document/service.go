@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -235,6 +236,10 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 
 	run, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, WorkflowInput{DocumentID: doc.ID})
 	if err != nil {
+		var alreadyStarted *serviceerror.WorkflowExecutionAlreadyStarted
+		if errors.As(err, &alreadyStarted) {
+			return doc, nil
+		}
 		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, fmt.Sprintf("start workflow: %v", err), fmt.Sprintf("start workflow: %v", err), nil)
 		return nil, fmt.Errorf("start workflow: %w", err)
 	}

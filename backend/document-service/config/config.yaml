@@ -36,6 +36,10 @@ github:
   branch: "main"
   base_branch: "main"
   base_url: "https://api.github.com"
+reconciler:
+  interval: 1m
+  min_uploaded_age: 1m
+  batch_size: 100
 observability:
   logs:
     enabled: true

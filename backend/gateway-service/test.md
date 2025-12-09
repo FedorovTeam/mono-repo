@@ -71,3 +71,24 @@ curl -X POST "$HOST" \
 
 Все вызовы возвращают заголовок `X-Correlation-ID`, который прокидывается в gRPC и Temporal и попадает в OTLP трейсы.
 
+### Восстановление после пропущенного webhook MinIO
+Если объект уже лежит в bucket, но статус документа остаётся `Uploaded` (webhook не дошёл до gateway), есть два варианта восстановления:
+
+1. Повторно отправить webhook вручную — обработчик `/internal/storage/uploaded` идемпотентен и спокойно примет дубликат:
+   ```
+   curl -X POST "http://localhost:8080/internal/storage/uploaded" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "Records": [{
+         "s3": {
+           "bucket": {"name": "knowledge-original"},
+           "object": {
+             "key": "<objectKey из storage-service>",
+             "userMetadata": {"x-amz-meta-correlation-id": "manual-retry"}
+           }
+         }
+       }]
+     }'
+   ```
+2. Дождаться фонового reconciler в document-service: он периодически ищет документы в статусе `Uploaded` старше заданного порога и вызывает `ConfirmUpload`, если объект найден в MinIO.
+

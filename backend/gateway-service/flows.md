@@ -8,6 +8,7 @@
 5. Мутация отвечает GraphQL-пейлоадом с сущностью `document`, полями `uploadUrl` и `uploadMethod = PUT`.
 6. Клиент загружает файл по `uploadUrl` (HTTP PUT). После события `s3:ObjectCreated:*` MinIO отправляет webhook на `/internal/storage/uploaded`.
 7. Webhook-драйвер gateway читает уведомление, извлекает `documentId` из имени объекта и `correlation-id` из `x-amz-meta-correlation-id` (user metadata/response elements), затем подтверждает загрузку через gRPC `document-service.ConfirmUpload` с bucket/objectKey/`correlation-id`. Если ни одна запись не обработана, возвращается 400. Дальнейшее выполнение workflow инициируется на стороне document-service.
+8. Если MinIO не смог доставить webhook (например, короткий сетевой сбой), событие можно безопасно воспроизвести тем же телом: обработчик идемпотентен, а `document-service` запустит workflow повторно. Дополнительно в document-service работает периодический reconciler, который для статуса `Uploaded` проверяет наличие объекта в MinIO и сам вызывает `ConfirmUpload`, покрывая случаи, когда webhook был потерян.
 8. При необходимости клиент вызывает `retryProcessing(documentId)` — gateway проксирует вызов в `document-service.RetryProcessing` c текущим `correlation-id`.
 
 ## Получение статуса
