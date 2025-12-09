@@ -7,9 +7,9 @@ events:
   webhook_arn: "arn:minio:sqs::1:gateway-webhook"
 
 observability:
-  enable_metrics: true
+  enable_metrics: false
   enable_traces: false
-  enable_logs: false
+  enable_logs: true
 
 minio:
   endpoint: "api.minio.tech.fedorov-team.tech"
