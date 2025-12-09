@@ -14,6 +14,8 @@ type pollingRepoStub struct {
 	updateInfoCalls  int
 	markDoneCalls    int
 	markWaitingCalls int
+	restored         int
+	restoreCalls     int
 }
 
 func (p *pollingRepoStub) Enqueue(context.Context, repository.EnqueueParams) (uuid.UUID, error) {
@@ -38,6 +40,10 @@ func (p *pollingRepoStub) MarkDoclingWaiting(context.Context, uuid.UUID, string,
 }
 func (p *pollingRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
 	return 0, 0, nil
+}
+func (p *pollingRepoStub) RestoreProcessing(context.Context) (int, error) {
+	p.restoreCalls++
+	return p.restored, nil
 }
 func (p *pollingRepoStub) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
 	return 0, 0, nil
@@ -106,5 +112,20 @@ func TestHandleTaskPollsWithoutRedownloading(t *testing.T) {
 
 	if conv.submitCalled {
 		t.Fatal("submit should not be called when job id is already set")
+	}
+}
+
+func TestRunRestoresProcessingTasksOnStartup(t *testing.T) {
+	repo := &pollingRepoStub{restored: 2}
+	storage := &trackingStorage{}
+	conv := &statusOnlyConverter{}
+	processor := NewProcessor(repo, conv, storage, nil, Config{PollInterval: time.Millisecond})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	processor.Run(ctx)
+	cancel()
+
+	if repo.restoreCalls != 1 {
+		t.Fatalf("expected restore to be called once, got %d", repo.restoreCalls)
 	}
 }

@@ -85,6 +85,14 @@ func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
 	return s.pending, s.processing, 0, nil
 }
 
+func (s *stubQueueRepo) RestoreProcessing(context.Context) (int, error) {
+	s.restoreCalls++
+	if s.restoreErr != nil {
+		return 0, s.restoreErr
+	}
+	return s.restored, nil
+}
+
 func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
 	s.restoreCalls++
 	if s.restoreErr != nil {

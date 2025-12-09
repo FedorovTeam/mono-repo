@@ -62,6 +62,7 @@ func (*fakeQueueRepo) MarkDoclingWaiting(context.Context, uuid.UUID, string, int
 func (*fakeQueueRepo) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
 	return 0, 0, nil
 }
+func (*fakeQueueRepo) RestoreProcessing(context.Context) (int, error) { return 0, nil }
 func (*fakeQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
 	return 0, 0, nil
 }
