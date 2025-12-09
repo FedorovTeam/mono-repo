@@ -73,7 +73,6 @@ type publishInput struct {
 	DocumentID        string
 	DocumentName      string
 	Owner             string
-	MarkdownContent   []byte
 	Version           int32
 	MarkdownBucket    string
 	MarkdownObjectKey string
@@ -82,6 +81,7 @@ type publishInput struct {
 	BaseBranch        string
 	Path              string
 	CreatePR          bool
+	CorrelationID     string
 }
 
 type convertResult struct {
@@ -157,7 +157,6 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		DocumentID:        snapshot.DocumentID,
 		DocumentName:      snapshot.DocumentName,
 		Owner:             snapshot.Owner,
-		MarkdownContent:   convRes.MarkdownContent,
 		MarkdownBucket:    snapshot.MarkdownBucket,
 		MarkdownObjectKey: markdownKey,
 		Version:           convArg.Version + 1,
@@ -166,6 +165,7 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		BaseBranch:        snapshot.BaseBranch,
 		Path:              snapshot.PublishPath,
 		CreatePR:          snapshot.CreatePR,
+		CorrelationID:     workflow.GetInfo(ctx).WorkflowExecution.ID,
 	}
 
 	if err := workflow.ExecuteActivity(ctx, ActivityPublishMarkdownName, pubArg).Get(ctx, nil); err != nil {
@@ -176,7 +176,7 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 }
 
 func (a *Activities) AwaitOriginal(ctx context.Context, documentID string) (documentSnapshot, error) {
-	ctx = a.withCorrelationID(ctx)
+	ctx = a.withCorrelationID(ctx, "")
 	if a.storage == nil {
 		return documentSnapshot{}, fmt.Errorf("storage client is not configured")
 	}
@@ -234,7 +234,7 @@ func (a *Activities) AwaitOriginal(ctx context.Context, documentID string) (docu
 }
 
 func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInput) error {
-	ctx = a.withCorrelationID(ctx)
+	ctx = a.withCorrelationID(ctx, "")
 	if a.storage == nil {
 		return fmt.Errorf("storage client is not configured")
 	}
@@ -252,7 +252,7 @@ func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInp
 }
 
 func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) (convertResult, error) {
-	ctx = a.withCorrelationID(ctx)
+	ctx = a.withCorrelationID(ctx, "")
 	if a.transformer == nil {
 		return convertResult{}, fmt.Errorf("transformer client is not configured")
 	}
@@ -275,7 +275,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 }
 
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {
-	ctx = a.withCorrelationID(ctx)
+	ctx = a.withCorrelationID(ctx, input.CorrelationID)
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
@@ -300,9 +300,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	}
 	path := input.Path
 
-	correlationID := ""
-	if info, ok := activityInfo(ctx); ok {
-		correlationID = info.WorkflowExecution.ID
+	correlationID := input.CorrelationID
+	if correlationID == "" {
+		if info, ok := activityInfo(ctx); ok {
+			correlationID = info.WorkflowExecution.ID
+		}
 	}
 
 	commitMessage := input.DocumentName
@@ -315,6 +317,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		return err
 	}
 
+	if input.MarkdownBucket == "" || input.MarkdownObjectKey == "" {
+		_ = a.fail(ctx, input.DocumentID, "markdown content is empty and no bucket/object_key provided")
+		return fmt.Errorf("markdown content is empty and no bucket/object_key provided")
+	}
+
 	req := &githubpublisherv1.PublishMarkdownRequest{
 		Owner:         owner,
 		Repository:    repository,
@@ -324,21 +331,18 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		CommitMessage: commitMessage,
 		CreatePr:      input.CreatePR,
 		CorrelationId: correlationID,
+		Bucket:        input.MarkdownBucket,
+		ObjectKey:     input.MarkdownObjectKey,
 	}
 
-	if len(input.MarkdownContent) > 0 {
-		req.Content = string(input.MarkdownContent)
-	} else {
-		req.Bucket = input.MarkdownBucket
-		req.ObjectKey = input.MarkdownObjectKey
-		if req.Bucket == "" || req.ObjectKey == "" {
-			return fmt.Errorf("markdown content is empty and no bucket/object_key provided")
-		}
-	}
-	_, err := a.publisher.PublishMarkdown(ctx, req)
+	resp, err := a.publisher.PublishMarkdown(ctx, req)
 	if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("publish: %v", err))
 		return err
+	}
+	if resp == nil || resp.CommitSha == "" {
+		_ = a.fail(ctx, input.DocumentID, "publish: empty response")
+		return fmt.Errorf("publish returned empty response")
 	}
 	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, "", "", &model.DocumentVersion{Version: input.Version})
 	return err
@@ -349,8 +353,11 @@ func (a *Activities) fail(ctx context.Context, documentID, reason string) error 
 	return err
 }
 
-func (a *Activities) withCorrelationID(ctx context.Context) context.Context {
-	id := correlationIDFromContext(ctx)
+func (a *Activities) withCorrelationID(ctx context.Context, explicit string) context.Context {
+	id := explicit
+	if id == "" {
+		id = correlationIDFromContext(ctx)
+	}
 	if id == "" {
 		if info, ok := activityInfo(ctx); ok {
 			id = info.WorkflowExecution.ID
