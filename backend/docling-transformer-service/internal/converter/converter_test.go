@@ -35,7 +35,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 				t.Fatal("submit correlation id is empty")
 			}
 
-			fileHeader := r.MultipartForm.File["file"][0]
+			fileHeader := r.MultipartForm.File["files"][0]
 			receivedFilename = fileHeader.Filename
 
 			file, err := fileHeader.Open()

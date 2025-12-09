@@ -337,7 +337,7 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 	writer := multipart.NewWriter(payload)
 
 	partHeaders := textproto.MIMEHeader{}
-	partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
+	partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="files"; filename="%s"`, filename))
 	partHeaders.Set("Content-Type", contentType)
 
 	part, err := writer.CreatePart(partHeaders)
