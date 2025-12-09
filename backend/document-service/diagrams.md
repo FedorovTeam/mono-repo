@@ -37,3 +37,13 @@ classDiagram
     Document --> DocumentVersion
     Document --> DocumentStatusLog
 ```
+
+```mermaid
+flowchart LR
+    DS[Document Service] -- optional traces/metrics/logs --> OTLP[(OTLP Collector)]
+    OTLP --> APM[(Tracing backend)]
+    OTLP --> Metrics[(Prometheus/Grafana)]
+    OTLP -. disabled via config .- DS
+```
+
+Трафик в OTLP Collector включается флагами `observability.traces.enabled` и `observability.metrics.enabled`; при выключенных значениях провайдеры остаются в no-op состоянии.

@@ -39,6 +39,8 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 
 	correlationID := s.pickCorrelationID(ctx, req.GetCorrelationId())
 
+	log.Printf("correlation_id=%s publish request path=%s owner=%s repo=%s create_pr=%t", correlationID, req.GetPath(), req.GetOwner(), req.GetRepository(), req.GetCreatePr())
+
 	owner := req.GetOwner()
 	if owner == "" {
 		owner = s.cfg.GitHub.Owner
@@ -64,6 +66,7 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 			log.Printf("correlation_id=%s load markdown error: %v", correlationID, err)
 			return nil, status.Errorf(codes.FailedPrecondition, "load markdown: %v", err)
 		}
+		log.Printf("correlation_id=%s loaded markdown bucket=%s key=%s", correlationID, bucket, key)
 		content = string(data)
 	}
 
@@ -99,11 +102,14 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		}
 	}
 
-	return &githubpublisherv1.PublishMarkdownResponse{
+	resp := &githubpublisherv1.PublishMarkdownResponse{
 		CommitSha:         commitSHA,
 		PullRequestNumber: prNumber,
 		PullRequestUrl:    prURL,
-	}, nil
+	}
+	log.Printf("correlation_id=%s published commit=%s pr=%d", correlationID, commitSHA, prNumber)
+
+	return resp, nil
 }
 
 func (s *PublisherServer) pickCorrelationID(ctx context.Context, explicit string) string {

@@ -265,7 +265,7 @@ func (f *fakePublisherServer) PublishMarkdown(ctx context.Context, req *githubpu
 	if req.GetContent() == "" && (req.GetBucket() == "" || req.GetObjectKey() == "") {
 		return nil, fmt.Errorf("empty content")
 	}
-	return &githubpublisherv1.PublishMarkdownResponse{}, nil
+	return &githubpublisherv1.PublishMarkdownResponse{CommitSha: "commit-sha", PullRequestNumber: 42, PullRequestUrl: "https://example.com/pr/42"}, nil
 }
 
 type memoryRepo struct {

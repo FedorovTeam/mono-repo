@@ -18,7 +18,8 @@
    - Workflow включает активности:
      - `AwaitOriginal` — опрашивает storage-service (`GetObject`) до готовности исходника, после чего выставляет статус `StoredOriginal` в PostgreSQL.
      - `ConvertToMarkdown` — вызывает docling-transformer-service и записывает `ConvertedToMarkdown` с ключом Markdown.
-     - `PublishMarkdown` — вызывает github-publisher-service, прокидывая `correlation-id = workflow_id`, commit message из имени документа и флаг `create_pr`, после успешной публикации переводит статус в `PublishedToGitHub`.
+     - `PublishMarkdown` — вызывает github-publisher-service по gRPC, передавая `bucket/object_key` Markdown из MinIO и `correlation-id = workflow_id`; commit message берётся из имени документа, флаг `create_pr` прокидывается как есть.
+   - Ответ github-publisher-service с `commit_sha`/`pull_request_*` переводит статус в `PublishedToGitHub`, отсутствие валидного ответа или ошибка меняют статус на `Failed` c заполненным `error_reason`.
    - При ошибке любая активность пишет статус `Failed` и причину в `documents.error_reason`, Temporal применяет retry-политику для временных сбоев.
    - Повторная загрузка исходника с тем же `document_id` (повторный `ConfirmUpload`) перезапускает workflow и даёт новый цикл статусов.
 

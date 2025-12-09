@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mono-repo/docling-transformer-service/internal/config"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/storage"
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -102,8 +104,8 @@ func buildMarkdownKey(originalKey string) string {
 }
 
 // Run запускает gRPC сервер на указанном порте.
-func Run(ctx context.Context, logger *zap.Logger, conv converter.Converter, storage storage.ObjectStorage, markdownBucket string, port int) error {
-	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
+func Run(ctx context.Context, logger *zap.Logger, conv converter.Converter, storage storage.ObjectStorage, markdownBucket string, port int, obsCfg config.ObservabilityConfig) error {
+	srv := newGRPCServer(logger, obsCfg)
 	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, storage, markdownBucket, logger))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -142,5 +144,39 @@ func LoggingInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 
 		logger.Info("gRPC request completed", zap.String("method", info.FullMethod), zap.String("correlation_id", correlationID))
 		return resp, nil
+	}
+}
+
+func newGRPCServer(logger *zap.Logger, obsCfg config.ObservabilityConfig) *grpc.Server {
+	interceptors := make([]grpc.UnaryServerInterceptor, 0, 1)
+	opts := make([]grpc.ServerOption, 0, 2)
+
+	if obsCfg.TracingEnabled || obsCfg.MetricsEnabled {
+		otelOptions := telemetry.BuildOtelOptions(obsCfg)
+		opts = append(opts, grpc.StatsHandler(otelgrpc.NewServerHandler(otelOptions...)))
+	}
+
+	if obsCfg.LoggingEnabled {
+		interceptors = append(interceptors, LoggingInterceptor(logger))
+	}
+
+	if len(interceptors) > 0 {
+		opts = append(opts, grpc.UnaryInterceptor(chainUnaryInterceptors(interceptors...)))
+	}
+
+	return grpc.NewServer(opts...)
+}
+
+func chainUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		h := handler
+		for i := len(interceptors) - 1; i >= 0; i-- {
+			next := h
+			interceptor := interceptors[i]
+			h = func(currentCtx context.Context, currentReq interface{}) (interface{}, error) {
+				return interceptor(currentCtx, currentReq, info, next)
+			}
+		}
+		return h(ctx, req)
 	}
 }

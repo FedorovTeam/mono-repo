@@ -3,6 +3,10 @@
 ## Автоматические тесты
 - `go test ./...`
 
+## Наблюдаемость
+- По умолчанию экспорт метрик и трейсинга выключен, а логи пишутся в stdout. Чтобы проверить интеграцию с OTLP Collector, в `config/config.yaml` установите `observability.traces.enabled` и/или `observability.metrics.enabled` в `true` и задайте переменную `OTEL_EXPORTER_OTLP_ENDPOINT` (например, `otel-collector:4317`).
+- Если хотите отключить любые записи в stdout (например, при нагрузочных тестах), установите `observability.logs.enabled: false` — логгер перейдёт в no-op режим, но фатальные ошибки по-прежнему завершают процесс.
+
 ## Ручные проверки через grpcurl
 1. Создать документ:
    ```bash

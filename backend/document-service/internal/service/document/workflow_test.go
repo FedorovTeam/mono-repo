@@ -86,7 +86,7 @@ func (f *fakeStorageClient) GenerateUploadURL(ctx context.Context, in *storagev1
 type fakePublisher struct{}
 
 func (fakePublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
-	return nil, nil
+	return &githubpublisherv1.PublishMarkdownResponse{CommitSha: "abc"}, nil
 }
 
 type trackingPublisher struct {
@@ -95,7 +95,7 @@ type trackingPublisher struct {
 
 func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
 	p.called = true
-	return &githubpublisherv1.PublishMarkdownResponse{}, nil
+	return &githubpublisherv1.PublishMarkdownResponse{CommitSha: "abc"}, nil
 }
 
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {

@@ -24,3 +24,10 @@ github:
   branch: "main"
   base_branch: "main"
   base_url: "https://api.github.com"
+observability:
+  logs:
+    enabled: true
+  traces:
+    enabled: false
+  metrics:
+    enabled: false
