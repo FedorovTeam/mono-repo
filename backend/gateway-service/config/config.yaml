@@ -14,7 +14,7 @@ uploads:
     - pdf
   signedUrlTtlSeconds: 900
 observability:
-  enabled: true
+  enabled: false
   otlpEndpoint: "localhost:4317"
   serviceName: "backend-gateway-service"
 logging:
