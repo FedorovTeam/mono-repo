@@ -5,6 +5,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/mono-repo/docling-transformer-service/internal/config"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
@@ -66,7 +67,7 @@ func TestConvertDocxToMarkdown(t *testing.T) {
 	logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
+	srv := newGRPCServer(logger, config.ObservabilityConfig{LoggingEnabled: true})
 	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, storage, "markdown-bucket", logger))
 
 	go func() {
@@ -123,7 +124,7 @@ func TestConvertDocxToMarkdownValidation(t *testing.T) {
 	logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(grpc.UnaryInterceptor(LoggingInterceptor(logger)))
+	srv := newGRPCServer(logger, config.ObservabilityConfig{LoggingEnabled: true})
 	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, storage, "md", logger))
 
 	go func() {
