@@ -23,6 +23,7 @@ const (
 type TransformationTask struct {
 	ID                uuid.UUID
 	Status            TransformationStatus
+	RetryCount        int
 	DocumentID        string
 	OriginalBucket    string
 	OriginalObjectKey string
@@ -33,6 +34,7 @@ type TransformationTask struct {
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
 	Error             *string
+	CorrelationID     string
 }
 
 type EnqueueParams struct {
@@ -42,6 +44,7 @@ type EnqueueParams struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
+	CorrelationID     string
 }
 
 type QueueRepository interface {
@@ -50,6 +53,9 @@ type QueueRepository interface {
 	AcquireNext(ctx context.Context) (*TransformationTask, error)
 	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
+	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries int) (restored, failed int, err error)
+	CleanupFinished(ctx context.Context, retention time.Duration) (int, error)
+	CountByStatus(ctx context.Context) (pending, processing int, err error)
 }
 
 type PostgresQueueRepository struct {
@@ -66,11 +72,11 @@ func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueuePar
 
 	query := `
 INSERT INTO transformations_queue (
-    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, correlation_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
 `
 
-	_, err := r.pool.Exec(ctx, query, id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey, params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt)
+	_, err := r.pool.Exec(ctx, query, id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey, params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt, params.CorrelationID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("enqueue transformation: %w", err)
 	}
@@ -89,6 +95,37 @@ func (r *PostgresQueueRepository) CountActive(ctx context.Context) (int, error) 
 	return count, nil
 }
 
+func (r *PostgresQueueRepository) CountByStatus(ctx context.Context) (pending, processing int, err error) {
+	const query = `SELECT status, COUNT(*) FROM transformations_queue WHERE status IN ('pending', 'processing') GROUP BY status`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count by status: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status TransformationStatus
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return 0, 0, fmt.Errorf("scan status count: %w", err)
+		}
+
+		switch status {
+		case StatusPending:
+			pending = count
+		case StatusProcessing:
+			processing = count
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return 0, 0, fmt.Errorf("iterate status count: %w", err)
+	}
+
+	return pending, processing, nil
+}
+
 func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*TransformationTask, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -97,7 +134,7 @@ func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*Transformat
 	defer tx.Rollback(ctx)
 
 	const selectQuery = `
-SELECT id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error
+SELECT id, status, retry_count, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'pending'
 ORDER BY created_at
@@ -115,8 +152,8 @@ FOR UPDATE SKIP LOCKED`
 		return nil, err
 	}
 
-	const updateQuery = `UPDATE transformations_queue SET status = 'processing', started_at = NOW() WHERE id = $1 RETURNING started_at`
-	if err := tx.QueryRow(ctx, updateQuery, task.ID).Scan(&task.StartedAt); err != nil {
+	const updateQuery = `UPDATE transformations_queue SET status = 'processing', started_at = NOW(), retry_count = retry_count + 1 WHERE id = $1 RETURNING started_at, retry_count`
+	if err := tx.QueryRow(ctx, updateQuery, task.ID).Scan(&task.StartedAt, &task.RetryCount); err != nil {
 		return nil, fmt.Errorf("mark processing: %w", err)
 	}
 	task.Status = StatusProcessing
@@ -148,11 +185,64 @@ func (r *PostgresQueueRepository) MarkFailed(ctx context.Context, id uuid.UUID, 
 	return nil
 }
 
+func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries int) (restored, failed int, err error) {
+	const query = `
+WITH stalled AS (
+    SELECT id, retry_count FROM transformations_queue
+    WHERE status = 'processing' AND started_at < NOW() - $1::interval
+),
+restored AS (
+    UPDATE transformations_queue
+    SET status = 'pending', started_at = NULL, error = 'restored after timeout'
+    WHERE id IN (SELECT id FROM stalled WHERE retry_count < $2)
+    RETURNING id
+),
+failed AS (
+    UPDATE transformations_queue
+    SET status = 'failed', finished_at = NOW(), error = 'processing timeout exceeded'
+    WHERE id IN (SELECT id FROM stalled WHERE retry_count >= $2)
+    RETURNING id
+)
+SELECT (SELECT COUNT(*) FROM restored), (SELECT COUNT(*) FROM failed);`
+
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+
+	if err := r.pool.QueryRow(ctx, query, timeout, maxRetries).Scan(&restored, &failed); err != nil {
+		return 0, 0, fmt.Errorf("restore stuck tasks: %w", err)
+	}
+
+	return restored, failed, nil
+}
+
+func (r *PostgresQueueRepository) CleanupFinished(ctx context.Context, retention time.Duration) (int, error) {
+	const query = `DELETE FROM transformations_queue WHERE status IN ('done', 'failed') AND finished_at < NOW() - $1::interval RETURNING 1`
+
+	rows, err := r.pool.Query(ctx, query, retention)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup finished: %w", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate cleanup results: %w", err)
+	}
+
+	return count, nil
+}
+
 func scanTask(row pgx.Row) (*TransformationTask, error) {
 	var task TransformationTask
 	if err := row.Scan(
 		&task.ID,
 		&task.Status,
+		&task.RetryCount,
 		&task.DocumentID,
 		&task.OriginalBucket,
 		&task.OriginalObjectKey,
@@ -163,6 +253,7 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&task.StartedAt,
 		&task.FinishedAt,
 		&task.Error,
+		&task.CorrelationID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, pgx.ErrNoRows

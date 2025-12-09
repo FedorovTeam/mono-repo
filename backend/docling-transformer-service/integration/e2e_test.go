@@ -22,10 +22,19 @@ type stubQueueRepo struct {
 	enqueueErr    error
 	countErr      error
 
-	acquireTasks []*repository.TransformationTask
-	markDoneIDs  []uuid.UUID
-	markFailedID []uuid.UUID
-	markMutex    sync.Mutex
+	acquireTasks   []*repository.TransformationTask
+	markDoneIDs    []uuid.UUID
+	markFailedID   []uuid.UUID
+	markMutex      sync.Mutex
+	pending        int
+	processing     int
+	restored       int
+	rejected       int
+	cleanupRemoved int
+	restoreErr     error
+	cleanupErr     error
+	restoreCalls   int
+	cleanupCalls   int
 }
 
 func (s *stubQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
@@ -65,6 +74,29 @@ func (s *stubQueueRepo) MarkFailed(_ context.Context, id uuid.UUID, _ string) er
 	defer s.markMutex.Unlock()
 	s.markFailedID = append(s.markFailedID, id)
 	return nil
+}
+
+func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, error) {
+	if s.countErr != nil {
+		return 0, 0, s.countErr
+	}
+	return s.pending, s.processing, nil
+}
+
+func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int) (int, int, error) {
+	s.restoreCalls++
+	if s.restoreErr != nil {
+		return 0, 0, s.restoreErr
+	}
+	return s.restored, s.rejected, nil
+}
+
+func (s *stubQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) {
+	s.cleanupCalls++
+	if s.cleanupErr != nil {
+		return 0, s.cleanupErr
+	}
+	return s.cleanupRemoved, nil
 }
 
 type stubStorage struct {
@@ -172,6 +204,40 @@ func TestWorkerProcessesTask(t *testing.T) {
 	if string(storage.uploaded) != "converted" {
 		t.Fatalf("expected markdown to be uploaded")
 	}
+}
+
+func TestWorkerRestoresStuckTasks(t *testing.T) {
+	repo := &stubQueueRepo{
+		pending:        3,
+		processing:     2,
+		restored:       2,
+		rejected:       1,
+		cleanupRemoved: 4,
+	}
+
+	storage := &stubStorage{downloadContent: []byte("source")}
+	conv := &stubConverter{result: converter.DoclingConvertResult{Content: []byte("converted")}}
+
+	processor := worker.NewProcessor(repo, conv, storage, zap.NewNop(), worker.Config{
+		MaxWorkers:           1,
+		PollInterval:         5 * time.Millisecond,
+		ProcessingTimeout:    5 * time.Millisecond,
+		MaxProcessingRetries: 1,
+		CleanupInterval:      10 * time.Millisecond,
+		CleanupRetention:     10 * time.Millisecond,
+		MarkdownBucket:       "md",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	processor.Run(ctx)
+
+	assertWithin(t, time.Second, func() bool {
+		repo.markMutex.Lock()
+		defer repo.markMutex.Unlock()
+		return repo.restoreCalls > 0 && repo.cleanupCalls > 0
+	})
 }
 
 func assertWithin(t *testing.T, timeout time.Duration, condition func() bool) {

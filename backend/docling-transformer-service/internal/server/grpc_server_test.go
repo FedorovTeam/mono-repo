@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/config"
@@ -51,6 +52,11 @@ func (*fakeQueueRepo) AcquireNext(context.Context) (*repository.TransformationTa
 }
 func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
 func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
+func (*fakeQueueRepo) CountByStatus(context.Context) (int, int, error)           { return 0, 0, nil }
+func (*fakeQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int) (int, int, error) {
+	return 0, 0, nil
+}
+func (*fakeQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) { return 0, nil }
 
 func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 	repo := &fakeQueueRepo{queueID: uuid.New()}
@@ -101,6 +107,9 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 	}
 	if enqueued.MarkdownObjectKey != "md/file.md" {
 		t.Fatalf("markdown key mismatch: %s", enqueued.MarkdownObjectKey)
+	}
+	if enqueued.CorrelationID != "corr-123" {
+		t.Fatalf("correlation id not propagated: %s", enqueued.CorrelationID)
 	}
 }
 

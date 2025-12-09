@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,9 +20,14 @@ type Config struct {
 
 // ServiceConfig описывает базовые настройки сервиса.
 type ServiceConfig struct {
-	Name       string `yaml:"name"`
-	GRPCPort   int    `yaml:"grpc_port"`
-	MaxWorkers int    `yaml:"max_workers"`
+	Name                 string        `yaml:"name"`
+	GRPCPort             int           `yaml:"grpc_port"`
+	MaxWorkers           int           `yaml:"max_workers"`
+	PollInterval         time.Duration `yaml:"poll_interval"`
+	ProcessingTimeout    time.Duration `yaml:"processing_timeout"`
+	MaxProcessingRetries int           `yaml:"max_processing_retries"`
+	CleanupInterval      time.Duration `yaml:"cleanup_interval"`
+	RetentionPeriod      time.Duration `yaml:"retention_period"`
 }
 
 // DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.

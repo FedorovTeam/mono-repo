@@ -66,8 +66,13 @@ func main() {
 	conv := converter.NewDoclingConverter(cfg.Docling.Endpoint, cfg.Docling.APIKey, logger)
 
 	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{
-		MarkdownBucket: cfg.Minio.Bucket,
-		MaxWorkers:     cfg.Service.MaxWorkers,
+		MarkdownBucket:       cfg.Minio.Bucket,
+		MaxWorkers:           cfg.Service.MaxWorkers,
+		PollInterval:         cfg.Service.PollInterval,
+		ProcessingTimeout:    cfg.Service.ProcessingTimeout,
+		MaxProcessingRetries: cfg.Service.MaxProcessingRetries,
+		CleanupInterval:      cfg.Service.CleanupInterval,
+		CleanupRetention:     cfg.Service.RetentionPeriod,
 	})
 	workerProcessor.Run(ctx)
 
