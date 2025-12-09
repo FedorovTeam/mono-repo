@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"backend-document-service/internal/config"
+	"backend-document-service/internal/grpcdial"
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
@@ -165,6 +167,24 @@ func startTemporalite(ctx context.Context) (testcontainers.Container, error) {
 	})
 }
 
+func testGRPCConfig() config.GRPCClient {
+	return config.GRPCClient{
+		DialTimeout:       time.Second,
+		MinConnectTimeout: 500 * time.Millisecond,
+		Backoff: config.Backoff{
+			BaseDelay:  100 * time.Millisecond,
+			Multiplier: 1.6,
+			Jitter:     0.2,
+			MaxDelay:   time.Second,
+		},
+		Keepalive: config.Keepalive{
+			Time:                10 * time.Second,
+			Timeout:             3 * time.Second,
+			PermitWithoutStream: true,
+		},
+	}
+}
+
 func startBufConnServer(t *testing.T, register func(*grpc.Server)) *grpc.ClientConn {
 	t.Helper()
 	lis := bufconn.Listen(1024 * 1024)
@@ -173,9 +193,15 @@ func startBufConnServer(t *testing.T, register func(*grpc.Server)) *grpc.ClientC
 	go func() {
 		_ = server.Serve(lis)
 	}()
-	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-		return lis.Dial()
-	}), grpc.WithInsecure())
+	conn, err := grpcdial.DialContext(
+		context.Background(),
+		"bufnet",
+		testGRPCConfig(),
+		grpcdial.WithDialOptions(grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis.Dial()
+		})),
+		grpcdial.WithoutBlock(),
+	)
 	if err != nil {
 		t.Fatalf("dial bufconn: %v", err)
 	}
