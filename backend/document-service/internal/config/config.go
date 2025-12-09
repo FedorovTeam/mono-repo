@@ -39,6 +39,19 @@ type Config struct {
 		BaseBranch string `yaml:"base_branch"`
 		BaseURL    string `yaml:"base_url"`
 	} `yaml:"github"`
+	Observability Observability `yaml:"observability"`
+}
+
+type Observability struct {
+	Logs struct {
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"logs"`
+	Traces struct {
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"traces"`
+	Metrics struct {
+		Enabled bool `yaml:"enabled"`
+	} `yaml:"metrics"`
 }
 
 func Load(path string) (*Config, error) {
