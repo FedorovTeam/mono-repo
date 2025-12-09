@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
@@ -155,6 +156,128 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	}
 }
 
+func TestDocumentWorkflowRetrySkipsCompletedSteps(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	if _, err := os.Stat("/var/run/docker.sock"); err != nil {
+		t.Skip("docker socket is unavailable, skipping temporalite-based e2e test")
+	}
+
+	temporal, err := startTemporalite(ctx)
+	if err != nil {
+		t.Fatalf("start temporalite: %v", err)
+	}
+	defer func() {
+		_ = temporal.Terminate(context.Background())
+	}()
+
+	host, err := temporal.Host(ctx)
+	if err != nil {
+		t.Fatalf("get host: %v", err)
+	}
+	port, err := temporal.MappedPort(ctx, "7233")
+	if err != nil {
+		t.Fatalf("get port: %v", err)
+	}
+
+	clientOpts := client.Options{HostPort: fmt.Sprintf("%s:%s", host, port.Port()), Namespace: "knowledge-base"}
+	temporalClient, err := client.Dial(clientOpts)
+	if err != nil {
+		t.Fatalf("dial temporal: %v", err)
+	}
+	defer temporalClient.Close()
+
+	storageRecorder := &metadataRecorder{}
+	storageConn := startBufConnServer(t, func(s *grpc.Server) {
+		storagev1.RegisterStorageServiceServer(s, &fakeStorageServer{recorder: storageRecorder})
+	})
+	defer storageConn.Close()
+
+	transformerRecorder := &metadataRecorder{}
+	transformerConn := startBufConnServer(t, func(s *grpc.Server) {
+		transformerv1.RegisterTransformerServiceServer(s, &fakeTransformerServer{recorder: transformerRecorder})
+	})
+	defer transformerConn.Close()
+
+	publisherRecorder := &metadataRecorder{}
+	publisherServer := &fakePublisherServer{recorder: publisherRecorder, failuresLeft: 1}
+	publisherConn := startBufConnServer(t, func(s *grpc.Server) {
+		githubpublisherv1.RegisterGithubPublisherServiceServer(s, publisherServer)
+	})
+	defer publisherConn.Close()
+
+	githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer githubServer.Close()
+
+	docID := uuid.NewString()
+	repo := &memoryRepo{doc: &model.Document{
+		ID:                docID,
+		Name:              "Document title",
+		Owner:             "custom-owner",
+		Repository:        "custom-repo",
+		Branch:            "custom-branch",
+		BaseBranch:        "main",
+		Path:              "docs/key.md",
+		WorkflowID:        docID,
+		Status:            model.StatusUploaded,
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "orig/key.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "md/key.md",
+		Versions:          []model.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/key.docx", MarkdownObjectKey: "md/key.md"}},
+		CreatePR:          true,
+	}, logs: []model.Status{model.StatusUploaded}}
+
+	activities := NewActivities(repo, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main", githubServer.URL)
+	activities.httpClient = githubServer.Client()
+	workerInstance := worker.New(temporalClient, "document-processing", worker.Options{})
+	workerInstance.RegisterWorkflow(DocumentProcessingWorkflow)
+	workerInstance.RegisterActivityWithOptions(activities.AwaitOriginal, activity.RegisterOptions{Name: ActivityAwaitOriginalName})
+	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: ActivityUploadOriginalName})
+	workerInstance.RegisterActivityWithOptions(activities.ConvertToMarkdown, activity.RegisterOptions{Name: ActivityConvertToMarkdownName})
+	workerInstance.RegisterActivityWithOptions(activities.PublishMarkdown, activity.RegisterOptions{Name: ActivityPublishMarkdownName})
+
+	go func() {
+		_ = workerInstance.Run(worker.InterruptCh())
+	}()
+	defer workerInstance.Stop()
+
+	input := WorkflowInput{DocumentID: docID}
+	options := client.StartWorkflowOptions{ID: docID, TaskQueue: "document-processing"}
+
+	run, err := temporalClient.ExecuteWorkflow(ctx, options, DocumentProcessingWorkflow, input)
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	if err := run.Get(ctx, nil); err == nil {
+		t.Fatalf("workflow should fail on first publish attempt")
+	}
+
+	run, err = temporalClient.ExecuteWorkflow(ctx, options, DocumentProcessingWorkflow, input)
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	if err := run.Get(ctx, nil); err != nil {
+		t.Fatalf("workflow result after retry: %v", err)
+	}
+
+	if len(transformerRecorder.values) != 1 {
+		t.Fatalf("expected single conversion, got %d", len(transformerRecorder.values))
+	}
+	if len(storageRecorder.values) != 1 {
+		t.Fatalf("expected single original fetch, got %d", len(storageRecorder.values))
+	}
+	if len(publisherRecorder.values) != 2 {
+		t.Fatalf("expected two publish attempts, got %d", len(publisherRecorder.values))
+	}
+	if repo.lastStatus != model.StatusPublishedToGitHub {
+		t.Fatalf("unexpected final status: %s", repo.lastStatus)
+	}
+}
+
 func startTemporalite(ctx context.Context) (testcontainers.Container, error) {
 	return testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
@@ -274,6 +397,7 @@ type fakePublisherServer struct {
 	lastBucket        string
 	lastObjectKey     string
 	lastCreatePR      bool
+	failuresLeft      int
 }
 
 func (f *fakePublisherServer) PublishMarkdown(ctx context.Context, req *githubpublisherv1.PublishMarkdownRequest) (*githubpublisherv1.PublishMarkdownResponse, error) {
@@ -291,6 +415,10 @@ func (f *fakePublisherServer) PublishMarkdown(ctx context.Context, req *githubpu
 	if req.GetContent() == "" && (req.GetBucket() == "" || req.GetObjectKey() == "") {
 		return nil, fmt.Errorf("empty content")
 	}
+	if f.failuresLeft > 0 {
+		f.failuresLeft--
+		return nil, fmt.Errorf("temporary publish error")
+	}
 	return &githubpublisherv1.PublishMarkdownResponse{CommitSha: "commit-sha", PullRequestNumber: 42, PullRequestUrl: "https://example.com/pr/42"}, nil
 }
 
@@ -299,6 +427,7 @@ type memoryRepo struct {
 	workflowID string
 	lastError  string
 	doc        *model.Document
+	logs       []model.Status
 }
 
 func (m *memoryRepo) CreateDocument(context.Context, *model.Document, *model.DocumentVersion, *model.DocumentStatusLog) (*model.Document, error) {
@@ -327,7 +456,20 @@ func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Statu
 	if version != nil {
 		m.doc.Versions = append(m.doc.Versions, *version)
 	}
+	m.logs = append(m.logs, to)
 	return m.doc, nil
+}
+
+func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+	if m.doc == nil || m.doc.ID != id {
+		return "", fmt.Errorf("not found")
+	}
+	for i := len(m.logs) - 1; i >= 0; i-- {
+		if m.logs[i] != model.StatusFailed {
+			return m.logs[i], nil
+		}
+	}
+	return "", sql.ErrNoRows
 }
 
 func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {

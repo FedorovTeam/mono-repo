@@ -28,6 +28,16 @@ func ValidateTransition(from, to Status) error {
 	if from == to {
 		return nil
 	}
+
+	if from == StatusFailed {
+		switch to {
+		case StatusStoredOriginal, StatusConvertedToMarkdown, StatusPublishedToGitHub:
+			return nil
+		default:
+			return errors.New("invalid status transition")
+		}
+	}
+
 	next, ok := allowedTransitions[from]
 	if !ok {
 		return errors.New("unknown current status")
@@ -48,24 +58,24 @@ func ValidateStatus(val Status) error {
 }
 
 type Document struct {
-        ID                string
-        Name              string
-        Owner             string
-        Repository        string
-        Branch            string
-        BaseBranch        string
-        Path              string
-        Status            Status
-        WorkflowID        string
-        ErrorReason       string
-        OriginalBucket    string
-        OriginalObjectKey string
-        MarkdownBucket    string
-        MarkdownObjectKey string
-        CreatePR          bool
-        CreatedAt         time.Time
-        UpdatedAt         time.Time
-        Versions          []DocumentVersion
+	ID                string
+	Name              string
+	Owner             string
+	Repository        string
+	Branch            string
+	BaseBranch        string
+	Path              string
+	Status            Status
+	WorkflowID        string
+	ErrorReason       string
+	OriginalBucket    string
+	OriginalObjectKey string
+	MarkdownBucket    string
+	MarkdownObjectKey string
+	CreatePR          bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Versions          []DocumentVersion
 }
 
 type DocumentVersion struct {

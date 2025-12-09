@@ -41,6 +41,8 @@ sequenceDiagram
         T-->>S: RunID сохранён в workflow_id
     end
 
+    Note over T,R: Перед каждой активностью сверяется текущее состояние
+    документа в PostgreSQL — уже выполненные шаги пропускаются.
     T->>S: Activity AwaitOriginal → storage-service.GetObject(bucket, object_key)
     S->>R: UpdateStatus StoredOriginal, версия сохранена
     T->>TR: Activity ConvertToMarkdown(originalBucket/objectKey → markdownBucket)

@@ -2,6 +2,8 @@ package document
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -191,22 +193,29 @@ func (a *Activities) AwaitOriginal(ctx context.Context, documentID string) (docu
 	if doc == nil {
 		return documentSnapshot{}, fmt.Errorf("document %s not found", documentID)
 	}
+
+	status, err := a.progressStatus(ctx, doc)
+	if err != nil {
+		return documentSnapshot{}, err
+	}
 	if doc.OriginalBucket == "" || doc.OriginalObjectKey == "" {
 		return documentSnapshot{}, fmt.Errorf("document %s has no original object key", documentID)
 	}
 
-	if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: doc.OriginalBucket, ObjectKey: doc.OriginalObjectKey}); err != nil {
-		_ = a.fail(ctx, documentID, fmt.Sprintf("wait original: %v", err))
-		return documentSnapshot{}, err
-	}
+	version := latestVersion(doc).Version
+	if status == model.StatusUploaded {
+		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: doc.OriginalBucket, ObjectKey: doc.OriginalObjectKey}); err != nil {
+			_ = a.fail(ctx, documentID, fmt.Sprintf("wait original: %v", err))
+			return documentSnapshot{}, err
+		}
 
-	version := int32(1)
-	if len(doc.Versions) > 0 {
-		version = doc.Versions[len(doc.Versions)-1].Version
-	}
+		if version == 0 {
+			version = 1
+		}
 
-	if _, err := a.repo.UpdateStatus(ctx, documentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey}); err != nil {
-		return documentSnapshot{}, err
+		if _, err := a.repo.UpdateStatus(ctx, documentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey}); err != nil {
+			return documentSnapshot{}, err
+		}
 	}
 
 	publishPath := doc.Path
@@ -259,6 +268,18 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	if a.transformer == nil {
 		return convertResult{}, fmt.Errorf("transformer client is not configured")
 	}
+	doc, err := a.repo.GetDocument(ctx, input.DocumentID)
+	if err != nil {
+		return convertResult{}, err
+	}
+
+	status, err := a.progressStatus(ctx, doc)
+	if err != nil {
+		return convertResult{}, err
+	}
+	if status == model.StatusConvertedToMarkdown || status == model.StatusPublishedToGitHub {
+		return convertResult{MarkdownKey: resolvedMarkdownKey(doc)}, nil
+	}
 	extension := input.FilenameExtension
 	if extension == "" {
 		extension = strings.TrimPrefix(strings.ToLower(filepath.Ext(input.OriginalObjectKey)), ".")
@@ -277,7 +298,8 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: resp.MarkdownObjectKey}); err != nil {
+	version := latestVersion(doc).Version + 1
+	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{Version: version, MarkdownObjectKey: resp.MarkdownObjectKey}); err != nil {
 		return convertResult{}, err
 	}
 	return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: resp.MarkdownObjectKey, MediaType: resp.MediaType}, nil
@@ -288,26 +310,53 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
+	doc, err := a.repo.GetDocument(ctx, input.DocumentID)
+	if err != nil {
+		return err
+	}
+
+	status, err := a.progressStatus(ctx, doc)
+	if err != nil {
+		return err
+	}
+	if status == model.StatusPublishedToGitHub {
+		return nil
+	}
 	owner := strings.TrimSpace(input.Owner)
 	if owner == "" {
-		owner = a.repoOwner
+		owner = doc.Owner
+		if owner == "" {
+			owner = a.repoOwner
+		}
 	}
 	repository := strings.TrimSpace(input.Repository)
 	if repository == "" {
-		repository = a.repoName
+		repository = doc.Repository
+		if repository == "" {
+			repository = a.repoName
+		}
 	}
 	branch := input.Branch
 	if branch == "" {
-		branch = a.branch
+		branch = doc.Branch
+		if branch == "" {
+			branch = a.branch
+		}
 	}
 	baseBranch := input.BaseBranch
 	if baseBranch == "" {
-		baseBranch = a.baseBranch
+		baseBranch = doc.BaseBranch
+		if baseBranch == "" {
+			baseBranch = a.baseBranch
+		}
 	}
 	if baseBranch == "" {
 		baseBranch = branch
 	}
 	path := input.Path
+	if path == "" {
+		path = doc.Path
+	}
 
 	correlationID := input.CorrelationID
 	if correlationID == "" {
@@ -321,23 +370,28 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		commitMessage = path
 	}
 
-        if owner == "" || repository == "" {
-                reason := "owner and repository are required"
-                _ = a.fail(ctx, input.DocumentID, reason)
-                return fmt.Errorf("%s", reason)
-        }
-        if strings.Contains(repository, "/") {
-                reason := fmt.Sprintf("repository should not contain owner prefix: %s", repository)
-                _ = a.fail(ctx, input.DocumentID, reason)
-                return fmt.Errorf("%s", reason)
-        }
+	if owner == "" || repository == "" {
+		reason := "owner and repository are required"
+		_ = a.fail(ctx, input.DocumentID, reason)
+		return fmt.Errorf("%s", reason)
+	}
+	if strings.Contains(repository, "/") {
+		reason := fmt.Sprintf("repository should not contain owner prefix: %s", repository)
+		_ = a.fail(ctx, input.DocumentID, reason)
+		return fmt.Errorf("%s", reason)
+	}
 
 	if err := a.validateRepository(ctx, owner, repository); err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))
 		return err
 	}
 
-	if input.MarkdownBucket == "" || input.MarkdownObjectKey == "" {
+	markdownObjectKey := input.MarkdownObjectKey
+	if markdownObjectKey == "" {
+		markdownObjectKey = resolvedMarkdownKey(doc)
+	}
+
+	if input.MarkdownBucket == "" || markdownObjectKey == "" {
 		_ = a.fail(ctx, input.DocumentID, "markdown content is empty and no bucket/object_key provided")
 		return fmt.Errorf("markdown content is empty and no bucket/object_key provided")
 	}
@@ -352,7 +406,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		CreatePr:      input.CreatePR,
 		CorrelationId: correlationID,
 		Bucket:        input.MarkdownBucket,
-		ObjectKey:     input.MarkdownObjectKey,
+		ObjectKey:     markdownObjectKey,
 	}
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)
@@ -364,13 +418,52 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		_ = a.fail(ctx, input.DocumentID, "publish: empty response")
 		return fmt.Errorf("publish returned empty response")
 	}
-	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, "", "", &model.DocumentVersion{Version: input.Version})
+	version := latestVersion(doc).Version + 1
+	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, "", "", &model.DocumentVersion{Version: version})
 	return err
 }
 
 func (a *Activities) fail(ctx context.Context, documentID, reason string) error {
 	_, err := a.repo.UpdateStatus(ctx, documentID, model.StatusFailed, reason, reason, nil)
 	return err
+}
+
+func (a *Activities) progressStatus(ctx context.Context, doc *model.Document) (model.Status, error) {
+	if doc.Status != model.StatusFailed {
+		return doc.Status, nil
+	}
+
+	status, err := a.repo.LastNonFailedStatus(ctx, doc.ID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return model.StatusUploaded, nil
+		}
+		return "", err
+	}
+
+	if status == "" {
+		return model.StatusUploaded, nil
+	}
+
+	return status, nil
+}
+
+func latestVersion(doc *model.Document) model.DocumentVersion {
+	var latest model.DocumentVersion
+	for i := range doc.Versions {
+		if doc.Versions[i].Version > latest.Version {
+			latest = doc.Versions[i]
+		}
+	}
+	return latest
+}
+
+func resolvedMarkdownKey(doc *model.Document) string {
+	latest := latestVersion(doc)
+	if latest.MarkdownObjectKey != "" {
+		return latest.MarkdownObjectKey
+	}
+	return doc.MarkdownObjectKey
 }
 
 func (a *Activities) withCorrelationID(ctx context.Context, explicit string) context.Context {

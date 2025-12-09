@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -99,6 +100,22 @@ func (r *Repository) GetDocument(ctx context.Context, id string) (*model.Documen
 	}
 	doc.Versions = versions
 	return &doc, nil
+}
+
+func (r *Repository) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+	row := r.db.QueryRowContext(ctx, `
+        SELECT to_status FROM document_status_logs WHERE document_id=$1 AND to_status <> $2 ORDER BY created_at DESC LIMIT 1
+    `, id, string(model.StatusFailed))
+
+	var status sql.NullString
+	if err := row.Scan(&status); err != nil {
+		return "", err
+	}
+	if !status.Valid {
+		return "", sql.ErrNoRows
+	}
+
+	return model.Status(strings.TrimSpace(status.String)), nil
 }
 
 func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
