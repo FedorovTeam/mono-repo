@@ -21,7 +21,7 @@ minio:
 
 events:
   upload_bucket: "docx"
-  webhook_arn: "arn:minio:sqs::1:gateway-webhook"
+  webhook_arn: "arn:minio:sqs::1:storage-webhook"
 `
 
 func TestLoadConfigDefaultsObservability(t *testing.T) {
