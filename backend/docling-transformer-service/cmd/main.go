@@ -63,7 +63,12 @@ func main() {
 	defer pool.Close()
 
 	queueRepo := repository.NewQueueRepository(pool)
-	conv := converter.NewDoclingConverter(cfg.Docling.Endpoint, cfg.Docling.APIKey, logger)
+	conv := converter.NewDoclingConverter(converter.Config{
+		Endpoint:           cfg.Docling.Endpoint,
+		APIKey:             cfg.Docling.APIKey,
+		StatusPollInterval: cfg.Docling.StatusPollInterval,
+		StatusPollTimeout:  cfg.Docling.StatusPollTimeout,
+	}, logger)
 
 	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{
 		MarkdownBucket:       cfg.Minio.Bucket,

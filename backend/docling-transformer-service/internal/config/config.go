@@ -32,8 +32,10 @@ type ServiceConfig struct {
 
 // DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.
 type DoclingConfig struct {
-	Endpoint string `yaml:"endpoint"`
-	APIKey   string `yaml:"api_key"`
+	Endpoint           string        `yaml:"endpoint"`
+	APIKey             string        `yaml:"api_key"`
+	StatusPollInterval time.Duration `yaml:"status_poll_interval"`
+	StatusPollTimeout  time.Duration `yaml:"status_poll_timeout"`
 }
 
 // MinioConfig описывает параметры доступа к MinIO.
