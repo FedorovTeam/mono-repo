@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
@@ -45,7 +46,7 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 			t.Fatalf("Docling expects POST, got %s", r.Method)
 		}
 
-		if r.URL.Path != "/convert" {
+		if r.URL.Path != "/v1/convert/file" {
 			t.Fatalf("unexpected Docling path: %s", r.URL.Path)
 		}
 
@@ -53,26 +54,33 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 			t.Fatalf("Docling header mismatch: %s", r.Header.Get("X-Correlation-Id"))
 		}
 
-		if r.Header.Get("X-Docling-Endpoint") != docling.URL {
-			t.Fatalf("Docling endpoint header missing: %s", r.Header.Get("X-Docling-Endpoint"))
-		}
-
-		if r.Header.Get("Content-Type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 			t.Fatalf("Docling content-type mismatch: %s", r.Header.Get("Content-Type"))
 		}
 
-		if source := r.Header.Get("X-Docling-Source-Filename"); source != "file.docx" {
-			t.Fatalf("unexpected source filename header: %s", source)
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("failed to parse multipart form: %v", err)
 		}
 
-		body, _ := io.ReadAll(r.Body)
+		file, header, err := r.FormFile("files")
+		if err != nil {
+			t.Fatalf("missing files form field: %v", err)
+		}
+		defer file.Close()
+
+		if header.Filename != "file.docx" {
+			t.Fatalf("unexpected source filename: %s", header.Filename)
+		}
+
+		body, _ := io.ReadAll(file)
 		receivedBody = body
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("## converted by docling"))
+		_, _ = io.WriteString(w, `{"document":{"filename":"file.docx","md_content":"## converted by docling"},"status":"success","processing_time":0.2}`)
 	}))
 	defer docling.Close()
 
-	conv := converter.NewDoclingConverter(docling.URL, zap.NewNop())
+	conv := converter.NewDoclingConverter(docling.URL, "", zap.NewNop())
 	memStorage := &stubStorage{download: []byte("docx stub from storage")}
 	logger := zap.NewNop()
 
@@ -95,12 +103,13 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
+	resp, err := client.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-1",
 		OriginalBucket:    "orig",
 		OriginalObjectKey: "path/file.docx",
 		MarkdownBucket:    "md",
 		MarkdownObjectKey: "dest/file.md",
+		FilenameExtension: "docx",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -115,6 +124,99 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 	}
 
 	if string(memStorage.uploaded) != "## converted by docling" {
+		t.Fatalf("markdown was not uploaded to storage")
+	}
+}
+
+func TestE2EPDFConversionAgainstDoclingStub(t *testing.T) {
+	var receivedBody []byte
+	var receivedFilename, receivedContentType, receivedSourceHeader string
+	var docling *httptest.Server
+	docling = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("Docling expects POST, got %s", r.Method)
+		}
+
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("failed to parse multipart form: %v", err)
+		}
+
+		fileHeader := r.MultipartForm.File["files"][0]
+		receivedFilename = fileHeader.Filename
+		receivedContentType = fileHeader.Header.Get("Content-Type")
+		receivedSourceHeader = r.Header.Get("X-Docling-Source-Filename")
+
+		file, err := fileHeader.Open()
+		if err != nil {
+			t.Fatalf("failed to open form file: %v", err)
+		}
+		defer file.Close()
+
+		body, _ := io.ReadAll(file)
+		receivedBody = body
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"document":{"filename":"document.pdf","md_content":"pdf converted"},"status":"success","processing_time":0.12}`)
+	}))
+	defer docling.Close()
+
+	conv := converter.NewDoclingConverter(docling.URL, "", zap.NewNop())
+	memStorage := &stubStorage{download: []byte("pdf stub from storage")}
+	logger := zap.NewNop()
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer(grpc.UnaryInterceptor(server.LoggingInterceptor(logger)))
+	transformerv1.RegisterTransformerServiceServer(srv, server.NewTransformerAPI(conv, memStorage, "md", logger))
+
+	go func() {
+		_ = srv.Serve(lis)
+	}()
+	t.Cleanup(srv.Stop)
+
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "integration-pdf"))
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(_ context.Context, s string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial bufnet: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+	resp, err := client.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-pdf",
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "dest/file.md",
+		FilenameExtension: "pdf",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if string(receivedBody) != "pdf stub from storage" {
+		t.Fatalf("unexpected body sent to docling: %s", string(receivedBody))
+	}
+
+	if receivedFilename != "document.pdf" {
+		t.Fatalf("unexpected source filename: %s", receivedFilename)
+	}
+
+	if receivedSourceHeader != "document.pdf" {
+		t.Fatalf("unexpected source header: %s", receivedSourceHeader)
+	}
+
+	if receivedContentType != "application/pdf" {
+		t.Fatalf("unexpected content type: %s", receivedContentType)
+	}
+
+	if string(resp.GetMarkdownContent()) != "pdf converted" {
+		t.Fatalf("unexpected markdown: %s", string(resp.GetMarkdownContent()))
+	}
+
+	if string(memStorage.uploaded) != "pdf converted" {
 		t.Fatalf("markdown was not uploaded to storage")
 	}
 }

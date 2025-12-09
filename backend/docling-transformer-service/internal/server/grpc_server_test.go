@@ -24,10 +24,12 @@ type fakeConverter struct {
 	response converter.DoclingConvertResult
 	err      error
 	ctx      context.Context
+	request  converter.DoclingConvertRequest
 }
 
-func (f *fakeConverter) Convert(ctx context.Context, _ converter.DoclingConvertRequest) (converter.DoclingConvertResult, error) {
+func (f *fakeConverter) Convert(ctx context.Context, req converter.DoclingConvertRequest) (converter.DoclingConvertResult, error) {
 	f.ctx = ctx
+	f.request = req
 	return f.response, f.err
 }
 
@@ -61,7 +63,7 @@ func (f *fakeStorage) Upload(_ context.Context, bucket, objectKey, contentType s
 	return f.uploadErr
 }
 
-func TestConvertDocxToMarkdown(t *testing.T) {
+func TestConvertDocumentToMarkdown(t *testing.T) {
 	conv := &fakeConverter{response: converter.DoclingConvertResult{Content: []byte("markdown"), MediaType: "text/markdown"}}
 	storage := &fakeStorage{downloadContent: []byte("docx bytes")}
 	logger := zap.NewNop()
@@ -85,12 +87,13 @@ func TestConvertDocxToMarkdown(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocxToMarkdown(ctx, &transformerv1.ConvertDocxToMarkdownRequest{
+	resp, err := client.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-123",
 		OriginalBucket:    "bucket-orig",
 		OriginalObjectKey: "path/file.docx",
 		MarkdownBucket:    "markdown-bucket",
 		MarkdownObjectKey: "md/file.md",
+		FilenameExtension: ".docx",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -116,9 +119,17 @@ func TestConvertDocxToMarkdown(t *testing.T) {
 	if corrID != "corr-123" {
 		t.Fatalf("correlation id not propagated, got %s", corrID)
 	}
+
+	if conv.request.ContentType != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		t.Fatalf("unexpected content type: %s", conv.request.ContentType)
+	}
+
+	if conv.request.FileName != "file.docx" {
+		t.Fatalf("unexpected filename: %s", conv.request.FileName)
+	}
 }
 
-func TestConvertDocxToMarkdownValidation(t *testing.T) {
+func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 	conv := &fakeConverter{response: converter.DoclingConvertResult{Content: []byte("markdown")}}
 	storage := &fakeStorage{downloadContent: []byte("docx bytes")}
 	logger := zap.NewNop()
@@ -141,9 +152,20 @@ func TestConvertDocxToMarkdownValidation(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := transformerv1.NewTransformerServiceClient(conn)
-	_, err = client.ConvertDocxToMarkdown(context.Background(), &transformerv1.ConvertDocxToMarkdownRequest{})
+	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{})
 
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected invalid argument, got %v", err)
+	}
+
+	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-123",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.txt",
+		MarkdownBucket:    "md",
+	})
+
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected invalid argument for unsupported extension, got %v", err)
 	}
 }

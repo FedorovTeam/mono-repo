@@ -45,7 +45,7 @@ func main() {
 	}
 
 	storageClient := storage.NewMinioStorage(minioClient)
-	conv := converter.NewDoclingConverter(cfg.Docling.Endpoint, logger)
+	conv := converter.NewDoclingConverter(cfg.Docling.Endpoint, cfg.Docling.APIKey, logger)
 
 	if err := server.Run(ctx, logger, conv, storageClient, cfg.Minio.Bucket, cfg.Service.GRPCPort, cfg.Observability); err != nil {
 		logger.Fatal("server failed", zap.Error(err))

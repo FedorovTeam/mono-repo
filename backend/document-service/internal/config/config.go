@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -28,9 +29,10 @@ type Config struct {
 		TaskQueue string `yaml:"task_queue"`
 	} `yaml:"temporal"`
 	Services struct {
-		StorageService         string `yaml:"storage_service"`
-		TransformerService     string `yaml:"transformer_service"`
-		GithubPublisherService string `yaml:"github_publisher_service"`
+		StorageService         string     `yaml:"storage_service"`
+		TransformerService     string     `yaml:"transformer_service"`
+		GithubPublisherService string     `yaml:"github_publisher_service"`
+		GRPC                   GRPCClient `yaml:"grpc"`
 	} `yaml:"services"`
 	Github struct {
 		Owner      string `yaml:"owner"`
@@ -40,6 +42,26 @@ type Config struct {
 		BaseURL    string `yaml:"base_url"`
 	} `yaml:"github"`
 	Observability Observability `yaml:"observability"`
+}
+
+type GRPCClient struct {
+	DialTimeout       time.Duration `yaml:"dial_timeout"`
+	MinConnectTimeout time.Duration `yaml:"min_connect_timeout"`
+	Backoff           Backoff       `yaml:"backoff"`
+	Keepalive         Keepalive     `yaml:"keepalive"`
+}
+
+type Backoff struct {
+	BaseDelay  time.Duration `yaml:"base_delay"`
+	Multiplier float64       `yaml:"multiplier"`
+	Jitter     float64       `yaml:"jitter"`
+	MaxDelay   time.Duration `yaml:"max_delay"`
+}
+
+type Keepalive struct {
+	Time                time.Duration `yaml:"time"`
+	Timeout             time.Duration `yaml:"timeout"`
+	PermitWithoutStream bool          `yaml:"permit_without_stream"`
 }
 
 type Observability struct {

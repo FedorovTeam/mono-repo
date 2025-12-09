@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,12 +19,26 @@ import (
 )
 
 const (
-	doclingConvertPath  = "/convert"
-	defaultContentType  = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	doclingConvertPath  = "/v1/convert/file"
 	correlationIDHeader = "X-Correlation-Id"
 	sourceFileHeader    = "X-Docling-Source-Filename"
 	endpointHeader      = "X-Docling-Endpoint"
+	apiKeyHeader        = "X-Api-Key"
 )
+
+const defaultExtension = "docx"
+
+var extensionToContentType = map[string]string{
+	"doc":  "application/msword",
+	"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	"pdf":  "application/pdf",
+}
+
+var contentTypeToExtension = map[string]string{
+	"application/msword": "doc",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+	"application/pdf": "pdf",
+}
 
 // DoclingConvertRequest описывает входные данные для конвертации DOCX в Markdown.
 type DoclingConvertRequest struct {
@@ -38,10 +55,11 @@ type DoclingConvertResult struct {
 
 type doclingFileResponse struct {
 	Document struct {
-		Filename    string `json:"filename"`
-		MdContent   string `json:"md_content"`
-		HtmlContent string `json:"html_content"`
-		TextContent string `json:"text_content"`
+		Filename       string  `json:"filename"`
+		MdContent      *string `json:"md_content"`
+		HtmlContent    *string `json:"html_content"`
+		TextContent    *string `json:"text_content"`
+		DoctagsContent *string `json:"doctags_content"`
 	} `json:"document"`
 	Status         string  `json:"status"`
 	Errors         []any   `json:"errors"`
@@ -56,22 +74,45 @@ type Converter interface {
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
 type DoclingConverter struct {
 	endpoint string
+	apiKey   string
 	client   *http.Client
 	logger   *zap.Logger
 }
 
 // NewDoclingConverter создаёт конвертер с таймаутом по умолчанию.
-func NewDoclingConverter(endpoint string, logger *zap.Logger) *DoclingConverter {
+func NewDoclingConverter(endpoint, apiKey string, logger *zap.Logger) *DoclingConverter {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &DoclingConverter{
 		endpoint: endpoint,
+		apiKey:   apiKey,
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
 		logger: logger,
 	}
+}
+
+func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, error) {
+	normalizedContentType := strings.ToLower(reqContentType)
+	if ext, ok := contentTypeToExtension[normalizedContentType]; ok {
+		return normalizedContentType, ext, nil
+	}
+
+	fileExt := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
+	if fileExt != "" {
+		if contentType, ok := extensionToContentType[fileExt]; ok {
+			return contentType, fileExt, nil
+		}
+		return "", "", fmt.Errorf("unsupported file extension: %s", fileExt)
+	}
+
+	if normalizedContentType != "" {
+		return "", "", fmt.Errorf("unsupported content type: %s", reqContentType)
+	}
+
+	return extensionToContentType[defaultExtension], defaultExtension, nil
 }
 
 // Convert выполняет HTTP-вызов в Docling-сервис и возвращает Markdown.
@@ -82,33 +123,53 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
+	contentType, fileExt, err := resolveContentTypeAndExt(req.ContentType, req.FileName)
+	if err != nil {
+		return DoclingConvertResult{}, err
+	}
+
 	filename := req.FileName
 	if filename == "" {
-		filename = "document.docx"
+		filename = fmt.Sprintf("document.%s", fileExt)
 	}
 
 	var lastErr error
-	contentType := req.ContentType
-	if contentType == "" {
-		contentType = defaultContentType
-	}
 
 	for attempt := 1; attempt <= 3; attempt++ {
 		endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingConvertPath)
 
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(req.Content))
+		payload := &bytes.Buffer{}
+		writer := multipart.NewWriter(payload)
+
+		partHeaders := textproto.MIMEHeader{}
+		partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="files"; filename="%s"`, filename))
+		partHeaders.Set("Content-Type", contentType)
+
+		part, err := writer.CreatePart(partHeaders)
+		if err == nil {
+			_, err = part.Write(req.Content)
+		}
+		if err == nil {
+			err = writer.Close()
+		}
+		if err != nil {
+			return DoclingConvertResult{}, fmt.Errorf("build docling multipart: %w", err)
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, payload)
 		if err != nil {
 			return DoclingConvertResult{}, fmt.Errorf("build docling request: %w", err)
 		}
 
-		httpReq.Header.Set("Content-Type", contentType)
+		httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 		httpReq.Header.Set(correlationIDHeader, correlationID)
+		if c.apiKey != "" {
+			httpReq.Header.Set(apiKeyHeader, c.apiKey)
+		}
 		if filename != "" {
 			httpReq.Header.Set(sourceFileHeader, filename)
 		}
-		if c.endpoint != "" {
-			httpReq.Header.Set(endpointHeader, c.endpoint)
-		}
+		httpReq.Header.Set(endpointHeader, c.endpoint)
 
 		resp, err := c.client.Do(httpReq)
 		if err != nil {
@@ -151,17 +212,29 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 							zap.Int("attempt", attempt),
 							zap.Error(err),
 						)
-					} else if dres.Document.MdContent == "" {
-						lastErr = fmt.Errorf("docling response has empty md_content, status=%s", dres.Status)
-						c.logger.Error("docling empty md_content",
-							zap.String("correlation_id", correlationID),
-							zap.String("status", dres.Status),
-						)
 					} else {
-						return DoclingConvertResult{
-							Content:   []byte(dres.Document.MdContent),
-							MediaType: "text/markdown",
-						}, nil
+						if dres.Status != "success" && dres.Status != "partial_success" {
+							lastErr = fmt.Errorf("docling response status=%s", dres.Status)
+							c.logger.Error("docling returned non-success status",
+								zap.String("correlation_id", correlationID),
+								zap.String("status", dres.Status),
+								zap.Any("errors", dres.Errors),
+							)
+							continue
+						}
+
+						if dres.Document.MdContent == nil || *dres.Document.MdContent == "" {
+							lastErr = fmt.Errorf("docling response has empty md_content, status=%s", dres.Status)
+							c.logger.Error("docling empty md_content",
+								zap.String("correlation_id", correlationID),
+								zap.String("status", dres.Status),
+							)
+						} else {
+							return DoclingConvertResult{
+								Content:   []byte(*dres.Document.MdContent),
+								MediaType: "text/markdown",
+							}, nil
+						}
 					}
 				} else {
 					return DoclingConvertResult{Content: body, MediaType: mediaType}, nil

@@ -4,8 +4,34 @@ security:
   apiKey: "secret"
 documentService:
   address: "document-service.document-service.svc.cluster.local:9090"
+  grpc:
+    insecure: true
+    dialTimeout: 5s
+    minConnectTimeout: 3s
+    keepalive:
+      time: 30s
+      timeout: 10s
+      permitWithoutStream: true
+    backoff:
+      baseDelay: 1s
+      multiplier: 1.6
+      jitter: 0.2
+      maxDelay: 30s
 storageService:
   address: "storage-service.storage-service.svc.cluster.local:9090"
+  grpc:
+    insecure: true
+    dialTimeout: 5s
+    minConnectTimeout: 3s
+    keepalive:
+      time: 30s
+      timeout: 10s
+      permitWithoutStream: true
+    backoff:
+      baseDelay: 1s
+      multiplier: 1.6
+      jitter: 0.2
+      maxDelay: 30s
 uploads:
   maxSizeBytes: 10485760
   allowedExtensions:

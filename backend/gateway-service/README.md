@@ -26,6 +26,7 @@ gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `doc
 - `security.apiKey` — ожидаемое значение заголовка `X-API-Key`.
 - `documentService.address` — `document.backend.svc.cluster.local:50051`.
 - `storageService.address` — `storage.backend.svc.cluster.local:50052`.
+- `documentService.grpc` / `storageService.grpc` — настройки gRPC-подключений (TLS через `insecure`, таймауты подключения `dialTimeout`/`minConnectTimeout`, keepalive `time`/`timeout`/`permitWithoutStream`, бэкофф `baseDelay`/`multiplier`/`jitter`/`maxDelay`).
 - `uploads.maxSizeBytes`, `uploads.allowedExtensions`, `uploads.signedUrlTtlSeconds` — лимиты загрузки и TTL presigned ссылок.
 - `observability.enabled` — включает/отключает экспорт метрик и трассировок (при `false` вместо экспортеров используются no-op провайдеры и обработчики).
 - `observability.otlpEndpoint`/`observability.serviceName` — адрес OTLP-коллектора и сервисное имя (обязателен при включённой телеметрии).

@@ -7,18 +7,18 @@ sequenceDiagram
     participant MN as MinIO
     participant DL as Docling HTTP Stub
 
-    GW->>TR: ConvertDocxToMarkdown(document_id, original_bucket, original_object_key,\nmarkdown_bucket?, markdown_object_key?)\n+x-correlation-id
+    GW->>TR: ConvertDocumentToMarkdown(document_id, original_bucket, original_object_key, filename_extension,\nmarkdown_bucket?, markdown_object_key?)\n+x-correlation-id
     TR->>TR: LoggingInterceptor\nобеспечивает/проставляет correlation-id
-    alt document_id или original_bucket/original_object_key пустые
+    alt document_id или original_bucket/original_object_key пустые\nили filename_extension не поддерживается
         TR-->>GW: InvalidArgument
     else
         opt markdown_bucket not provided
             TR->>TR: использовать markdownBucket из конфигурации\n(иначе вернуть InvalidArgument)
         end
         TR->>MN: GET original_object_key из original_bucket\n(повторение при NoSuchKey)
-        TR->>DL: POST /convert c телом DOCX\nContent-Type: переданный или docx по умолчанию\nX-Correlation-Id\nX-Docling-Source-Filename: basename(original_object_key) или document.docx\nX-Docling-Endpoint: <docling.endpoint>
+        TR->>DL: POST /v1/convert/file multipart/form-data с files\nContent-Type part: исходный\nX-Correlation-Id\nX-Docling-Source-Filename: basename(original_object_key) или document.docx\nX-Docling-Endpoint: <docling.endpoint>\nX-Api-Key при наличии
         loop до 3 попыток
-            DL-->>TR: Markdown (text/markdown или JSON с md_content)
+            DL-->>TR: JSON document.md_content или Markdown в теле
         end
         opt markdown_object_key not provided
             TR->>TR: buildMarkdownKey(original_object_key) -> *.md

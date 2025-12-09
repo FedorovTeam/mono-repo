@@ -22,7 +22,7 @@ sequenceDiagram
     Worker-->>Temporal: поллинг и исполнение workflow
     Worker-->>DB: фиксация статусов/версий документа
     Worker->>Storage: UploadOriginal/GetObject
-    Worker->>Transformer: ConvertDocxToMarkdown
+    Worker->>Transformer: ConvertDocumentToMarkdown
     Worker->>Publisher: PublishMarkdown
     Worker->>GitHub: валидация доступа к репозиторию
 ```

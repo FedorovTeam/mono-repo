@@ -6,7 +6,10 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
+	"backend-document-service/internal/config"
+	"backend-document-service/internal/grpcdial"
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/service/document"
 	"backend-document-service/internal/storage"
@@ -26,9 +29,15 @@ func dialer(server *grpc.Server) (*grpc.ClientConn, func(), error) {
 	go func() {
 		_ = server.Serve(lis)
 	}()
-	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-		return lis.Dial()
-	}), grpc.WithInsecure())
+	conn, err := grpcdial.DialContext(
+		context.Background(),
+		"bufnet",
+		grpcClientConfig(),
+		grpcdial.WithDialOptions(grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis.Dial()
+		})),
+		grpcdial.WithoutBlock(),
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -37,6 +46,24 @@ func dialer(server *grpc.Server) (*grpc.ClientConn, func(), error) {
 		server.Stop()
 	}
 	return conn, cleanup, nil
+}
+
+func grpcClientConfig() config.GRPCClient {
+	return config.GRPCClient{
+		DialTimeout:       time.Second,
+		MinConnectTimeout: 500 * time.Millisecond,
+		Backoff: config.Backoff{
+			BaseDelay:  100 * time.Millisecond,
+			Multiplier: 1.6,
+			Jitter:     0.2,
+			MaxDelay:   time.Second,
+		},
+		Keepalive: config.Keepalive{
+			Time:                10 * time.Second,
+			Timeout:             3 * time.Second,
+			PermitWithoutStream: true,
+		},
+	}
 }
 
 type staticKey struct{}
