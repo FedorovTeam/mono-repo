@@ -7,9 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/stretchr/testify/require"
@@ -37,10 +39,7 @@ func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedKey := "org/knowledge/project/documents/year=2025/month=01/day=02/doc-123.docx"
-	if resp.ObjectKey != expectedKey {
-		t.Fatalf("unexpected key: %s", resp.ObjectKey)
-	}
+	assertObjectKey(t, resp.ObjectKey, "org/knowledge/project/documents/year=2025/month=01/day=02", "doc-123.docx")
 	if resp.Bucket != "knowledge-original" {
 		t.Fatalf("unexpected bucket: %s", resp.Bucket)
 	}
@@ -53,7 +52,7 @@ func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 	if got := client.lastHeaders.Get("x-amz-meta-correlation-id"); got != "corr-1" {
 		t.Fatalf("correlation id not included: %s", got)
 	}
-	if client.lastObject != expectedKey {
+	if client.lastObject != resp.ObjectKey {
 		t.Fatalf("object key not passed to minio: %s", client.lastObject)
 	}
 }
@@ -123,7 +122,7 @@ func TestUploadOriginalStoresContent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "knowledge-original", resp.GetBucket())
 	require.Equal(t, []byte("payload"), client.storedData[resp.GetBucket()][resp.GetObjectKey()])
-	require.Contains(t, resp.GetObjectKey(), "org/acme/project/knowledge/year=2025/month=01/day=02/doc-123.docx")
+	assertObjectKey(t, resp.GetObjectKey(), "org/acme/project/knowledge/year=2025/month=01/day=02", "doc-123.docx")
 }
 
 func TestUploadMarkdownUsesDefaultsFromServer(t *testing.T) {
@@ -139,7 +138,7 @@ func TestUploadMarkdownUsesDefaultsFromServer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "knowledge-md", resp.GetBucket())
 	require.Equal(t, []byte("markdown"), client.storedData[resp.GetBucket()][resp.GetObjectKey()])
-	require.Contains(t, resp.GetObjectKey(), "org/knowledge/project/documents/year=2024/month=11/day=05/doc-md.md")
+	assertObjectKey(t, resp.GetObjectKey(), "org/knowledge/project/documents/year=2024/month=11/day=05", "doc-md.md")
 }
 
 func TestGetObjectReturnsStoredData(t *testing.T) {
@@ -199,6 +198,19 @@ func (m *mockPresignClient) ListenBucketNotification(context.Context, string, st
 
 func (m *mockPresignClient) SetBucketNotification(context.Context, string, notification.Configuration) error {
 	return nil
+}
+
+func assertObjectKey(t *testing.T, key, prefix, filename string) {
+	t.Helper()
+
+	require.Truef(t, strings.HasPrefix(key, prefix+"/"), "key %s should start with prefix %s/", key, prefix)
+
+	parts := strings.Split(key, "/")
+	require.Len(t, parts, 9)
+
+	_, err := uuid.Parse(parts[7])
+	require.NoError(t, err)
+	require.Equal(t, filename, parts[8])
 }
 
 type mockClient struct {
