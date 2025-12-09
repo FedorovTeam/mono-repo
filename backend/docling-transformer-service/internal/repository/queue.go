@@ -61,6 +61,7 @@ type QueueRepository interface {
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
 	MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPollAt time.Time) error
 	ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error)
+	RestoreProcessing(ctx context.Context) (int, error)
 	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error)
 	CleanupFinished(ctx context.Context, retention time.Duration) (int, error)
 	CountByStatus(ctx context.Context) (pending, processing, waitingDocling int, err error)
@@ -304,6 +305,27 @@ func (r *PostgresQueueRepository) releaseWaiting(ctx context.Context, tx pgx.Tx,
 	}
 
 	return ready, nil
+}
+
+func (r *PostgresQueueRepository) RestoreProcessing(ctx context.Context) (int, error) {
+	const query = `
+UPDATE transformations_queue
+SET status = 'pending', started_at = NULL, next_poll_at = NULL, error = NULL
+WHERE status = 'processing'
+RETURNING 1`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("restore processing tasks: %w", err)
+	}
+	defer rows.Close()
+
+	restored, err := countRows(rows)
+	if err != nil {
+		return 0, err
+	}
+
+	return restored, nil
 }
 
 func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error) {
