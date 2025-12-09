@@ -21,5 +21,6 @@ WORKDIR /app
 
 COPY --from=builder /app/docling-transformer-service .
 COPY --from=builder /app/config/ ./config/
+COPY --from=builder /app/db/ ./db/
 
 CMD ["./docling-transformer-service", "-config", "config/config.yaml"]
