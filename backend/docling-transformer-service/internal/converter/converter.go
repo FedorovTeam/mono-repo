@@ -84,6 +84,7 @@ type Config struct {
 	APIKey             string
 	StatusPollInterval time.Duration
 	StatusPollTimeout  time.Duration
+	StatusMaxAttempts  int
 }
 
 type doclingStatusResponse struct {
@@ -110,6 +111,8 @@ type converterMetrics struct {
 
 // Converter определяет поведение конвертера документов.
 type Converter interface {
+	Submit(ctx context.Context, req DoclingConvertRequest) (string, error)
+	Poll(ctx context.Context, jobID string, pollInterval, pollTimeout time.Duration, maxAttempts int) (DoclingConvertResult, time.Duration, int, error)
 	Convert(ctx context.Context, req DoclingConvertRequest) (DoclingConvertResult, error)
 }
 
@@ -121,6 +124,7 @@ type DoclingConverter struct {
 	logger             *zap.Logger
 	statusPollInterval time.Duration
 	statusPollTimeout  time.Duration
+	statusMaxAttempts  int
 	metrics            converterMetrics
 }
 
@@ -140,6 +144,11 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		pollTimeout = defaultPollTimeout
 	}
 
+	maxAttempts := cfg.StatusMaxAttempts
+	if maxAttempts < 0 {
+		maxAttempts = 0
+	}
+
 	return &DoclingConverter{
 		endpoint: strings.TrimRight(cfg.Endpoint, "/"),
 		apiKey:   cfg.APIKey,
@@ -149,6 +158,7 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		logger:             logger,
 		statusPollInterval: pollInterval,
 		statusPollTimeout:  pollTimeout,
+		statusMaxAttempts:  maxAttempts,
 		metrics:            newConverterMetrics(logger),
 	}
 }
@@ -192,17 +202,17 @@ func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, 
 	return extensionToContentType[defaultExtension], defaultExtension, nil
 }
 
-// Convert отправляет документ в Docling через submit, затем опрашивает статус до успешного результата.
-func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertRequest) (DoclingConvertResult, error) {
+// Submit отправляет документ в Docling и возвращает идентификатор задачи.
+func (c *DoclingConverter) Submit(ctx context.Context, req DoclingConvertRequest) (string, error) {
 	if len(req.Content) == 0 {
-		return DoclingConvertResult{}, errors.New("empty document")
+		return "", errors.New("empty document")
 	}
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
 	contentType, fileExt, err := resolveContentTypeAndExt(req.ContentType, req.FileName)
 	if err != nil {
-		return DoclingConvertResult{}, err
+		return "", err
 	}
 
 	filename := req.FileName
@@ -212,7 +222,7 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 
 	jobID, err := c.submitWithRetry(ctx, correlationID, filename, contentType, req.Content)
 	if err != nil {
-		return DoclingConvertResult{}, err
+		return "", err
 	}
 
 	c.logger.Info("docling submit accepted",
@@ -220,26 +230,53 @@ func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertReques
 		zap.String("correlation_id", correlationID),
 	)
 
+	return jobID, nil
+}
+
+// Poll опрашивает статус Docling до получения результата или истечения лимитов.
+func (c *DoclingConverter) Poll(ctx context.Context, jobID string, pollInterval, pollTimeout time.Duration, maxAttempts int) (DoclingConvertResult, time.Duration, int, error) {
+	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+
 	waitStart := time.Now()
-	statusResponse, err := c.pollStatus(ctx, correlationID, jobID)
+	statusResponse, attempts, err := c.pollStatus(ctx, correlationID, jobID, pollInterval, pollTimeout, maxAttempts)
 	waitDuration := time.Since(waitStart)
 	if err != nil {
 		c.logger.Error("docling status polling failed",
 			zap.String("job_id", jobID),
 			zap.String("correlation_id", correlationID),
 			zap.Duration("wait_duration", waitDuration),
+			zap.Int("poll_attempts", attempts),
 			zap.Error(err),
 		)
-		return DoclingConvertResult{}, err
+		return DoclingConvertResult{}, waitDuration, attempts, err
 	}
 
 	c.metrics.observeWait(ctx, waitDuration, jobID)
 	c.logger.Info("docling conversion completed",
 		zap.String("job_id", jobID),
 		zap.Duration("wait_duration", waitDuration),
+		zap.Int("poll_attempts", attempts),
 	)
 
-	return buildConvertResult(statusResponse)
+	result, err := buildConvertResult(statusResponse)
+	if err != nil {
+		return DoclingConvertResult{}, waitDuration, attempts, fmt.Errorf("docling result: %w", err)
+	}
+
+	return result, waitDuration, attempts, nil
+}
+
+// Convert отправляет документ в Docling через submit, затем опрашивает статус до успешного результата с конфигурацией по умолчанию.
+func (c *DoclingConverter) Convert(ctx context.Context, req DoclingConvertRequest) (DoclingConvertResult, error) {
+	ctx, _ = telemetry.EnsureCorrelationID(ctx)
+
+	jobID, err := c.Submit(ctx, req)
+	if err != nil {
+		return DoclingConvertResult{}, err
+	}
+
+	result, _, _, err := c.Poll(ctx, jobID, c.statusPollInterval, c.statusPollTimeout, c.statusMaxAttempts)
+	return result, err
 }
 
 func (c *DoclingConverter) submitWithRetry(ctx context.Context, correlationID, filename, contentType string, content []byte) (string, error) {
@@ -333,23 +370,44 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 	return submitResp.JobID, nil
 }
 
-func (c *DoclingConverter) pollStatus(ctx context.Context, correlationID, jobID string) (doclingStatusResponse, error) {
+func (c *DoclingConverter) pollStatus(ctx context.Context, correlationID, jobID string, pollInterval, pollTimeout time.Duration, maxAttempts int) (doclingStatusResponse, int, error) {
 	if jobID == "" {
-		return doclingStatusResponse{}, errors.New("empty job id")
+		return doclingStatusResponse{}, 0, errors.New("empty job id")
+	}
+
+	normalizedInterval := pollInterval
+	if normalizedInterval <= 0 {
+		normalizedInterval = c.statusPollInterval
+	}
+	if normalizedInterval <= 0 {
+		normalizedInterval = defaultPollInterval
+	}
+
+	normalizedTimeout := pollTimeout
+	if normalizedTimeout <= 0 {
+		normalizedTimeout = c.statusPollTimeout
+	}
+
+	normalizedAttempts := maxAttempts
+	if normalizedAttempts <= 0 {
+		normalizedAttempts = c.statusMaxAttempts
+	}
+	if normalizedAttempts <= 0 {
+		normalizedAttempts = math.MaxInt32
 	}
 
 	start := time.Now()
 
-	for attempt := 1; ; attempt++ {
+	for attempt := 1; attempt <= normalizedAttempts; attempt++ {
 		statusResp, err := c.fetchStatus(ctx, correlationID, jobID)
 		if err == nil {
 			switch statusResp.Status {
 			case "success", "partial_success":
-				return statusResp, nil
+				return statusResp, attempt, nil
 			case "pending", "processing", "queued", "running":
 			// continue polling
 			default:
-				return doclingStatusResponse{}, fmt.Errorf("docling status=%s for job %s", statusResp.Status, jobID)
+				return doclingStatusResponse{}, attempt, fmt.Errorf("docling status=%s for job %s", statusResp.Status, jobID)
 			}
 		} else {
 			c.logger.Error("docling status request failed",
@@ -360,22 +418,18 @@ func (c *DoclingConverter) pollStatus(ctx context.Context, correlationID, jobID 
 		}
 
 		elapsed := time.Since(start)
-		if elapsed >= c.statusPollTimeout {
-			return doclingStatusResponse{}, fmt.Errorf("docling polling timeout for job %s", jobID)
-		}
-
-		backoff := c.statusPollInterval * time.Duration(math.Pow(2, float64(attempt-1)))
-		remaining := c.statusPollTimeout - elapsed
-		if backoff > remaining {
-			backoff = remaining
+		if elapsed >= normalizedTimeout {
+			return doclingStatusResponse{}, attempt, fmt.Errorf("docling polling timeout for job %s", jobID)
 		}
 
 		select {
 		case <-ctx.Done():
-			return doclingStatusResponse{}, ctx.Err()
-		case <-time.After(backoff):
+			return doclingStatusResponse{}, attempt, ctx.Err()
+		case <-time.After(normalizedInterval):
 		}
 	}
+
+	return doclingStatusResponse{}, normalizedAttempts, fmt.Errorf("docling polling attempts exceeded for job %s", jobID)
 }
 
 func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID string) (doclingStatusResponse, error) {

@@ -118,6 +118,21 @@ type stubConverter struct {
 	err    error
 }
 
+func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return "job-1", nil
+}
+
+func (s *stubConverter) Poll(context.Context, string, time.Duration, time.Duration, int) (converter.DoclingConvertResult, time.Duration, int, error) {
+	if s.err != nil {
+		return converter.DoclingConvertResult{}, 0, 0, s.err
+	}
+
+	return s.result, 0, 1, nil
+}
+
 func (s *stubConverter) Convert(context.Context, converter.DoclingConvertRequest) (converter.DoclingConvertResult, error) {
 	if s.err != nil {
 		return converter.DoclingConvertResult{}, s.err

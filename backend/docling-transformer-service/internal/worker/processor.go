@@ -26,6 +26,9 @@ type Config struct {
 	MaxProcessingRetries int
 	CleanupInterval      time.Duration
 	CleanupRetention     time.Duration
+	DoclingPollInterval  time.Duration
+	DoclingPollTimeout   time.Duration
+	DoclingMaxAttempts   int
 }
 
 type workerMetrics struct {
@@ -34,6 +37,8 @@ type workerMetrics struct {
 	restoredCounter metric.Int64Counter
 	rejectedCounter metric.Int64Counter
 	durationHist    metric.Float64Histogram
+	doclingWaitHist metric.Float64Histogram
+	doclingPolls    metric.Int64Histogram
 	mu              sync.Mutex
 	lastPending     int64
 	lastProcessing  int64
@@ -80,6 +85,14 @@ func newWorkerMetrics(logger *zap.Logger) *workerMetrics {
 	m.durationHist, err = meter.Float64Histogram("docling_transformer_processing_duration_ms")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create duration histogram", zap.Error(err))
+	}
+	m.doclingWaitHist, err = meter.Float64Histogram("docling_transformer_docling_wait_duration_ms")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create docling wait histogram", zap.Error(err))
+	}
+	m.doclingPolls, err = meter.Int64Histogram("docling_transformer_docling_poll_attempts")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create docling polls histogram", zap.Error(err))
 	}
 
 	if m.pendingGauge != nil && m.processingGauge != nil {
@@ -128,6 +141,22 @@ func (m *workerMetrics) recordDuration(ctx context.Context, duration time.Durati
 	}
 
 	m.durationHist.Record(ctx, float64(duration.Milliseconds()))
+}
+
+func (m *workerMetrics) recordDoclingWait(ctx context.Context, duration time.Duration) {
+	if m == nil || m.doclingWaitHist == nil {
+		return
+	}
+
+	m.doclingWaitHist.Record(ctx, float64(duration.Milliseconds()))
+}
+
+func (m *workerMetrics) recordDoclingPolls(ctx context.Context, attempts int) {
+	if m == nil || m.doclingPolls == nil {
+		return
+	}
+
+	m.doclingPolls.Record(ctx, int64(attempts))
 }
 
 func (p *Processor) Run(ctx context.Context) {
@@ -196,6 +225,13 @@ func (p *Processor) workerLoop(ctx context.Context, interval time.Duration) {
 }
 
 func (p *Processor) handleTask(ctx context.Context, task *repository.TransformationTask) error {
+	processingCtx := ctx
+	if p.cfg.ProcessingTimeout > 0 {
+		var cancel context.CancelFunc
+		processingCtx, cancel = context.WithTimeout(ctx, p.cfg.ProcessingTimeout)
+		defer cancel()
+	}
+
 	if task.MarkdownBucket == "" {
 		task.MarkdownBucket = p.cfg.MarkdownBucket
 	}
@@ -217,7 +253,7 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 		return err
 	}
 
-	originalContent, err := p.storage.Download(ctx, task.OriginalBucket, task.OriginalObjectKey)
+	originalContent, err := p.storage.Download(processingCtx, task.OriginalBucket, task.OriginalObjectKey)
 	if err != nil {
 		return fmt.Errorf("download original: %w", err)
 	}
@@ -227,25 +263,33 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 		originalFileName = fmt.Sprintf("document.%s", fileExt)
 	}
 
-	result, err := p.conv.Convert(ctx, converter.DoclingConvertRequest{
+	jobID, err := p.conv.Submit(processingCtx, converter.DoclingConvertRequest{
 		FileName:    originalFileName,
 		Content:     originalContent,
 		ContentType: contentType,
 	})
 	if err != nil {
-		return fmt.Errorf("conversion error: %w", err)
+		return fmt.Errorf("docling submit: %w", err)
 	}
+
+	result, waitDuration, pollAttempts, err := p.conv.Poll(processingCtx, jobID, p.cfg.DoclingPollInterval, p.cfg.DoclingPollTimeout, p.cfg.DoclingMaxAttempts)
+	if err != nil {
+		return fmt.Errorf("docling poll: %w", err)
+	}
+	p.metrics.recordDoclingWait(processingCtx, waitDuration)
+	p.metrics.recordDoclingPolls(processingCtx, pollAttempts)
+	p.logger.Info("docling result received", zap.String("job_id", jobID), zap.Duration("docling_wait", waitDuration), zap.Int("docling_polls", pollAttempts))
 
 	mediaType := result.MediaType
 	if mediaType == "" {
 		mediaType = "text/markdown"
 	}
 
-	if err := p.storage.Upload(ctx, task.MarkdownBucket, task.MarkdownObjectKey, mediaType, result.Content); err != nil {
+	if err := p.storage.Upload(processingCtx, task.MarkdownBucket, task.MarkdownObjectKey, mediaType, result.Content); err != nil {
 		return fmt.Errorf("upload markdown: %w", err)
 	}
 
-	if err := p.repo.MarkDone(ctx, task.ID, task.MarkdownBucket, task.MarkdownObjectKey); err != nil {
+	if err := p.repo.MarkDone(processingCtx, task.ID, task.MarkdownBucket, task.MarkdownObjectKey); err != nil {
 		return fmt.Errorf("mark done: %w", err)
 	}
 
