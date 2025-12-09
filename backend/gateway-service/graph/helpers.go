@@ -17,28 +17,42 @@ type UploadValidationConfig struct {
 	SignedURLTTLSeconds int64
 }
 
-func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadValidationConfig) error {
+func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadValidationConfig) (repository string, owner *string, err error) {
 	if strings.TrimSpace(input.FileName) == "" {
-		return errors.New("fileName is required")
+		return "", nil, errors.New("fileName is required")
 	}
-	if strings.TrimSpace(input.Repository) == "" {
-		return errors.New("repository is required")
+
+	repository = strings.TrimSpace(input.Repository)
+	if repository == "" {
+		return "", nil, errors.New("repository is required")
 	}
+
+	if strings.Contains(repository, "/") {
+		parts := strings.Split(repository, "/")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return "", nil, errors.New("repository must be in format <owner>/<repo> or <repo>")
+		}
+		normalizedOwner := strings.TrimSpace(parts[0])
+		normalizedRepo := strings.TrimSpace(parts[1])
+		repository = normalizedRepo
+		owner = &normalizedOwner
+	}
+
 	if strings.TrimSpace(input.Branch) == "" {
-		return errors.New("branch is required")
+		return "", nil, errors.New("branch is required")
 	}
 	if strings.TrimSpace(input.Path) == "" {
-		return errors.New("path is required")
+		return "", nil, errors.New("path is required")
 	}
 	if input.FileSizeBytes <= 0 {
-		return errors.New("fileSizeBytes must be positive")
+		return "", nil, errors.New("fileSizeBytes must be positive")
 	}
 	if cfg.MaxSizeBytes > 0 && int64(input.FileSizeBytes) > cfg.MaxSizeBytes {
-		return fmt.Errorf("fileSizeBytes exceeds limit %d", cfg.MaxSizeBytes)
+		return "", nil, fmt.Errorf("fileSizeBytes exceeds limit %d", cfg.MaxSizeBytes)
 	}
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(input.FileName), "."))
 	if ext == "" {
-		return errors.New("file extension is required")
+		return "", nil, errors.New("file extension is required")
 	}
 	if len(cfg.AllowedExtensions) > 0 {
 		allowed := false
@@ -49,10 +63,10 @@ func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadVal
 			}
 		}
 		if !allowed {
-			return fmt.Errorf("extension %s is not allowed", ext)
+			return "", nil, fmt.Errorf("extension %s is not allowed", ext)
 		}
 	}
-	return nil
+	return repository, owner, nil
 }
 
 func mapDocument(doc *pb.Document) *model.KnowledgeDocument {
@@ -67,6 +81,11 @@ func mapDocument(doc *pb.Document) *model.KnowledgeDocument {
 		Branch:     doc.GetBranch(),
 		Path:       doc.GetPath(),
 		Status:     modelStatusFromProto(doc.GetStatus()),
+	}
+
+	if doc.GetRepositoryOwner() != "" {
+		owner := doc.GetRepositoryOwner()
+		result.RepositoryOwner = &owner
 	}
 
 	wf := doc.GetWorkflowId()

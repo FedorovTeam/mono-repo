@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v3.21.12
-// source: backend/document/v1/document.proto
+// source: proto/backend/document/v1/document.proto
 
 package pb
 
@@ -64,11 +64,11 @@ func (x DocumentStatus) String() string {
 }
 
 func (DocumentStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_backend_document_v1_document_proto_enumTypes[0].Descriptor()
+	return file_proto_backend_document_v1_document_proto_enumTypes[0].Descriptor()
 }
 
 func (DocumentStatus) Type() protoreflect.EnumType {
-	return &file_backend_document_v1_document_proto_enumTypes[0]
+	return &file_proto_backend_document_v1_document_proto_enumTypes[0]
 }
 
 func (x DocumentStatus) Number() protoreflect.EnumNumber {
@@ -77,7 +77,7 @@ func (x DocumentStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DocumentStatus.Descriptor instead.
 func (DocumentStatus) EnumDescriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{0}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{0}
 }
 
 type Document struct {
@@ -85,6 +85,7 @@ type Document struct {
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	FileName          string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
 	Repository        string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
+	RepositoryOwner   string                 `protobuf:"bytes,15,opt,name=repository_owner,json=repositoryOwner,proto3" json:"repository_owner,omitempty"`
 	Branch            string                 `protobuf:"bytes,4,opt,name=branch,proto3" json:"branch,omitempty"`
 	Path              string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
 	Status            DocumentStatus         `protobuf:"varint,6,opt,name=status,proto3,enum=backend.document.v1.DocumentStatus" json:"status,omitempty"`
@@ -102,7 +103,7 @@ type Document struct {
 
 func (x *Document) Reset() {
 	*x = Document{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[0]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -114,7 +115,7 @@ func (x *Document) String() string {
 func (*Document) ProtoMessage() {}
 
 func (x *Document) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[0]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -127,7 +128,7 @@ func (x *Document) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Document.ProtoReflect.Descriptor instead.
 func (*Document) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{0}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Document) GetId() string {
@@ -147,6 +148,13 @@ func (x *Document) GetFileName() string {
 func (x *Document) GetRepository() string {
 	if x != nil {
 		return x.Repository
+	}
+	return ""
+}
+
+func (x *Document) GetRepositoryOwner() string {
+	if x != nil {
+		return x.RepositoryOwner
 	}
 	return ""
 }
@@ -233,6 +241,7 @@ type CreateDocumentRequest struct {
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	FileName          string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
 	Repository        string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
+	RepositoryOwner   string                 `protobuf:"bytes,12,opt,name=repository_owner,json=repositoryOwner,proto3" json:"repository_owner,omitempty"`
 	Branch            string                 `protobuf:"bytes,4,opt,name=branch,proto3" json:"branch,omitempty"`
 	Path              string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
 	CorrelationId     string                 `protobuf:"bytes,6,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
@@ -247,7 +256,7 @@ type CreateDocumentRequest struct {
 
 func (x *CreateDocumentRequest) Reset() {
 	*x = CreateDocumentRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[1]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +268,7 @@ func (x *CreateDocumentRequest) String() string {
 func (*CreateDocumentRequest) ProtoMessage() {}
 
 func (x *CreateDocumentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[1]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,7 +281,7 @@ func (x *CreateDocumentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateDocumentRequest.ProtoReflect.Descriptor instead.
 func (*CreateDocumentRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{1}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CreateDocumentRequest) GetId() string {
@@ -292,6 +301,13 @@ func (x *CreateDocumentRequest) GetFileName() string {
 func (x *CreateDocumentRequest) GetRepository() string {
 	if x != nil {
 		return x.Repository
+	}
+	return ""
+}
+
+func (x *CreateDocumentRequest) GetRepositoryOwner() string {
+	if x != nil {
+		return x.RepositoryOwner
 	}
 	return ""
 }
@@ -361,7 +377,7 @@ type GetDocumentRequest struct {
 
 func (x *GetDocumentRequest) Reset() {
 	*x = GetDocumentRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[2]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -373,7 +389,7 @@ func (x *GetDocumentRequest) String() string {
 func (*GetDocumentRequest) ProtoMessage() {}
 
 func (x *GetDocumentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[2]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -386,7 +402,7 @@ func (x *GetDocumentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDocumentRequest.ProtoReflect.Descriptor instead.
 func (*GetDocumentRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{2}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetDocumentRequest) GetId() string {
@@ -406,7 +422,7 @@ type RetryProcessingRequest struct {
 
 func (x *RetryProcessingRequest) Reset() {
 	*x = RetryProcessingRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[3]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +434,7 @@ func (x *RetryProcessingRequest) String() string {
 func (*RetryProcessingRequest) ProtoMessage() {}
 
 func (x *RetryProcessingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[3]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +447,7 @@ func (x *RetryProcessingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetryProcessingRequest.ProtoReflect.Descriptor instead.
 func (*RetryProcessingRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{3}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RetryProcessingRequest) GetId() string {
@@ -461,7 +477,7 @@ type ListDocumentsRequest struct {
 
 func (x *ListDocumentsRequest) Reset() {
 	*x = ListDocumentsRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[4]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -473,7 +489,7 @@ func (x *ListDocumentsRequest) String() string {
 func (*ListDocumentsRequest) ProtoMessage() {}
 
 func (x *ListDocumentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[4]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -486,7 +502,7 @@ func (x *ListDocumentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDocumentsRequest.ProtoReflect.Descriptor instead.
 func (*ListDocumentsRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{4}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListDocumentsRequest) GetLimit() int32 {
@@ -534,7 +550,7 @@ type ListDocumentsResponse struct {
 
 func (x *ListDocumentsResponse) Reset() {
 	*x = ListDocumentsResponse{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[5]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -546,7 +562,7 @@ func (x *ListDocumentsResponse) String() string {
 func (*ListDocumentsResponse) ProtoMessage() {}
 
 func (x *ListDocumentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[5]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -559,7 +575,7 @@ func (x *ListDocumentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDocumentsResponse.ProtoReflect.Descriptor instead.
 func (*ListDocumentsResponse) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{5}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListDocumentsResponse) GetDocuments() []*Document {
@@ -588,7 +604,7 @@ type ConfirmUploadRequest struct {
 
 func (x *ConfirmUploadRequest) Reset() {
 	*x = ConfirmUploadRequest{}
-	mi := &file_backend_document_v1_document_proto_msgTypes[6]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -600,7 +616,7 @@ func (x *ConfirmUploadRequest) String() string {
 func (*ConfirmUploadRequest) ProtoMessage() {}
 
 func (x *ConfirmUploadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_document_v1_document_proto_msgTypes[6]
+	mi := &file_proto_backend_document_v1_document_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -613,7 +629,7 @@ func (x *ConfirmUploadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfirmUploadRequest.ProtoReflect.Descriptor instead.
 func (*ConfirmUploadRequest) Descriptor() ([]byte, []int) {
-	return file_backend_document_v1_document_proto_rawDescGZIP(), []int{6}
+	return file_proto_backend_document_v1_document_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ConfirmUploadRequest) GetDocumentId() string {
@@ -644,17 +660,18 @@ func (x *ConfirmUploadRequest) GetCorrelationId() string {
 	return ""
 }
 
-var File_backend_document_v1_document_proto protoreflect.FileDescriptor
+var File_proto_backend_document_v1_document_proto protoreflect.FileDescriptor
 
-const file_backend_document_v1_document_proto_rawDesc = "" +
+const file_proto_backend_document_v1_document_proto_rawDesc = "" +
 	"\n" +
-	"\"backend/document/v1/document.proto\x12\x13backend.document.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x97\x04\n" +
+	"(proto/backend/document/v1/document.proto\x12\x13backend.document.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc2\x04\n" +
 	"\bDocument\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1e\n" +
 	"\n" +
 	"repository\x18\x03 \x01(\tR\n" +
-	"repository\x12\x16\n" +
+	"repository\x12)\n" +
+	"\x10repository_owner\x18\x0f \x01(\tR\x0frepositoryOwner\x12\x16\n" +
 	"\x06branch\x18\x04 \x01(\tR\x06branch\x12\x12\n" +
 	"\x04path\x18\x05 \x01(\tR\x04path\x12;\n" +
 	"\x06status\x18\x06 \x01(\x0e2#.backend.document.v1.DocumentStatusR\x06status\x12\x1f\n" +
@@ -669,13 +686,14 @@ const file_backend_document_v1_document_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x88\x03\n" +
+	"updated_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xb3\x03\n" +
 	"\x15CreateDocumentRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1e\n" +
 	"\n" +
 	"repository\x18\x03 \x01(\tR\n" +
-	"repository\x12\x16\n" +
+	"repository\x12)\n" +
+	"\x10repository_owner\x18\f \x01(\tR\x0frepositoryOwner\x12\x16\n" +
 	"\x06branch\x18\x04 \x01(\tR\x06branch\x12\x12\n" +
 	"\x04path\x18\x05 \x01(\tR\x04path\x12%\n" +
 	"\x0ecorrelation_id\x18\x06 \x01(\tR\rcorrelationId\x12%\n" +
@@ -724,20 +742,20 @@ const file_backend_document_v1_document_proto_rawDesc = "" +
 	"\rConfirmUpload\x12).backend.document.v1.ConfirmUploadRequest\x1a\x1d.backend.document.v1.DocumentB6Z4backend-gateway-service/proto/backend/document/v1;pbb\x06proto3"
 
 var (
-	file_backend_document_v1_document_proto_rawDescOnce sync.Once
-	file_backend_document_v1_document_proto_rawDescData []byte
+	file_proto_backend_document_v1_document_proto_rawDescOnce sync.Once
+	file_proto_backend_document_v1_document_proto_rawDescData []byte
 )
 
-func file_backend_document_v1_document_proto_rawDescGZIP() []byte {
-	file_backend_document_v1_document_proto_rawDescOnce.Do(func() {
-		file_backend_document_v1_document_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_backend_document_v1_document_proto_rawDesc), len(file_backend_document_v1_document_proto_rawDesc)))
+func file_proto_backend_document_v1_document_proto_rawDescGZIP() []byte {
+	file_proto_backend_document_v1_document_proto_rawDescOnce.Do(func() {
+		file_proto_backend_document_v1_document_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_backend_document_v1_document_proto_rawDesc), len(file_proto_backend_document_v1_document_proto_rawDesc)))
 	})
-	return file_backend_document_v1_document_proto_rawDescData
+	return file_proto_backend_document_v1_document_proto_rawDescData
 }
 
-var file_backend_document_v1_document_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_backend_document_v1_document_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
-var file_backend_document_v1_document_proto_goTypes = []any{
+var file_proto_backend_document_v1_document_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_proto_backend_document_v1_document_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_proto_backend_document_v1_document_proto_goTypes = []any{
 	(DocumentStatus)(0),            // 0: backend.document.v1.DocumentStatus
 	(*Document)(nil),               // 1: backend.document.v1.Document
 	(*CreateDocumentRequest)(nil),  // 2: backend.document.v1.CreateDocumentRequest
@@ -748,7 +766,7 @@ var file_backend_document_v1_document_proto_goTypes = []any{
 	(*ConfirmUploadRequest)(nil),   // 7: backend.document.v1.ConfirmUploadRequest
 	(*timestamppb.Timestamp)(nil),  // 8: google.protobuf.Timestamp
 }
-var file_backend_document_v1_document_proto_depIdxs = []int32{
+var file_proto_backend_document_v1_document_proto_depIdxs = []int32{
 	0,  // 0: backend.document.v1.Document.status:type_name -> backend.document.v1.DocumentStatus
 	8,  // 1: backend.document.v1.Document.created_at:type_name -> google.protobuf.Timestamp
 	8,  // 2: backend.document.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
@@ -771,27 +789,27 @@ var file_backend_document_v1_document_proto_depIdxs = []int32{
 	0,  // [0:5] is the sub-list for field type_name
 }
 
-func init() { file_backend_document_v1_document_proto_init() }
-func file_backend_document_v1_document_proto_init() {
-	if File_backend_document_v1_document_proto != nil {
+func init() { file_proto_backend_document_v1_document_proto_init() }
+func file_proto_backend_document_v1_document_proto_init() {
+	if File_proto_backend_document_v1_document_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_backend_document_v1_document_proto_rawDesc), len(file_backend_document_v1_document_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_backend_document_v1_document_proto_rawDesc), len(file_proto_backend_document_v1_document_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_backend_document_v1_document_proto_goTypes,
-		DependencyIndexes: file_backend_document_v1_document_proto_depIdxs,
-		EnumInfos:         file_backend_document_v1_document_proto_enumTypes,
-		MessageInfos:      file_backend_document_v1_document_proto_msgTypes,
+		GoTypes:           file_proto_backend_document_v1_document_proto_goTypes,
+		DependencyIndexes: file_proto_backend_document_v1_document_proto_depIdxs,
+		EnumInfos:         file_proto_backend_document_v1_document_proto_enumTypes,
+		MessageInfos:      file_proto_backend_document_v1_document_proto_msgTypes,
 	}.Build()
-	File_backend_document_v1_document_proto = out.File
-	file_backend_document_v1_document_proto_goTypes = nil
-	file_backend_document_v1_document_proto_depIdxs = nil
+	File_proto_backend_document_v1_document_proto = out.File
+	file_proto_backend_document_v1_document_proto_goTypes = nil
+	file_proto_backend_document_v1_document_proto_depIdxs = nil
 }

@@ -19,6 +19,7 @@ message Document {
   string id = 1;
   string file_name = 2;
   string repository = 3;
+  string repository_owner = 15;
   string branch = 4;
   string path = 5;
   DocumentStatus status = 6;
@@ -36,6 +37,7 @@ message CreateDocumentRequest {
   string id = 1;
   string file_name = 2;
   string repository = 3;
+  string repository_owner = 12;
   string branch = 4;
   string path = 5;
   string correlation_id = 6;

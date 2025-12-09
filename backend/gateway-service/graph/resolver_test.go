@@ -106,6 +106,9 @@ func TestUploadHappyPath(t *testing.T) {
 		if in.CorrelationId != "corr-test" {
 			t.Fatalf("correlation id not propagated")
 		}
+		if in.Repository != "repo" || in.RepositoryOwner != "org" {
+			t.Fatalf("repository parsing failed: repo=%s owner=%s", in.Repository, in.RepositoryOwner)
+		}
 		if in.ContentLength != 1024 {
 			t.Fatalf("unexpected content length: %d", in.ContentLength)
 		}
@@ -115,7 +118,7 @@ func TestUploadHappyPath(t *testing.T) {
 		if in.GetUploadBucket() != "docs" || in.GetUploadObjectKey() == "" {
 			t.Fatalf("bucket info not forwarded")
 		}
-		return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, RepositoryOwner: in.RepositoryOwner, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil }, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
 	}}
@@ -142,6 +145,12 @@ func TestUploadHappyPath(t *testing.T) {
 	if payload.UploadURL == "" || payload.UploadMethod == "" {
 		t.Fatalf("payload missing upload info: %+v", payload)
 	}
+	if payload.Document.Repository != "repo" {
+		t.Fatalf("unexpected repository in payload: %s", payload.Document.Repository)
+	}
+	if payload.Document.RepositoryOwner == nil || *payload.Document.RepositoryOwner != "org" {
+		t.Fatalf("missing repository owner in payload: %+v", payload.Document.RepositoryOwner)
+	}
 }
 
 func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
@@ -163,6 +172,9 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 		}
 		if in.GetId() != capturedDocID {
 			t.Fatalf("document id mismatch: %s vs %s", in.GetId(), capturedDocID)
+		}
+		if in.RepositoryOwner != "org" || in.Repository != "repo" {
+			t.Fatalf("repository info not normalized: %s/%s", in.RepositoryOwner, in.Repository)
 		}
 		return &pb.Document{Id: capturedDocID, WorkflowId: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
