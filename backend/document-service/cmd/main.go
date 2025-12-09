@@ -12,6 +12,7 @@ import (
 
 	"backend-document-service/db/migrations"
 	"backend-document-service/internal/config"
+	"backend-document-service/internal/grpcdial"
 	"backend-document-service/internal/observability"
 	"backend-document-service/internal/repository"
 	docservice "backend-document-service/internal/service/document"
@@ -27,7 +28,6 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
-	"google.golang.org/grpc"
 )
 
 func main() {
@@ -101,19 +101,19 @@ func main() {
 	}
 	defer temporalClient.Close()
 
-	storageConn, err := grpc.DialContext(ctx, cfg.Services.StorageService, grpc.WithInsecure())
+	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)
 	}
 	defer storageConn.Close()
 
-	transformerConn, err := grpc.DialContext(ctx, cfg.Services.TransformerService, grpc.WithInsecure())
+	transformerConn, err := grpcdial.DialContext(ctx, cfg.Services.TransformerService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("transformer client: %v", err)
 	}
 	defer transformerConn.Close()
 
-	publisherConn, err := grpc.DialContext(ctx, cfg.Services.GithubPublisherService, grpc.WithInsecure())
+	publisherConn, err := grpcdial.DialContext(ctx, cfg.Services.GithubPublisherService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("publisher client: %v", err)
 	}

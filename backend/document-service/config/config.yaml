@@ -18,6 +18,18 @@ services:
   storage_service: "storage-service.storage-service.svc.cluster.local:9090"
   transformer_service: "docling-transformer-service.docling-transformer-service.svc.cluster.local:9090"
   github_publisher_service: "github-publisher-service.github-publisher-service.svc.cluster.local:9090"
+  grpc:
+    dial_timeout: 5s
+    min_connect_timeout: 2s
+    backoff:
+      base_delay: 1s
+      multiplier: 1.6
+      jitter: 0.2
+      max_delay: 120s
+    keepalive:
+      time: 30s
+      timeout: 10s
+      permit_without_stream: true
 github:
   owner: "FedorovTeam"
   repository: "knowledge-base"
