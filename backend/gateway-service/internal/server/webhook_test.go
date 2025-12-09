@@ -81,6 +81,45 @@ func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {
 	}
 }
 
+func TestHandleStorageNotification_ConfirmUpload_URLEncodedKey(t *testing.T) {
+	docClient := &stubDocumentClient{}
+	srv := &Server{logger: zap.NewNop(), documentClient: docClient}
+
+	encodedKey := "org/project/3fa85f64-5717-4562-b3fc-2c963f66afa6%2Bv1.docx"
+	payload := map[string]any{
+		"Records": []map[string]any{
+			{
+				"s3": map[string]any{
+					"bucket": map[string]any{"name": "knowledge-docx"},
+					"object": map[string]any{
+						"key":          encodedKey,
+						"userMetadata": map[string]string{"x-amz-meta-correlation-id": "corr-2"},
+					},
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/internal/storage/uploaded", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	srv.handleStorageNotification(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, rr.Code)
+	}
+	if docClient.calls != 1 {
+		t.Fatalf("expected 1 confirm call, got %d", docClient.calls)
+	}
+	if docClient.lastRequest.GetDocumentId() != "3fa85f64-5717-4562-b3fc-2c963f66afa6+v1" {
+		t.Fatalf("unexpected document id: %s", docClient.lastRequest.GetDocumentId())
+	}
+	if docClient.lastRequest.GetObjectKey() != "org/project/3fa85f64-5717-4562-b3fc-2c963f66afa6+v1.docx" {
+		t.Fatalf("unexpected object key: %s", docClient.lastRequest.GetObjectKey())
+	}
+}
+
 func TestHandleStorageNotification_NoRecords(t *testing.T) {
 	srv := &Server{logger: zap.NewNop(), documentClient: &stubDocumentClient{}}
 	payload := map[string]any{
