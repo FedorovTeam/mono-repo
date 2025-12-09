@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"go.uber.org/zap"
@@ -326,7 +327,10 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 		return lis.Dial()
 	}
 
-	storageClient, err := storageclient.NewGRPCClient("bufnet", grpc.WithContextDialer(dialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	dialCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	storageClient, err := storageclient.NewGRPCClient(dialCtx, "bufnet", grpc.WithContextDialer(dialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("cannot create storage client: %v", err)
 	}

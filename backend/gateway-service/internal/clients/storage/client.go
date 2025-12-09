@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	"backend-gateway-service/internal/ctxutils"
@@ -22,12 +21,9 @@ type GRPCClient struct {
 	conn *grpc.ClientConn
 }
 
-// NewGRPCClient создаёт gRPC-клиент с insecure транспортом для локальной разработки.
-func NewGRPCClient(address string, opts ...grpc.DialOption) (*GRPCClient, error) {
-	if len(opts) == 0 {
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	}
-	conn, err := grpc.Dial(address, opts...)
+// NewGRPCClient создаёт gRPC-клиент с переданными настройками Dial.
+func NewGRPCClient(ctx context.Context, address string, opts ...grpc.DialOption) (*GRPCClient, error) {
+	conn, err := grpc.DialContext(ctx, address, opts...)
 	if err != nil {
 		return nil, err
 	}
