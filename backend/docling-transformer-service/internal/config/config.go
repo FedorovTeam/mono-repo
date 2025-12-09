@@ -12,14 +12,16 @@ type Config struct {
 	Service       ServiceConfig       `yaml:"service"`
 	Docling       DoclingConfig       `yaml:"docling"`
 	Minio         MinioConfig         `yaml:"minio"`
+	Postgres      PostgresConfig      `yaml:"postgres"`
 	Temporal      TemporalConfig      `yaml:"temporal"`
 	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 // ServiceConfig описывает базовые настройки сервиса.
 type ServiceConfig struct {
-	Name     string `yaml:"name"`
-	GRPCPort int    `yaml:"grpc_port"`
+	Name       string `yaml:"name"`
+	GRPCPort   int    `yaml:"grpc_port"`
+	MaxWorkers int    `yaml:"max_workers"`
 }
 
 // DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.
@@ -36,6 +38,12 @@ type MinioConfig struct {
 	Bucket    string `yaml:"bucket"`
 	Region    string `yaml:"region"`
 	UseSSL    bool   `yaml:"use_ssl"`
+}
+
+// PostgresConfig описывает параметры подключения к базе данных.
+type PostgresConfig struct {
+	DSN            string `yaml:"dsn"`
+	MaxConnections int32  `yaml:"max_connections"`
 }
 
 // TemporalConfig описывает подключение к Temporal.

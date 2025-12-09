@@ -40,6 +40,21 @@ var contentTypeToExtension = map[string]string{
 	"application/pdf": "pdf",
 }
 
+// ResolveContentTypeByExtension возвращает content-type для заданного расширения.
+func ResolveContentTypeByExtension(fileExt string) (string, error) {
+	normalized := strings.TrimPrefix(strings.ToLower(fileExt), ".")
+	if normalized == "" {
+		normalized = defaultExtension
+	}
+
+	contentType, ok := extensionToContentType[normalized]
+	if !ok {
+		return "", fmt.Errorf("unsupported file extension: %s", normalized)
+	}
+
+	return contentType, nil
+}
+
 // DoclingConvertRequest описывает входные данные для конвертации DOCX в Markdown.
 type DoclingConvertRequest struct {
 	FileName    string

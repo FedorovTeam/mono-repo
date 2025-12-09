@@ -2,35 +2,78 @@ package integration
 
 import (
 	"context"
-	"io"
-	"net"
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
+	"github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/server"
 	"github.com/mono-repo/docling-transformer-service/internal/storage"
+	"github.com/mono-repo/docling-transformer-service/internal/worker"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/test/bufconn"
 )
 
-const bufSize = 1024 * 1024
+type stubQueueRepo struct {
+	enqueueCalled []repository.EnqueueParams
+	active        int
+	enqueueErr    error
+	countErr      error
 
-type stubStorage struct {
-	download []byte
-	uploaded []byte
+	acquireTasks []*repository.TransformationTask
+	markDoneIDs  []uuid.UUID
+	markFailedID []uuid.UUID
+	markMutex    sync.Mutex
 }
 
-var _ storage.ObjectStorage = (*stubStorage)(nil)
+func (s *stubQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
+	s.enqueueCalled = append(s.enqueueCalled, params)
+	if s.enqueueErr != nil {
+		return uuid.Nil, s.enqueueErr
+	}
+	return uuid.New(), nil
+}
+
+func (s *stubQueueRepo) CountActive(context.Context) (int, error) {
+	if s.countErr != nil {
+		return 0, s.countErr
+	}
+	return s.active, nil
+}
+
+func (s *stubQueueRepo) AcquireNext(context.Context) (*repository.TransformationTask, error) {
+	if len(s.acquireTasks) == 0 {
+		return nil, nil
+	}
+
+	task := s.acquireTasks[0]
+	s.acquireTasks = s.acquireTasks[1:]
+	return task, nil
+}
+
+func (s *stubQueueRepo) MarkDone(_ context.Context, id uuid.UUID, _, _ string) error {
+	s.markMutex.Lock()
+	defer s.markMutex.Unlock()
+	s.markDoneIDs = append(s.markDoneIDs, id)
+	return nil
+}
+
+func (s *stubQueueRepo) MarkFailed(_ context.Context, id uuid.UUID, _ string) error {
+	s.markMutex.Lock()
+	defer s.markMutex.Unlock()
+	s.markFailedID = append(s.markFailedID, id)
+	return nil
+}
+
+type stubStorage struct {
+	downloadContent []byte
+	uploaded        []byte
+}
 
 func (s *stubStorage) Download(context.Context, string, string) ([]byte, error) {
-	return s.download, nil
+	return s.downloadContent, nil
 }
 
 func (s *stubStorage) Upload(_ context.Context, _, _ string, _ string, content []byte) error {
@@ -38,185 +81,112 @@ func (s *stubStorage) Upload(_ context.Context, _, _ string, _ string, content [
 	return nil
 }
 
-func TestE2EConversionAgainstDoclingStub(t *testing.T) {
-	var receivedBody []byte
-	var docling *httptest.Server
-	docling = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("Docling expects POST, got %s", r.Method)
-		}
+type stubConverter struct {
+	result converter.DoclingConvertResult
+	err    error
+}
 
-		if r.URL.Path != "/v1/convert/file" {
-			t.Fatalf("unexpected Docling path: %s", r.URL.Path)
-		}
-
-		if r.Header.Get("X-Correlation-Id") != "integration-1" {
-			t.Fatalf("Docling header mismatch: %s", r.Header.Get("X-Correlation-Id"))
-		}
-
-		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
-			t.Fatalf("Docling content-type mismatch: %s", r.Header.Get("Content-Type"))
-		}
-
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Fatalf("failed to parse multipart form: %v", err)
-		}
-
-		file, header, err := r.FormFile("files")
-		if err != nil {
-			t.Fatalf("missing files form field: %v", err)
-		}
-		defer file.Close()
-
-		if header.Filename != "file.docx" {
-			t.Fatalf("unexpected source filename: %s", header.Filename)
-		}
-
-		body, _ := io.ReadAll(file)
-		receivedBody = body
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `{"document":{"filename":"file.docx","md_content":"## converted by docling"},"status":"success","processing_time":0.2}`)
-	}))
-	defer docling.Close()
-
-	conv := converter.NewDoclingConverter(docling.URL, "", zap.NewNop())
-	memStorage := &stubStorage{download: []byte("docx stub from storage")}
-	logger := zap.NewNop()
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(grpc.UnaryInterceptor(server.LoggingInterceptor(logger)))
-	transformerv1.RegisterTransformerServiceServer(srv, server.NewTransformerAPI(conv, memStorage, "md", logger))
-
-	go func() {
-		_ = srv.Serve(lis)
-	}()
-	t.Cleanup(srv.Stop)
-
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "integration-1"))
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(_ context.Context, s string) (net.Conn, error) {
-		return lis.Dial()
-	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("failed to dial bufnet: %v", err)
+func (s *stubConverter) Convert(context.Context, converter.DoclingConvertRequest) (converter.DoclingConvertResult, error) {
+	if s.err != nil {
+		return converter.DoclingConvertResult{}, s.err
 	}
-	t.Cleanup(func() { conn.Close() })
+	return s.result, nil
+}
 
-	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
+var _ repository.QueueRepository = (*stubQueueRepo)(nil)
+var _ storage.ObjectStorage = (*stubStorage)(nil)
+var _ converter.Converter = (*stubConverter)(nil)
+
+func TestConvertDocumentQueuesTask(t *testing.T) {
+	repo := &stubQueueRepo{active: 0}
+	api := server.NewTransformerAPI(repo, "markdown-bucket", 1, zap.NewNop())
+
+	resp, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-1",
 		OriginalBucket:    "orig",
 		OriginalObjectKey: "path/file.docx",
-		MarkdownBucket:    "md",
-		MarkdownObjectKey: "dest/file.md",
-		FilenameExtension: "docx",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(receivedBody) != "docx stub from storage" {
-		t.Fatalf("unexpected body sent to docling: %s", string(receivedBody))
+	if resp.GetQueueId() == "" {
+		t.Fatalf("queue id must be returned")
 	}
 
-	if string(resp.GetMarkdownContent()) != "## converted by docling" {
-		t.Fatalf("unexpected markdown: %s", string(resp.GetMarkdownContent()))
+	if len(repo.enqueueCalled) != 1 {
+		t.Fatalf("expected single enqueue, got %d", len(repo.enqueueCalled))
 	}
 
-	if string(memStorage.uploaded) != "## converted by docling" {
-		t.Fatalf("markdown was not uploaded to storage")
+	enqueued := repo.enqueueCalled[0]
+	if enqueued.MarkdownBucket != "markdown-bucket" {
+		t.Fatalf("unexpected markdown bucket: %s", enqueued.MarkdownBucket)
+	}
+	if enqueued.MarkdownObjectKey == "" {
+		t.Fatalf("markdown key should be auto generated")
 	}
 }
 
-func TestE2EPDFConversionAgainstDoclingStub(t *testing.T) {
-	var receivedBody []byte
-	var receivedFilename, receivedContentType, receivedSourceHeader string
-	var docling *httptest.Server
-	docling = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("Docling expects POST, got %s", r.Method)
-		}
+func TestConvertDocumentResourceExhausted(t *testing.T) {
+	repo := &stubQueueRepo{active: 2}
+	api := server.NewTransformerAPI(repo, "md", 1, zap.NewNop())
 
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Fatalf("failed to parse multipart form: %v", err)
-		}
-
-		fileHeader := r.MultipartForm.File["files"][0]
-		receivedFilename = fileHeader.Filename
-		receivedContentType = fileHeader.Header.Get("Content-Type")
-		receivedSourceHeader = r.Header.Get("X-Docling-Source-Filename")
-
-		file, err := fileHeader.Open()
-		if err != nil {
-			t.Fatalf("failed to open form file: %v", err)
-		}
-		defer file.Close()
-
-		body, _ := io.ReadAll(file)
-		receivedBody = body
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `{"document":{"filename":"document.pdf","md_content":"pdf converted"},"status":"success","processing_time":0.12}`)
-	}))
-	defer docling.Close()
-
-	conv := converter.NewDoclingConverter(docling.URL, "", zap.NewNop())
-	memStorage := &stubStorage{download: []byte("pdf stub from storage")}
-	logger := zap.NewNop()
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(grpc.UnaryInterceptor(server.LoggingInterceptor(logger)))
-	transformerv1.RegisterTransformerServiceServer(srv, server.NewTransformerAPI(conv, memStorage, "md", logger))
-
-	go func() {
-		_ = srv.Serve(lis)
-	}()
-	t.Cleanup(srv.Stop)
-
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "integration-pdf"))
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(_ context.Context, s string) (net.Conn, error) {
-		return lis.Dial()
-	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("failed to dial bufnet: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-
-	client := transformerv1.NewTransformerServiceClient(conn)
-	resp, err := client.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
-		DocumentId:        "doc-pdf",
+	_, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-1",
 		OriginalBucket:    "orig",
-		OriginalObjectKey: "path/file",
-		MarkdownBucket:    "md",
-		MarkdownObjectKey: "dest/file.md",
-		FilenameExtension: "pdf",
+		OriginalObjectKey: "file.docx",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected resource exhausted error")
+	}
+}
+
+func TestWorkerProcessesTask(t *testing.T) {
+	taskID := uuid.New()
+	repo := &stubQueueRepo{
+		acquireTasks: []*repository.TransformationTask{{
+			ID:                taskID,
+			OriginalBucket:    "orig",
+			OriginalObjectKey: "path/file.docx",
+			MarkdownBucket:    "md",
+			MarkdownObjectKey: "dest/file.md",
+			FilenameExtension: "docx",
+		}},
 	}
 
-	if string(receivedBody) != "pdf stub from storage" {
-		t.Fatalf("unexpected body sent to docling: %s", string(receivedBody))
-	}
+	storage := &stubStorage{downloadContent: []byte("source")}
+	conv := &stubConverter{result: converter.DoclingConvertResult{Content: []byte("converted"), MediaType: "text/markdown"}}
 
-	if receivedFilename != "document.pdf" {
-		t.Fatalf("unexpected source filename: %s", receivedFilename)
-	}
+	processor := worker.NewProcessor(repo, conv, storage, zap.NewNop(), worker.Config{MaxWorkers: 1, PollInterval: 10 * time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	if receivedSourceHeader != "document.pdf" {
-		t.Fatalf("unexpected source header: %s", receivedSourceHeader)
-	}
+	processor.Run(ctx)
 
-	if receivedContentType != "application/pdf" {
-		t.Fatalf("unexpected content type: %s", receivedContentType)
-	}
+	assertWithin(t, time.Second, func() bool {
+		repo.markMutex.Lock()
+		defer repo.markMutex.Unlock()
+		return len(repo.markDoneIDs) == 1
+	})
 
-	if string(resp.GetMarkdownContent()) != "pdf converted" {
-		t.Fatalf("unexpected markdown: %s", string(resp.GetMarkdownContent()))
+	if string(storage.uploaded) != "converted" {
+		t.Fatalf("expected markdown to be uploaded")
 	}
+}
 
-	if string(memStorage.uploaded) != "pdf converted" {
-		t.Fatalf("markdown was not uploaded to storage")
+func assertWithin(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("condition not met within %s", timeout)
+		default:
+			if condition() {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }

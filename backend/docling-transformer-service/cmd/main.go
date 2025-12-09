@@ -8,13 +8,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/mono-repo/docling-transformer-service/internal/config"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
+	"github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/server"
 	"github.com/mono-repo/docling-transformer-service/internal/storage"
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
+	"github.com/mono-repo/docling-transformer-service/internal/worker"
 	"go.uber.org/zap"
 )
 
@@ -45,9 +48,30 @@ func main() {
 	}
 
 	storageClient := storage.NewMinioStorage(minioClient)
+	poolConfig, err := pgxpool.ParseConfig(cfg.Postgres.DSN)
+	if err != nil {
+		logger.Fatal("failed to parse postgres dsn", zap.Error(err))
+	}
+	if cfg.Postgres.MaxConnections > 0 {
+		poolConfig.MaxConns = cfg.Postgres.MaxConnections
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		logger.Fatal("failed to init postgres", zap.Error(err))
+	}
+	defer pool.Close()
+
+	queueRepo := repository.NewQueueRepository(pool)
 	conv := converter.NewDoclingConverter(cfg.Docling.Endpoint, cfg.Docling.APIKey, logger)
 
-	if err := server.Run(ctx, logger, conv, storageClient, cfg.Minio.Bucket, cfg.Service.GRPCPort, cfg.Observability); err != nil {
+	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{
+		MarkdownBucket: cfg.Minio.Bucket,
+		MaxWorkers:     cfg.Service.MaxWorkers,
+	})
+	workerProcessor.Run(ctx)
+
+	if err := server.Run(ctx, logger, queueRepo, cfg.Minio.Bucket, cfg.Service.MaxWorkers, cfg.Service.GRPCPort, cfg.Observability); err != nil {
 		logger.Fatal("server failed", zap.Error(err))
 	}
 }

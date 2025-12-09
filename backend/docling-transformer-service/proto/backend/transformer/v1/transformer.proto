@@ -18,8 +18,8 @@ message ConvertDocumentToMarkdownRequest {
 }
 
 message ConvertDocumentToMarkdownResponse {
-  bytes markdown_content = 1;
-  string media_type = 2;
+  string queue_id = 1;
+  string status = 2;
   string markdown_bucket = 3;
   string markdown_object_key = 4;
 }

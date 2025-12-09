@@ -1,6 +1,11 @@
 service:
   name: docling-transformer-service
   grpc_port: 9090
+  max_workers: 1
+
+postgres:
+  dsn: postgres://user:password@postgres:5432/docling?sslmode=disable
+  max_connections: 5
 
 docling:
   endpoint: https://docling.tech.fedorov-team.tech
