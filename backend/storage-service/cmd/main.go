@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"backend-storage-service/config"
+	"backend-storage-service/internal/observability"
 	"backend-storage-service/internal/storage"
 	"backend-storage-service/internal/transport/grpcserver"
 	storagev1 "backend-storage-service/proto/backend/storage/v1"
@@ -63,13 +63,15 @@ func main() {
 
 	log.Printf("инициализированы бакеты: docx=%s, md=%s", cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD)
 
-	grpcServer := grpc.NewServer(
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		grpc.ChainUnaryInterceptor(
-			otelgrpc.UnaryServerInterceptor(),
-			correlationLoggingInterceptor(),
-		),
-	)
+	observabilityCfg := observability.Config{
+		EnableMetrics: cfg.Observability.EnableMetrics,
+		EnableTraces:  cfg.Observability.EnableTraces,
+		EnableLogs:    cfg.Observability.EnableLogs,
+	}
+
+	observability.ConfigureProviders(observabilityCfg)
+	serverOptions := observability.GRPCServerOptions(observabilityCfg, correlationLoggingInterceptor())
+	grpcServer := grpc.NewServer(serverOptions...)
 	storagev1.RegisterStorageServiceServer(grpcServer, grpcserver.New(minioAPI, keyGenerator, cfg.Minio.Buckets.KnowledgeDocx, storageService))
 
 	listener, err := net.Listen("tcp", cfg.Service.GRPCPort)
