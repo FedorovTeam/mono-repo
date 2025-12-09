@@ -20,10 +20,13 @@ type Repository interface {
 	CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error)
 	GetDocument(ctx context.Context, id string) (*model.Document, error)
 	ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
+	CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error)
 	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
 	UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error)
 	LastNonFailedStatus(ctx context.Context, id string) (model.Status, error)
 }
+
+const startWorkflowErrorPrefix = "start workflow:"
 
 type Service struct {
 	repo                  Repository
@@ -241,7 +244,8 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		if errors.As(err, &alreadyStarted) {
 			return doc, nil
 		}
-		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, fmt.Sprintf("start workflow: %v", err), fmt.Sprintf("start workflow: %v", err), nil)
+		reason := fmt.Sprintf("%s %v", startWorkflowErrorPrefix, err)
+		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
 		return nil, fmt.Errorf("start workflow: %w", err)
 	}
 

@@ -40,6 +40,10 @@ reconciler:
   interval: 1m
   min_uploaded_age: 1m
   batch_size: 100
+workflow_retryer:
+  interval: 1m
+  batch_size: 100
+  max_attempts: 3
 observability:
   logs:
     enabled: true

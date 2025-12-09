@@ -111,12 +111,20 @@ func (r *integrationRepo) CreateDocument(context.Context, *model.Document, *mode
 	return nil, nil
 }
 
-func (r *integrationRepo) GetDocument(context.Context, string) (*model.Document, error) {
-	return nil, nil
+func (r *integrationRepo) GetDocument(_ context.Context, id string) (*model.Document, error) {
+	return &model.Document{ID: id, Status: model.StatusStoredOriginal, MarkdownBucket: "bucket", MarkdownObjectKey: "object-key", Versions: []model.DocumentVersion{{Version: 1, MarkdownObjectKey: "object-key"}}}, nil
 }
 
 func (r *integrationRepo) ListDocuments(context.Context, int, int, *model.Status) ([]model.Document, error) {
 	return nil, nil
+}
+
+func (r *integrationRepo) CountStatusLogsWithReasonPrefix(context.Context, string, model.Status, string) (int, error) {
+	return 0, nil
+}
+
+func (r *integrationRepo) LastNonFailedStatus(context.Context, string) (model.Status, error) {
+	return model.Status(""), nil
 }
 
 func (r *integrationRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {

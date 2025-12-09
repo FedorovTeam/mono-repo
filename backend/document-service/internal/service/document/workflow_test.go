@@ -36,6 +36,17 @@ func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status 
 	return nil, nil
 }
 
+func (f *fakeRepo) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+	if f.doc != nil {
+		return f.doc.Status, nil
+	}
+	return model.Status(""), nil
+}
+
 func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
 	f.lastStatus = to
 	f.lastVersion = version
@@ -99,7 +110,7 @@ func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpubli
 }
 
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &fakeRepo{doc: &model.Document{ID: "doc-1", Status: model.StatusStoredOriginal, Versions: []model.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownContent: []byte("md"), MediaType: "text/markdown", MarkdownObjectKey: "md-key"}}
 	storage := &fakeStorageClient{}
 
@@ -156,6 +167,7 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 		Branch:            "main",
 		BaseBranch:        "main",
 		Path:              "docs/doc-1.md",
+		Status:            model.StatusUploaded,
 		OriginalBucket:    "orig",
 		OriginalObjectKey: "orig/doc-1.docx",
 		MarkdownBucket:    "md",
@@ -183,7 +195,7 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 }
 
 func TestPublishMarkdownValidatesRepositoryBeforePublish(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &fakeRepo{doc: &model.Document{ID: "doc-1", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: model.StatusStoredOriginal}}
 	publisher := &trackingPublisher{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/owner/repo" {
@@ -215,7 +227,7 @@ func TestPublishMarkdownValidatesRepositoryBeforePublish(t *testing.T) {
 }
 
 func TestPublishMarkdownRejectsRepositoryWithSlash(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &fakeRepo{doc: &model.Document{ID: "doc-3", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: model.StatusStoredOriginal}}
 	publisher := &trackingPublisher{}
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +261,7 @@ func TestPublishMarkdownRejectsRepositoryWithSlash(t *testing.T) {
 }
 
 func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &fakeRepo{doc: &model.Document{ID: "doc-2", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: model.StatusStoredOriginal}}
 	publisher := &trackingPublisher{}
 	var requestedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

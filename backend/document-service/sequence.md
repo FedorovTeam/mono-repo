@@ -8,6 +8,7 @@ sequenceDiagram
     participant K as KeyManager (MinIO)
     participant R as Репозиторий (PostgreSQL)
     participant T as Temporal Client
+    participant WR as Workflow Retrier
     participant ST as storage-service
     participant TR as docling-transformer-service
     participant GP as github-publisher-service
@@ -37,6 +38,9 @@ sequenceDiagram
     alt Ошибка запуска
         S->>R: UpdateStatus Failed (reason=start workflow)
         S-->>C: Ошибка
+        WR-->>R: Периодический поиск Failed (start workflow)
+        WR->>T: Start DocumentProcessingWorkflow(ID=document_id, correlation_id=workflow_id)
+        T-->>WR: RunID сохранён в workflow_id
     else Успех запуска
         T-->>S: RunID сохранён в workflow_id
     end
