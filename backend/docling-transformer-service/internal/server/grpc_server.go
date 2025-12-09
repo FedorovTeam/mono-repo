@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"strings"
 
 	"github.com/mono-repo/docling-transformer-service/internal/config"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
-	"github.com/mono-repo/docling-transformer-service/internal/storage"
+	"github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
+	"github.com/mono-repo/docling-transformer-service/internal/transformations"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
@@ -23,15 +23,15 @@ import (
 // TransformerAPI реализует gRPC-контракт TransformerService.
 type TransformerAPI struct {
 	transformerv1.UnimplementedTransformerServiceServer
-	converter      converter.Converter
-	storage        storage.ObjectStorage
+	queueRepo      repository.QueueRepository
 	markdownBucket string
+	maxWorkers     int
 	logger         *zap.Logger
 }
 
 // NewTransformerAPI конструирует обработчик с переданным конвертером.
-func NewTransformerAPI(conv converter.Converter, storage storage.ObjectStorage, markdownBucket string, logger *zap.Logger) *TransformerAPI {
-	return &TransformerAPI{converter: conv, storage: storage, markdownBucket: markdownBucket, logger: logger}
+func NewTransformerAPI(queueRepo repository.QueueRepository, markdownBucket string, maxWorkers int, logger *zap.Logger) *TransformerAPI {
+	return &TransformerAPI{queueRepo: queueRepo, markdownBucket: markdownBucket, maxWorkers: maxWorkers, logger: logger}
 }
 
 // ConvertDocumentToMarkdown выполняет преобразование документа через конвертер.
@@ -59,81 +59,57 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		return nil, status.Error(codes.InvalidArgument, "markdown bucket is required")
 	}
 
-	fileExt := strings.TrimPrefix(strings.ToLower(req.GetFilenameExtension()), ".")
+	fileExt := transformations.NormalizeExtension(req.GetFilenameExtension())
 	if fileExt == "" {
-		fileExt = strings.TrimPrefix(strings.ToLower(filepath.Ext(req.GetOriginalObjectKey())), ".")
+		fileExt = transformations.NormalizeExtension(filepath.Ext(req.GetOriginalObjectKey()))
 	}
-
 	if fileExt == "" {
 		return nil, status.Error(codes.InvalidArgument, "file extension is required")
 	}
 
-	supportedExt := map[string]string{
-		"doc":  "application/msword",
-		"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		"pdf":  "application/pdf",
-	}
-
-	contentType, ok := supportedExt[fileExt]
-	if !ok {
+	if _, err := converter.ResolveContentTypeByExtension(fileExt); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported file extension: %s", fileExt)
-	}
-
-	originalContent, err := s.storage.Download(ctx, req.GetOriginalBucket(), req.GetOriginalObjectKey())
-	if err != nil {
-		s.logger.Error("download original failed", zap.String("correlation_id", correlationID), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "download original: %v", err)
-	}
-
-	originalFileName := filepath.Base(req.GetOriginalObjectKey())
-	if filepath.Ext(originalFileName) == "" && fileExt != "" {
-		originalFileName = fmt.Sprintf("document.%s", fileExt)
-	}
-
-	result, err := s.converter.Convert(ctx, converter.DoclingConvertRequest{
-		FileName:    originalFileName,
-		Content:     originalContent,
-		ContentType: contentType,
-	})
-	if err != nil {
-		s.logger.Error("conversion failed", zap.String("correlation_id", correlationID), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "conversion error: %v", err)
 	}
 
 	markdownKey := req.GetMarkdownObjectKey()
 	if markdownKey == "" {
-		markdownKey = buildMarkdownKey(req.GetOriginalObjectKey())
+		markdownKey = transformations.BuildMarkdownKey(req.GetOriginalObjectKey())
 	}
 
-	markdownContentType := result.MediaType
-	if markdownContentType == "" {
-		markdownContentType = "text/markdown"
+	if s.maxWorkers > 0 {
+		active, err := s.queueRepo.CountActive(ctx)
+		if err != nil {
+			s.logger.Error("count active tasks failed", zap.String("correlation_id", correlationID), zap.Error(err))
+			return nil, status.Errorf(codes.Internal, "count active tasks: %v", err)
+		}
+
+		if active >= s.maxWorkers {
+			return nil, status.Error(codes.ResourceExhausted, "no free worker slots")
+		}
 	}
 
-	if err := s.storage.Upload(ctx, markdownBucket, markdownKey, markdownContentType, result.Content); err != nil {
-		s.logger.Error("upload markdown failed", zap.String("correlation_id", correlationID), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "upload markdown: %v", err)
+	queueID, err := s.queueRepo.Enqueue(ctx, repository.EnqueueParams{
+		DocumentID:        req.GetDocumentId(),
+		OriginalBucket:    req.GetOriginalBucket(),
+		OriginalObjectKey: req.GetOriginalObjectKey(),
+		MarkdownBucket:    markdownBucket,
+		MarkdownObjectKey: markdownKey,
+		FilenameExtension: fileExt,
+	})
+	if err != nil {
+		s.logger.Error("enqueue transformation failed", zap.String("correlation_id", correlationID), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "enqueue transformation: %v", err)
 	}
 
-	s.logger.Info("ConvertDocumentToMarkdown completed", zap.String("correlation_id", correlationID), zap.String("markdown_bucket", markdownBucket), zap.String("markdown_key", markdownKey))
+	s.logger.Info("ConvertDocumentToMarkdown queued", zap.String("correlation_id", correlationID), zap.String("queue_id", queueID.String()))
 
-	return &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownContent: result.Content, MediaType: result.MediaType, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}, nil
-}
-
-func buildMarkdownKey(originalKey string) string {
-	ext := filepath.Ext(originalKey)
-	base := strings.TrimSuffix(originalKey, ext)
-	if base == "" {
-		return originalKey + ".md"
-	}
-
-	return base + ".md"
+	return &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: queueID.String(), Status: string(repository.StatusPending), MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}, nil
 }
 
 // Run запускает gRPC сервер на указанном порте.
-func Run(ctx context.Context, logger *zap.Logger, conv converter.Converter, storage storage.ObjectStorage, markdownBucket string, port int, obsCfg config.ObservabilityConfig) error {
+func Run(ctx context.Context, logger *zap.Logger, queueRepo repository.QueueRepository, markdownBucket string, maxWorkers int, port int, obsCfg config.ObservabilityConfig) error {
 	srv := newGRPCServer(logger, obsCfg)
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, storage, markdownBucket, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(queueRepo, markdownBucket, maxWorkers, logger))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {

@@ -5,9 +5,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/config"
-	"github.com/mono-repo/docling-transformer-service/internal/converter"
-	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
+	"github.com/mono-repo/docling-transformer-service/internal/repository"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -20,61 +20,47 @@ import (
 
 const bufSize = 1024 * 1024
 
-type fakeConverter struct {
-	response converter.DoclingConvertResult
-	err      error
-	ctx      context.Context
-	request  converter.DoclingConvertRequest
+type fakeQueueRepo struct {
+	enqueueCalls []repository.EnqueueParams
+	active       int
+	enqueueErr   error
+	countErr     error
+	queueID      uuid.UUID
 }
 
-func (f *fakeConverter) Convert(ctx context.Context, req converter.DoclingConvertRequest) (converter.DoclingConvertResult, error) {
-	f.ctx = ctx
-	f.request = req
-	return f.response, f.err
-}
-
-type fakeStorage struct {
-	downloadContent []byte
-	downloadErr     error
-	uploadErr       error
-
-	downloadedBucket string
-	downloadedKey    string
-	uploadedBucket   string
-	uploadedKey      string
-	uploadedType     string
-	uploadedContent  []byte
-}
-
-func (f *fakeStorage) Download(_ context.Context, bucket, objectKey string) ([]byte, error) {
-	f.downloadedBucket = bucket
-	f.downloadedKey = objectKey
-	if f.downloadErr != nil {
-		return nil, f.downloadErr
+func (f *fakeQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
+	f.enqueueCalls = append(f.enqueueCalls, params)
+	if f.enqueueErr != nil {
+		return uuid.Nil, f.enqueueErr
 	}
-	return f.downloadContent, nil
+	if f.queueID == uuid.Nil {
+		f.queueID = uuid.New()
+	}
+	return f.queueID, nil
 }
 
-func (f *fakeStorage) Upload(_ context.Context, bucket, objectKey, contentType string, content []byte) error {
-	f.uploadedBucket = bucket
-	f.uploadedKey = objectKey
-	f.uploadedType = contentType
-	f.uploadedContent = content
-	return f.uploadErr
+func (f *fakeQueueRepo) CountActive(context.Context) (int, error) {
+	if f.countErr != nil {
+		return 0, f.countErr
+	}
+	return f.active, nil
 }
 
-func TestConvertDocumentToMarkdown(t *testing.T) {
-	conv := &fakeConverter{response: converter.DoclingConvertResult{Content: []byte("markdown"), MediaType: "text/markdown"}}
-	storage := &fakeStorage{downloadContent: []byte("docx bytes")}
+func (*fakeQueueRepo) AcquireNext(context.Context) (*repository.TransformationTask, error) {
+	return nil, nil
+}
+func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
+func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
+
+func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
+	repo := &fakeQueueRepo{queueID: uuid.New()}
 	logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
 	srv := newGRPCServer(logger, config.ObservabilityConfig{LoggingEnabled: true})
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, storage, "markdown-bucket", logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "markdown-bucket", 2, logger))
 
-	go func() {
-		_ = srv.Serve(lis)
-	}()
+	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-123"))
@@ -91,56 +77,42 @@ func TestConvertDocumentToMarkdown(t *testing.T) {
 		DocumentId:        "doc-123",
 		OriginalBucket:    "bucket-orig",
 		OriginalObjectKey: "path/file.docx",
-		MarkdownBucket:    "markdown-bucket",
 		MarkdownObjectKey: "md/file.md",
-		FilenameExtension: ".docx",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(resp.GetMarkdownContent()) != "markdown" {
-		t.Fatalf("unexpected markdown: %s", string(resp.GetMarkdownContent()))
+	if resp.GetQueueId() != repo.queueID.String() {
+		t.Fatalf("unexpected queue id: %s", resp.GetQueueId())
 	}
 
-	if resp.GetMediaType() != "text/markdown" {
-		t.Fatalf("unexpected media type: %s", resp.GetMediaType())
+	if resp.GetStatus() != string(repository.StatusPending) {
+		t.Fatalf("unexpected status: %s", resp.GetStatus())
 	}
 
-	if storage.downloadedBucket != "bucket-orig" || storage.downloadedKey != "path/file.docx" {
-		t.Fatalf("unexpected download args: %s %s", storage.downloadedBucket, storage.downloadedKey)
+	if len(repo.enqueueCalls) != 1 {
+		t.Fatalf("expected enqueue to be called once, got %d", len(repo.enqueueCalls))
 	}
 
-	if storage.uploadedBucket != "markdown-bucket" || storage.uploadedKey != "md/file.md" {
-		t.Fatalf("unexpected upload args: %s %s", storage.uploadedBucket, storage.uploadedKey)
+	enqueued := repo.enqueueCalls[0]
+	if enqueued.MarkdownBucket != "markdown-bucket" {
+		t.Fatalf("markdown bucket fallback not applied: %s", enqueued.MarkdownBucket)
 	}
-
-	corrID := telemetry.CorrelationIDFromContext(conv.ctx)
-	if corrID != "corr-123" {
-		t.Fatalf("correlation id not propagated, got %s", corrID)
-	}
-
-	if conv.request.ContentType != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
-		t.Fatalf("unexpected content type: %s", conv.request.ContentType)
-	}
-
-	if conv.request.FileName != "file.docx" {
-		t.Fatalf("unexpected filename: %s", conv.request.FileName)
+	if enqueued.MarkdownObjectKey != "md/file.md" {
+		t.Fatalf("markdown key mismatch: %s", enqueued.MarkdownObjectKey)
 	}
 }
 
 func TestConvertDocumentToMarkdownValidation(t *testing.T) {
-	conv := &fakeConverter{response: converter.DoclingConvertResult{Content: []byte("markdown")}}
-	storage := &fakeStorage{downloadContent: []byte("docx bytes")}
+	repo := &fakeQueueRepo{}
 	logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
-	srv := newGRPCServer(logger, config.ObservabilityConfig{LoggingEnabled: true})
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(conv, storage, "md", logger))
+	srv := newGRPCServer(logger, config.ObservabilityConfig{})
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 1, logger))
 
-	go func() {
-		_ = srv.Serve(lis)
-	}()
+	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 
 	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(_ context.Context, s string) (net.Conn, error) {
@@ -158,14 +130,14 @@ func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 		t.Fatalf("expected invalid argument, got %v", err)
 	}
 
+	repo.active = 2
 	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-123",
 		OriginalBucket:    "bucket",
-		OriginalObjectKey: "file.txt",
-		MarkdownBucket:    "md",
+		OriginalObjectKey: "file.docx",
 	})
 
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("expected invalid argument for unsupported extension, got %v", err)
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("expected resource exhausted, got %v", err)
 	}
 }
