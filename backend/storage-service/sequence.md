@@ -17,7 +17,7 @@ sequenceDiagram
     Storage->>Storage: validate filename_extension и content
     Storage->>MinIO: BucketExists(knowledge-original)
     MinIO-->>Storage: exists
-    Storage->>Storage: BuildKey(org/<org>/project/<project>/year=YYYY/month=MM/day=DD/<document_id>.<ext>)
+    Storage->>Storage: BuildKey(org/<org>/project/<project>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>)
     Storage->>MinIO: PutObject(bucket=knowledge-original, key, ContentType=по расширению)
     MinIO-->>Storage: OK
     Storage-->>Client: bucket/key, created_at (+ response metadata: correlation-id, org-slug, project-slug)
@@ -29,7 +29,7 @@ sequenceDiagram
     Storage->>Storage: validate content
     Storage->>MinIO: BucketExists(knowledge-md)
     MinIO-->>Storage: exists
-    Storage->>Storage: BuildKey(org/<org>/project/<project>/year=YYYY/month=MM/day=DD/<document_id>.md)
+    Storage->>Storage: BuildKey(org/<org>/project/<project>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.md)
     Storage->>MinIO: PutObject(bucket=knowledge-md, key, ContentType=text/markdown)
     MinIO-->>Storage: OK
     Storage-->>Client: bucket/key, created_at (+ response metadata)
@@ -45,7 +45,7 @@ sequenceDiagram
     %% GenerateUploadURL
     Client->>Storage: GenerateUploadURL(document_id, file_name, content_length, expires_in_seconds, correlation_id?)
     Storage->>Storage: validate content_length > 0, expires_in_seconds > 0, ext ∈ {doc, docx, pdf}
-    Storage->>Storage: BuildKey(default org/project, document_id, ext)
+    Storage->>Storage: BuildKey(default org/project, document_id, ext) // с uuid сегментом
     Storage->>MinIO: BucketExists(uploadBucket)
     MinIO-->>Storage: exists
     Storage->>MinIO: PresignHeader(PUT, bucket=uploadBucket, key, expires, x-amz-meta-correlation-id?)

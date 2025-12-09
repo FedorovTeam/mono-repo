@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/stretchr/testify/require"
@@ -103,14 +105,20 @@ func TestObjectKeyGenerator_BuildKey(t *testing.T) {
 	}
 
 	generator := NewObjectKeyGenerator(now)
+	generator.newUUID = func() uuid.UUID {
+		return uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")
+	}
 	key, err := generator.BuildKey("acme", "knowledge", "doc-42", ".docx")
 	require.NoError(t, err)
-	require.Equal(t, "org/acme/project/knowledge/year=2025/month=01/day=02/doc-42.docx", key)
+	require.Equal(t, "org/acme/project/knowledge/year=2025/month=01/day=02/123e4567-e89b-12d3-a456-426614174000/doc-42.docx", key)
 }
 
 func TestService_UploadAndDownload(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := NewObjectKeyGenerator(func() time.Time { return time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC) })
+	generator.newUUID = func() uuid.UUID {
+		return uuid.MustParse("123e4567-e89b-12d3-a456-426614174001")
+	}
 	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
 
 	ctx := context.Background()
@@ -119,7 +127,9 @@ func TestService_UploadAndDownload(t *testing.T) {
 	originalLocation, err := svc.UploadOriginal(ctx, "org", "proj", "id-1", "docx", originalContent)
 	require.NoError(t, err)
 
-	require.Contains(t, originalLocation.Key, "org/org/project/proj/year=2024/month=12/day=31/id-1.docx")
+	require.Equal(t, "org/org/project/proj/year=2024/month=12/day=31/123e4567-e89b-12d3-a456-426614174001/id-1.docx", originalLocation.Key)
+	_, err = uuid.Parse(strings.Split(originalLocation.Key, "/")[7])
+	require.NoError(t, err)
 	require.Equal(t, "knowledge-original", originalLocation.Bucket)
 	require.Equal(t, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", client.lastPutOpts.ContentType)
 
@@ -127,7 +137,9 @@ func TestService_UploadAndDownload(t *testing.T) {
 	mdLocation, err := svc.UploadMarkdown(ctx, "org", "proj", "id-1", markdownContent)
 	require.NoError(t, err)
 
-	require.Contains(t, mdLocation.Key, "org/org/project/proj/year=2024/month=12/day=31/id-1.md")
+	require.Equal(t, "org/org/project/proj/year=2024/month=12/day=31/123e4567-e89b-12d3-a456-426614174001/id-1.md", mdLocation.Key)
+	_, err = uuid.Parse(strings.Split(mdLocation.Key, "/")[7])
+	require.NoError(t, err)
 	require.Equal(t, "knowledge-md", mdLocation.Bucket)
 	require.Equal(t, "text/markdown", client.lastPutOpts.ContentType)
 

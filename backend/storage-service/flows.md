@@ -5,7 +5,7 @@
      `org-slug` и `project-slug`, а при их отсутствии используются дефолты `knowledge`/`documents`), document_id, расширение и
      байты файла.
    - Service валидирует наличие document_id, расширения и содержимого, генерирует ключ по шаблону
-     `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` и пишет объект в приватный бакет
+     `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>` и пишет объект в приватный бакет
      `knowledge-original` (или иной бакет из конфигурации, если он указан в секции `minio.buckets.knowledge_docx`).
    - Возвращается bucket/key и timestamp загрузки; в заголовок ответа добавляются `x-correlation-id`, `org-slug` и
      `project-slug` из запроса/метаданных.
@@ -29,7 +29,7 @@
      опциональный correlation_id.
    - Сервис валидирует параметры, проверяет, что расширение файла входит в список `doc`, `docx`, `pdf`, и убеждается в
      доступности бакета загрузки (`events.upload_bucket` или `knowledge-original`).
-   - Генерируется ключ по стандартному шаблону и подписывается URL MinIO с заголовком `x-amz-meta-correlation-id` для
+   - Генерируется ключ по стандартному шаблону с промежуточным UUID-сегментом и подписывается URL MinIO с заголовком `x-amz-meta-correlation-id` для
      сохранения трассировки загрузки.
    - В ответе возвращаются upload_url, bucket, object_key и время жизни ссылки, а также служебные заголовки с correlation_id и
      slug’ами по умолчанию (`knowledge`/`documents`).

@@ -3,7 +3,7 @@
 ## 1. Загрузка оригинала от gateway-service
 - gateway-service принимает исходный файл (doc/docx/pdf) и вызывает `UploadOriginal`.
 - `org_slug` / `project_slug` берутся из запроса или gRPC метаданных, по умолчанию `knowledge/documents`.
-- Ключ формируется по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` и кладётся в приватный бакет `knowledge-original`.
+- Ключ формируется по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>` и кладётся в приватный бакет `knowledge-original`.
 - В ответ возвращаются `bucket`/`object_key` и выставляется `x-correlation-id` в gRPC-хедерах для трассировки.
 
 ## 2. Сохранение Markdown после конвертации
