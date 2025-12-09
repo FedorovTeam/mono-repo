@@ -2,17 +2,17 @@
 
 ```mermaid
 graph LR
+    GW[Gateway / Workflows clients] -->|gRPC :service.grpc_port (9090 по умолчанию)| TR[docling-transformer-service]
     subgraph App
-        TR[docling-transformer-service]
+        TR
     end
-    TR -->|gRPC 9092| GW[Gateway/Workflows]
-    TR -->|HTTP /convert\nX-Correlation-Id| DL[Docling Wrapper]
-    TR -->|S3 API| MN[(MinIO bucket docling-transformations)]
-    TR -->|Client| TMP[Temporal Cloud]
-    TR -->|Logs/Tracing/metrics\nwhen enabled| OBS[OTel Collector]
+    TR -->|HTTP POST /convert\nX-Correlation-Id, X-Docling-Source-Filename| DL[Docling Wrapper]
+    TR -->|S3 API download/upload| MN[(MinIO buckets: original* / docling-transformations)]
+    TR -->|OTLP (traces/metrics/logs)\nкогда включено| OBS[OTel Collector]
 ```
 
-- gRPC порт читается из `service.grpc_port`.
-- MinIO/Temporal подключаются как внешние управляемые сервисы, параметры лежат в `config.yaml`.
-- Все вызовы содержат `X-Correlation-Id` для трассировки в логах/метриках.
+- gRPC сервер слушает порт из `service.grpc_port` (в `config/config.yaml` по умолчанию `9090`).
+- Docling вызывается по HTTP `POST` на `/convert` с прокидыванием `X-Correlation-Id` и исходного имени файла (`X-Docling-Source-Filename`).
+- MinIO используется для скачивания оригинала (bucket передаётся в gRPC-запросе) и загрузки Markdown в bucket по умолчанию `docling-transformations` из настроек.
+- Параметры Temporal присутствуют в конфигурации для клиента, но сервис пока не устанавливает подключение.
 - Трассировка, метрики и логирование активируются флагами `observability.tracingEnabled`, `observability.metricsEnabled`, `observability.loggingEnabled`; при выключении соответствующие провайдеры и middleware не поднимаются.
