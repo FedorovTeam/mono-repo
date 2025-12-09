@@ -30,7 +30,7 @@ go test ./...
 ```
 
 ## Интеграции и зависимости
-- **Docling**: HTTP POST `/convert` на `docling.endpoint`, на вход сырые байты DOCX, на выход — Markdown.
+- **Docling**: HTTP POST `/v1/convert/file` на `docling.endpoint`, тело — `multipart/form-data` с полем `files[]`, заголовки `X-Correlation-Id` и опционально `X-Api-Key`; в ответе JSON c `document.md_content`.
 - **MinIO**: планируется для хранения исходников и результата (bucket `docling-transformations`).
 - **Temporal**: подключение как клиент к namespace `knowledge-base`.
 

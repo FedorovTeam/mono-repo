@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
@@ -45,7 +46,7 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 			t.Fatalf("Docling expects POST, got %s", r.Method)
 		}
 
-		if r.URL.Path != "/convert" {
+		if r.URL.Path != "/v1/convert/file" {
 			t.Fatalf("unexpected Docling path: %s", r.URL.Path)
 		}
 
@@ -53,26 +54,33 @@ func TestE2EConversionAgainstDoclingStub(t *testing.T) {
 			t.Fatalf("Docling header mismatch: %s", r.Header.Get("X-Correlation-Id"))
 		}
 
-		if r.Header.Get("X-Docling-Endpoint") != docling.URL {
-			t.Fatalf("Docling endpoint header missing: %s", r.Header.Get("X-Docling-Endpoint"))
-		}
-
-		if r.Header.Get("Content-Type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 			t.Fatalf("Docling content-type mismatch: %s", r.Header.Get("Content-Type"))
 		}
 
-		if source := r.Header.Get("X-Docling-Source-Filename"); source != "file.docx" {
-			t.Fatalf("unexpected source filename header: %s", source)
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("failed to parse multipart form: %v", err)
 		}
 
-		body, _ := io.ReadAll(r.Body)
+		file, header, err := r.FormFile("files")
+		if err != nil {
+			t.Fatalf("missing files form field: %v", err)
+		}
+		defer file.Close()
+
+		if header.Filename != "file.docx" {
+			t.Fatalf("unexpected source filename: %s", header.Filename)
+		}
+
+		body, _ := io.ReadAll(file)
 		receivedBody = body
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("## converted by docling"))
+		_, _ = io.WriteString(w, `{"document":{"filename":"file.docx","md_content":"## converted by docling"},"status":"success","processing_time":0.2}`)
 	}))
 	defer docling.Close()
 
-	conv := converter.NewDoclingConverter(docling.URL, zap.NewNop())
+	conv := converter.NewDoclingConverter(docling.URL, "", zap.NewNop())
 	memStorage := &stubStorage{download: []byte("docx stub from storage")}
 	logger := zap.NewNop()
 
