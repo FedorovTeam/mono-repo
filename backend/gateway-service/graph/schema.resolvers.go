@@ -21,7 +21,8 @@ import (
 
 // UploadKnowledgeDocument is the resolver for the uploadKnowledgeDocument field.
 func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input model.UploadKnowledgeDocumentInput) (*model.UploadKnowledgeDocumentPayload, error) {
-	if err := validateUploadInput(input, r.UploadConfig); err != nil {
+	repo, owner, err := validateUploadInput(input, r.UploadConfig)
+	if err != nil {
 		return nil, err
 	}
 
@@ -45,17 +46,24 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		return nil, fmt.Errorf("cannot generate upload url: %w", err)
 	}
 
-	created, err := r.DocumentClient.CreateDocument(ctx, &pb.CreateDocumentRequest{
+	req := &pb.CreateDocumentRequest{
 		Id:              documentID,
 		FileName:        input.FileName,
-		Repository:      input.Repository,
+		Repository:      repo,
+		RepositoryOwner: "",
 		Branch:          input.Branch,
 		Path:            input.Path,
 		CorrelationId:   correlationID,
 		ContentLength:   int64(input.FileSizeBytes),
 		UploadBucket:    uploadURL.GetBucket(),
 		UploadObjectKey: uploadURL.GetObjectKey(),
-	})
+	}
+
+	if owner != nil {
+		req.RepositoryOwner = *owner
+	}
+
+	created, err := r.DocumentClient.CreateDocument(ctx, req)
 	if err != nil {
 		logger.Error("failed to create document", zap.Error(err))
 		return nil, fmt.Errorf("cannot create document: %w", err)

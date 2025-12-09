@@ -10,14 +10,17 @@ import (
 )
 
 type KnowledgeDocument struct {
-	ID         string                  `json:"id"`
-	FileName   string                  `json:"fileName"`
-	Repository string                  `json:"repository"`
-	Branch     string                  `json:"branch"`
-	Path       string                  `json:"path"`
-	Status     KnowledgeDocumentStatus `json:"status"`
-	WorkflowID *string                 `json:"workflowId,omitempty"`
-	Error      *string                 `json:"error,omitempty"`
+	ID       string `json:"id"`
+	FileName string `json:"fileName"`
+	// Имя репозитория без владельца.
+	Repository string `json:"repository"`
+	// Владелец репозитория, если он был указан при загрузке.
+	RepositoryOwner *string                 `json:"repositoryOwner,omitempty"`
+	Branch          string                  `json:"branch"`
+	Path            string                  `json:"path"`
+	Status          KnowledgeDocumentStatus `json:"status"`
+	WorkflowID      *string                 `json:"workflowId,omitempty"`
+	Error           *string                 `json:"error,omitempty"`
 }
 
 type KnowledgeDocumentConnection struct {
@@ -46,9 +49,10 @@ type Query struct {
 type UploadKnowledgeDocumentInput struct {
 	FileName      string `json:"fileName"`
 	FileSizeBytes int    `json:"fileSizeBytes"`
-	Repository    string `json:"repository"`
-	Branch        string `json:"branch"`
-	Path          string `json:"path"`
+	// Имя репозитория GitHub: допускается `<repo>` или `<owner>/<repo>`.
+	Repository string `json:"repository"`
+	Branch     string `json:"branch"`
+	Path       string `json:"path"`
 }
 
 type UploadKnowledgeDocumentPayload struct {

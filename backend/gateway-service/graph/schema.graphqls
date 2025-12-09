@@ -28,7 +28,10 @@ type KnowledgeDocumentConnection {
 type KnowledgeDocument {
   id: ID!
   fileName: String!
+  """Имя репозитория без владельца."""
   repository: String!
+  """Владелец репозитория, если он был указан при загрузке."""
+  repositoryOwner: String
   branch: String!
   path: String!
   status: KnowledgeDocumentStatus!
@@ -47,6 +50,7 @@ enum KnowledgeDocumentStatus {
 input UploadKnowledgeDocumentInput {
   fileName: String!
   fileSizeBytes: Int!
+  """Имя репозитория GitHub: допускается `<repo>` или `<owner>/<repo>`."""
   repository: String!
   branch: String!
   path: String!

@@ -47,14 +47,15 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	KnowledgeDocument struct {
-		Branch     func(childComplexity int) int
-		Error      func(childComplexity int) int
-		FileName   func(childComplexity int) int
-		ID         func(childComplexity int) int
-		Path       func(childComplexity int) int
-		Repository func(childComplexity int) int
-		Status     func(childComplexity int) int
-		WorkflowID func(childComplexity int) int
+		Branch          func(childComplexity int) int
+		Error           func(childComplexity int) int
+		FileName        func(childComplexity int) int
+		ID              func(childComplexity int) int
+		Path            func(childComplexity int) int
+		Repository      func(childComplexity int) int
+		RepositoryOwner func(childComplexity int) int
+		Status          func(childComplexity int) int
+		WorkflowID      func(childComplexity int) int
 	}
 
 	KnowledgeDocumentConnection struct {
@@ -143,6 +144,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.Repository(childComplexity), true
+	case "KnowledgeDocument.repositoryOwner":
+		if e.complexity.KnowledgeDocument.RepositoryOwner == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.RepositoryOwner(childComplexity), true
 	case "KnowledgeDocument.status":
 		if e.complexity.KnowledgeDocument.Status == nil {
 			break
@@ -372,7 +379,10 @@ type KnowledgeDocumentConnection {
 type KnowledgeDocument {
   id: ID!
   fileName: String!
+  """Имя репозитория без владельца."""
   repository: String!
+  """Владелец репозитория, если он был указан при загрузке."""
+  repositoryOwner: String
   branch: String!
   path: String!
   status: KnowledgeDocumentStatus!
@@ -391,6 +401,7 @@ enum KnowledgeDocumentStatus {
 input UploadKnowledgeDocumentInput {
   fileName: String!
   fileSizeBytes: Int!
+  """Имя репозитория GitHub: допускается ` + "`" + `<repo>` + "`" + ` или ` + "`" + `<owner>/<repo>` + "`" + `."""
   repository: String!
   branch: String!
   path: String!
@@ -612,6 +623,35 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_repository(_ context.
 	return fc, nil
 }
 
+func (ec *executionContext) _KnowledgeDocument_repositoryOwner(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_KnowledgeDocument_repositoryOwner,
+		func(ctx context.Context) (any, error) {
+			return obj.RepositoryOwner, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeDocument_repositoryOwner(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeDocument",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _KnowledgeDocument_branch(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -787,6 +827,8 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_fileName(ctx, field)
 			case "repository":
 				return ec.fieldContext_KnowledgeDocument_repository(ctx, field)
+			case "repositoryOwner":
+				return ec.fieldContext_KnowledgeDocument_repositoryOwner(ctx, field)
 			case "branch":
 				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
 			case "path":
@@ -913,6 +955,8 @@ func (ec *executionContext) fieldContext_Mutation_retryProcessing(ctx context.Co
 				return ec.fieldContext_KnowledgeDocument_fileName(ctx, field)
 			case "repository":
 				return ec.fieldContext_KnowledgeDocument_repository(ctx, field)
+			case "repositoryOwner":
+				return ec.fieldContext_KnowledgeDocument_repositoryOwner(ctx, field)
 			case "branch":
 				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
 			case "path":
@@ -972,6 +1016,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_fileName(ctx, field)
 			case "repository":
 				return ec.fieldContext_KnowledgeDocument_repository(ctx, field)
+			case "repositoryOwner":
+				return ec.fieldContext_KnowledgeDocument_repositoryOwner(ctx, field)
 			case "branch":
 				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
 			case "path":
@@ -1185,6 +1231,8 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_fileName(ctx, field)
 			case "repository":
 				return ec.fieldContext_KnowledgeDocument_repository(ctx, field)
+			case "repositoryOwner":
+				return ec.fieldContext_KnowledgeDocument_repositoryOwner(ctx, field)
 			case "branch":
 				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
 			case "path":
@@ -2870,6 +2918,8 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "repositoryOwner":
+			out.Values[i] = ec._KnowledgeDocument_repositoryOwner(ctx, field, obj)
 		case "branch":
 			out.Values[i] = ec._KnowledgeDocument_branch(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
