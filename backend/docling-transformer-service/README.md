@@ -7,7 +7,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - Проверка на переполнение слотов (`service.max_workers`): при превышении лимита задач в статусах `pending`/`processing` возвращается gRPC код `ResourceExhausted`.
 - HTTP-запрос к Docling-конвертеру выполняется воркером в фоне; результат сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
 - Проксирование correlation-id во все внешние вызовы (Docling, MinIO) из воркера.
-- Очередь хранится в PostgreSQL, схема создаётся через миграции `db/migrations/001_create_transformations_queue.sql`–`db/migrations/003_add_docling_fields.sql` и применяется автоматически при старте сервиса.
+- Очередь хранится в PostgreSQL, схема создаётся через миграции `db/migrations/ и применяется автоматически при старте сервиса.
 - Настройки Docling, MinIO, PostgreSQL и наблюдаемости в одном конфигурационном файле.
 - Unit-тесты покрывают постановку задач в очередь и работу воркера.
 
