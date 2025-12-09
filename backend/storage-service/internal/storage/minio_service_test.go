@@ -109,9 +109,9 @@ func TestObjectKeyGenerator_BuildKey(t *testing.T) {
 }
 
 func TestService_UploadAndDownload(t *testing.T) {
-	client := newMockClient("knowledge-docx", "knowledge-md")
+	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := NewObjectKeyGenerator(func() time.Time { return time.Date(2024, 12, 31, 0, 0, 0, 0, time.UTC) })
-	svc := NewService(client, generator, "knowledge-docx", "knowledge-md")
+	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
 
 	ctx := context.Background()
 	originalContent := []byte("original-bytes")
@@ -120,7 +120,7 @@ func TestService_UploadAndDownload(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Contains(t, originalLocation.Key, "org/org/project/proj/year=2024/month=12/day=31/id-1.docx")
-	require.Equal(t, "knowledge-docx", originalLocation.Bucket)
+	require.Equal(t, "knowledge-original", originalLocation.Bucket)
 	require.Equal(t, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", client.lastPutOpts.ContentType)
 
 	markdownContent := []byte("markdown")
@@ -137,18 +137,18 @@ func TestService_UploadAndDownload(t *testing.T) {
 }
 
 func TestService_ErrorsOnMissingBucket(t *testing.T) {
-	client := newMockClient("knowledge-docx")
+	client := newMockClient("knowledge-original")
 	generator := NewObjectKeyGenerator(time.Now)
-	svc := NewService(client, generator, "knowledge-docx", "knowledge-md")
+	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
 
 	_, err := svc.UploadMarkdown(context.Background(), "org", "proj", "id-1", []byte("md"))
 	require.Error(t, err)
 }
 
 func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
-	client := newMockClient("knowledge-docx")
+	client := newMockClient("knowledge-original")
 	generator := NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
-	svc := NewService(client, generator, "knowledge-docx", "knowledge-md")
+	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
 
 	ctx := context.Background()
 
@@ -162,18 +162,18 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 		ExpiresInSeconds: 600,
 	}
 
-	resp, err := svc.GenerateUploadURL(ctx, "knowledge-docx", params)
+	resp, err := svc.GenerateUploadURL(ctx, "knowledge-original", params)
 	require.NoError(t, err)
-	require.Equal(t, "knowledge-docx", resp.Bucket)
+	require.Equal(t, "knowledge-original", resp.Bucket)
 	require.Contains(t, resp.ObjectKey, "doc-1.docx")
 	require.Equal(t, int64(600), resp.ExpiresInSeconds)
 	require.Equal(t, "http://example.com/presigned", resp.UploadURL.String())
 	require.Equal(t, "corr-1", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
 
-	_, err = svc.GenerateUploadURL(ctx, "knowledge-docx", GenerateUploadURLParams{})
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{})
 	require.ErrorIs(t, err, ErrInvalidArgument)
 
-	_, err = svc.GenerateUploadURL(ctx, "knowledge-docx", GenerateUploadURLParams{
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{
 		DocumentID:       "doc-1",
 		FileName:         "unsafe.exe",
 		ContentLength:    10,
@@ -181,7 +181,7 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrInvalidArgument)
 
-	_, err = svc.GenerateUploadURL(ctx, "knowledge-docx", GenerateUploadURLParams{
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{
 		DocumentID:       "doc-1",
 		FileName:         "demo.pdf",
 		ContentLength:    -1,

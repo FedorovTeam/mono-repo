@@ -3,7 +3,7 @@
 ## 1. Загрузка оригинала от gateway-service
 - gateway-service принимает исходный файл (doc/docx/pdf) и вызывает `UploadOriginal`.
 - `org_slug` / `project_slug` берутся из запроса или gRPC метаданных, по умолчанию `knowledge/documents`.
-- Ключ формируется по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` и кладётся в приватный бакет `knowledge-docx`.
+- Ключ формируется по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` и кладётся в приватный бакет `knowledge-original`.
 - В ответ возвращаются `bucket`/`object_key` и выставляется `x-correlation-id` в gRPC-хедерах для трассировки.
 
 ## 2. Сохранение Markdown после конвертации
@@ -18,7 +18,7 @@
 ## 4. Предоставление presigned PUT для прямой загрузки
 - Для загрузки напрямую в MinIO вызывается `GenerateUploadURL`.
 - Разрешены только расширения `doc`, `docx`, `pdf`; длина содержимого и срок действия ссылки должны быть больше нуля.
-- Ссылка подписывается для бакета из конфигурации `events.upload_bucket` (по умолчанию `knowledge-docx`), ключ строится по стандартному шаблону и содержит `x-amz-meta-correlation-id`.
+- Ссылка подписывается для бакета из конфигурации `events.upload_bucket` (по умолчанию `knowledge-original`), ключ строится по стандартному шаблону и содержит `x-amz-meta-correlation-id`.
 - В ответе возвращаются `upload_url`, `bucket`, `object_key` и `expires_in_seconds` для дальнейшей загрузки.
 
 ## 5. Настройка уведомлений о загрузке

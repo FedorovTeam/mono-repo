@@ -3,7 +3,7 @@ service:
   document_service: "document-service.document-service.svc.cluster.local:9090"
 
 events:
-  upload_bucket: "knowledge-docx"
+  upload_bucket: "knowledge-original"
   webhook_arn: "arn:minio:sqs::storage-webhook:webhook"
 
 observability:
@@ -17,5 +17,5 @@ minio:
   secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
   use_ssl: true
   buckets:
-    knowledge_docx: "knowledge-docx"
+    knowledge_docx: "knowledge-original"
     knowledge_md: "knowledge-md"

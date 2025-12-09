@@ -5,7 +5,7 @@
 
 ## Ручные проверки через grpcurl
 1. Собрать gRPC-сервер (после генерации protobuf-стабов).
-2. Запустить MinIO с бакетами `knowledge-docx` и `knowledge-md`.
+2. Запустить MinIO с бакетами `knowledge-original` и `knowledge-md`.
 3. Поднять сервис командой `go run ./cmd` — в выводе должны появиться строки об инициализации бакетов, старте gRPC-порта и обрабатке запросов с указанием `correlation_id`.
 4. Выполнить загрузку оригинала:
    ```bash
@@ -26,4 +26,4 @@
    В ответе ожидаются `uploadUrl`, `bucket`, `objectKey` и `expiresInSeconds`; заголовок `x-amz-meta-correlation-id=demo-corr` будет частью подписанных параметров.
 
 ## Проверка приватности
-- В MinIO убедитесь, что политики бакетов `knowledge-docx` и `knowledge-md` не допускают публичного доступа.
+- В MinIO убедитесь, что политики бакетов `knowledge-original` и `knowledge-md` не допускают публичного доступа.

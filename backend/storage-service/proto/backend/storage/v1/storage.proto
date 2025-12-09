@@ -10,7 +10,7 @@ option go_package = "backend-storage-service/proto/backend/storage/v1;storagev1"
 // Ключи формируются по шаблону
 // org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>.
 service StorageService {
-  // UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-docx.
+  // UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-original.
   rpc UploadOriginal(UploadOriginalRequest) returns (UploadObjectResponse);
 
   // UploadMarkdown сохраняет Markdown-версию документа в приватный бакет knowledge-md.
@@ -49,7 +49,7 @@ message UploadObjectResponse {
 
 // GetObjectRequest описывает чтение ранее загруженного объекта.
 message GetObjectRequest {
-  // bucket определяет, откуда читать: knowledge-docx или knowledge-md.
+  // bucket определяет, откуда читать: knowledge-original или knowledge-md.
   string bucket = 1;
   string object_key = 2;
 }

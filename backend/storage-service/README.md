@@ -3,7 +3,7 @@
 Сервис отвечает за хранение исходных документов и их Markdown-версий в приватных бакетах MinIO. Публичный контракт описан в `proto/backend/storage/v1/storage.proto`.
 
 ## Назначение
-- Прием исходных файлов (knowledge-docx) и Markdown (knowledge-md).
+- Прием исходных файлов (knowledge-original) и Markdown (knowledge-md).
 - Генерация ключей по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>`.
 - Для выдачи presigned ссылок используются дефолтные `org_slug=knowledge` и `project_slug=documents`, чтобы сохранять единый путь размещения объектов.
 - Выдача сохраненных объектов по ключу.
@@ -20,7 +20,7 @@
 - `observability.enable_metrics` / `observability.enable_traces` / `observability.enable_logs` — включают экспорт метрик, трейсинга и логов соответственно (по умолчанию все включено).
 
 ## Локальный запуск
-1. Поднимите MinIO (например, через `docker-compose` шаблона template-service) и создайте бакеты `knowledge-docx` и `knowledge-md` с приватной политикой.
+1. Поднимите MinIO (например, через `docker-compose` шаблона template-service) и создайте бакеты `knowledge-original` и `knowledge-md` с приватной политикой.
 2. Обновите `config/config.yaml` при необходимости.
 3. Сгенерируйте gRPC-код при помощи `protoc` (директория `proto`).
 4. Запустите сервис: `go run ./cmd`.

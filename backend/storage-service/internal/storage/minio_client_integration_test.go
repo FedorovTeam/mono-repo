@@ -21,14 +21,14 @@ func TestNewMinioClientInitializesBuckets(t *testing.T) {
 		Endpoint:  endpoint,
 		AccessKey: "access",
 		SecretKey: "secret",
-		Buckets:   []string{"knowledge-docx", "knowledge-md"},
+		Buckets:   []string{"knowledge-original", "knowledge-md"},
 	})
 	require.NoError(t, err)
 
 	generator := NewObjectKeyGenerator(func() time.Time {
 		return time.Date(2024, time.July, 1, 0, 0, 0, 0, time.UTC)
 	})
-	service := NewService(client, generator, "knowledge-docx", "knowledge-md")
+	service := NewService(client, generator, "knowledge-original", "knowledge-md")
 
 	location, err := service.UploadOriginal(ctx, "org", "proj", "doc-1", "docx", []byte("payload"))
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func TestNewMinioClientInitializesBuckets(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("payload"), data)
 
-	existsDocx, err := client.BucketExists(ctx, "knowledge-docx")
+	existsDocx, err := client.BucketExists(ctx, "knowledge-original")
 	require.NoError(t, err)
 	require.True(t, existsDocx)
 

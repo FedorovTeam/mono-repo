@@ -6,11 +6,11 @@
      байты файла.
    - Service валидирует наличие document_id, расширения и содержимого, генерирует ключ по шаблону
      `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` и пишет объект в приватный бакет
-     `knowledge-docx` (или иной бакет из конфигурации, если он указан в секции `minio.buckets.knowledge_docx`).
+     `knowledge-original` (или иной бакет из конфигурации, если он указан в секции `minio.buckets.knowledge_docx`).
    - Возвращается bucket/key и timestamp загрузки; в заголовок ответа добавляются `x-correlation-id`, `org-slug` и
      `project-slug` из запроса/метаданных.
    - При старте сервиса настраивается webhook/queue уведомление MinIO (ObjectCreated) для бакета загрузки, выбранного через
-     `events.upload_bucket` (по умолчанию `knowledge-docx`), используя ARN из `events.webhook_arn`.
+     `events.upload_bucket` (по умолчанию `knowledge-original`), используя ARN из `events.webhook_arn`.
 
 2. **UploadMarkdown**
    - После конвертации docling-трансформером вызывается загрузка Markdown.
@@ -28,7 +28,7 @@
    - Клиент запрашивает подписанную PUT-ссылку, передавая document_id, file_name, content_length, expires_in_seconds и
      опциональный correlation_id.
    - Сервис валидирует параметры, проверяет, что расширение файла входит в список `doc`, `docx`, `pdf`, и убеждается в
-     доступности бакета загрузки (`events.upload_bucket` или `knowledge-docx`).
+     доступности бакета загрузки (`events.upload_bucket` или `knowledge-original`).
    - Генерируется ключ по стандартному шаблону и подписывается URL MinIO с заголовком `x-amz-meta-correlation-id` для
      сохранения трассировки загрузки.
    - В ответе возвращаются upload_url, bucket, object_key и время жизни ссылки, а также служебные заголовки с correlation_id и

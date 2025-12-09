@@ -6,7 +6,7 @@ flowchart LR
   Client[[gRPC клиент]] -->|UploadOriginal / UploadMarkdown| StorageService
   StorageService --> KeyGen[[ObjectKeyGenerator]]
   StorageService --> MinIO[(MinIO)]
-  MinIO --> Bucket1[[knowledge-docx]]
+  MinIO --> Bucket1[[knowledge-original]]
   MinIO --> Bucket2[[knowledge-md]]
 ```
 

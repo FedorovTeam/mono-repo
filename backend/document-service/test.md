@@ -10,7 +10,7 @@
 ## Ручные проверки через grpcurl
 1. Создать документ:
    ```bash
-   grpcurl -plaintext -d '{"name":"demo.docx","original_bucket":"backend-original","markdown_bucket":"backend-md"}' localhost:50051 backend.document.v1.DocumentService/CreateDocument
+   grpcurl -plaintext -d '{"name":"demo.docx","original_bucket":"knowledge-original","markdown_bucket":"knowledge-md"}' localhost:50051 backend.document.v1.DocumentService/CreateDocument
    ```
 2. Получить документ:
    ```bash

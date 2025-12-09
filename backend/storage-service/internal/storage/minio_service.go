@@ -160,7 +160,7 @@ func NewService(client Client, keyGenerator *ObjectKeyGenerator, docxBucket, mar
 	}
 }
 
-// UploadOriginal сохраняет исходный документ в приватный бакет knowledge-docx.
+// UploadOriginal сохраняет исходный документ в приватный бакет knowledge-original.
 func (s *Service) UploadOriginal(ctx context.Context, orgSlug, projectSlug, documentID, extension string, content []byte) (ObjectLocation, error) {
 	if err := s.ensureBucket(ctx, s.docxBucket); err != nil {
 		return ObjectLocation{}, err

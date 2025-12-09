@@ -7,8 +7,8 @@ minio:
   access_key: "xUCM3lvYME7MrYTwegSA"
   secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
   use_ssl: true
-  original_bucket: "backend-original"
-  markdown_bucket: "backend-md"
+  original_bucket: "knowledge-original"
+  markdown_bucket: "knowledge-md"
   bucket_prefix: "documents"
 temporal:
   address: "temporal-frontend.temporal.svc.cluster.local:7233"

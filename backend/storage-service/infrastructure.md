@@ -8,7 +8,7 @@ deploymentDiagram
       component "MinIO client" as minioClient
     }
     node "minio" {
-      database "knowledge-docx" as bucketDocx
+      database "knowledge-original" as bucketDocx
       database "knowledge-md" as bucketMd
     }
     node "gateway" {
@@ -22,9 +22,9 @@ deploymentDiagram
   bucketDocx --> gatewayWebhook : s3:ObjectCreated
 ```
 
-- Buckets `knowledge-docx` и `knowledge-md` остаются приватными.
+- Buckets `knowledge-original` и `knowledge-md` остаются приватными.
 - Доступ осуществляется по `minio.endpoint` с ключами из `config.yaml`.
 - При старте сервис создаёт недостающие бакеты из `minio.buckets` и `events.upload_bucket`.
-- Для бакета загрузки (`events.upload_bucket`, по умолчанию `knowledge-docx`) включается webhook с ARN `events.webhook_arn`, чтобы
+- Для бакета загрузки (`events.upload_bucket`, по умолчанию `knowledge-original`) включается webhook с ARN `events.webhook_arn`, чтобы
   отправлять уведомления `s3:ObjectCreated` в gateway.
-- RPC `GenerateUploadURL` подписывает PUT-запрос в бакет `knowledge-docx`, используя ключ формата `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` и фиксируя `x-amz-meta-correlation-id` из входящего запроса.
+- RPC `GenerateUploadURL` подписывает PUT-запрос в бакет `knowledge-original`, используя ключ формата `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` и фиксируя `x-amz-meta-correlation-id` из входящего запроса.

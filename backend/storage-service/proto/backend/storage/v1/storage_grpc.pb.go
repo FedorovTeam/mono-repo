@@ -33,7 +33,7 @@ const (
 // Ключи формируются по шаблону
 // org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>.
 type StorageServiceClient interface {
-	// UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-docx.
+	// UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-original.
 	UploadOriginal(ctx context.Context, in *UploadOriginalRequest, opts ...grpc.CallOption) (*UploadObjectResponse, error)
 	// UploadMarkdown сохраняет Markdown-версию документа в приватный бакет knowledge-md.
 	UploadMarkdown(ctx context.Context, in *UploadMarkdownRequest, opts ...grpc.CallOption) (*UploadObjectResponse, error)
@@ -99,7 +99,7 @@ func (c *storageServiceClient) GenerateUploadURL(ctx context.Context, in *Genera
 // Ключи формируются по шаблону
 // org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>.
 type StorageServiceServer interface {
-	// UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-docx.
+	// UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-original.
 	UploadOriginal(context.Context, *UploadOriginalRequest) (*UploadObjectResponse, error)
 	// UploadMarkdown сохраняет Markdown-версию документа в приватный бакет knowledge-md.
 	UploadMarkdown(context.Context, *UploadMarkdownRequest) (*UploadObjectResponse, error)

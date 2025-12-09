@@ -51,7 +51,7 @@ func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {
 		"Records": []map[string]any{
 			{
 				"s3": map[string]any{
-					"bucket": map[string]any{"name": "knowledge-docx"},
+					"bucket": map[string]any{"name": "knowledge-original"},
 					"object": map[string]any{
 						"key":          "org/project/1234.docx",
 						"userMetadata": map[string]string{"x-amz-meta-correlation-id": "corr-1"},
@@ -90,7 +90,7 @@ func TestHandleStorageNotification_ConfirmUpload_URLEncodedKey(t *testing.T) {
 		"Records": []map[string]any{
 			{
 				"s3": map[string]any{
-					"bucket": map[string]any{"name": "knowledge-docx"},
+					"bucket": map[string]any{"name": "knowledge-original"},
 					"object": map[string]any{
 						"key":          encodedKey,
 						"userMetadata": map[string]string{"x-amz-meta-correlation-id": "corr-2"},

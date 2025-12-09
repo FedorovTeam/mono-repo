@@ -15,10 +15,10 @@ sequenceDiagram
     Client->>Storage: UploadOriginal(org_slug?, project_slug?, document_id, filename_extension, content)
     Storage->>Storage: resolve org/project (metadata или значения по умолчанию)
     Storage->>Storage: validate filename_extension и content
-    Storage->>MinIO: BucketExists(knowledge-docx)
+    Storage->>MinIO: BucketExists(knowledge-original)
     MinIO-->>Storage: exists
     Storage->>Storage: BuildKey(org/<org>/project/<project>/year=YYYY/month=MM/day=DD/<document_id>.<ext>)
-    Storage->>MinIO: PutObject(bucket=knowledge-docx, key, ContentType=по расширению)
+    Storage->>MinIO: PutObject(bucket=knowledge-original, key, ContentType=по расширению)
     MinIO-->>Storage: OK
     Storage-->>Client: bucket/key, created_at (+ response metadata: correlation-id, org-slug, project-slug)
     MinIO-->>Events: Notification ObjectCreated (uploadBucket)

@@ -243,7 +243,7 @@ type GetObjectRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// bucket определяет, откуда читать: knowledge-docx или knowledge-md.
+	// bucket определяет, откуда читать: knowledge-original или knowledge-md.
 	Bucket    string `protobuf:"bytes,1,opt,name=bucket,proto3" json:"bucket,omitempty"`
 	ObjectKey string `protobuf:"bytes,2,opt,name=object_key,json=objectKey,proto3" json:"object_key,omitempty"`
 }

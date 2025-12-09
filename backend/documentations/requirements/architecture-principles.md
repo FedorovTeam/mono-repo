@@ -206,7 +206,7 @@ backend/
 
 | Назначение                | Bucket | Права | Пример ключа |
 |---------------------------| --- | --- | --- |
-| Оригиналы DOC/DOCX/PDF    | `knowledge-docx` | private | `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<doc_id>.docx` |
+| Оригиналы DOC/DOCX/PDF    | `knowledge-original` | private | `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<doc_id>.docx` |
 | Конвертированный Markdown | `knowledge-md` | private | `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<doc_id>.md` |
 
 **Правила:**
@@ -242,7 +242,7 @@ org/acme/project/payments/year=2025/month=04/day=22/6f8c...e42.md
 | `org_slug` | TEXT | Организация |
 | `project_slug` | TEXT | Проект/репозиторий в домене клиента |
 | `status` | TEXT | Текущий статус (см. жизненный цикл) |
-| `source_bucket` | TEXT | Обычно `knowledge-docx` |
+| `source_bucket` | TEXT | Обычно `knowledge-original` |
 | `source_key` | TEXT | Ключ DOCX в MinIO |
 | `md_bucket` | TEXT | Обычно `knowledge-md` |
 | `md_key` | TEXT | Ключ Markdown в MinIO |
