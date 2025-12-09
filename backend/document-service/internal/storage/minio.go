@@ -88,28 +88,37 @@ func (m *MinioKeyManager) buildBasePath(data KeyGenerationData) string {
 }
 
 func buildEntitySpecificPath(data KeyGenerationData) string {
-	var segments []string
+	segments := make([]string, 0, 2)
 
 	if data.DocumentID != "" {
 		segments = append(segments, data.DocumentID)
 	}
 
-	candidate := firstNonEmpty(
-		normalizePath(data.EntitySpecificPath),
-		normalizePath(data.PublishPath),
-		normalizePath(data.Path),
-		normalizePath(data.FileName),
-	)
-
-	if candidate != "" {
-		segments = append(segments, candidate)
-	}
-
-	if len(segments) == 0 {
-		segments = append(segments, uuid.NewString())
-	}
+	fileName := uuid.NewString() + extractExtension(data)
+	segments = append(segments, fileName)
 
 	return path.Join(segments...)
+}
+
+func extractExtension(data KeyGenerationData) string {
+	source := firstNonEmpty(
+		normalizePath(data.FileName),
+		normalizePath(data.Path),
+		normalizePath(data.PublishPath),
+		normalizePath(data.EntitySpecificPath),
+	)
+
+	if source == "" {
+		return ""
+	}
+
+	base := path.Base(source)
+	ext := path.Ext(base)
+	if ext == "" || ext == "." {
+		return ""
+	}
+
+	return ext
 }
 
 func normalizePath(value string) string {
