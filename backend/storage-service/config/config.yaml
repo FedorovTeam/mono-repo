@@ -4,7 +4,7 @@ service:
 
 events:
   upload_bucket: "knowledge-docx"
-  webhook_arn: "arn:minio:sqs::1:storage-webhook"
+  webhook_arn: "arn:minio:sqs::storage-webhook:webhook"
 
 observability:
   enable_metrics: false
