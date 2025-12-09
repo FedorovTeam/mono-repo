@@ -2,6 +2,28 @@
 version: 1
 interactions:
 - request:
+    body: ""
+    form: {}
+    headers:
+      Accept:
+      - application/vnd.github+json
+      Authorization:
+      - Bearer token
+      X-Correlation-Id:
+      - corr-int
+    url: http://127.0.0.1:38343/repos/owner/repo/contents/docs/a.md?ref=feature/doc
+    method: GET
+  response:
+    body: ""
+    headers:
+      Content-Length:
+      - "0"
+      Date:
+      - Tue, 09 Dec 2025 14:39:32 GMT
+    status: 404 Not Found
+    code: 404
+    duration: ""
+- request:
     body: '{"branch":"feature/doc","committer":{"email":"bot@example.org","name":"Bot"},"content":"IyBIaQ==","message":"Add
       doc"}'
     form: {}
@@ -12,7 +34,7 @@ interactions:
       - Bearer token
       X-Correlation-Id:
       - corr-int
-    url: http://127.0.0.1:44639/repos/owner/repo/contents/docs/a.md
+    url: http://127.0.0.1:38343/repos/owner/repo/contents/docs/a.md
     method: PUT
   response:
     body: |
@@ -23,7 +45,7 @@ interactions:
       Content-Type:
       - application/json
       Date:
-      - Fri, 05 Dec 2025 10:12:05 GMT
+      - Tue, 09 Dec 2025 14:39:32 GMT
     status: 200 OK
     code: 200
     duration: ""
@@ -38,7 +60,7 @@ interactions:
       - Bearer token
       X-Correlation-Id:
       - corr-int
-    url: http://127.0.0.1:44639/repos/owner/repo/pulls
+    url: http://127.0.0.1:38343/repos/owner/repo/pulls
     method: POST
   response:
     body: |
@@ -49,7 +71,7 @@ interactions:
       Content-Type:
       - text/plain; charset=utf-8
       Date:
-      - Fri, 05 Dec 2025 10:12:05 GMT
+      - Tue, 09 Dec 2025 14:39:32 GMT
     status: 201 Created
     code: 201
     duration: ""

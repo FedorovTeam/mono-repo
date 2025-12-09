@@ -51,6 +51,8 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 		}
 
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/owner/repo/contents/docs/a.md":
+			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPut && r.URL.Path == "/repos/owner/repo/contents/docs/a.md":
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"commit": map[string]string{"sha": "abc123"}})

@@ -31,6 +31,12 @@ type Client struct {
 	authorEmail       string
 }
 
+type repositoryFile struct {
+	SHA      string `json:"sha"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
+}
+
 // New создаёт GitHub клиента на основе конфигурации.
 func New(httpClient HTTPClient, baseURL, token, owner, repository, defaultBranch, correlationHeader, authorName, authorEmail string) *Client {
 	return &Client{
@@ -80,11 +86,28 @@ func (c *Client) CommitMarkdown(ctx context.Context, path, content, message, bra
 		authorEmail = c.authorEmail
 	}
 
+	existingFile, err := c.getExistingFile(ctx, path, branch, correlationID)
+	if err != nil {
+		return "", fmt.Errorf("get existing file: %w", err)
+	}
+
 	body := map[string]any{
 		"message":   message,
 		"content":   base64.StdEncoding.EncodeToString([]byte(content)),
 		"branch":    branch,
 		"committer": map[string]string{"name": authorName, "email": authorEmail},
+	}
+
+	if existingFile != nil {
+		existingContent, err := base64.StdEncoding.DecodeString(existingFile.Content)
+		if err != nil {
+			return "", fmt.Errorf("decode existing content: %w", err)
+		}
+		if string(existingContent) == content {
+			return existingFile.SHA, nil
+		}
+
+		body["sha"] = existingFile.SHA
 	}
 
 	payload, err := json.Marshal(body)
@@ -98,6 +121,10 @@ func (c *Client) CommitMarkdown(ctx context.Context, path, content, message, bra
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	c.setHeaders(req, correlationID)
+
+	if existingFile != nil && existingFile.SHA != "" {
+		req.Header.Set("If-Match", existingFile.SHA)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -120,6 +147,40 @@ func (c *Client) CommitMarkdown(ctx context.Context, path, content, message, bra
 	}
 
 	return commitResp.Commit.SHA, nil
+}
+
+func (c *Client) getExistingFile(ctx context.Context, path, branch, correlationID string) (*repositoryFile, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s", c.baseURL, c.owner, c.repository, strings.TrimPrefix(path, "/"))
+	if branch != "" {
+		url += "?ref=" + branch
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	c.setHeaders(req, correlationID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, nil
+	default:
+		return nil, c.unexpectedStatusError(resp, branch, url)
+	}
+
+	var file repositoryFile
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		return nil, fmt.Errorf("decode existing file: %w", err)
+	}
+
+	return &file, nil
 }
 
 // CreatePullRequest открывает Pull Request из ветки branch в baseBranch.
