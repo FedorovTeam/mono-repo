@@ -104,7 +104,14 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 
 	s.logger.Info("ConvertDocumentToMarkdown queued", zap.String("correlation_id", correlationID), zap.String("queue_id", queueID.String()))
 
-	return &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: queueID.String(), Status: string(repository.StatusPending), MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}, nil
+	return &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           queueID.String(),
+		Status:            string(repository.StatusPending),
+		MarkdownBucket:    markdownBucket,
+		MarkdownObjectKey: markdownKey,
+		WaitingDocling:    false,
+		DoclingTimeout:    false,
+	}, nil
 }
 
 // Run запускает gRPC сервер на указанном порте.

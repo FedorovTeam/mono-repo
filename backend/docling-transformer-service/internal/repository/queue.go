@@ -24,6 +24,8 @@ type TransformationTask struct {
 	ID                uuid.UUID
 	Status            TransformationStatus
 	RetryCount        int
+	DoclingJobID      string
+	DoclingPollCount  int
 	DocumentID        string
 	OriginalBucket    string
 	OriginalObjectKey string
@@ -53,9 +55,10 @@ type QueueRepository interface {
 	AcquireNext(ctx context.Context) (*TransformationTask, error)
 	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
-	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries int) (restored, failed int, err error)
+	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
+	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error)
 	CleanupFinished(ctx context.Context, retention time.Duration) (int, error)
-	CountByStatus(ctx context.Context) (pending, processing int, err error)
+	CountByStatus(ctx context.Context) (pending, processing, waitingDocling int, err error)
 }
 
 type PostgresQueueRepository struct {
@@ -72,8 +75,8 @@ func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueuePar
 
 	query := `
 INSERT INTO transformations_queue (
-    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, correlation_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, correlation_id, docling_poll_count
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, 0)
 `
 
 	_, err := r.pool.Exec(ctx, query, id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey, params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt, params.CorrelationID)
@@ -95,35 +98,19 @@ func (r *PostgresQueueRepository) CountActive(ctx context.Context) (int, error) 
 	return count, nil
 }
 
-func (r *PostgresQueueRepository) CountByStatus(ctx context.Context) (pending, processing int, err error) {
-	const query = `SELECT status, COUNT(*) FROM transformations_queue WHERE status IN ('pending', 'processing') GROUP BY status`
+func (r *PostgresQueueRepository) CountByStatus(ctx context.Context) (pending, processing, waitingDocling int, err error) {
+	const query = `
+SELECT
+    COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+    COUNT(*) FILTER (WHERE status = 'processing' AND (docling_job_id IS NULL OR docling_job_id = '')) AS processing,
+    COUNT(*) FILTER (WHERE status = 'processing' AND (docling_job_id IS NOT NULL AND docling_job_id <> '')) AS waiting_docling
+FROM transformations_queue`
 
-	rows, err := r.pool.Query(ctx, query)
-	if err != nil {
-		return 0, 0, fmt.Errorf("count by status: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var status TransformationStatus
-		var count int
-		if err := rows.Scan(&status, &count); err != nil {
-			return 0, 0, fmt.Errorf("scan status count: %w", err)
-		}
-
-		switch status {
-		case StatusPending:
-			pending = count
-		case StatusProcessing:
-			processing = count
-		}
+	if err := r.pool.QueryRow(ctx, query).Scan(&pending, &processing, &waitingDocling); err != nil {
+		return 0, 0, 0, fmt.Errorf("count by status: %w", err)
 	}
 
-	if err := rows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("iterate status count: %w", err)
-	}
-
-	return pending, processing, nil
+	return pending, processing, waitingDocling, nil
 }
 
 func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*TransformationTask, error) {
@@ -134,7 +121,7 @@ func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*Transformat
 	defer tx.Rollback(ctx)
 
 	const selectQuery = `
-SELECT id, status, retry_count, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'pending'
 ORDER BY created_at
@@ -185,22 +172,44 @@ func (r *PostgresQueueRepository) MarkFailed(ctx context.Context, id uuid.UUID, 
 	return nil
 }
 
-func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries int) (restored, failed int, err error) {
+func (r *PostgresQueueRepository) UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error {
+	if pollCount < 0 {
+		pollCount = 0
+	}
+
+	const query = `UPDATE transformations_queue SET docling_job_id = COALESCE(NULLIF($2, ''), docling_job_id), docling_poll_count = $3 WHERE id = $1`
+
+	if _, err := r.pool.Exec(ctx, query, id, jobID, pollCount); err != nil {
+		return fmt.Errorf("update docling info: %w", err)
+	}
+
+	return nil
+}
+
+func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error) {
 	const query = `
 WITH stalled AS (
-    SELECT id, retry_count FROM transformations_queue
+    SELECT id, retry_count, docling_job_id, docling_poll_count FROM transformations_queue
     WHERE status = 'processing' AND started_at < NOW() - $1::interval
+),
+failed AS (
+    UPDATE transformations_queue
+    SET status = 'failed', finished_at = NOW(),
+        error = CASE
+            WHEN docling_job_id IS NOT NULL AND docling_job_id <> '' AND $3 > 0 AND docling_poll_count >= $3 THEN 'docling polling attempts exceeded'
+            ELSE 'processing timeout exceeded'
+        END
+    WHERE id IN (
+        SELECT id FROM stalled
+        WHERE retry_count >= $2
+           OR (docling_job_id IS NOT NULL AND docling_job_id <> '' AND $3 > 0 AND docling_poll_count >= $3)
+    )
+    RETURNING id
 ),
 restored AS (
     UPDATE transformations_queue
     SET status = 'pending', started_at = NULL, error = 'restored after timeout'
-    WHERE id IN (SELECT id FROM stalled WHERE retry_count < $2)
-    RETURNING id
-),
-failed AS (
-    UPDATE transformations_queue
-    SET status = 'failed', finished_at = NOW(), error = 'processing timeout exceeded'
-    WHERE id IN (SELECT id FROM stalled WHERE retry_count >= $2)
+    WHERE id IN (SELECT id FROM stalled EXCEPT SELECT id FROM failed)
     RETURNING id
 )
 SELECT (SELECT COUNT(*) FROM restored), (SELECT COUNT(*) FROM failed);`
@@ -209,7 +218,11 @@ SELECT (SELECT COUNT(*) FROM restored), (SELECT COUNT(*) FROM failed);`
 		maxRetries = 1
 	}
 
-	if err := r.pool.QueryRow(ctx, query, timeout, maxRetries).Scan(&restored, &failed); err != nil {
+	if maxDoclingPollAttempts < 0 {
+		maxDoclingPollAttempts = 0
+	}
+
+	if err := r.pool.QueryRow(ctx, query, timeout, maxRetries, maxDoclingPollAttempts).Scan(&restored, &failed); err != nil {
 		return 0, 0, fmt.Errorf("restore stuck tasks: %w", err)
 	}
 
@@ -243,6 +256,8 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&task.ID,
 		&task.Status,
 		&task.RetryCount,
+		&task.DoclingJobID,
+		&task.DoclingPollCount,
 		&task.DocumentID,
 		&task.OriginalBucket,
 		&task.OriginalObjectKey,

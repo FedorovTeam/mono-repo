@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -34,6 +35,7 @@ type Config struct {
 type workerMetrics struct {
 	pendingGauge    metric.Int64ObservableGauge
 	processingGauge metric.Int64ObservableGauge
+	doclingGauge    metric.Int64ObservableGauge
 	restoredCounter metric.Int64Counter
 	rejectedCounter metric.Int64Counter
 	durationHist    metric.Float64Histogram
@@ -42,6 +44,7 @@ type workerMetrics struct {
 	mu              sync.Mutex
 	lastPending     int64
 	lastProcessing  int64
+	lastDocling     int64
 }
 
 type Processor struct {
@@ -74,6 +77,10 @@ func newWorkerMetrics(logger *zap.Logger) *workerMetrics {
 	if err != nil && logger != nil {
 		logger.Warn("failed to create processing gauge", zap.Error(err))
 	}
+	m.doclingGauge, err = meter.Int64ObservableGauge("docling_transformer_queue_docling_waiting")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create docling waiting gauge", zap.Error(err))
+	}
 	m.restoredCounter, err = meter.Int64Counter("docling_transformer_tasks_restored")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create restored counter", zap.Error(err))
@@ -95,14 +102,32 @@ func newWorkerMetrics(logger *zap.Logger) *workerMetrics {
 		logger.Warn("failed to create docling polls histogram", zap.Error(err))
 	}
 
-	if m.pendingGauge != nil && m.processingGauge != nil {
+	observables := make([]metric.Observable, 0, 3)
+	if m.pendingGauge != nil {
+		observables = append(observables, m.pendingGauge)
+	}
+	if m.processingGauge != nil {
+		observables = append(observables, m.processingGauge)
+	}
+	if m.doclingGauge != nil {
+		observables = append(observables, m.doclingGauge)
+	}
+
+	if len(observables) > 0 {
 		if _, err := meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
 			m.mu.Lock()
 			defer m.mu.Unlock()
-			observer.ObserveInt64(m.pendingGauge, m.lastPending)
-			observer.ObserveInt64(m.processingGauge, m.lastProcessing)
+			if m.pendingGauge != nil {
+				observer.ObserveInt64(m.pendingGauge, m.lastPending)
+			}
+			if m.processingGauge != nil {
+				observer.ObserveInt64(m.processingGauge, m.lastProcessing)
+			}
+			if m.doclingGauge != nil {
+				observer.ObserveInt64(m.doclingGauge, m.lastDocling)
+			}
 			return nil
-		}, m.pendingGauge, m.processingGauge); err != nil && logger != nil {
+		}, observables...); err != nil && logger != nil {
 			logger.Warn("failed to register queue callback", zap.Error(err))
 		}
 	}
@@ -110,7 +135,7 @@ func newWorkerMetrics(logger *zap.Logger) *workerMetrics {
 	return m
 }
 
-func (m *workerMetrics) recordQueueSizes(pending, processing int64) {
+func (m *workerMetrics) recordQueueSizes(pending, processing, doclingWaiting int64) {
 	if m == nil {
 		return
 	}
@@ -118,6 +143,7 @@ func (m *workerMetrics) recordQueueSizes(pending, processing int64) {
 	m.mu.Lock()
 	m.lastPending = pending
 	m.lastProcessing = processing
+	m.lastDocling = doclingWaiting
 	m.mu.Unlock()
 }
 
@@ -212,8 +238,10 @@ func (p *Processor) workerLoop(ctx context.Context, interval time.Duration) {
 
 		if err := p.handleTask(taskCtx, task); err != nil {
 			p.metrics.recordDuration(taskCtx, time.Since(start))
-			p.logger.Error("transformation failed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", time.Since(start)), zap.Error(err))
-			if markErr := p.repo.MarkFailed(ctx, task.ID, err.Error()); markErr != nil {
+			doclingWaiting := task.DoclingJobID != ""
+			doclingTimeout := errors.Is(err, converter.ErrDoclingPollingTimeout) || errors.Is(err, converter.ErrDoclingPollingAttemptsExceeded)
+			p.logger.Error("transformation failed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", time.Since(start)), zap.Bool("docling_waiting", doclingWaiting), zap.Bool("docling_timeout", doclingTimeout), zap.String("docling_job_id", task.DoclingJobID), zap.Int("docling_poll_count", task.DoclingPollCount), zap.Error(err))
+			if markErr := p.repo.MarkFailed(ctx, task.ID, buildFailureMessage(err, task)); markErr != nil {
 				p.logger.Error("mark failed errored", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Error(markErr))
 			}
 		} else {
@@ -231,6 +259,8 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 		processingCtx, cancel = context.WithTimeout(ctx, p.cfg.ProcessingTimeout)
 		defer cancel()
 	}
+
+	correlationID := telemetry.CorrelationIDFromContext(ctx)
 
 	if task.MarkdownBucket == "" {
 		task.MarkdownBucket = p.cfg.MarkdownBucket
@@ -263,22 +293,55 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 		originalFileName = fmt.Sprintf("document.%s", fileExt)
 	}
 
-	jobID, err := p.conv.Submit(processingCtx, converter.DoclingConvertRequest{
-		FileName:    originalFileName,
-		Content:     originalContent,
-		ContentType: contentType,
-	})
-	if err != nil {
-		return fmt.Errorf("docling submit: %w", err)
+	jobID := task.DoclingJobID
+	pollOffset := task.DoclingPollCount
+
+	if jobID == "" {
+		jobID, err = p.conv.Submit(processingCtx, converter.DoclingConvertRequest{
+			FileName:    originalFileName,
+			Content:     originalContent,
+			ContentType: contentType,
+		})
+		if err != nil {
+			return fmt.Errorf("docling submit: %w", err)
+		}
+
+		if err := p.repo.UpdateDoclingInfo(ctx, task.ID, jobID, 0); err != nil {
+			return fmt.Errorf("store docling job: %w", err)
+		}
+
+		task.DoclingJobID = jobID
+		task.DoclingPollCount = 0
+
+		p.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.String("correlation_id", correlationID))
+	} else {
+		p.logger.Info("resume docling polling", zap.String("job_id", jobID), zap.Int("docling_poll_count", pollOffset), zap.String("correlation_id", correlationID))
 	}
 
-	result, waitDuration, pollAttempts, err := p.conv.Poll(processingCtx, jobID, p.cfg.DoclingPollInterval, p.cfg.DoclingPollTimeout, p.cfg.DoclingMaxAttempts)
+	remainingAttempts := p.cfg.DoclingMaxAttempts
+	if remainingAttempts > 0 {
+		remainingAttempts -= pollOffset
+		if remainingAttempts <= 0 {
+			return fmt.Errorf("%w: job %s has no remaining attempts after %d polls", converter.ErrDoclingPollingAttemptsExceeded, jobID, pollOffset)
+		}
+	}
+
+	result, waitDuration, pollAttempts, err := p.conv.Poll(processingCtx, jobID, p.cfg.DoclingPollInterval, p.cfg.DoclingPollTimeout, remainingAttempts)
+	newPollCount := pollOffset + pollAttempts
+	task.DoclingJobID = jobID
+	task.DoclingPollCount = newPollCount
+
+	if err := p.repo.UpdateDoclingInfo(ctx, task.ID, jobID, newPollCount); err != nil {
+		return fmt.Errorf("store docling polling progress: %w", err)
+	}
+
+	p.metrics.recordDoclingWait(processingCtx, waitDuration)
+	p.metrics.recordDoclingPolls(processingCtx, pollAttempts)
+	p.logger.Info("docling result received", zap.String("job_id", jobID), zap.Duration("docling_wait", waitDuration), zap.Int("docling_polls", newPollCount))
+
 	if err != nil {
 		return fmt.Errorf("docling poll: %w", err)
 	}
-	p.metrics.recordDoclingWait(processingCtx, waitDuration)
-	p.metrics.recordDoclingPolls(processingCtx, pollAttempts)
-	p.logger.Info("docling result received", zap.String("job_id", jobID), zap.Duration("docling_wait", waitDuration), zap.Int("docling_polls", pollAttempts))
 
 	mediaType := result.MediaType
 	if mediaType == "" {
@@ -311,15 +374,15 @@ func (p *Processor) maintenanceLoop(ctx context.Context, interval time.Duration)
 }
 
 func (p *Processor) runMaintenanceCycle(ctx context.Context) {
-	if pending, processing, err := p.repo.CountByStatus(ctx); err != nil {
+	if pending, processing, doclingWaiting, err := p.repo.CountByStatus(ctx); err != nil {
 		p.logger.Error("count tasks by status failed", zap.Error(err))
 	} else {
-		p.metrics.recordQueueSizes(int64(pending), int64(processing))
-		p.logger.Info("queue status snapshot", zap.Int("pending", pending), zap.Int("processing", processing))
+		p.metrics.recordQueueSizes(int64(pending), int64(processing), int64(doclingWaiting))
+		p.logger.Info("queue status snapshot", zap.Int("pending", pending), zap.Int("processing", processing), zap.Int("docling_waiting", doclingWaiting))
 	}
 
 	if p.cfg.ProcessingTimeout > 0 {
-		restored, failed, err := p.repo.RestoreStuckProcessing(ctx, p.cfg.ProcessingTimeout, p.cfg.MaxProcessingRetries)
+		restored, failed, err := p.repo.RestoreStuckProcessing(ctx, p.cfg.ProcessingTimeout, p.cfg.MaxProcessingRetries, p.cfg.DoclingMaxAttempts)
 		if err != nil {
 			p.logger.Error("restore stuck tasks failed", zap.Error(err))
 		} else if restored > 0 || failed > 0 {
@@ -343,5 +406,25 @@ func (p *Processor) wait(ctx context.Context, interval time.Duration) {
 	select {
 	case <-ctx.Done():
 	case <-time.After(interval):
+	}
+}
+
+func buildFailureMessage(err error, task *repository.TransformationTask) string {
+	if task == nil {
+		return err.Error()
+	}
+
+	jobID := task.DoclingJobID
+	pollCount := task.DoclingPollCount
+
+	switch {
+	case errors.Is(err, converter.ErrDoclingPollingTimeout):
+		return fmt.Sprintf("docling polling timeout for job %s after %d attempts", jobID, pollCount)
+	case errors.Is(err, converter.ErrDoclingPollingAttemptsExceeded):
+		return fmt.Sprintf("docling polling attempts exceeded for job %s after %d attempts", jobID, pollCount)
+	case jobID != "":
+		return fmt.Sprintf("docling job %s failed: %v", jobID, err)
+	default:
+		return err.Error()
 	}
 }

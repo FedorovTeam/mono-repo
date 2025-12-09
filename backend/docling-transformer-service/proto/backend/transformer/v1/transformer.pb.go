@@ -111,6 +111,8 @@ type ConvertDocumentToMarkdownResponse struct {
 	Status            string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	MarkdownBucket    string                 `protobuf:"bytes,3,opt,name=markdown_bucket,json=markdownBucket,proto3" json:"markdown_bucket,omitempty"`
 	MarkdownObjectKey string                 `protobuf:"bytes,4,opt,name=markdown_object_key,json=markdownObjectKey,proto3" json:"markdown_object_key,omitempty"`
+	WaitingDocling    bool                   `protobuf:"varint,5,opt,name=waiting_docling,json=waitingDocling,proto3" json:"waiting_docling,omitempty"`
+	DoclingTimeout    bool                   `protobuf:"varint,6,opt,name=docling_timeout,json=doclingTimeout,proto3" json:"docling_timeout,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -173,6 +175,20 @@ func (x *ConvertDocumentToMarkdownResponse) GetMarkdownObjectKey() string {
 	return ""
 }
 
+func (x *ConvertDocumentToMarkdownResponse) GetWaitingDocling() bool {
+	if x != nil {
+		return x.WaitingDocling
+	}
+	return false
+}
+
+func (x *ConvertDocumentToMarkdownResponse) GetDoclingTimeout() bool {
+	if x != nil {
+		return x.DoclingTimeout
+	}
+	return false
+}
+
 var File_proto_backend_transformer_v1_transformer_proto protoreflect.FileDescriptor
 
 const file_proto_backend_transformer_v1_transformer_proto_rawDesc = "" +
@@ -185,12 +201,14 @@ const file_proto_backend_transformer_v1_transformer_proto_rawDesc = "" +
 	"\x13original_object_key\x18\x03 \x01(\tR\x11originalObjectKey\x12'\n" +
 	"\x0fmarkdown_bucket\x18\x04 \x01(\tR\x0emarkdownBucket\x12.\n" +
 	"\x13markdown_object_key\x18\x05 \x01(\tR\x11markdownObjectKey\x12-\n" +
-	"\x12filename_extension\x18\x06 \x01(\tR\x11filenameExtension\"\xaf\x01\n" +
+	"\x12filename_extension\x18\x06 \x01(\tR\x11filenameExtension\"\x81\x02\n" +
 	"!ConvertDocumentToMarkdownResponse\x12\x19\n" +
 	"\bqueue_id\x18\x01 \x01(\tR\aqueueId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12'\n" +
 	"\x0fmarkdown_bucket\x18\x03 \x01(\tR\x0emarkdownBucket\x12.\n" +
-	"\x13markdown_object_key\x18\x04 \x01(\tR\x11markdownObjectKey2\xa7\x01\n" +
+	"\x13markdown_object_key\x18\x04 \x01(\tR\x11markdownObjectKey\x12'\n" +
+	"\x0fwaiting_docling\x18\x05 \x01(\bR\x0ewaitingDocling\x12'\n" +
+	"\x0fdocling_timeout\x18\x06 \x01(\bR\x0edoclingTimeout2\xa7\x01\n" +
 	"\x12TransformerService\x12\x90\x01\n" +
 	"\x19ConvertDocumentToMarkdown\x128.backend.transformer.v1.ConvertDocumentToMarkdownRequest\x1a9.backend.transformer.v1.ConvertDocumentToMarkdownResponseB]Z[github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1;transformerv1b\x06proto3"
 
