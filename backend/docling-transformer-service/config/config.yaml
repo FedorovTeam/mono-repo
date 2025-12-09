@@ -4,6 +4,7 @@ service:
 
 docling:
   endpoint: https://docling.tech.fedorov-team.tech
+  api_key: ""
 
 minio:
   endpoint: api.minio.tech.fedorov-team.tech

@@ -5,8 +5,8 @@
 2. Интерсептор (включается флагом `observability.loggingEnabled`) сохраняет/генерирует correlation-id и пишет входные метаданные в лог.
 3. Сервис проверяет наличие `document_id`, `original_bucket` и `original_object_key`; если `markdown_bucket` не указан, используется значение из `config.yaml`.
 4. MinIO-адаптер скачивает оригинал с повторными попытками при ошибке `NoSuchKey` (до 10 попыток с увеличивающейся паузой).
-5. `DoclingConverter` отправляет POST `${docling.endpoint}/convert` (до 3 попыток). В запрос передаются `X-Correlation-Id`, `X-Docling-Source-Filename` (имя берётся из `original_object_key` или подставляется `document.docx`), `X-Docling-Endpoint` и `Content-Type` (по умолчанию `application/vnd.openxmlformats-officedocument.wordprocessingml.document`).
-6. Ответ Docling обрабатывается как Markdown: при `Content-Type: application/json` читается `document.md_content`, в остальных случаях берётся тело ответа и `Content-Type` из заголовка (если пусто — `text/markdown`).
+5. `DoclingConverter` отправляет POST `${docling.endpoint}/v1/convert/file` (до 3 попыток). В запрос передаются `X-Correlation-Id`, `X-Docling-Source-Filename` (имя берётся из `original_object_key` или подставляется `document.docx`), `X-Api-Key` (если задан в конфиге), `X-Docling-Endpoint`, а тело — `multipart/form-data` с полем `files` (один файл с `Content-Type` исходника).
+6. Ответ Docling обрабатывается как Markdown: при `Content-Type: application/json` читается `document.md_content` со статусом `success/partial_success`, в остальных случаях берётся тело ответа и `Content-Type` из заголовка (если пусто — `text/markdown`).
 7. Markdown сохраняется в MinIO в `markdown_bucket` с ключом из запроса или вычисленным по исходному пути (`<original>.md`); в `PutObject` передаётся итоговый media type.
 8. gRPC-слой отдаёт `markdown_content`, `media_type`, `markdown_bucket` и `markdown_object_key` вызывающей стороне; correlation-id можно использовать для увязки со следующими шагами (публикация в GitHub/Temporal и т.д.).
 
