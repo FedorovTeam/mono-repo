@@ -2,11 +2,11 @@ service:
   name: docling-transformer-service
   grpc_port: 9090
   max_workers: 1
-  poll_interval: 1s
-  processing_timeout: 30s
+  poll_interval: 5s
+  processing_timeout: 60s
   max_processing_retries: 3
   cleanup_interval: 1m
-  retention_period: 168h
+  retention_period: 24h
 
 postgres:
   dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/docling?sslmode=disable"
@@ -15,8 +15,8 @@ postgres:
 docling:
   endpoint: https://docling.tech.fedorov-team.tech
   api_key: ""
-  status_poll_interval: 1s
-  status_poll_timeout: 30s
+  status_poll_interval: 30s
+  status_poll_timeout: 60s
   status_max_attempts: 0
 
 minio:
