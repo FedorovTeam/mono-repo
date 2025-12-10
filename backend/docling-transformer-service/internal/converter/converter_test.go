@@ -304,6 +304,32 @@ func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T)
 	}
 }
 
+func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
+	const responseBody = `{"status":"mystery","message":"unexpected"}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, doclingStatusPath) {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
+
+	_, err := conv.CheckStatus(context.Background(), "job-unknown")
+	if err == nil {
+		t.Fatal("expected error for unknown status")
+	}
+
+	if !strings.Contains(err.Error(), "response="+responseBody) {
+		t.Fatalf("expected response body in error, got: %v", err)
+	}
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

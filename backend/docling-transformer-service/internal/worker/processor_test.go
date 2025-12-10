@@ -2,12 +2,18 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/repository"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type pollingRepoStub struct {
@@ -127,5 +133,49 @@ func TestRunRestoresProcessingTasksOnStartup(t *testing.T) {
 
 	if repo.restoreCalls != 1 {
 		t.Fatalf("expected restore to be called once, got %d", repo.restoreCalls)
+	}
+}
+
+func TestPollDoclingJobLogsStatusError(t *testing.T) {
+	const responseBody = `{"status":"unknown","message":"docling refused"}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/status/poll/") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	repo := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, zap.NewNop())
+
+	logCore, logs := observer.New(zap.InfoLevel)
+	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingMaxAttempts: 1})
+
+	jobID := "job-log-error"
+	task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: jobID, CreatedAt: time.Now()}
+
+	err := processor.pollDoclingJob(context.Background(), task, jobID, 0)
+	if err == nil {
+		t.Fatal("expected polling to return error")
+	}
+
+	if !strings.Contains(err.Error(), "response="+responseBody) {
+		t.Fatalf("expected docling response in error, got: %v", err)
+	}
+
+	entries := logs.FilterMessage("docling status check failed").All()
+	if len(entries) == 0 {
+		t.Fatalf("expected error log entry, got %d logs", logs.Len())
+	}
+
+	errorField := fmt.Sprint(entries[0].ContextMap()["error"])
+	if !strings.Contains(errorField, "response="+responseBody) {
+		t.Fatalf("expected response body in log, got: %s", errorField)
 	}
 }
