@@ -91,8 +91,11 @@ func main() {
 
 	queueRepo := repository.NewQueueRepository(pool)
 	conv := converter.NewDoclingConverter(converter.Config{
-		Endpoint: cfg.Docling.Endpoint,
-		APIKey:   cfg.Docling.APIKey,
+		Endpoint:           cfg.Docling.Endpoint,
+		APIKey:             cfg.Docling.APIKey,
+		DefaultLanguage:    cfg.Docling.DefaultLanguage,
+		PDFDefaultLanguage: cfg.Docling.PDFDefaultLanguage,
+		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
 	}, logger)
 
 	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{

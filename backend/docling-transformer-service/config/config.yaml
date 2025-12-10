@@ -16,6 +16,9 @@ postgres:
 docling:
   endpoint: https://docling.tech.fedorov-team.tech
   api_key: ""
+  default_language: ru
+  pdf_default_language: ru
+  pdf_enable_ocr: true
   status_initial_interval: 15s
   status_backoff_factor: 2
   status_max_interval: 30m

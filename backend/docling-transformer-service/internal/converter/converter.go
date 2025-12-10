@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -130,8 +131,11 @@ type DoclingConvertResult struct {
 
 // Config описывает параметры HTTP-клиента Docling.
 type Config struct {
-	Endpoint string
-	APIKey   string
+	Endpoint           string
+	APIKey             string
+	DefaultLanguage    string
+	PDFDefaultLanguage string
+	PDFEnableOCR       bool
 }
 
 func normalizeStatus(status string) string {
@@ -191,10 +195,13 @@ type Converter interface {
 
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
 type DoclingConverter struct {
-	endpoint string
-	apiKey   string
-	client   *http.Client
-	logger   *zap.Logger
+	endpoint           string
+	apiKey             string
+	defaultLanguage    string
+	pdfDefaultLanguage string
+	pdfEnableOCR       bool
+	client             *http.Client
+	logger             *zap.Logger
 }
 
 // NewDoclingConverter создаёт конвертер с параметрами по умолчанию.
@@ -204,8 +211,11 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 	}
 
 	return &DoclingConverter{
-		endpoint: strings.TrimRight(cfg.Endpoint, "/"),
-		apiKey:   cfg.APIKey,
+		endpoint:           strings.TrimRight(cfg.Endpoint, "/"),
+		apiKey:             cfg.APIKey,
+		defaultLanguage:    cfg.DefaultLanguage,
+		pdfDefaultLanguage: cfg.PDFDefaultLanguage,
+		pdfEnableOCR:       cfg.PDFEnableOCR,
 		client: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -232,6 +242,18 @@ func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, 
 	}
 
 	return extensionToContentType[defaultExtension], defaultExtension, nil
+}
+
+func (c *DoclingConverter) shouldEnableOCR(contentType string) bool {
+	return contentType == "application/pdf" && c.pdfEnableOCR
+}
+
+func (c *DoclingConverter) selectLanguage(contentType string) string {
+	if contentType == "application/pdf" && c.pdfDefaultLanguage != "" {
+		return c.pdfDefaultLanguage
+	}
+
+	return c.defaultLanguage
 }
 
 // Submit отправляет документ в Docling и возвращает идентификатор задачи.
@@ -362,6 +384,21 @@ func (c *DoclingConverter) submitWithRetry(ctx context.Context, correlationID, f
 func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, contentType string, content []byte) (string, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
 
+	queryParams := url.Values{}
+	language := c.selectLanguage(contentType)
+
+	if c.shouldEnableOCR(contentType) {
+		queryParams.Set("ocr", "true")
+	}
+
+	if language != "" {
+		queryParams.Set("language", language)
+	}
+
+	if encoded := queryParams.Encode(); encoded != "" {
+		endpoint = fmt.Sprintf("%s?%s", endpoint, encoded)
+	}
+
 	payload := &bytes.Buffer{}
 	writer := multipart.NewWriter(payload)
 
@@ -381,6 +418,15 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 	if err == nil {
 		_, err = part.Write(content)
 	}
+
+	if err == nil && language != "" {
+		err = writer.WriteField("language", language)
+	}
+
+	if err == nil && c.shouldEnableOCR(contentType) {
+		err = writer.WriteField("ocr", "true")
+	}
+
 	if err == nil {
 		err = writer.Close()
 	}

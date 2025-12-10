@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -74,10 +75,15 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 			receivedCorrelationStatus = r.Header.Get(correlationIDHeader)
 
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
-				TaskID:  path.Base(r.URL.Path),
-				Status:  "SUCCESS",
-				Content: doclingStatusContent{Markdown: ptr("# converted")},
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{
+				TaskID:     path.Base(r.URL.Path),
+				TaskStatus: "success",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status:   "success",
+				Document: exportDocumentResponse{MdContent: ptr("# converted")},
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -152,10 +158,15 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-999"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
-				TaskID:  "task-999",
-				Status:  "completed",
-				Content: doclingStatusContent{Markdown: ptr("ok")},
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{
+				TaskID:     "task-999",
+				TaskStatus: "completed",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status:   "completed",
+				Document: exportDocumentResponse{MdContent: ptr("ok")},
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -194,7 +205,7 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-wait"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingStatusResponse{TaskID: "task-wait", Status: "processing"})
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{TaskID: "task-wait", TaskStatus: "processing"})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -232,10 +243,12 @@ func TestDoclingConverterCheckStatusTaskStatusField(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-async"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
-				TaskID:     "task-async",
-				TaskStatus: "completed",
-				Content:    doclingStatusContent{Markdown: ptr("# async")},
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{TaskID: "task-async", TaskStatus: "completed"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status:   "completed",
+				Document: exportDocumentResponse{MdContent: ptr("# async")},
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -275,7 +288,7 @@ func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T)
 			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-unknown"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingStatusResponse{TaskID: "task-unknown"})
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{TaskID: "task-unknown"})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -305,7 +318,7 @@ func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T)
 }
 
 func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
-	const responseBody = `{"status":"mystery","message":"unexpected"}`
+	const responseBody = `{"task_status":"mystery","message":"unexpected"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, doclingStatusPath) {
@@ -332,4 +345,95 @@ func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
 
 func ptr[T any](v T) *T {
 	return &v
+}
+
+func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
+	var receivedQuery string
+	var receivedLanguageField, receivedOCRField string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			receivedQuery = r.URL.RawQuery
+
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("failed to parse submit form: %v", err)
+			}
+
+			receivedLanguageField = r.FormValue("language")
+			receivedOCRField = r.FormValue("ocr")
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "pdf-task"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{TaskID: "pdf-task", TaskStatus: "success"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status:   "success",
+				Document: exportDocumentResponse{MdContent: ptr("# pdf")},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{
+		Endpoint:           server.URL,
+		PDFEnableOCR:       true,
+		DefaultLanguage:    "ru",
+		PDFDefaultLanguage: "sah",
+	}, zap.NewNop())
+
+	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "pdf-corr")
+	jobID, err := conv.Submit(ctx, DoclingConvertRequest{
+		FileName:    "scan.pdf",
+		Content:     []byte("pdf content"),
+		ContentType: "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if jobID == "" {
+		t.Fatalf("jobID must be returned")
+	}
+
+	status, err := conv.CheckStatus(ctx, jobID)
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Status != "success" {
+		t.Fatalf("unexpected status: %s", status.Status)
+	}
+
+	query := statusFromRawQuery(receivedQuery)
+	if query.Get("ocr") != "true" {
+		t.Fatalf("expected ocr param in query, got %s", query.Get("ocr"))
+	}
+
+	if query.Get("language") != "sah" {
+		t.Fatalf("expected pdf language override, got %s", query.Get("language"))
+	}
+
+	if receivedLanguageField != "sah" {
+		t.Fatalf("expected language form field, got %s", receivedLanguageField)
+	}
+
+	if receivedOCRField != "true" {
+		t.Fatalf("expected ocr form field, got %s", receivedOCRField)
+	}
+}
+
+func statusFromRawQuery(rawQuery string) url.Values {
+	query, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return url.Values{}
+	}
+
+	return query
 }
