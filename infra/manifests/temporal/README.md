@@ -9,3 +9,10 @@
 
 ```bash
 kubectl apply -n argocd -f infra/manifests/temporal/application.yaml
+```
+
+SSO:
+Callback:
+```shell
+https://temporal.tech.fedorov-team.tech/auth/sso/callback
+```

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+sudo apt install unzip
+
 set -e
 
 # Определение архитектуры
