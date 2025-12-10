@@ -3,6 +3,7 @@ package converter
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -17,6 +18,17 @@ import (
 
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
 )
+
+type doclingStatusResponse struct {
+	TaskID     string               `json:"task_id"`
+	Status     string               `json:"status"`
+	TaskStatus string               `json:"task_status"`
+	Content    doclingStatusContent `json:"content"`
+}
+
+type doclingStatusContent struct {
+	Markdown *string `json:"md_content"`
+}
 
 func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 	var submitCalls, statusCalls int32
@@ -75,9 +87,16 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
-				TaskID:  path.Base(r.URL.Path),
-				Status:  "SUCCESS",
-				Content: doclingStatusContent{Markdown: ptr("# converted")},
+				TaskID:     path.Base(r.URL.Path),
+				Status:     "SUCCESS",
+				TaskStatus: "success",
+				Content:    doclingStatusContent{Markdown: ptr("# converted")},
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Document: exportDocumentResponse{MdContent: ptr("# converted")},
+				Status:   "success",
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -153,9 +172,16 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
-				TaskID:  "task-999",
-				Status:  "completed",
-				Content: doclingStatusContent{Markdown: ptr("ok")},
+				TaskID:     "task-999",
+				Status:     "completed",
+				TaskStatus: "completed",
+				Content:    doclingStatusContent{Markdown: ptr("ok")},
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Document: exportDocumentResponse{MdContent: ptr("ok")},
+				Status:   "completed",
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -194,7 +220,7 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-wait"})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(doclingStatusResponse{TaskID: "task-wait", Status: "processing"})
+			_ = json.NewEncoder(w).Encode(doclingStatusResponse{TaskID: "task-wait", Status: "processing", TaskStatus: "processing"})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -236,6 +262,12 @@ func TestDoclingConverterCheckStatusTaskStatusField(t *testing.T) {
 				TaskID:     "task-async",
 				TaskStatus: "completed",
 				Content:    doclingStatusContent{Markdown: ptr("# async")},
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Document: exportDocumentResponse{MdContent: ptr("# async")},
+				Status:   "completed",
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -304,7 +336,7 @@ func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T)
 	}
 }
 
-func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
+func TestDoclingConverterCheckStatusUnknownSchedulesNextPoll(t *testing.T) {
 	const responseBody = `{"status":"mystery","message":"unexpected"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -312,21 +344,38 @@ func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
 
+		response := map[string]string{
+			"task_status": "mystery",
+			"status":      "mystery",
+			"message":     "unexpected",
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(responseBody))
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
+	logCore, logs := observer.New(zap.DebugLevel)
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.New(logCore))
 
-	_, err := conv.CheckStatus(context.Background(), "job-unknown")
-	if err == nil {
-		t.Fatal("expected error for unknown status")
+	result, err := conv.CheckStatus(context.Background(), "job-unknown")
+	if err != nil {
+		t.Fatalf("unexpected error for unknown status: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "response="+responseBody) {
-		t.Fatalf("expected response body in error, got: %v", err)
+	if result.Result != nil || result.Status != "mystery" {
+		t.Fatalf("expected pending-like response, got %+v", result)
+	}
+
+	warnings := logs.FilterMessage("docling status unrecognized, scheduling next poll").All()
+	if len(warnings) == 0 {
+		t.Fatalf("expected warning log for unknown status, got %d", logs.Len())
+	}
+
+	responseField := fmt.Sprint(warnings[0].ContextMap()["response"])
+	if !strings.Contains(responseField, "mystery") {
+		t.Fatalf("expected response snippet in warning, got: %s", responseField)
 	}
 }
 

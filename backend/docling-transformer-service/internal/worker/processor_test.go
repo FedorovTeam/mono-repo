@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,8 +21,12 @@ type pollingRepoStub struct {
 	updateInfoCalls  int
 	markDoneCalls    int
 	markWaitingCalls int
+	markFailedCalls  int
 	restored         int
 	restoreCalls     int
+	lastPollCount    int
+	lastWaitingPoll  int
+	lastNextPoll     time.Time
 }
 
 func (p *pollingRepoStub) Enqueue(context.Context, repository.EnqueueParams) (uuid.UUID, error) {
@@ -35,13 +40,19 @@ func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) e
 	p.markDoneCalls++
 	return nil
 }
-func (p *pollingRepoStub) MarkFailed(context.Context, uuid.UUID, string) error { return nil }
-func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
-	p.updateInfoCalls++
+func (p *pollingRepoStub) MarkFailed(context.Context, uuid.UUID, string) error {
+	p.markFailedCalls++
 	return nil
 }
-func (p *pollingRepoStub) MarkDoclingWaiting(context.Context, uuid.UUID, string, int, time.Time) error {
+func (p *pollingRepoStub) UpdateDoclingInfo(_ context.Context, _ uuid.UUID, _ string, pollCount int) error {
+	p.updateInfoCalls++
+	p.lastPollCount = pollCount
+	return nil
+}
+func (p *pollingRepoStub) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, _ string, pollCount int, nextPoll time.Time) error {
 	p.markWaitingCalls++
+	p.lastWaitingPoll = pollCount
+	p.lastNextPoll = nextPoll
 	return nil
 }
 func (p *pollingRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
@@ -68,6 +79,17 @@ func (c *statusOnlyConverter) Submit(context.Context, converter.DoclingConvertRe
 
 func (c *statusOnlyConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
 	return converter.StatusCheckResult{Status: "success", Result: &converter.DoclingConvertResult{Content: []byte("markdown"), MediaType: "text/markdown"}}, nil
+}
+
+type unknownStatusConverter struct {
+	status string
+}
+
+func (c *unknownStatusConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+	return "", nil
+}
+func (c *unknownStatusConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
+	return converter.StatusCheckResult{Status: c.status, Result: nil}, nil
 }
 
 type trackingStorage struct {
@@ -137,7 +159,7 @@ func TestRunRestoresProcessingTasksOnStartup(t *testing.T) {
 }
 
 func TestPollDoclingJobLogsStatusError(t *testing.T) {
-	const responseBody = `{"status":"unknown","message":"docling refused"}`
+	const responseBody = `{"status":"failed","task_status":"failed","message":"docling refused"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/status/poll/") {
@@ -155,7 +177,7 @@ func TestPollDoclingJobLogsStatusError(t *testing.T) {
 	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, zap.NewNop())
 
 	logCore, logs := observer.New(zap.InfoLevel)
-	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingMaxAttempts: 1})
+	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingMaxAttempts: 0})
 
 	jobID := "job-log-error"
 	task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: jobID, CreatedAt: time.Now()}
@@ -177,5 +199,53 @@ func TestPollDoclingJobLogsStatusError(t *testing.T) {
 	errorField := fmt.Sprint(entries[0].ContextMap()["error"])
 	if !strings.Contains(errorField, "response="+responseBody) {
 		t.Fatalf("expected response body in log, got: %s", errorField)
+	}
+}
+
+func TestPollDoclingJobUnknownStatusKeepsWaiting(t *testing.T) {
+	repo := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := &unknownStatusConverter{status: "mystery"}
+	processor := NewProcessor(repo, conv, storage, nil, Config{
+		DoclingMaxAttempts:     2,
+		DoclingInitialInterval: time.Second,
+		DoclingBackoffFactor:   2,
+	})
+
+	task := &repository.TransformationTask{ID: uuid.New(), CreatedAt: time.Now()}
+
+	err := processor.pollDoclingJob(context.Background(), task, "job-unknown", 0)
+	if err == nil || !errors.Is(err, errDoclingWaiting) {
+		t.Fatalf("expected waiting error, got %v", err)
+	}
+
+	if repo.markFailedCalls != 0 {
+		t.Fatalf("expected no failures, got %d", repo.markFailedCalls)
+	}
+
+	if repo.markWaitingCalls != 1 {
+		t.Fatalf("expected mark waiting once, got %d", repo.markWaitingCalls)
+	}
+
+	if task.NextPollAt == nil || task.NextPollAt.Before(time.Now()) {
+		t.Fatalf("expected next poll time to be scheduled, got %v", task.NextPollAt)
+	}
+}
+
+func TestPollDoclingJobUnknownStatusStopsAtLimit(t *testing.T) {
+	repo := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := &unknownStatusConverter{status: "mystery"}
+	processor := NewProcessor(repo, conv, storage, nil, Config{DoclingMaxAttempts: 1})
+
+	task := &repository.TransformationTask{ID: uuid.New(), CreatedAt: time.Now()}
+
+	err := processor.pollDoclingJob(context.Background(), task, "job-unknown", 1)
+	if err == nil || !errors.Is(err, converter.ErrDoclingPollingAttemptsExceeded) {
+		t.Fatalf("expected polling attempts exceeded, got %v", err)
+	}
+
+	if repo.markFailedCalls != 0 {
+		t.Fatalf("expected no mark failed during polling, got %d", repo.markFailedCalls)
 	}
 }

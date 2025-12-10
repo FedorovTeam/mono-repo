@@ -75,6 +75,20 @@ var pendingStatuses = map[string]struct{}{
 	"in progress": {},
 }
 
+var failureStatuses = map[string]struct{}{
+	"failed":    {},
+	"failure":   {},
+	"error":     {},
+	"errored":   {},
+	"timeout":   {},
+	"timed_out": {},
+	"timed out": {},
+	"canceled":  {},
+	"cancelled": {},
+	"aborted":   {},
+	"rejected":  {},
+}
+
 func isSuccessStatus(status string) bool {
 	_, ok := successStatuses[status]
 	return ok
@@ -82,6 +96,11 @@ func isSuccessStatus(status string) bool {
 
 func isPendingStatus(status string) bool {
 	_, ok := pendingStatuses[status]
+	return ok
+}
+
+func isFailureStatus(status string) bool {
+	_, ok := failureStatuses[status]
 	return ok
 }
 
@@ -326,8 +345,23 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		}, nil
 
 	default:
-		// 4. Неуспешный финальный статус
-		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
+		if isFailureStatus(normalizedStatus) {
+			// 4. Неуспешный финальный статус
+			return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
+		}
+
+		// 5. Неизвестный промежуточный статус — ждём следующего запроса
+		c.logger.Warn("docling status unrecognized, scheduling next poll",
+			zap.String("job_id", jobID),
+			zap.String("correlation_id", correlationID),
+			zap.String("status", normalizedStatus),
+			zap.String("response", responseSnippet(body)),
+		)
+
+		return StatusCheckResult{
+			Status: normalizedStatus,
+			Result: nil,
+		}, nil
 	}
 }
 
