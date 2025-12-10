@@ -115,7 +115,7 @@ func ResolveContentTypeByExtension(fileExt string) (string, error) {
 	return contentType, nil
 }
 
-// DoclingConvertRequest описывает входные данные для конвертации DOCX в Markdown.
+// DoclingConvertRequest описывает входные данные для конвертации.
 type DoclingConvertRequest struct {
 	FileName    string
 	Content     []byte
@@ -354,9 +354,13 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 	}
 }
 
-// --- внутренние методы отправки и опций Docling ---
+// --- внутренняя отправка задач и опции Docling ---
 
-func (c *DoclingConverter) submitWithRetry(ctx context.Context, correlationID, filename, contentType, fileExt string, content []byte) (string, error) {
+func (c *DoclingConverter) submitWithRetry(
+	ctx context.Context,
+	correlationID, filename, contentType, fileExt string,
+	content []byte,
+) (string, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
@@ -385,7 +389,10 @@ func (c *DoclingConverter) submitWithRetry(ctx context.Context, correlationID, f
 }
 
 // writeDoclingOptions — формирует form-data поля с опциями Docling Serve.
-func (c *DoclingConverter) writeDoclingOptions(writer *multipart.Writer, contentType, fileExt string) error {
+func (c *DoclingConverter) writeDoclingOptions(
+	writer *multipart.Writer,
+	contentType, fileExt string,
+) error {
 	// Всегда явно просим Markdown
 	if err := writer.WriteField("to_formats", "md"); err != nil {
 		return fmt.Errorf("write to_formats: %w", err)
@@ -405,7 +412,7 @@ func (c *DoclingConverter) writeDoclingOptions(writer *multipart.Writer, content
 			return fmt.Errorf("write do_ocr: %w", err)
 		}
 
-		// ВАЖНО: форсируем OCR даже при наличии текстового слоя
+		// IMPORTANT: форсируем OCR даже при наличии текстового слоя
 		if err := writer.WriteField("force_ocr", "true"); err != nil {
 			return fmt.Errorf("write force_ocr: %w", err)
 		}
@@ -423,7 +430,7 @@ func (c *DoclingConverter) writeDoclingOptions(writer *multipart.Writer, content
 		}
 	}
 
-	// Режим таблиц и картинок — можно тюнить по желанию
+	// Режим таблиц и картинок — дефолты
 	if err := writer.WriteField("table_mode", "accurate"); err != nil {
 		return fmt.Errorf("write table_mode: %w", err)
 	}
@@ -434,7 +441,11 @@ func (c *DoclingConverter) writeDoclingOptions(writer *multipart.Writer, content
 	return nil
 }
 
-func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, contentType, fileExt string, content []byte) (string, error) {
+func (c *DoclingConverter) submit(
+	ctx context.Context,
+	correlationID, filename, contentType, fileExt string,
+	content []byte,
+) (string, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
 
 	payload := &bytes.Buffer{}
