@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -276,7 +275,7 @@ func (c *DoclingConverter) Submit(ctx context.Context, req DoclingConvertRequest
 		filename = fmt.Sprintf("document.%s", fileExt)
 	}
 
-	jobID, err := c.submitWithRetry(ctx, correlationID, filename, contentType, req.Content)
+	jobID, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content)
 	if err != nil {
 		return "", err
 	}
@@ -355,11 +354,13 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 	}
 }
 
-func (c *DoclingConverter) submitWithRetry(ctx context.Context, correlationID, filename, contentType string, content []byte) (string, error) {
+// --- внутренние методы отправки и опций Docling ---
+
+func (c *DoclingConverter) submitWithRetry(ctx context.Context, correlationID, filename, contentType, fileExt string, content []byte) (string, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
-		jobID, err := c.submit(ctx, correlationID, filename, contentType, content)
+		jobID, err := c.submit(ctx, correlationID, filename, contentType, fileExt, content)
 		if err == nil {
 			return jobID, nil
 		}
@@ -383,23 +384,58 @@ func (c *DoclingConverter) submitWithRetry(ctx context.Context, correlationID, f
 	return "", lastErr
 }
 
-func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, contentType string, content []byte) (string, error) {
-	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
+// writeDoclingOptions — формирует form-data поля с опциями Docling Serve.
+func (c *DoclingConverter) writeDoclingOptions(writer *multipart.Writer, contentType, fileExt string) error {
+	// Всегда явно просим Markdown
+	if err := writer.WriteField("to_formats", "md"); err != nil {
+		return fmt.Errorf("write to_formats: %w", err)
+	}
 
-	queryParams := url.Values{}
-	language := c.selectLanguage(contentType)
+	// from_formats — подсказываем тип входа (pdf/doc/docx)
+	if fileExt != "" {
+		if err := writer.WriteField("from_formats", fileExt); err != nil {
+			return fmt.Errorf("write from_formats: %w", err)
+		}
+	}
 
+	// Опции для PDF + OCR
 	if c.shouldEnableOCR(contentType) {
-		queryParams.Set("ocr", "true")
+		// Включаем OCR
+		if err := writer.WriteField("do_ocr", "true"); err != nil {
+			return fmt.Errorf("write do_ocr: %w", err)
+		}
+
+		// ВАЖНО: форсируем OCR даже при наличии текстового слоя
+		if err := writer.WriteField("force_ocr", "true"); err != nil {
+			return fmt.Errorf("write force_ocr: %w", err)
+		}
+
+		// Язык OCR
+		if lang := c.selectLanguage(contentType); lang != "" {
+			if err := writer.WriteField("ocr_lang", lang); err != nil {
+				return fmt.Errorf("write ocr_lang: %w", err)
+			}
+		}
+
+		// Бэкенд парсера PDF (актуальная версия)
+		if err := writer.WriteField("pdf_backend", "dlparse_v4"); err != nil {
+			return fmt.Errorf("write pdf_backend: %w", err)
+		}
 	}
 
-	if language != "" {
-		queryParams.Set("language", language)
+	// Режим таблиц и картинок — можно тюнить по желанию
+	if err := writer.WriteField("table_mode", "accurate"); err != nil {
+		return fmt.Errorf("write table_mode: %w", err)
+	}
+	if err := writer.WriteField("image_export_mode", "embedded"); err != nil {
+		return fmt.Errorf("write image_export_mode: %w", err)
 	}
 
-	if encoded := queryParams.Encode(); encoded != "" {
-		endpoint = fmt.Sprintf("%s?%s", endpoint, encoded)
-	}
+	return nil
+}
+
+func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, contentType, fileExt string, content []byte) (string, error) {
+	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
 
 	payload := &bytes.Buffer{}
 	writer := multipart.NewWriter(payload)
@@ -420,19 +456,16 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 	if err == nil {
 		_, err = part.Write(content)
 	}
-
-	if err == nil && language != "" {
-		err = writer.WriteField("language", language)
-	}
-
-	if err == nil && c.shouldEnableOCR(contentType) {
-		err = writer.WriteField("ocr", "true")
-	}
-
-	if err == nil {
-		err = writer.Close()
-	}
 	if err != nil {
+		return "", fmt.Errorf("build docling multipart: %w", err)
+	}
+
+	// Опции Docling Serve (форматы, OCR, язык, pdf_backend и т.п.)
+	if err = c.writeDoclingOptions(writer, contentType, fileExt); err != nil {
+		return "", err
+	}
+
+	if err = writer.Close(); err != nil {
 		return "", fmt.Errorf("build docling multipart: %w", err)
 	}
 
