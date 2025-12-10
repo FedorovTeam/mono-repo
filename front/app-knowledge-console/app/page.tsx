@@ -23,7 +23,7 @@ interface UploadResponse {
 
 export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
-  const [repository, setRepository] = useState('FedorovTeam/docs');
+  const [repository, setRepository] = useState('docs');
   const [branch, setBranch] = useState('main');
   const [path, setPath] = useState('docs/test.md');
 
@@ -144,10 +144,11 @@ export default function HomePage() {
       setMessage(
           `Файл загружен. Document ID: ${document.id}, статус: ${document.status}`,
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setStatus('error');
-      setMessage(err.message || 'Неизвестная ошибка');
+      const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
+      setMessage(errorMessage);
     }
   };
 
@@ -176,13 +177,17 @@ export default function HomePage() {
 
             <div className="grid grid-cols-1 gap-3">
               <div>
-                <label className="block text-sm mb-1">Repository</label>
+                <label className="block text-sm mb-1">Название репозитория</label>
                 <input
                     type="text"
                     value={repository}
                     onChange={(e) => setRepository(e.target.value)}
+                    placeholder="например: docs"
                     className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                 />
+                <p className="mt-1 text-xs text-slate-400">
+                  Укажите только имя репозитория без владельца (например, <code>docs</code>).
+                </p>
               </div>
               <div>
                 <label className="block text-sm mb-1">Branch</label>
