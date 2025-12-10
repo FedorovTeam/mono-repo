@@ -42,10 +42,22 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 	log.Printf("correlation_id=%s publish request path=%s owner=%s repo=%s create_pr=%t", correlationID, req.GetPath(), req.GetOwner(), req.GetRepository(), req.GetCreatePr())
 
 	owner := req.GetOwner()
+	repository := req.GetRepository()
+
+	if strings.Contains(repository, "/") {
+		parts := strings.Split(repository, "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return nil, status.Error(codes.InvalidArgument, "repository must not contain slash")
+		}
+		if owner != "" && owner != parts[0] {
+			return nil, status.Error(codes.InvalidArgument, "repository must not contain owner prefix")
+		}
+		owner, repository = parts[0], parts[1]
+	}
+
 	if owner == "" {
 		owner = s.cfg.GitHub.Owner
 	}
-	repository := req.GetRepository()
 	if repository == "" {
 		repository = s.cfg.GitHub.Repository
 	}

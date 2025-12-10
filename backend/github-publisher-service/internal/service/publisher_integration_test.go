@@ -170,6 +170,116 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 	}
 }
 
+func TestPublishMarkdownIntegration_RepositoryWithSlashAndEmptyOwner(t *testing.T) {
+	var capturedPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/foo/bar/contents/readme.md":
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodPut && r.URL.Path == "/repos/foo/bar/contents/readme.md":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"commit": map[string]string{"sha": "with-slash"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		GitHub: config.GitHubConfig{
+			BaseURL:       server.URL,
+			Owner:         "default-owner",
+			Repository:    "default-repo",
+			Token:         "token",
+			DefaultBranch: "main",
+		},
+	}
+
+	lis := bufconn.Listen(1024 * 1024)
+	grpcServer := grpc.NewServer()
+	storageStub := &stubStorage{data: "# Hi"}
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, server.Client(), storageStub))
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	t.Cleanup(grpcServer.Stop)
+
+	dialer := func(context.Context, string) (net.Conn, error) {
+		return lis.Dial()
+	}
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(dialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := githubpublisherv1.NewGithubPublisherServiceClient(conn)
+
+	resp, err := client.PublishMarkdown(context.Background(), &githubpublisherv1.PublishMarkdownRequest{
+		Path:          "readme.md",
+		Repository:    "foo/bar",
+		Content:       "# Doc",
+		CommitMessage: "Add doc",
+	})
+	if err != nil {
+		t.Fatalf("PublishMarkdown error: %v", err)
+	}
+
+	if resp.GetCommitSha() != "with-slash" {
+		t.Fatalf("unexpected commit sha: %s", resp.GetCommitSha())
+	}
+	if capturedPath != "/repos/foo/bar/contents/readme.md" {
+		t.Fatalf("unexpected request path: %s", capturedPath)
+	}
+}
+
+func TestPublishMarkdownIntegration_RepositoryWithSlashOwnerMismatch(t *testing.T) {
+	cfg := &config.Config{GitHub: config.GitHubConfig{Token: "token"}}
+
+	lis := bufconn.Listen(1024 * 1024)
+	grpcServer := grpc.NewServer()
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, &http.Client{}, &stubStorage{data: "# Hi"}))
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	t.Cleanup(grpcServer.Stop)
+
+	dialer := func(context.Context, string) (net.Conn, error) {
+		return lis.Dial()
+	}
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(dialer), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := githubpublisherv1.NewGithubPublisherServiceClient(conn)
+
+	_, err = client.PublishMarkdown(context.Background(), &githubpublisherv1.PublishMarkdownRequest{
+		Path:       "readme.md",
+		Owner:      "someone",
+		Repository: "foo/bar",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("status not returned")
+	}
+	if st.Code() != codes.InvalidArgument {
+		t.Fatalf("unexpected code: %s", st.Code())
+	}
+}
+
 func TestPublishMarkdownIntegration_GitHubError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
