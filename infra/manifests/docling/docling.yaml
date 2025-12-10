@@ -22,17 +22,37 @@ spec:
               value: "1"
             - name: DOCLING_SERVE_RESULT_REMOVAL_DELAY
               value: "3600"
+            - name: DOCLING_SERVE_SINGLE_USE_RESULTS
+              value: "true"
+            - name: DOCLING_SERVE_MAX_FILE_SIZE
+              value: "104857600"      # 100 MiB
+            - name: DOCLING_SERVE_MAX_NUM_PAGES
+              value: "1000"
+            - name: DOCLING_SERVE_ENG_KIND
+              value: "local"
+            - name: DOCLING_SERVE_ENG_LOC_NUM_WORKERS
+              value: "2"              # 2 параллельных задачи
+            - name: DOCLING_SERVE_ENG_LOC_SHARE_MODELS
+              value: "true"           # делить модели между воркерам
+            - name: DOCLING_NUM_THREADS
+              value: "3"              # torch-потоки
+            - name: DOCLING_DEVICE
+              value: "cpu"
+            - name: DOCLING_PERF_PAGE_BATCH_SIZE
+              value: "4"
+            - name: DOCLING_PERF_ELEMENTS_BATCH_SIZE
+              value: "8"
             # при желании сюда можно добавить другие env из .env.example
           ports:
             - containerPort: 5001
               name: http
           resources:
             requests:
-              cpu: "500m"
-              memory: "2Gi"
+              cpu: "2"
+              memory: "3Gi"
             limits:
               cpu: "3"
-              memory: "6Gi"
+              memory: "4Gi"
           # Если потребуется доступ к модели/кэшу на диске – сюда можно добавить volumeMounts
 ---
 apiVersion: v1
