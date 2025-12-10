@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
 )
@@ -220,6 +221,86 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 
 	if status.Status == "" {
 		t.Fatalf("status should be propagated")
+	}
+}
+
+func TestDoclingConverterCheckStatusTaskStatusField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-async"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingStatusResponse{
+				TaskID:     "task-async",
+				TaskStatus: "completed",
+				Content:    doclingStatusContent{Markdown: ptr("# async")},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
+
+	jobID, err := conv.Submit(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	status, err := conv.CheckStatus(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Status != "completed" {
+		t.Fatalf("expected normalized task status, got %s", status.Status)
+	}
+
+	if status.Result == nil || string(status.Result.Content) != "# async" {
+		t.Fatalf("unexpected result: %+v", status.Result)
+	}
+}
+
+func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T) {
+	logCore, logs := observer.New(zap.DebugLevel)
+	logger := zap.New(logCore)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-unknown"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingStatusResponse{TaskID: "task-unknown"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, logger)
+
+	jobID, err := conv.Submit(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	status, err := conv.CheckStatus(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Status != "pending" {
+		t.Fatalf("expected pending status fallback, got %s", status.Status)
+	}
+
+	warnings := logs.FilterMessage("docling status missing, defaulting to pending")
+	if warnings.Len() == 0 {
+		t.Fatalf("expected warning log for missing status")
 	}
 }
 

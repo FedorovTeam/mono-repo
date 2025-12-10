@@ -167,11 +167,25 @@ type doclingStatusContent struct {
 type doclingStatusResponse struct {
 	TaskID         string                `json:"task_id"`
 	JobID          string                `json:"job_id"`
+	TaskStatus     string                `json:"task_status"`
+	JobStatus      string                `json:"job_status"`
 	Status         string                `json:"status"`
+	State          string                `json:"state"`
 	Content        doclingStatusContent  `json:"content"`
 	Document       *doclingStatusContent `json:"document"`
 	Errors         []any                 `json:"errors"`
 	ProcessingTime float64               `json:"processing_time"`
+}
+
+func (resp doclingStatusResponse) statusWithFallback() (normalizedStatus string, rawStatus string) {
+	for _, status := range []string{resp.TaskStatus, resp.JobStatus, resp.Status, resp.State} {
+		status = strings.TrimSpace(status)
+		if status != "" {
+			return normalizeStatus(status), status
+		}
+	}
+
+	return "", ""
 }
 
 type doclingSubmitResponse struct {
@@ -280,7 +294,15 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		return StatusCheckResult{}, err
 	}
 
-	normalizedStatus := normalizeStatus(statusResp.Status)
+	normalizedStatus, rawStatus := statusResp.statusWithFallback()
+
+	if normalizedStatus == "" {
+		normalizedStatus = "pending"
+		c.logger.Warn("docling status missing, defaulting to pending",
+			zap.String("job_id", jobID),
+			zap.String("correlation_id", correlationID),
+		)
+	}
 
 	switch {
 	case isSuccessStatus(normalizedStatus):
@@ -301,7 +323,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		)
 		return StatusCheckResult{Status: normalizedStatus, Result: nil}, nil
 	default:
-		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s", statusResp.Status, jobID)
+		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s", rawStatus, jobID)
 	}
 }
 
@@ -457,8 +479,9 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 }
 
 func buildConvertResult(resp doclingStatusResponse) (DoclingConvertResult, error) {
-	if !isSuccessStatus(normalizeStatus(resp.Status)) {
-		return DoclingConvertResult{}, fmt.Errorf("docling response status=%s", resp.Status)
+	normalizedStatus, rawStatus := resp.statusWithFallback()
+	if !isSuccessStatus(normalizedStatus) {
+		return DoclingConvertResult{}, fmt.Errorf("docling response status=%s", rawStatus)
 	}
 
 	content := resp.mergedContent()
