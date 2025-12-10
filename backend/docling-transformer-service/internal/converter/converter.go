@@ -466,7 +466,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 		}
 
 		// Бэкенд парсера PDF
-		if err := writer.WriteField("pdf_backend", "dlparse_v4"); err != nil {
+		if err := writer.WriteField("pdf_backend", "pypdfium2"); err != nil {
 			return fmt.Errorf("write pdf_backend: %w", err)
 		}
 	}

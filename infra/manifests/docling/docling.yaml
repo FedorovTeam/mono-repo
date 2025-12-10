@@ -20,6 +20,8 @@ spec:
           env:
             - name: DOCLING_SERVE_ENABLE_UI
               value: "1"
+            - name: DOCLING_SERVE_RESULT_REMOVAL_DELAY
+              value: "3600"
             # при желании сюда можно добавить другие env из .env.example
           ports:
             - containerPort: 5001
@@ -29,8 +31,8 @@ spec:
               cpu: "500m"
               memory: "2Gi"
             limits:
-              cpu: "2"
-              memory: "8Gi"
+              cpu: "3"
+              memory: "6Gi"
           # Если потребуется доступ к модели/кэшу на диске – сюда можно добавить volumeMounts
 ---
 apiVersion: v1
