@@ -79,7 +79,10 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 			return nil, status.Errorf(codes.FailedPrecondition, "load markdown: %v", err)
 		}
 		log.Printf("correlation_id=%s loaded markdown bucket=%s key=%s", correlationID, bucket, key)
-		content = string(data)
+		content, err = convertToUTF8(data)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid content encoding: %v", err)
+		}
 	}
 
 	branch := req.GetBranch()
