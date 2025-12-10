@@ -83,7 +83,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
 				Status:   "success",
-				Document: exportDocumentResponse{MdContent: ptr("# converted")},
+				Document: exportDocumentResponse{MdContent: ptr("# converted"), Charset: ptr("utf-16")},
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -119,6 +119,10 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 
 	if status.Result.MediaType != "text/markdown" {
 		t.Fatalf("unexpected media type: %s", status.Result.MediaType)
+	}
+
+	if status.Result.Charset != "utf-16" {
+		t.Fatalf("unexpected charset: %s", status.Result.Charset)
 	}
 
 	if atomic.LoadInt32(&submitCalls) != 1 {
