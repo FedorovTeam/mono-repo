@@ -49,5 +49,3 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251022142026-3a174f9686a8 // indirect
 	gopkg.in/yaml.v2 v2.2.8 // indirect
 )
-
-replace golang.org/x/text/encoding/charmap/charsetautodetect => ./internal/charsetautodetect

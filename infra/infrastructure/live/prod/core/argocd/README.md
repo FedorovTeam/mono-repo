@@ -4,5 +4,9 @@ docker login https://harbor.tech.fedorov-team.tech/ -u robot$argo-cd -p TPhohsjK
 
 
 ```shell
-kubectl create secret generic regcred --from-file=.dockerconfigjson=~/.docker/config.json --type=kubernetes.io/dockerconfigjson -n argo
+cat ~/.docker/config.json
+
+create file dockerconfig.json
+
+kubectl create secret generic regcred --from-file=.dockerconfigjson=./dockerconfig.json --type=kubernetes.io/dockerconfigjson -n argocd
 ```

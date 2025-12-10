@@ -1,12 +1,12 @@
 package service
 
 import (
+	"backend-github-publisher-service/internal/charsetautodetect"
 	"bytes"
 	"fmt"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/charmap/charsetautodetect"
 	xunicode "golang.org/x/text/encoding/unicode"
 )
 
