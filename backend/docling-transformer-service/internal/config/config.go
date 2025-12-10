@@ -35,6 +35,9 @@ type ServiceConfig struct {
 type DoclingConfig struct {
 	Endpoint              string        `yaml:"endpoint"`
 	APIKey                string        `yaml:"api_key"`
+	DefaultLanguage       string        `yaml:"default_language"`
+	PDFDefaultLanguage    string        `yaml:"pdf_default_language"`
+	PDFEnableOCR          bool          `yaml:"pdf_enable_ocr"`
 	StatusInitialInterval time.Duration `yaml:"status_initial_interval"`
 	StatusBackoffFactor   float64       `yaml:"status_backoff_factor"`
 	StatusMaxInterval     time.Duration `yaml:"status_max_interval"`
