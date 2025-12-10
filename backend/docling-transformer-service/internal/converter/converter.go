@@ -63,6 +63,7 @@ var successStatuses = map[string]struct{}{
 
 var pendingStatuses = map[string]struct{}{
 	"pending":     {},
+	"started":     {},
 	"processing":  {},
 	"queued":      {},
 	"running":     {},
