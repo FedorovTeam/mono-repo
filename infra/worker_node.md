@@ -23,6 +23,17 @@ curl -sfL https://get.k3s.io |
 
 Вариант 2 — через готовый скрипт: `infra/scripts/k3s/setup_worker_node.sh`, передав значения `K3S_URL`, `K3S_TOKEN` и `INSTALL_K3S_VERSION` (`v1.29.3+k3s1`).
 
+## После подключения
+
+Выполнить скрипт `infra/scripts/steps/4_add_worker_node.sh`, который применяет `metallb-config.yaml` и `metallb-config-worker.yaml`, расширяя пул `address-pools` и обеспечивая выдачу IP-адресов для сервисов на новой ноде.
+
+После применения проверить конфигурацию и получение адресов:
+
+```shell
+kubectl get ipaddresspools.metallb.io -A
+kubectl get svc -n traefik
+```
+
 ## Проверка
 
 1. На мастер-ноде выполнить `kubectl get nodes` и убедиться, что новая нода находится в статусе `Ready`.
