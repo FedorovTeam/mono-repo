@@ -127,6 +127,7 @@ type DoclingConvertRequest struct {
 type DoclingConvertResult struct {
 	Content   []byte
 	MediaType string
+	Charset   string
 }
 
 // Config описывает параметры HTTP-клиента Docling.
@@ -174,6 +175,7 @@ type exportDocumentResponse struct {
 	HtmlContent    *string `json:"html_content"`
 	TextContent    *string `json:"text_content"`
 	DoctagsContent *string `json:"doctags_content"`
+	Charset        *string `json:"charset"`
 }
 
 type doclingSubmitResponse struct {
@@ -570,14 +572,19 @@ func buildConvertResult(resp convertDocumentResponse) (DoclingConvertResult, err
 
 	doc := resp.Document
 
+	charset := ""
+	if doc.Charset != nil {
+		charset = *doc.Charset
+	}
+
 	if md := firstNonEmpty(doc.MdContent); md != "" {
-		return DoclingConvertResult{Content: []byte(md), MediaType: "text/markdown"}, nil
+		return DoclingConvertResult{Content: []byte(md), MediaType: "text/markdown", Charset: charset}, nil
 	}
 	if html := firstNonEmpty(doc.HtmlContent); html != "" {
-		return DoclingConvertResult{Content: []byte(html), MediaType: "text/html"}, nil
+		return DoclingConvertResult{Content: []byte(html), MediaType: "text/html", Charset: charset}, nil
 	}
 	if text := firstNonEmpty(doc.TextContent); text != "" {
-		return DoclingConvertResult{Content: []byte(text), MediaType: "text/plain"}, nil
+		return DoclingConvertResult{Content: []byte(text), MediaType: "text/plain", Charset: charset}, nil
 	}
 
 	return DoclingConvertResult{}, errors.New("docling response has empty content")

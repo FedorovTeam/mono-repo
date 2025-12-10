@@ -402,7 +402,7 @@ func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.Transfo
 	p.metrics.recordDoclingWait(ctx, time.Since(task.CreatedAt))
 
 	result := *statusResult.Result
-	mediaType := normalizeMediaType(result.MediaType)
+	mediaType := normalizeMediaType(result.MediaType, result.Charset)
 
 	uploadCtx, cancelUpload := p.fastPhaseContext(ctx)
 	defer cancelUpload()
@@ -418,17 +418,23 @@ func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.Transfo
 	return nil
 }
 
-func normalizeMediaType(mediaType string) string {
+func normalizeMediaType(mediaType, charset string) string {
+	mediaType = strings.TrimSpace(mediaType)
 	if mediaType == "" {
 		mediaType = "text/markdown"
 	}
 
 	lower := strings.ToLower(mediaType)
-	if strings.Contains(lower, "charset=utf-8") {
+	if strings.Contains(lower, "charset=") {
 		return mediaType
 	}
 
-	return mediaType + "; charset=utf-8"
+	charset = strings.TrimSpace(charset)
+	if charset == "" {
+		charset = "utf-8"
+	}
+
+	return mediaType + "; charset=" + charset
 }
 
 func (p *Processor) maintenanceLoop(ctx context.Context, interval time.Duration) {

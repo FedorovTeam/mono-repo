@@ -198,18 +198,20 @@ func TestPollDoclingJobNormalizesMediaType(t *testing.T) {
 	cases := []struct {
 		name       string
 		mediaType  string
+		charset    string
 		expectedCT string
 	}{
 		{name: "default markdown", mediaType: "", expectedCT: "text/markdown; charset=utf-8"},
 		{name: "plain text", mediaType: "text/plain", expectedCT: "text/plain; charset=utf-8"},
 		{name: "charset already set", mediaType: "text/html; charset=utf-8", expectedCT: "text/html; charset=utf-8"},
+		{name: "docling charset", mediaType: "text/markdown", charset: "koi8-r", expectedCT: "text/markdown; charset=koi8-r"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &pollingRepoStub{}
 			storage := &trackingStorage{}
-			conv := &staticResultConverter{result: converter.DoclingConvertResult{Content: []byte("body"), MediaType: tc.mediaType}}
+			conv := &staticResultConverter{result: converter.DoclingConvertResult{Content: []byte("body"), MediaType: tc.mediaType, Charset: tc.charset}}
 			processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
 
 			task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
@@ -222,5 +224,22 @@ func TestPollDoclingJobNormalizesMediaType(t *testing.T) {
 				t.Fatalf("expected content type %q, got %q", tc.expectedCT, storage.contentType)
 			}
 		})
+	}
+}
+
+func TestPollDoclingJobStoresUtf8ForCyrillicMarkdown(t *testing.T) {
+	repo := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := &staticResultConverter{result: converter.DoclingConvertResult{Content: []byte("# Заголовок\nТекст"), MediaType: "text/markdown"}}
+	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
+
+	task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
+
+	if err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if storage.contentType != "text/markdown; charset=utf-8" {
+		t.Fatalf("expected utf-8 charset for cyrillic markdown, got %q", storage.contentType)
 	}
 }
