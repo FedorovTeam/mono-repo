@@ -70,9 +70,22 @@ func (c *statusOnlyConverter) CheckStatus(context.Context, string) (converter.St
 	return converter.StatusCheckResult{Status: "success", Result: &converter.DoclingConvertResult{Content: []byte("markdown"), MediaType: "text/markdown"}}, nil
 }
 
+type staticResultConverter struct {
+	result converter.DoclingConvertResult
+}
+
+func (c *staticResultConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+	return "", nil
+}
+
+func (c *staticResultConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
+	return converter.StatusCheckResult{Status: "success", Result: &c.result}, nil
+}
+
 type trackingStorage struct {
 	downloadCalls int
 	uploaded      []byte
+	contentType   string
 }
 
 func (s *trackingStorage) Download(context.Context, string, string) ([]byte, error) {
@@ -80,8 +93,9 @@ func (s *trackingStorage) Download(context.Context, string, string) ([]byte, err
 	return []byte("original"), nil
 }
 
-func (s *trackingStorage) Upload(_ context.Context, _, _ string, _ string, content []byte) error {
+func (s *trackingStorage) Upload(_ context.Context, _, _ string, contentType string, content []byte) error {
 	s.uploaded = append([]byte(nil), content...)
+	s.contentType = contentType
 	return nil
 }
 
@@ -137,7 +151,7 @@ func TestRunRestoresProcessingTasksOnStartup(t *testing.T) {
 }
 
 func TestPollDoclingJobLogsStatusError(t *testing.T) {
-	const responseBody = `{"status":"unknown","message":"docling refused"}`
+	const responseBody = `{"task_status":"unknown","message":"docling refused"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/status/poll/") {
@@ -177,5 +191,36 @@ func TestPollDoclingJobLogsStatusError(t *testing.T) {
 	errorField := fmt.Sprint(entries[0].ContextMap()["error"])
 	if !strings.Contains(errorField, "response="+responseBody) {
 		t.Fatalf("expected response body in log, got: %s", errorField)
+	}
+}
+
+func TestPollDoclingJobNormalizesMediaType(t *testing.T) {
+	cases := []struct {
+		name       string
+		mediaType  string
+		expectedCT string
+	}{
+		{name: "default markdown", mediaType: "", expectedCT: "text/markdown; charset=utf-8"},
+		{name: "plain text", mediaType: "text/plain", expectedCT: "text/plain; charset=utf-8"},
+		{name: "charset already set", mediaType: "text/html; charset=utf-8", expectedCT: "text/html; charset=utf-8"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &pollingRepoStub{}
+			storage := &trackingStorage{}
+			conv := &staticResultConverter{result: converter.DoclingConvertResult{Content: []byte("body"), MediaType: tc.mediaType}}
+			processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
+
+			task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
+
+			if err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if storage.contentType != tc.expectedCT {
+				t.Fatalf("expected content type %q, got %q", tc.expectedCT, storage.contentType)
+			}
+		})
 	}
 }

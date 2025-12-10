@@ -16,9 +16,14 @@ type ObjectStorage interface {
 	Upload(ctx context.Context, bucket, objectKey, contentType string, content []byte) error
 }
 
+type minioClient interface {
+	GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (*minio.Object, error)
+	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
+}
+
 // MinioStorage реализует ObjectStorage поверх minio.Client.
 type MinioStorage struct {
-	client *minio.Client
+	client minioClient
 }
 
 // NewMinioStorage создаёт адаптер MinIO.
