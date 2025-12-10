@@ -160,11 +160,13 @@ type taskProcessingMeta struct {
 	NumFailed    int `json:"num_failed"`
 }
 
-// ConvertDocumentResponse из /v1/result/{task_id} (вариант конвертации)
+// ConvertDocumentResponse из /v1/result/{task_id}
 type convertDocumentResponse struct {
 	Document       exportDocumentResponse `json:"document"`
 	Status         string                 `json:"status"`
+	Errors         []errorItem            `json:"errors"`
 	ProcessingTime float64                `json:"processing_time"`
+	Timings        map[string]any         `json:"timings"`
 }
 
 type exportDocumentResponse struct {
@@ -175,6 +177,12 @@ type exportDocumentResponse struct {
 	TextContent    *string `json:"text_content"`
 	DoctagsContent *string `json:"doctags_content"`
 	Charset        *string `json:"charset"`
+}
+
+type errorItem struct {
+	ComponentType string `json:"component_type"`
+	ModuleName    string `json:"module_name"`
+	ErrorMessage  string `json:"error_message"`
 }
 
 type doclingSubmitResponse struct {
@@ -218,7 +226,7 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		pdfDefaultLanguage: cfg.PDFDefaultLanguage,
 		pdfEnableOCR:       cfg.PDFEnableOCR,
 		client: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 		logger: logger,
 	}
@@ -283,6 +291,8 @@ func (c *DoclingConverter) Submit(ctx context.Context, req DoclingConvertRequest
 	c.logger.Info("docling submit accepted",
 		zap.String("job_id", jobID),
 		zap.String("correlation_id", correlationID),
+		zap.String("content_type", contentType),
+		zap.String("file_ext", fileExt),
 	)
 
 	return jobID, nil
@@ -349,7 +359,41 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		}, nil
 
 	default:
-		// 4. Неуспешный финальный статус
+		// 4. Неуспешный финальный статус — попробуем вытянуть детали из /v1/result/{task_id}
+		c.logger.Warn("docling reported failure status",
+			zap.String("job_id", jobID),
+			zap.String("correlation_id", correlationID),
+			zap.String("status", rawStatus),
+			zap.String("status_body", responseSnippet(body)),
+		)
+
+		if resultResp, resultBody, resErr := c.fetchResult(ctx, correlationID, jobID); resErr == nil {
+			// залогируем ошибки если есть
+			if len(resultResp.Errors) > 0 {
+				for _, e := range resultResp.Errors {
+					c.logger.Error("docling conversion error detail",
+						zap.String("job_id", jobID),
+						zap.String("correlation_id", correlationID),
+						zap.String("component_type", e.ComponentType),
+						zap.String("module_name", e.ModuleName),
+						zap.String("error_message", e.ErrorMessage),
+					)
+				}
+			} else {
+				c.logger.Warn("docling result on failure has no errors",
+					zap.String("job_id", jobID),
+					zap.String("correlation_id", correlationID),
+					zap.String("result_body", responseSnippet(resultBody)),
+				)
+			}
+		} else {
+			c.logger.Warn("docling result fetch on failure errored",
+				zap.String("job_id", jobID),
+				zap.String("correlation_id", correlationID),
+				zap.Error(resErr),
+			)
+		}
+
 		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
 	}
 }
@@ -398,7 +442,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 		return fmt.Errorf("write to_formats: %w", err)
 	}
 
-	// from_formats — подсказываем тип входа (pdf/doc/docx)
+	// Подсказываем тип входа (pdf/doc/docx) — опционально
 	if fileExt != "" {
 		if err := writer.WriteField("from_formats", fileExt); err != nil {
 			return fmt.Errorf("write from_formats: %w", err)
@@ -412,30 +456,43 @@ func (c *DoclingConverter) writeDoclingOptions(
 			return fmt.Errorf("write do_ocr: %w", err)
 		}
 
-		// IMPORTANT: форсируем OCR даже при наличии текстового слоя
+		// Форсируем OCR даже при наличии текстового слоя
 		if err := writer.WriteField("force_ocr", "true"); err != nil {
 			return fmt.Errorf("write force_ocr: %w", err)
 		}
 
+		// Дадим Docling самому выбрать доступный движок
+		if err := writer.WriteField("ocr_engine", "auto"); err != nil {
+			return fmt.Errorf("write ocr_engine: %w", err)
+		}
+
 		// Язык OCR
 		if lang := c.selectLanguage(contentType); lang != "" {
+			// для List[str] достаточно одного значения — FastAPI сам обернёт в массив
 			if err := writer.WriteField("ocr_lang", lang); err != nil {
 				return fmt.Errorf("write ocr_lang: %w", err)
 			}
 		}
 
-		// Бэкенд парсера PDF (актуальная версия)
+		// Бэкенд парсера PDF
 		if err := writer.WriteField("pdf_backend", "dlparse_v4"); err != nil {
 			return fmt.Errorf("write pdf_backend: %w", err)
 		}
 	}
 
-	// Режим таблиц и картинок — дефолты
+	// Режим таблиц и картинок — дефолты, но укажем явно
 	if err := writer.WriteField("table_mode", "accurate"); err != nil {
 		return fmt.Errorf("write table_mode: %w", err)
 	}
+	if err := writer.WriteField("table_cell_matching", "true"); err != nil {
+		return fmt.Errorf("write table_cell_matching: %w", err)
+	}
 	if err := writer.WriteField("image_export_mode", "embedded"); err != nil {
 		return fmt.Errorf("write image_export_mode: %w", err)
+	}
+	// Стандартный pipeline
+	if err := writer.WriteField("pipeline", "standard"); err != nil {
+		return fmt.Errorf("write pipeline: %w", err)
 	}
 
 	return nil
@@ -569,7 +626,7 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 	return statusResp, body, nil
 }
 
-// fetchResult читает ConvertDocumentResponse из /v1/result/{task_id}
+// fetchResult читает ConvertDocumentResponse / другие варианты из /v1/result/{task_id}
 func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, jobID string) (convertDocumentResponse, []byte, error) {
 	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingResultPath, jobID)
 
@@ -599,6 +656,8 @@ func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, jobID
 		return convertDocumentResponse{}, body, fmt.Errorf("docling result returned %d: %s", resp.StatusCode, string(body))
 	}
 
+	// /v1/result может вернуть ConvertDocumentResponse, PresignedUrlConvertDocumentResponse или ChunkDocumentResponse.
+	// Мы ожидаем только ConvertDocumentResponse. В случае другого типа будет ошибка unmarshal — залогируем.
 	var resultResp convertDocumentResponse
 	if err := json.Unmarshal(body, &resultResp); err != nil {
 		return convertDocumentResponse{}, body, fmt.Errorf("unmarshal docling result response: %w", err)
