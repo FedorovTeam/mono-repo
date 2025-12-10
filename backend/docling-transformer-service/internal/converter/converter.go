@@ -261,7 +261,6 @@ func (c *DoclingConverter) selectLanguage(contentType string) string {
 	if contentType == "application/pdf" && c.pdfDefaultLanguage != "" {
 		return c.pdfDefaultLanguage
 	}
-
 	return c.defaultLanguage
 }
 
@@ -306,7 +305,6 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
-	// 1. Спрашиваем статус задачи
 	statusResp, body, err := c.fetchStatus(ctx, correlationID, jobID)
 	if err != nil {
 		return StatusCheckResult{}, err
@@ -325,7 +323,6 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 
 	switch {
 	case isSuccessStatus(normalizedStatus):
-		// 2. Если задача завершена успешно — забираем результат
 		resultResp, resultBody, err := c.fetchResult(ctx, correlationID, jobID)
 		if err != nil {
 			return StatusCheckResult{}, fmt.Errorf("docling result fetch failed: %w (body=%s)", err, responseSnippet(resultBody))
@@ -347,7 +344,6 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		}, nil
 
 	case isPendingStatus(normalizedStatus):
-		// 3. Задача ещё в обработке — просто возвращаем статус
 		c.logger.Debug("docling still processing",
 			zap.String("job_id", jobID),
 			zap.String("correlation_id", correlationID),
@@ -359,7 +355,6 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		}, nil
 
 	default:
-		// 4. Неуспешный финальный статус — попробуем вытянуть детали из /v1/result/{task_id}
 		c.logger.Warn("docling reported failure status",
 			zap.String("job_id", jobID),
 			zap.String("correlation_id", correlationID),
@@ -368,7 +363,6 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		)
 
 		if resultResp, resultBody, resErr := c.fetchResult(ctx, correlationID, jobID); resErr == nil {
-			// залогируем ошибки если есть
 			if len(resultResp.Errors) > 0 {
 				for _, e := range resultResp.Errors {
 					c.logger.Error("docling conversion error detail",
@@ -451,15 +445,13 @@ func (c *DoclingConverter) writeDoclingOptions(
 
 	// Опции для PDF + OCR
 	if c.shouldEnableOCR(contentType) {
-		// Включаем OCR
+		// Включаем OCR (Docling сам решит, когда его применять)
 		if err := writer.WriteField("do_ocr", "true"); err != nil {
 			return fmt.Errorf("write do_ocr: %w", err)
 		}
 
-		// Форсируем OCR даже при наличии текстового слоя
-		if err := writer.WriteField("force_ocr", "true"); err != nil {
-			return fmt.Errorf("write force_ocr: %w", err)
-		}
+		// НЕ форсим OCR — оставляем текстовый слой, если он нормальный
+		// (force_ocr не пишем вообще)
 
 		// Дадим Docling самому выбрать доступный движок
 		if err := writer.WriteField("ocr_engine", "auto"); err != nil {
@@ -468,7 +460,6 @@ func (c *DoclingConverter) writeDoclingOptions(
 
 		// Язык OCR
 		if lang := c.selectLanguage(contentType); lang != "" {
-			// для List[str] достаточно одного значения — FastAPI сам обернёт в массив
 			if err := writer.WriteField("ocr_lang", lang); err != nil {
 				return fmt.Errorf("write ocr_lang: %w", err)
 			}
@@ -618,7 +609,6 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 		return taskStatusResponse{}, body, fmt.Errorf("unmarshal docling status response: %w", err)
 	}
 
-	// Подстрахуемся: если task_id не пришёл, проставим из jobID
 	if statusResp.TaskID == "" {
 		statusResp.TaskID = jobID
 	}
@@ -656,8 +646,6 @@ func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, jobID
 		return convertDocumentResponse{}, body, fmt.Errorf("docling result returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	// /v1/result может вернуть ConvertDocumentResponse, PresignedUrlConvertDocumentResponse или ChunkDocumentResponse.
-	// Мы ожидаем только ConvertDocumentResponse. В случае другого типа будет ошибка unmarshal — залогируем.
 	var resultResp convertDocumentResponse
 	if err := json.Unmarshal(body, &resultResp); err != nil {
 		return convertDocumentResponse{}, body, fmt.Errorf("unmarshal docling result response: %w", err)
