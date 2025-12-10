@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -26,6 +27,8 @@ const (
 	endpointHeader      = "X-Docling-Endpoint"
 	apiKeyHeader        = "X-Api-Key"
 )
+
+const doclingFileFieldName = "files"
 
 const (
 	defaultExtension    = "docx"
@@ -336,8 +339,16 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 	payload := &bytes.Buffer{}
 	writer := multipart.NewWriter(payload)
 
+	contentDisposition := mime.FormatMediaType("form-data", map[string]string{
+		"name":     doclingFileFieldName,
+		"filename": filename,
+	})
+	if contentDisposition == "" {
+		return "", fmt.Errorf("build docling multipart: could not format content disposition")
+	}
+
 	partHeaders := textproto.MIMEHeader{}
-	partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="files"; filename="%s"`, filename))
+	partHeaders.Set("Content-Disposition", contentDisposition)
 	partHeaders.Set("Content-Type", contentType)
 
 	part, err := writer.CreatePart(partHeaders)
