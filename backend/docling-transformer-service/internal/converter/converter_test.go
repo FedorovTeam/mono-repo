@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -35,7 +36,24 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 				t.Fatal("submit correlation id is empty")
 			}
 
-			fileHeader := r.MultipartForm.File["files"][0]
+			fileHeaders, ok := r.MultipartForm.File[doclingFileFieldName]
+			if !ok || len(fileHeaders) != 1 {
+				t.Fatalf("unexpected multipart fields: %+v", r.MultipartForm.File)
+			}
+
+			fileHeader := fileHeaders[0]
+			contentDisposition := fileHeader.Header.Get("Content-Disposition")
+			_, params, err := mime.ParseMediaType(contentDisposition)
+			if err != nil {
+				t.Fatalf("failed to parse content disposition: %v", err)
+			}
+			if params["name"] != doclingFileFieldName {
+				t.Fatalf("unexpected multipart field name: %s", params["name"])
+			}
+			if fileHeader.Header.Get("Content-Type") != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+				t.Fatalf("unexpected content type: %s", fileHeader.Header.Get("Content-Type"))
+			}
+
 			receivedFilename = fileHeader.Filename
 
 			file, err := fileHeader.Open()
