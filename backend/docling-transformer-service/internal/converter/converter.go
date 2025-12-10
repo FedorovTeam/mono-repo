@@ -56,6 +56,8 @@ var successStatuses = map[string]struct{}{
 	"finished":        {},
 }
 
+const maxResponseSnippetLen = 1024
+
 var pendingStatuses = map[string]struct{}{
 	"pending":     {},
 	"processing":  {},
@@ -80,6 +82,19 @@ func isPendingStatus(status string) bool {
 }
 
 var ErrDoclingPollingAttemptsExceeded = errors.New("docling polling attempts exceeded")
+
+func responseSnippet(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+
+	snippet := strings.TrimSpace(string(body))
+	if len(snippet) > maxResponseSnippetLen {
+		return snippet[:maxResponseSnippetLen] + "..."
+	}
+
+	return snippet
+}
 
 // ResolveContentTypeByExtension возвращает content-type для заданного расширения.
 func ResolveContentTypeByExtension(fileExt string) (string, error) {
@@ -289,7 +304,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
-	statusResp, err := c.fetchStatus(ctx, correlationID, jobID)
+	statusResp, body, err := c.fetchStatus(ctx, correlationID, jobID)
 	if err != nil {
 		return StatusCheckResult{}, err
 	}
@@ -323,7 +338,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 		)
 		return StatusCheckResult{Status: normalizedStatus, Result: nil}, nil
 	default:
-		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s", rawStatus, jobID)
+		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
 	}
 }
 
@@ -431,12 +446,12 @@ func (c *DoclingConverter) submit(ctx context.Context, correlationID, filename, 
 	return jobID, nil
 }
 
-func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID string) (doclingStatusResponse, error) {
+func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID string) (doclingStatusResponse, []byte, error) {
 	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingStatusPath, jobID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return doclingStatusResponse{}, fmt.Errorf("build docling status request: %w", err)
+		return doclingStatusResponse{}, nil, fmt.Errorf("build docling status request: %w", err)
 	}
 
 	req.Header.Set(correlationIDHeader, correlationID)
@@ -447,22 +462,22 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return doclingStatusResponse{}, fmt.Errorf("call docling status: %w", err)
+		return doclingStatusResponse{}, nil, fmt.Errorf("call docling status: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		return doclingStatusResponse{}, fmt.Errorf("read docling status response: %w", readErr)
+		return doclingStatusResponse{}, nil, fmt.Errorf("read docling status response: %w", readErr)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return doclingStatusResponse{}, fmt.Errorf("docling status returned %d: %s", resp.StatusCode, string(body))
+		return doclingStatusResponse{}, body, fmt.Errorf("docling status returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var statusResp doclingStatusResponse
 	if err := json.Unmarshal(body, &statusResp); err != nil {
-		return doclingStatusResponse{}, fmt.Errorf("unmarshal docling status response: %w", err)
+		return doclingStatusResponse{}, body, fmt.Errorf("unmarshal docling status response: %w", err)
 	}
 
 	if statusResp.TaskID == "" {
@@ -475,7 +490,7 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 		statusResp.JobID = jobID
 	}
 
-	return statusResp, nil
+	return statusResp, body, nil
 }
 
 func buildConvertResult(resp doclingStatusResponse) (DoclingConvertResult, error) {

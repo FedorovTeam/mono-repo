@@ -359,10 +359,10 @@ func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.Transfo
 		return fmt.Errorf("store docling polling progress: %w", err)
 	}
 
-	p.metrics.recordDoclingPolls(ctx, 1)
-	p.logger.Info("docling status checked", zap.String("job_id", jobID), zap.String("status", statusResult.Status), zap.Int("docling_polls", newPollCount))
-
 	if err != nil {
+		p.metrics.recordDoclingPolls(ctx, 1)
+		p.logger.Error("docling status check failed", zap.String("job_id", jobID), zap.Int("docling_polls", newPollCount), zap.Error(err))
+
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			nextPoll := p.nextPollTime(time.Now(), newPollCount)
 			task.DoclingPollCount = newPollCount
@@ -378,6 +378,9 @@ func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.Transfo
 
 		return fmt.Errorf("docling status: %w", err)
 	}
+
+	p.metrics.recordDoclingPolls(ctx, 1)
+	p.logger.Info("docling status checked", zap.String("job_id", jobID), zap.String("status", statusResult.Status), zap.Int("docling_polls", newPollCount))
 
 	if statusResult.Result == nil {
 		if p.cfg.DoclingMaxAttempts > 0 && newPollCount >= p.cfg.DoclingMaxAttempts {
