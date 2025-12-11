@@ -111,6 +111,7 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	workerInstance.RegisterActivityWithOptions(activities.AwaitOriginal, activity.RegisterOptions{Name: ActivityAwaitOriginalName})
 	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: ActivityUploadOriginalName})
 	workerInstance.RegisterActivityWithOptions(activities.ConvertToMarkdown, activity.RegisterOptions{Name: ActivityConvertToMarkdownName})
+	workerInstance.RegisterActivityWithOptions(activities.AwaitMarkdown, activity.RegisterOptions{Name: ActivityAwaitMarkdownName})
 	workerInstance.RegisterActivityWithOptions(activities.PublishMarkdown, activity.RegisterOptions{Name: ActivityPublishMarkdownName})
 
 	go func() {
@@ -238,6 +239,7 @@ func TestDocumentWorkflowRetrySkipsCompletedSteps(t *testing.T) {
 	workerInstance.RegisterActivityWithOptions(activities.AwaitOriginal, activity.RegisterOptions{Name: ActivityAwaitOriginalName})
 	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: ActivityUploadOriginalName})
 	workerInstance.RegisterActivityWithOptions(activities.ConvertToMarkdown, activity.RegisterOptions{Name: ActivityConvertToMarkdownName})
+	workerInstance.RegisterActivityWithOptions(activities.AwaitMarkdown, activity.RegisterOptions{Name: ActivityAwaitMarkdownName})
 	workerInstance.RegisterActivityWithOptions(activities.PublishMarkdown, activity.RegisterOptions{Name: ActivityPublishMarkdownName})
 
 	go func() {

@@ -150,6 +150,10 @@ func main() {
 		activity.RegisterOptions{Name: docservice.ActivityConvertToMarkdownName},
 	)
 	workerInstance.RegisterActivityWithOptions(
+		activities.AwaitMarkdown,
+		activity.RegisterOptions{Name: docservice.ActivityAwaitMarkdownName},
+	)
+	workerInstance.RegisterActivityWithOptions(
 		activities.PublishMarkdown,
 		activity.RegisterOptions{Name: docservice.ActivityPublishMarkdownName},
 	)
