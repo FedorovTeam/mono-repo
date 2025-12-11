@@ -381,10 +381,10 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		return fmt.Errorf("%s", reason)
 	}
 
-	if err := a.validateRepository(ctx, owner, repository); err != nil {
-		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))
-		return err
-	}
+	//if err := a.validateRepository(ctx, owner, repository); err != nil {
+	//	_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))
+	//	return err
+	//}
 
 	markdownObjectKey := input.MarkdownObjectKey
 	if markdownObjectKey == "" {
