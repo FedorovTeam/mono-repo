@@ -443,8 +443,6 @@ func (c *DoclingConverter) writeDoclingOptions(
 	writer *multipart.Writer,
 	contentType, fileExt string,
 ) error {
-	lang := c.selectLanguage(contentType)
-
 	// Всегда явно просим Markdown
 	if err := writer.WriteField("to_formats", "md"); err != nil {
 		return fmt.Errorf("write to_formats: %w", err)
@@ -459,10 +457,6 @@ func (c *DoclingConverter) writeDoclingOptions(
 
 	// Опции для PDF + OCR
 	if c.shouldEnableOCR(contentType) {
-		if err := writer.WriteField("ocr", "true"); err != nil {
-			return fmt.Errorf("write ocr: %w", err)
-		}
-
 		// Включаем OCR (Docling сам решит, когда его применять)
 		if err := writer.WriteField("do_ocr", "true"); err != nil {
 			return fmt.Errorf("write do_ocr: %w", err)
@@ -477,7 +471,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 		}
 
 		// Язык OCR
-		if lang != "" {
+		if lang := c.selectLanguage(contentType); lang != "" {
 			if err := writer.WriteField("ocr_lang", lang); err != nil {
 				return fmt.Errorf("write ocr_lang: %w", err)
 			}
@@ -502,12 +496,6 @@ func (c *DoclingConverter) writeDoclingOptions(
 	// Стандартный pipeline
 	if err := writer.WriteField("pipeline", "standard"); err != nil {
 		return fmt.Errorf("write pipeline: %w", err)
-	}
-
-	if lang != "" {
-		if err := writer.WriteField("language", lang); err != nil {
-			return fmt.Errorf("write language: %w", err)
-		}
 	}
 
 	return nil
