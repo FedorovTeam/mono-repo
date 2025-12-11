@@ -4,7 +4,7 @@
 
 **Файлы:** MinIO (S3-совместимое хранилище)
 
-**Оркестрация долгих процессов:** Temporal
+**Оркестрация долгих процессов:** cron-воркеры + статусы в PostgreSQL
 
 **Внешний API:** GraphQL (`github.com/99designs/gqlgen`, схема — `graph/schema.graphqls`)
 
@@ -41,7 +41,7 @@
 | № | Принцип | Как применяется в проекте |
 | --- | --- | --- |
 | 1 | **Domain-Driven Design** | Core-домен: управление *Knowledge Document* (знаниевая статья). Граница Bounded Context = граница микросервиса `document-service`. |
-| 2 | **Workflow-Oriented Orchestration** | Долгие процессы (upload → convert → publish) моделируются как **Temporal Workflow** с шагами-активити. Отдельная шина событий (NATS и т.п.) не используется. |
+| 2 | **Cron-Oriented Orchestration** | Долгие процессы (upload → convert → publish) выполняются серией **periodic/cron-воркеров**. Источник правды по этапам — статусы в PostgreSQL; каждый воркер читает актуальные статусы и переводит документы на следующий шаг. Отдельная шина событий (NATS и т.п.) и Temporal не используются. |
 | 3 | **CQRS по необходимости** | Базовая модель — обычный CRUD поверх PostgreSQL. При росте нагрузки допускается выделение read-модели для списков документов. |
 | 4 | **Self-Contained Service** | Каждый сервис владеет своей схемой PostgreSQL (если БД ему нужна) и своим набором bucket’ов в MinIO. Код других сервисов не импортируется. |
 | 5 | **Consumer Owns Integration** | Адаптеры внешних API (GitHub, Docling) живут в соответствующих сервисах (`github-publisher-service`, `docling-transformer-service`) и не протекают в core-домен. |
@@ -64,10 +64,6 @@ minio:
 github:
   token: ...
   repo: ...
-
-temporal:
-  address: temporal.example.com:7233
-  namespace: knowledge-base
 
 docling:
   endpoint: http://docling-service:8080
@@ -101,7 +97,7 @@ docling:
 1. **`gateway-service`**
    - Внешний GraphQL API.
    - Принимает файл/метаданные (организация, репозиторий, ветка, путь).
-   - Вызывает gRPC-методы `document-service` и/или запускает Workflow через адаптер Temporal.
+   - Вызывает gRPC-методы `document-service` и `storage-service`.
 2. **`document-service`** (core-домен)
    - Владеет таблицами `documents`, `document_versions`, `document_status_logs`.
    - Знает про ключи объектов в MinIO (оригинал и Markdown).
@@ -118,14 +114,10 @@ docling:
    - Инкапсулирует работу с GitHub API (репозитории, ветки, коммиты, PR).
    - Принимает «готовый Markdown + путь + метаданные коммита», создаёт коммит/PR.
    - Не хранит доменную модель документа — только техническую интеграцию.
-6. **`workflow-service`** (Temporal worker)
-   - Реализует Temporal Workflow:
-      - шаг сохранения оригинала;
-      - шаг конвертации;
-      - шаг сохранения Markdown;
-      - шаг публикации в GitHub.
-   - Все шаги — Temporal Activities, вызывающие gRPC этих сервисов.
-   - Сам workflow-драйвер может жить либо как отдельный сервис, либо внутри `document-service`, но логически описывается тут.
+6. **Периодические воркеры**
+   - Запускаются как cron-задачи (Kubernetes CronJob или systemd timer) и читают `documents`/`document_status_logs`.
+   - Проверяют наличие исходников/Markdown в MinIO и по gRPC вызывают `storage-service`, `docling-transformer-service`, `github-publisher-service`.
+   - Переводят документ на следующий статус в PostgreSQL, чтобы следующий cron-воркер мог продолжить цепочку.
 
 ---
 
@@ -147,7 +139,7 @@ docling:
 - `storage-service`
 - `docling-transformer-service`
 - `github-publisher-service`
-- `workflow-service`
+- cron-воркеры (как отдельные CronJob’ы или внутри `document-service`)
 
 Названия директорий, helm-релизов и gRPC-пакетов должны быть согласованы между собой (см. ниже).
 
@@ -252,25 +244,6 @@ org/acme/project/payments/year=2025/month=04/day=22/6f8c...e42.md
 | `created_at` | TIMESTAMPTZ | Время создания записи |
 | `updated_at` | TIMESTAMPTZ | Время последнего обновления |
 
-### 5.4. Temporal: как используется
-
-Мы **не деплоим Temporal-кластер**, используем **готовый внешний инстанс**:
-см: ```infra/argocd/temporal-app.yaml```
-```
-temporal:
-  address: temporal.example.com:7233
-  namespace: knowledge-base
-```
-
-Наши задачи:
-
-- подключиться к **Temporal Worker**
-- выполнить **Workflow** + **Activity**
-- зарегистрировать воркер под `taskQueue: document-processing`
-
-Никакого NATS, никакого self-host Temporal — только подключение **как клиент**.
----
-
 ## 6. API и интеграция
 
 ### 6.1. Внешний API — GraphQL (`gateway-service`)
@@ -290,8 +263,8 @@ GraphQL-слой:
 
 - не содержит бизнес-логики;
 - проксирует и композирует:
-   - gRPC-вызовы `document-service`;
-   - операции запуска/чтения Temporal Workflow.
+   - gRPC-вызовы `document-service` и `storage-service`;
+   - создание записи о документе и проброс параметров, которые затем подхватывают cron-воркеры, читая статусы из PostgreSQL.
 
 ### 6.2. Внутренний API — gRPC
 
@@ -364,7 +337,7 @@ rpc PublishMarkdown(PublishMarkdownRequest)
 - `usecases.md` — сценарии: «админ загружает документ», «перепубликация документа» и т.п.
 - `test.md` — сценарии ручного тестирования (curl / grpcurl / GraphQL-примеры).
 - `code.md` — Mermaid-диаграмма Code / Module View конкретного сервиса.
-- `infrastructure.md` — Mermaid-диаграмма инфраструктурного уровня (БД, MinIO, Temporal).
+- `infrastructure.md` — Mermaid-диаграмма инфраструктурного уровня (БД, MinIO, cron-воркеры).
 - `sequence.md` — Mermaid `sequenceDiagram` по основному поведению сервиса.
 
 После прочтения этих файлов разработчик должен понимать:
@@ -382,7 +355,7 @@ rpc PublishMarkdown(PublishMarkdownRequest)
 Перед мержем изменений в любой сервис:
 
 - [ ]  gRPC proto-контракты обновлены и сгенерированы (go/ts и др. языки, если используются).
-- [ ]  Если меняется шаг Workflow — обновлена диаграмма в `sequence.md` и описание в `flows.md`.
+- [ ]  Если меняется cron-шаг (например, цепочка Upload → Convert → Publish) — обновлена диаграмма в `sequence.md` и описание в `flows.md`.
 - [ ]  В MinIO не появляются новые bucket’ы без описания в документации.
 - [ ]  Все публичные методы логируют `correlation-id` и статус операции.
 - [ ]  `config.yaml` содержит секреты; все секреты.

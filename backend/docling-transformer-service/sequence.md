@@ -2,7 +2,7 @@
 
 ```mermaid
 sequenceDiagram
-    participant GW as Gateway/Temporal Activity
+    participant GW as Gateway/cron job
     participant TR as Transformer gRPC
     participant PG as PostgreSQL Queue
     participant WK as Worker

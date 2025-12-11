@@ -6,22 +6,18 @@
    - Загружаемый и markdown-бакеты берутся из запроса либо из конфигурации; при отсутствии любого из них возвращается ошибка. Путь для публикации (`publish_path`) и `path` по умолчанию равны имени файла.
    - Репозиторий можно передать в виде `owner/repo` — в этом случае владелец подтягивается из префикса. Наличие лишних слэшей или несовпадение owner/repo приводит к ошибке валидации.
    - Генератор ключей MinIO проверяет существование бакетов и строит базовый путь `<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<uuid>[.<ext>]`, где `uuid` генерируется случайно, а расширение берется из исходного имени файла (если оно передано). Итоговые ключи — `<base>/original` для исходника и сам `<base>` для Markdown; переданные `upload_object_key`/`markdown_object_key` могут их переопределить.
-   - В PostgreSQL создаётся запись с `status=Uploaded`, `workflow_id=document_id`, флагом `create_pr`, версия `1` фиксируется в `document_versions`, в `document_status_logs` добавляется переход в `Uploaded`. Temporal workflow на этом шаге не запускается.
+   - В PostgreSQL создаётся запись с `status=Uploaded`, `workflow_id=document_id`, флагом `create_pr`, версия `1` фиксируется в `document_versions`, в `document_status_logs` добавляется переход в `Uploaded`.
 
 2. **Подтверждение загрузки**
    - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после уведомления от MinIO.
-   - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями. Если Temporal не сконфигурирован, возвращает документ без запуска обработки.
-   - При наличии Temporal запускается `DocumentProcessingWorkflow` с идентификатором `workflow_id=document_id` в указанной очереди. В случае ошибки старта статус переводится в `Failed`; при успехе в `documents.workflow_id` сохраняется идентификатор запущенного workflow.
-   - Фоновый ретраер раз в заданный интервал просматривает документы в статусе `Failed` с причиной, начинающейся на `start workflow:`. Если количество неудачных запусков меньше лимита, он логирует `correlation_id=workflow_id`, повторно инициирует `DocumentProcessingWorkflow` через Temporal client и сохраняет новый `workflow_id`.
-   - Отдельный reconciler периодически проверяет «зависшие» документы в статусе `Uploaded`: если исходный объект уже лежит в MinIO, он сам вызывает `ConfirmUpload` с сохранёнными bucket/object_key.
+   - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями. При успехе фиксирует `StoredOriginal` и логирует переход; при ошибке пишет `Failed` с причиной.
+   - Периодический cron-воркер `UploadReconciler` опрашивает таблицу `documents` в статусе `Uploaded`, проверяет наличие исходника в MinIO и при необходимости сам вызывает `ConfirmUpload`, чтобы не зависеть только от вебхуков.
 
-3. **Workflow обработки**
-   - Для всех активностей установлены таймауты `2m` и retry-политика Temporal.
-   - Перед каждой активностью workflow читает текущее состояние документа из PostgreSQL: если зафиксированы статусы `StoredOriginal` / `ConvertedToMarkdown` / `PublishedToGitHub` (или соответствующие версии), шаг пропускается без повторного обращения к внешнему сервису. Это позволяет безопасно перезапускать workflow после сбоев в публикации/конвертации и при ручном `retryProcessing`.
-   - Workflow стартует даже если текущий статус `Failed`: для определения следующего шага используется последний успешный статус.
-   - `AwaitOriginal` — запрашивает исходный объект через storage-service (`GetObject`) только при статусе `Uploaded`. При ошибке выставляет `Failed`; при успехе фиксирует статус `StoredOriginal` и версию (берёт последнюю сохранённую, минимум `1`).
-   - `ConvertToMarkdown` — вызывает docling-transformer-service, на ошибке записывает `Failed`. При успехе обновляет статус `ConvertedToMarkdown`, сохраняет `MarkdownObjectKey` из ответа и версию `previous+1`; при повторном запуске после удачной конвертации сразу возвращает сохранённый `MarkdownObjectKey`.
-   - `PublishMarkdown` — подставляет owner/repo/branch/base-branch из документа или конфигурации (пустой base-branch заменяет на ветку). Репозиторий не проверяется HTTP-запросом (код валидации закомментирован), но формат `repository` без слэшей и непустой `owner` требуются. Перед вызовом GitHub-паблишера сервис трижды проверяет наличие Markdown-объекта в хранилище с экспоненциальной задержкой. Commit message берётся из имени документа или пути. При успехе фиксирует `PublishedToGitHub` с версией `previous+1`, при ошибке/пустом ответе — `Failed` с причиной; при наличии статуса `PublishedToGitHub` шаг пропускается.
+3. **Обработка по статусам**
+   - Цепочка обработки строится на cron-воркерах. Каждый воркер читает текущий статус в PostgreSQL, выполняет свой шаг и переводит документ дальше, чтобы следующий воркер мог его подобрать.
+   - `UploadReconciler` уже перевёл документ в `StoredOriginal` и сохранил оригинальный объект в `document_versions`.
+   - `MarkdownConverter` (cron) выбирает документы `StoredOriginal`, подтягивает исходник через `storage-service.GetObject`, вызывает `docling-transformer-service` и при успехе сохраняет `ConvertedToMarkdown` с новым `markdown_object_key` и версией `previous+1`. Ошибка конвертации фиксируется как `Failed` с причиной.
+   - `GithubPublisher` (cron) читает записи `ConvertedToMarkdown`, проверяет наличие Markdown-объекта через `storage-service` и вызывает gRPC `github-publisher-service`. При успехе выставляет `PublishedToGitHub` и новую версию, при ошибке — `Failed`. Повторный проход пропускает уже опубликованные документы.
 
 4. **Ручное обновление статуса**
    - Клиент вызывает `UpdateDocumentStatus`. Допустимы переходы `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, повторное выставление текущего статуса, либо перевод в `Failed` (если `error_reason` не задан, используется `reason`).
