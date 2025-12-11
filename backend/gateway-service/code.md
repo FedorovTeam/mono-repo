@@ -2,9 +2,28 @@
 
 ```mermaid
 classDiagram
+    class Main {
+        +main()
+    }
+    class Config {
+        +Load(path)
+        Server
+        Security
+        DocumentService
+        StorageService
+        Uploads
+        Observability
+        Logging
+    }
     class Server {
         +Run(ctx)
-        +handleStorageNotification(w, r)
+        -handleStorageNotification(w, r)
+    }
+    class Logging {
+        +New(level)
+    }
+    class GRPCDial {
+        +DefaultOptions(cfg, providers)
     }
     class GraphQLResolver {
         +UploadKnowledgeDocument()
@@ -35,12 +54,19 @@ classDiagram
         +CORSMiddleware()
     }
     class Observability {
+        +Setup()
         +HTTPHandler()
         +GRPCDialOptions()
     }
+    Main --> Config : Load
+    Main --> Server : New + Run
+    Server --> Config
+    Server --> Logging
+    Server --> Observability : Setup
+    Server --> GRPCDial
     Server --> GraphQLResolver
     Server --> Middleware
-    Server --> Observability
+    Server --> Observability : HTTPHandler
     GraphQLResolver --> DocumentClient
     GraphQLResolver --> StorageClient
     Server --> DocumentClient : ConfirmUpload (webhook)
