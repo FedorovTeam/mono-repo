@@ -18,14 +18,17 @@ import (
 )
 
 type pollingRepoStub struct {
-	updateInfoCalls  int
-	markDoneCalls    int
-	markWaitingCalls int
-	lastNextPoll     time.Time
-	lastPollCount    int
-	lastJobID        string
-	restored         int
-	restoreCalls     int
+	updateInfoCalls   int
+	markDoneCalls     int
+	markWaitingCalls  int
+	lastNextPoll      time.Time
+	lastPollCount     int
+	lastJobID         string
+	restored          int
+	restoreCalls      int
+	restoreStuck      int
+	failedStuck       int
+	restoreStuckCalls int
 }
 
 func (p *pollingRepoStub) Enqueue(context.Context, repository.EnqueueParams) (uuid.UUID, error) {
@@ -59,7 +62,8 @@ func (p *pollingRepoStub) RestoreProcessing(context.Context) (int, error) {
 	return p.restored, nil
 }
 func (p *pollingRepoStub) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
-	return 0, 0, nil
+	p.restoreStuckCalls++
+	return p.restoreStuck, p.failedStuck, nil
 }
 func (p *pollingRepoStub) CleanupFinished(context.Context, time.Duration) (int, error) { return 0, nil }
 func (p *pollingRepoStub) CountByStatus(context.Context) (int, int, int, error)        { return 0, 0, 0, nil }
@@ -142,18 +146,18 @@ func TestHandleTaskPollsWithoutRedownloading(t *testing.T) {
 	}
 }
 
-func TestRunRestoresProcessingTasksOnStartup(t *testing.T) {
-	repo := &pollingRepoStub{restored: 2}
+func TestRunPerformsMaintenanceOnStartup(t *testing.T) {
+	repo := &pollingRepoStub{restoreStuck: 2, failedStuck: 1}
 	storage := &trackingStorage{}
 	conv := &statusOnlyConverter{}
-	processor := NewProcessor(repo, conv, storage, nil, Config{PollInterval: time.Millisecond})
+	processor := NewProcessor(repo, conv, storage, nil, Config{PollInterval: time.Millisecond, ProcessingTimeout: time.Minute})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	processor.Run(ctx)
 	cancel()
 
-	if repo.restoreCalls != 1 {
-		t.Fatalf("expected restore to be called once, got %d", repo.restoreCalls)
+	if repo.restoreStuckCalls != 1 {
+		t.Fatalf("expected stuck restore to be called once, got %d", repo.restoreStuckCalls)
 	}
 }
 

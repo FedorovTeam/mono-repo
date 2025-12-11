@@ -224,13 +224,7 @@ func (m *workerMetrics) recordTemporaryRetry(ctx context.Context, retries int) {
 }
 
 func (p *Processor) Run(ctx context.Context) {
-	restored, err := p.repo.RestoreProcessing(ctx)
-	if err != nil {
-		p.logger.Error("restore processing tasks failed", zap.Error(err))
-	} else if restored > 0 {
-		p.logger.Info("restored processing tasks", zap.Int("restored", restored))
-		p.metrics.recordRecoveries(ctx, restored, 0)
-	}
+	p.runMaintenanceCycle(ctx)
 
 	workers := p.cfg.MaxWorkers
 	if workers <= 0 {
