@@ -20,6 +20,7 @@ type fakeRepo struct {
 	lastVersion *model.DocumentVersion
 	lastError   string
 	doc         *model.Document
+	jobs        map[string]model.ProcessingJob
 }
 
 func (f *fakeRepo) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -59,11 +60,42 @@ func (f *fakeRepo) CreateProcessingJob(ctx context.Context, job *model.Processin
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()
 	}
+	if f.jobs == nil {
+		f.jobs = make(map[string]model.ProcessingJob)
+	}
+	if job.Status == "" {
+		job.Status = model.JobStatusPending
+	}
+	f.jobs[job.TaskID] = *job
 	return job, nil
 }
 
 func (f *fakeRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
+	job := model.ProcessingJob{TaskID: taskID, Status: status}
+	if payload != nil {
+		job.Payload = payload
+	}
+	if nextRunAt != nil {
+		job.NextRunAt = *nextRunAt
+	}
+	if f.jobs == nil {
+		f.jobs = make(map[string]model.ProcessingJob)
+	}
+	f.jobs[taskID] = job
+	return &job, nil
+}
+
+func (f *fakeRepo) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+	for _, job := range f.jobs {
+		if job.DocumentID != documentID {
+			continue
+		}
+		if job.Status == model.JobStatusPending || job.Status == model.JobStatusInProgress {
+			copy := job
+			return &copy, nil
+		}
+	}
+	return nil, nil
 }
 
 type fakeTransformerClient struct {

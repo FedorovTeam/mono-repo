@@ -51,11 +51,11 @@ type ComplexityRoot struct {
 		Error           func(childComplexity int) int
 		FileName        func(childComplexity int) int
 		ID              func(childComplexity int) int
+		JobID           func(childComplexity int) int
 		Path            func(childComplexity int) int
 		Repository      func(childComplexity int) int
 		RepositoryOwner func(childComplexity int) int
 		Status          func(childComplexity int) int
-		WorkflowID      func(childComplexity int) int
 	}
 
 	KnowledgeDocumentConnection struct {
@@ -132,6 +132,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.ID(childComplexity), true
+	case "KnowledgeDocument.jobId":
+		if e.complexity.KnowledgeDocument.JobID == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.JobID(childComplexity), true
 	case "KnowledgeDocument.path":
 		if e.complexity.KnowledgeDocument.Path == nil {
 			break
@@ -156,12 +162,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.Status(childComplexity), true
-	case "KnowledgeDocument.workflowId":
-		if e.complexity.KnowledgeDocument.WorkflowID == nil {
-			break
-		}
-
-		return e.complexity.KnowledgeDocument.WorkflowID(childComplexity), true
 
 	case "KnowledgeDocumentConnection.nodes":
 		if e.complexity.KnowledgeDocumentConnection.Nodes == nil {
@@ -386,7 +386,7 @@ type KnowledgeDocument {
   branch: String!
   path: String!
   status: KnowledgeDocumentStatus!
-  workflowId: String
+  jobId: String
   error: String
 }
 
@@ -739,14 +739,14 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_status(_ context.Cont
 	return fc, nil
 }
 
-func (ec *executionContext) _KnowledgeDocument_workflowId(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+func (ec *executionContext) _KnowledgeDocument_jobId(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
 		ec.OperationContext,
 		field,
-		ec.fieldContext_KnowledgeDocument_workflowId,
+		ec.fieldContext_KnowledgeDocument_jobId,
 		func(ctx context.Context) (any, error) {
-			return obj.WorkflowID, nil
+			return obj.JobID, nil
 		},
 		nil,
 		ec.marshalOString2ᚖstring,
@@ -755,7 +755,7 @@ func (ec *executionContext) _KnowledgeDocument_workflowId(ctx context.Context, f
 	)
 }
 
-func (ec *executionContext) fieldContext_KnowledgeDocument_workflowId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_KnowledgeDocument_jobId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "KnowledgeDocument",
 		Field:      field,
@@ -835,8 +835,8 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
 			case "status":
 				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
-			case "workflowId":
-				return ec.fieldContext_KnowledgeDocument_workflowId(ctx, field)
+			case "jobId":
+				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
 			}
@@ -963,8 +963,8 @@ func (ec *executionContext) fieldContext_Mutation_retryProcessing(ctx context.Co
 				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
 			case "status":
 				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
-			case "workflowId":
-				return ec.fieldContext_KnowledgeDocument_workflowId(ctx, field)
+			case "jobId":
+				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
 			}
@@ -1024,8 +1024,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
 			case "status":
 				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
-			case "workflowId":
-				return ec.fieldContext_KnowledgeDocument_workflowId(ctx, field)
+			case "jobId":
+				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
 			}
@@ -1239,8 +1239,8 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
 			case "status":
 				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
-			case "workflowId":
-				return ec.fieldContext_KnowledgeDocument_workflowId(ctx, field)
+			case "jobId":
+				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
 			}
@@ -2935,8 +2935,8 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "workflowId":
-			out.Values[i] = ec._KnowledgeDocument_workflowId(ctx, field, obj)
+		case "jobId":
+			out.Values[i] = ec._KnowledgeDocument_jobId(ctx, field, obj)
 		case "error":
 			out.Values[i] = ec._KnowledgeDocument_error(ctx, field, obj)
 		default:

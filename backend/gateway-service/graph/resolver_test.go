@@ -118,7 +118,7 @@ func TestUploadHappyPath(t *testing.T) {
 		if in.GetUploadBucket() != "docs" || in.GetUploadObjectKey() == "" {
 			t.Fatalf("bucket info not forwarded")
 		}
-		return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, RepositoryOwner: in.RepositoryOwner, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), JobId: in.GetId(), FileName: in.FileName, Repository: in.Repository, RepositoryOwner: in.RepositoryOwner, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED, ActualStatus: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil }, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
 	}}
@@ -139,8 +139,8 @@ func TestUploadHappyPath(t *testing.T) {
 	if !docCalled || !storageCalled {
 		t.Fatalf("expected downstream calls")
 	}
-	if payload.Document.WorkflowID == nil || *payload.Document.WorkflowID != storageDocID {
-		t.Fatalf("workflow id not returned")
+	if payload.Document.JobID == nil || *payload.Document.JobID != storageDocID {
+		t.Fatalf("job id not returned")
 	}
 	if payload.UploadURL == "" || payload.UploadMethod == "" {
 		t.Fatalf("payload missing upload info: %+v", payload)
@@ -176,7 +176,7 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 		if in.RepositoryOwner != "org" || in.Repository != "repo" {
 			t.Fatalf("repository info not normalized: %s/%s", in.RepositoryOwner, in.Repository)
 		}
-		return &pb.Document{Id: capturedDocID, WorkflowId: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+		return &pb.Document{Id: capturedDocID, WorkflowId: capturedDocID, JobId: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED, ActualStatus: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
 		return nil, nil
 	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -246,7 +246,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 			if in.GetId() != capturedDocID {
 				t.Fatalf("document id mismatch: %s vs %s", in.GetId(), capturedDocID)
 			}
-			return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+			return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), JobId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED, ActualStatus: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 		},
 		getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -270,7 +270,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
 	reqBody := map[string]interface{}{
-		"query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status workflowId } } }",
+            "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
 		"variables": map[string]interface{}{
 			"input": map[string]interface{}{
 				"fileName":      "demo.docx",
@@ -299,9 +299,9 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 				UploadURL    string `json:"uploadUrl"`
 				UploadMethod string `json:"uploadMethod"`
 				Document     struct {
-					ID         string  `json:"id"`
-					Status     string  `json:"status"`
-					WorkflowID *string `json:"workflowId"`
+					ID     string  `json:"id"`
+					Status string  `json:"status"`
+					JobID  *string `json:"jobId"`
 				} `json:"document"`
 			} `json:"uploadKnowledgeDocument"`
 		} `json:"data"`
@@ -313,7 +313,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	if len(resp.Errors) > 0 {
 		t.Fatalf("unexpected graphql errors: %+v", resp.Errors)
 	}
-	if resp.Data.UploadKnowledgeDocument.Document.ID == "" || resp.Data.UploadKnowledgeDocument.Document.ID != capturedDocID || resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != capturedDocID {
+	if resp.Data.UploadKnowledgeDocument.Document.ID == "" || resp.Data.UploadKnowledgeDocument.Document.ID != capturedDocID || resp.Data.UploadKnowledgeDocument.Document.JobID == nil || *resp.Data.UploadKnowledgeDocument.Document.JobID != capturedDocID {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
 	}
 	if resp.Data.UploadKnowledgeDocument.UploadURL == "" || resp.Data.UploadKnowledgeDocument.UploadMethod == "" {
@@ -354,7 +354,7 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 			if in.GetId() == "" || in.GetId() != storageServer.lastDocumentID {
 				t.Fatalf("document id mismatch: %s vs %s", in.GetId(), storageServer.lastDocumentID)
 			}
-			return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+			return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), JobId: in.GetId(), FileName: in.FileName, Repository: in.Repository, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED, ActualStatus: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 		},
 		getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
@@ -368,7 +368,7 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
 	reqBody := map[string]interface{}{
-		"query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status workflowId } } }",
+            "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
 		"variables": map[string]interface{}{
 			"input": map[string]interface{}{
 				"fileName":      "demo.docx",
@@ -397,9 +397,9 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 				UploadURL    string `json:"uploadUrl"`
 				UploadMethod string `json:"uploadMethod"`
 				Document     struct {
-					ID         string  `json:"id"`
-					Status     string  `json:"status"`
-					WorkflowID *string `json:"workflowId"`
+					ID     string  `json:"id"`
+					Status string  `json:"status"`
+					JobID  *string `json:"jobId"`
 				} `json:"document"`
 			} `json:"uploadKnowledgeDocument"`
 		} `json:"data"`
@@ -420,8 +420,8 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	if resp.Data.UploadKnowledgeDocument.Document.ID != storageServer.lastDocumentID || resp.Data.UploadKnowledgeDocument.UploadURL != "http://minio/presigned" {
 		t.Fatalf("unexpected response: %+v", resp.Data.UploadKnowledgeDocument)
 	}
-	if resp.Data.UploadKnowledgeDocument.Document.WorkflowID == nil || *resp.Data.UploadKnowledgeDocument.Document.WorkflowID != storageServer.lastDocumentID {
-		t.Fatalf("workflow id not forwarded: %+v", resp.Data.UploadKnowledgeDocument.Document)
+	if resp.Data.UploadKnowledgeDocument.Document.JobID == nil || *resp.Data.UploadKnowledgeDocument.Document.JobID != storageServer.lastDocumentID {
+		t.Fatalf("job id not forwarded: %+v", resp.Data.UploadKnowledgeDocument.Document)
 	}
 	if storageServer.lastCorrelation != "corr-grpc" {
 		t.Fatalf("correlation id not forwarded to storage service: %s", storageServer.lastCorrelation)

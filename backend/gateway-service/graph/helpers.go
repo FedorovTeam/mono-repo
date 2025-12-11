@@ -74,13 +74,18 @@ func mapDocument(doc *pb.Document) *model.KnowledgeDocument {
 		return nil
 	}
 
+	status := doc.GetActualStatus()
+	if status == pb.DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED {
+		status = doc.GetStatus()
+	}
+
 	result := &model.KnowledgeDocument{
 		ID:         doc.GetId(),
 		FileName:   doc.GetFileName(),
 		Repository: doc.GetRepository(),
 		Branch:     doc.GetBranch(),
 		Path:       doc.GetPath(),
-		Status:     modelStatusFromProto(doc.GetStatus()),
+		Status:     modelStatusFromProto(status),
 	}
 
 	if doc.GetRepositoryOwner() != "" {
@@ -88,12 +93,15 @@ func mapDocument(doc *pb.Document) *model.KnowledgeDocument {
 		result.RepositoryOwner = &owner
 	}
 
-	wf := doc.GetWorkflowId()
-	if wf == "" {
-		wf = doc.GetId()
+	jobID := doc.GetJobId()
+	if jobID == "" {
+		jobID = doc.GetWorkflowId()
 	}
-	if wf != "" {
-		result.WorkflowID = &wf
+	if jobID == "" {
+		jobID = doc.GetId()
+	}
+	if jobID != "" {
+		result.JobID = &jobID
 	}
 	if doc.GetError() != "" {
 		errText := doc.GetError()

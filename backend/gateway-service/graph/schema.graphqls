@@ -35,7 +35,7 @@ type KnowledgeDocument {
   branch: String!
   path: String!
   status: KnowledgeDocumentStatus!
-  workflowId: String
+  jobId: String
   error: String
 }
 

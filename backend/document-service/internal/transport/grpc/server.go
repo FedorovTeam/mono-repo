@@ -127,6 +127,10 @@ func (s *Server) ConfirmUpload(ctx context.Context, req *documentv1.ConfirmUploa
 }
 
 func toProto(doc *model.Document) *documentv1.Document {
+	actualStatus := doc.ActualStatus
+	if actualStatus == "" {
+		actualStatus = doc.Status
+	}
 	p := &documentv1.Document{
 		Id:                doc.ID,
 		FileName:          doc.Name,
@@ -145,6 +149,8 @@ func toProto(doc *model.Document) *documentv1.Document {
 		CreatePr:          doc.CreatePR,
 		CreatedAt:         timestamppb.New(doc.CreatedAt),
 		UpdatedAt:         timestamppb.New(doc.UpdatedAt),
+		JobId:             doc.ActiveJobID,
+		ActualStatus:      toProtoStatus(actualStatus),
 	}
 	return p
 }

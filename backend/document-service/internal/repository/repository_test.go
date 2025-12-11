@@ -78,6 +78,9 @@ func TestUpdateStatusFlow(t *testing.T) {
 			AddRow("ver-1", "doc-1", 1, "orig/key", "md/key", "", now, now).
 			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", "", now, now))
 	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at FROM processing_jobs WHERE document_id=$1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1")).
+		WithArgs("doc-1", model.JobStatusPending, model.JobStatusInProgress).
+		WillReturnError(sql.ErrNoRows)
 
 	version := &model.DocumentVersion{Version: 2, OriginalObjectKey: "orig/key2", MarkdownObjectKey: "md/key2"}
 	doc, err := repo.UpdateStatus(ctx, "doc-1", model.StatusStoredOriginal, "stored", "", version)
@@ -111,6 +114,9 @@ func TestUpdateStatusIdempotent(t *testing.T) {
 			AddRow("ver-1", "doc-1", 1, "orig/key", "md/key", "", now, now).
 			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", "", now, now))
 	mock.ExpectCommit()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at FROM processing_jobs WHERE document_id=$1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1")).
+		WithArgs("doc-1", model.JobStatusPending, model.JobStatusInProgress).
+		WillReturnError(sql.ErrNoRows)
 
 	version := &model.DocumentVersion{Version: 2, OriginalObjectKey: "orig/key2", MarkdownObjectKey: "md/key2"}
 	doc, err := repo.UpdateStatus(ctx, "doc-1", model.StatusStoredOriginal, "", "", version)
@@ -156,6 +162,9 @@ func TestListDocuments(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents ORDER BY created_at DESC")).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "created_at", "updated_at"}).
 			AddRow("doc-1", "name", "", "", "", "", "", model.StatusUploaded, "", "orig", "orig/key", "md", "md/key", "", false, time.Now(), time.Now()))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at FROM processing_jobs WHERE document_id=$1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1")).
+		WithArgs("doc-1", model.JobStatusPending, model.JobStatusInProgress).
+		WillReturnError(sql.ErrNoRows)
 
 	docs, err := repo.ListDocuments(ctx, 0, 0, nil)
 	require.NoError(t, err)

@@ -100,6 +100,7 @@ type integrationRepo struct {
 	lastStatus  model.Status
 	lastVersion *model.DocumentVersion
 	lastError   string
+	jobs        map[string]model.ProcessingJob
 }
 
 func (r *integrationRepo) CreateDocument(context.Context, *model.Document, *model.DocumentVersion, *model.DocumentStatusLog) (*model.Document, error) {
@@ -137,11 +138,42 @@ func (r *integrationRepo) CreateProcessingJob(ctx context.Context, job *model.Pr
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()
 	}
+	if r.jobs == nil {
+		r.jobs = make(map[string]model.ProcessingJob)
+	}
+	if job.Status == "" {
+		job.Status = model.JobStatusPending
+	}
+	r.jobs[job.TaskID] = *job
 	return job, nil
 }
 
 func (r *integrationRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
+	job := model.ProcessingJob{TaskID: taskID, Status: status}
+	if nextRunAt != nil {
+		job.NextRunAt = *nextRunAt
+	}
+	if payload != nil {
+		job.Payload = payload
+	}
+	if r.jobs == nil {
+		r.jobs = make(map[string]model.ProcessingJob)
+	}
+	r.jobs[taskID] = job
+	return &job, nil
+}
+
+func (r *integrationRepo) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+	for _, job := range r.jobs {
+		if job.DocumentID != documentID {
+			continue
+		}
+		if job.Status == model.JobStatusPending || job.Status == model.JobStatusInProgress {
+			copy := job
+			return &copy, nil
+		}
+	}
+	return nil, nil
 }
 
 type recordingPublisher struct {

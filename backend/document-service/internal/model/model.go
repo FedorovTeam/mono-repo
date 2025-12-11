@@ -83,7 +83,9 @@ type Document struct {
 	BaseBranch        string
 	Path              string
 	Status            Status
+	ActualStatus      Status
 	WorkflowID        string
+	ActiveJobID       string
 	ErrorReason       string
 	OriginalBucket    string
 	OriginalObjectKey string

@@ -31,6 +31,8 @@ message Document {
   string markdown_object_key = 12;
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp updated_at = 14;
+  string job_id = 16;
+  DocumentStatus actual_status = 17;
 }
 
 message CreateDocumentRequest {
