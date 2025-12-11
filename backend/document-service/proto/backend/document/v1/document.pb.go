@@ -27,10 +27,11 @@ type DocumentStatus int32
 const (
 	DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED           DocumentStatus = 0
 	DocumentStatus_DOCUMENT_STATUS_UPLOADED              DocumentStatus = 1
-	DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL       DocumentStatus = 2
-	DocumentStatus_DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN DocumentStatus = 3
-	DocumentStatus_DOCUMENT_STATUS_PUBLISHED_TO_GITHUB   DocumentStatus = 4
-	DocumentStatus_DOCUMENT_STATUS_FAILED                DocumentStatus = 5
+	DocumentStatus_DOCUMENT_STATUS_IN_PROGRESS           DocumentStatus = 2
+	DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL       DocumentStatus = 3
+	DocumentStatus_DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN DocumentStatus = 4
+	DocumentStatus_DOCUMENT_STATUS_PUBLISHED_TO_GITHUB   DocumentStatus = 5
+	DocumentStatus_DOCUMENT_STATUS_FAILED                DocumentStatus = 6
 )
 
 // Enum value maps for DocumentStatus.
@@ -38,18 +39,20 @@ var (
 	DocumentStatus_name = map[int32]string{
 		0: "DOCUMENT_STATUS_UNSPECIFIED",
 		1: "DOCUMENT_STATUS_UPLOADED",
-		2: "DOCUMENT_STATUS_STORED_ORIGINAL",
-		3: "DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN",
-		4: "DOCUMENT_STATUS_PUBLISHED_TO_GITHUB",
-		5: "DOCUMENT_STATUS_FAILED",
+		2: "DOCUMENT_STATUS_IN_PROGRESS",
+		3: "DOCUMENT_STATUS_STORED_ORIGINAL",
+		4: "DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN",
+		5: "DOCUMENT_STATUS_PUBLISHED_TO_GITHUB",
+		6: "DOCUMENT_STATUS_FAILED",
 	}
 	DocumentStatus_value = map[string]int32{
 		"DOCUMENT_STATUS_UNSPECIFIED":           0,
 		"DOCUMENT_STATUS_UPLOADED":              1,
-		"DOCUMENT_STATUS_STORED_ORIGINAL":       2,
-		"DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN": 3,
-		"DOCUMENT_STATUS_PUBLISHED_TO_GITHUB":   4,
-		"DOCUMENT_STATUS_FAILED":                5,
+		"DOCUMENT_STATUS_IN_PROGRESS":           2,
+		"DOCUMENT_STATUS_STORED_ORIGINAL":       3,
+		"DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN": 4,
+		"DOCUMENT_STATUS_PUBLISHED_TO_GITHUB":   5,
+		"DOCUMENT_STATUS_FAILED":                6,
 	}
 )
 
@@ -779,14 +782,15 @@ const file_backend_document_v1_document_proto_rawDesc = "" +
 	"\x06bucket\x18\x02 \x01(\tR\x06bucket\x12\x1d\n" +
 	"\n" +
 	"object_key\x18\x03 \x01(\tR\tobjectKey\x12%\n" +
-	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId*\xe4\x01\n" +
+	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId*\x85\x02\n" +
 	"\x0eDocumentStatus\x12\x1f\n" +
 	"\x1bDOCUMENT_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n" +
-	"\x18DOCUMENT_STATUS_UPLOADED\x10\x01\x12#\n" +
-	"\x1fDOCUMENT_STATUS_STORED_ORIGINAL\x10\x02\x12)\n" +
-	"%DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN\x10\x03\x12'\n" +
-	"#DOCUMENT_STATUS_PUBLISHED_TO_GITHUB\x10\x04\x12\x1a\n" +
-	"\x16DOCUMENT_STATUS_FAILED\x10\x052\xf1\x03\n" +
+	"\x18DOCUMENT_STATUS_UPLOADED\x10\x01\x12\x1f\n" +
+	"\x1bDOCUMENT_STATUS_IN_PROGRESS\x10\x02\x12#\n" +
+	"\x1fDOCUMENT_STATUS_STORED_ORIGINAL\x10\x03\x12)\n" +
+	"%DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN\x10\x04\x12'\n" +
+	"#DOCUMENT_STATUS_PUBLISHED_TO_GITHUB\x10\x05\x12\x1a\n" +
+	"\x16DOCUMENT_STATUS_FAILED\x10\x062\xf1\x03\n" +
 	"\x0fDocumentService\x12[\n" +
 	"\x0eCreateDocument\x12*.backend.document.v1.CreateDocumentRequest\x1a\x1d.backend.document.v1.Document\x12U\n" +
 	"\vGetDocument\x12'.backend.document.v1.GetDocumentRequest\x1a\x1d.backend.document.v1.Document\x12f\n" +

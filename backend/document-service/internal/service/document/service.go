@@ -242,6 +242,14 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 	if err != nil {
 		var alreadyStarted *serviceerror.WorkflowExecutionAlreadyStarted
 		if errors.As(err, &alreadyStarted) {
+			if alreadyStarted.RunId != "" {
+				if updated, updateErr := s.repo.UpdateWorkflowID(ctx, doc.ID, alreadyStarted.RunId); updateErr == nil {
+					doc = updated
+				}
+			}
+			if updated, updateErr := s.repo.UpdateStatus(ctx, doc.ID, model.StatusInProgress, "", "", nil); updateErr == nil {
+				return updated, nil
+			}
 			return doc, nil
 		}
 		reason := fmt.Sprintf("%s %v", startWorkflowErrorPrefix, err)
@@ -249,7 +257,12 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		return nil, fmt.Errorf("start workflow: %w", err)
 	}
 
-	return s.repo.UpdateWorkflowID(ctx, doc.ID, run.GetID())
+	runID := run.GetRunID()
+	if _, err := s.repo.UpdateWorkflowID(ctx, doc.ID, runID); err != nil {
+		return nil, err
+	}
+
+	return s.repo.UpdateStatus(ctx, doc.ID, model.StatusInProgress, "", "", nil)
 }
 
 func (s *Service) GetDocument(ctx context.Context, id string) (*model.Document, error) {

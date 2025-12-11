@@ -82,11 +82,13 @@ func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status,
 		return nil, errors.New("missing doc")
 	}
 	r.savedStatus = to
-	r.savedError = errorReason
-	r.doc.Status = to
 	if errorReason != "" {
+		r.savedError = errorReason
 		r.doc.ErrorReason = errorReason
+	} else if r.doc != nil && r.doc.ErrorReason != "" && r.doc.Status != to {
+		r.doc.ErrorReason = ""
 	}
+	r.doc.Status = to
 	if version != nil {
 		if len(r.doc.Versions) == 0 {
 			r.doc.Versions = []model.DocumentVersion{*version}
@@ -248,8 +250,9 @@ func TestConfirmUploadStartsWorkflow(t *testing.T) {
 
 	doc, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
-	require.Equal(t, "doc-123", doc.WorkflowID)
-	require.Equal(t, "doc-123", repo.workflowID)
+	require.Equal(t, "run-123", doc.WorkflowID)
+	require.Equal(t, model.StatusInProgress, repo.savedStatus)
+	require.Equal(t, "run-123", repo.workflowID)
 }
 
 func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
@@ -259,8 +262,8 @@ func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
 
 	returned, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
-	require.Equal(t, doc, returned)
-	require.Empty(t, repo.savedStatus)
+	require.Equal(t, model.StatusInProgress, repo.savedStatus)
+	require.Equal(t, model.StatusInProgress, returned.Status)
 }
 
 func TestUpdateStatusValidation(t *testing.T) {

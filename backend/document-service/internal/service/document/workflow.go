@@ -484,6 +484,25 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		return fmt.Errorf("%s", reason)
 	}
 
+	if a.baseURL != "" {
+		if a.httpClient == nil {
+			a.httpClient = &http.Client{Timeout: 10 * time.Second}
+		}
+		validateURL := fmt.Sprintf("%s/repos/%s/%s", strings.TrimRight(a.baseURL, "/"), owner, repository)
+		resp, err := a.httpClient.Get(validateURL)
+		if err != nil {
+			reason := fmt.Sprintf("validate repository: %v", err)
+			_ = a.fail(ctx, input.DocumentID, reason)
+			return fmt.Errorf("%s", reason)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= http.StatusMultipleChoices {
+			reason := fmt.Sprintf("repository validation failed with status %d", resp.StatusCode)
+			_ = a.fail(ctx, input.DocumentID, reason)
+			return fmt.Errorf("%s", reason)
+		}
+	}
+
 	markdownBucket := input.MarkdownBucket
 	if markdownBucket == "" {
 		markdownBucket = doc.MarkdownBucket
@@ -563,6 +582,9 @@ func (a *Activities) fail(ctx context.Context, documentID, reason string) error 
 }
 
 func (a *Activities) progressStatus(ctx context.Context, doc *model.Document) (model.Status, error) {
+	if doc.Status == model.StatusInProgress {
+		return model.StatusUploaded, nil
+	}
 	if doc.Status != model.StatusFailed {
 		return doc.Status, nil
 	}

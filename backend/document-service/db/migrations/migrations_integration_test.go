@@ -83,7 +83,7 @@ func assertEnumValues(t *testing.T, ctx context.Context, db *sql.DB) {
 		require.NoError(t, rows.Scan(&v))
 		values = append(values, v)
 	}
-	require.Equal(t, []string{"Uploaded", "StoredOriginal", "ConvertedToMarkdown", "PublishedToGitHub", "Failed"}, values)
+require.Equal(t, []string{"Uploaded", "StoredOriginal", "ConvertedToMarkdown", "PublishedToGitHub", "Failed", "InProgress"}, values)
 }
 
 func assertIndexes(t *testing.T, ctx context.Context, db *sql.DB) {

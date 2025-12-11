@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.temporal.io/sdk/activity"
@@ -154,6 +156,156 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	}
 	if publisherServer.lastCommitMessage != repo.doc.Name {
 		t.Fatalf("unexpected commit message: %s", publisherServer.lastCommitMessage)
+	}
+}
+
+func TestWorkflowRetrierRecoversAfterTemporalRestart(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	if _, err := os.Stat("/var/run/docker.sock"); err != nil {
+		t.Skip("docker socket is unavailable, skipping temporalite-based retry test")
+	}
+
+	temporalDown, err := startTemporalite(ctx)
+	if err != nil {
+		t.Fatalf("start temporalite for failure: %v", err)
+	}
+
+	downHost, err := temporalDown.Host(ctx)
+	if err != nil {
+		t.Fatalf("get host: %v", err)
+	}
+	downPort, err := temporalDown.MappedPort(ctx, "7233")
+	if err != nil {
+		t.Fatalf("get port: %v", err)
+	}
+
+	downClient, err := client.Dial(client.Options{HostPort: fmt.Sprintf("%s:%s", downHost, downPort.Port()), Namespace: "knowledge-base"})
+	if err != nil {
+		t.Fatalf("dial temporal client for failure: %v", err)
+	}
+	defer downClient.Close()
+
+	docID := uuid.NewString()
+	repo := &memoryRepo{doc: &model.Document{
+		ID:                docID,
+		Name:              "Document title",
+		Owner:             "custom-owner",
+		Repository:        "custom-repo",
+		Branch:            "custom-branch",
+		BaseBranch:        "main",
+		Path:              "docs/key.md",
+		WorkflowID:        docID,
+		Status:            model.StatusUploaded,
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "orig/key.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "md/key.md",
+		Versions:          []model.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/key.docx", MarkdownObjectKey: "md/key.md"}},
+		CreatePR:          true,
+	}, logs: []model.Status{model.StatusUploaded}}
+
+	svc := New(repo, &keyMock{}, downClient, "document-processing", nil, "orig", "md", "owner", "repo", "main", "main")
+
+	_ = temporalDown.Terminate(ctx)
+
+	if _, err = svc.ConfirmUpload(ctx, ConfirmUploadInput{DocumentID: docID, Bucket: "orig", ObjectKey: "orig/key.docx"}); err == nil {
+		t.Fatal("expected start workflow failure while temporal is down")
+	}
+	if repo.doc.Status != model.StatusFailed {
+		t.Fatalf("expected failed status after start error, got %s", repo.doc.Status)
+	}
+	if !strings.HasPrefix(strings.ToLower(repo.doc.ErrorReason), startWorkflowErrorPrefix) {
+		t.Fatalf("unexpected error reason: %s", repo.doc.ErrorReason)
+	}
+
+	temporalUp, err := startTemporalite(ctx)
+	if err != nil {
+		t.Fatalf("restart temporalite: %v", err)
+	}
+	defer func() {
+		_ = temporalUp.Terminate(ctx)
+	}()
+
+	host, err := temporalUp.Host(ctx)
+	if err != nil {
+		t.Fatalf("get host: %v", err)
+	}
+	port, err := temporalUp.MappedPort(ctx, "7233")
+	if err != nil {
+		t.Fatalf("get port: %v", err)
+	}
+
+	var temporalClient client.Client
+	require.Eventually(t, func() bool {
+		c, dialErr := client.Dial(client.Options{HostPort: fmt.Sprintf("%s:%s", host, port.Port()), Namespace: "knowledge-base"})
+		if dialErr != nil {
+			return false
+		}
+		temporalClient = c
+		return true
+	}, 20*time.Second, time.Second)
+	t.Cleanup(func() {
+		if temporalClient != nil {
+			temporalClient.Close()
+		}
+	})
+
+	storageRecorder := &metadataRecorder{}
+	storageConn := startBufConnServer(t, func(s *grpc.Server) {
+		storagev1.RegisterStorageServiceServer(s, &fakeStorageServer{recorder: storageRecorder})
+	})
+	defer storageConn.Close()
+
+	transformerRecorder := &metadataRecorder{}
+	transformerConn := startBufConnServer(t, func(s *grpc.Server) {
+		transformerv1.RegisterTransformerServiceServer(s, &fakeTransformerServer{recorder: transformerRecorder})
+	})
+	defer transformerConn.Close()
+
+	publisherRecorder := &metadataRecorder{}
+	publisherConn := startBufConnServer(t, func(s *grpc.Server) {
+		githubpublisherv1.RegisterGithubPublisherServiceServer(s, &fakePublisherServer{recorder: publisherRecorder})
+	})
+	defer publisherConn.Close()
+
+	githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer githubServer.Close()
+
+	activities := NewActivities(repo, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main", githubServer.URL)
+	activities.httpClient = githubServer.Client()
+	workerInstance := worker.New(temporalClient, "document-processing", worker.Options{})
+	workerInstance.RegisterWorkflow(DocumentProcessingWorkflow)
+	workerInstance.RegisterActivityWithOptions(activities.AwaitOriginal, activity.RegisterOptions{Name: ActivityAwaitOriginalName})
+	workerInstance.RegisterActivityWithOptions(activities.UploadOriginal, activity.RegisterOptions{Name: ActivityUploadOriginalName})
+	workerInstance.RegisterActivityWithOptions(activities.ConvertToMarkdown, activity.RegisterOptions{Name: ActivityConvertToMarkdownName})
+	workerInstance.RegisterActivityWithOptions(activities.AwaitMarkdown, activity.RegisterOptions{Name: ActivityAwaitMarkdownName})
+	workerInstance.RegisterActivityWithOptions(activities.PublishMarkdown, activity.RegisterOptions{Name: ActivityPublishMarkdownName})
+
+	go func() {
+		_ = workerInstance.Run(worker.InterruptCh())
+	}()
+	defer workerInstance.Stop()
+
+	retrier := NewWorkflowRetrier(repo, temporalClient, "document-processing", 10, 3)
+	retrier.reconcile(ctx)
+
+	require.Eventually(t, func() bool {
+		return repo.lastStatus == model.StatusPublishedToGitHub
+	}, time.Minute, time.Second)
+
+	if repo.workflowID == "" || repo.workflowID == docID {
+		t.Fatalf("expected workflow id to be updated to run id, got %q", repo.workflowID)
+	}
+	if repo.doc.ErrorReason != "" {
+		t.Fatalf("expected error reason to be cleared, got %q", repo.doc.ErrorReason)
+	}
+	require.Contains(t, repo.logs, model.StatusInProgress)
+	if len(storageRecorder.values) == 0 || len(transformerRecorder.values) == 0 || len(publisherRecorder.values) == 0 {
+		t.Fatalf("expected activities to be invoked after retry")
 	}
 }
 

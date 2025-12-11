@@ -49,6 +49,7 @@ func TestWorkflowRetrierRestartsWorkflow(t *testing.T) {
 
 	require.Equal(t, 1, starter.calls)
 	require.Equal(t, "run-123", repo.workflowID)
+	require.Equal(t, model.StatusInProgress, repo.savedStatus)
 }
 
 func TestWorkflowRetrierRespectsAttemptLimit(t *testing.T) {

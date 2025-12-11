@@ -153,6 +153,8 @@ func toProtoStatus(s model.Status) documentv1.DocumentStatus {
 	switch s {
 	case model.StatusUploaded:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED
+	case model.StatusInProgress:
+		return documentv1.DocumentStatus_DOCUMENT_STATUS_IN_PROGRESS
 	case model.StatusStoredOriginal:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL
 	case model.StatusConvertedToMarkdown:
@@ -170,6 +172,8 @@ func fromProtoStatus(s documentv1.DocumentStatus) model.Status {
 	switch s {
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED:
 		return model.StatusUploaded
+	case documentv1.DocumentStatus_DOCUMENT_STATUS_IN_PROGRESS:
+		return model.StatusInProgress
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL:
 		return model.StatusStoredOriginal
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN:

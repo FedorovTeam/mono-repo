@@ -8,6 +8,7 @@ import (
 type Status string
 
 const (
+	StatusInProgress          Status = "InProgress"
 	StatusUploaded            Status = "Uploaded"
 	StatusStoredOriginal      Status = "StoredOriginal"
 	StatusConvertedToMarkdown Status = "ConvertedToMarkdown"
@@ -15,10 +16,11 @@ const (
 	StatusFailed              Status = "Failed"
 )
 
-var allowedTransitions = map[Status]Status{
-	StatusUploaded:            StatusStoredOriginal,
-	StatusStoredOriginal:      StatusConvertedToMarkdown,
-	StatusConvertedToMarkdown: StatusPublishedToGitHub,
+var allowedTransitions = map[Status][]Status{
+	StatusUploaded:            {StatusInProgress, StatusStoredOriginal},
+	StatusInProgress:          {StatusStoredOriginal},
+	StatusStoredOriginal:      {StatusConvertedToMarkdown},
+	StatusConvertedToMarkdown: {StatusPublishedToGitHub},
 }
 
 func ValidateTransition(from, to Status) error {
@@ -31,7 +33,7 @@ func ValidateTransition(from, to Status) error {
 
 	if from == StatusFailed {
 		switch to {
-		case StatusStoredOriginal, StatusConvertedToMarkdown, StatusPublishedToGitHub:
+		case StatusInProgress, StatusStoredOriginal, StatusConvertedToMarkdown, StatusPublishedToGitHub:
 			return nil
 		default:
 			return errors.New("invalid status transition")
@@ -42,15 +44,17 @@ func ValidateTransition(from, to Status) error {
 	if !ok {
 		return errors.New("unknown current status")
 	}
-	if next != to {
-		return errors.New("invalid status transition")
+	for _, allowed := range next {
+		if allowed == to {
+			return nil
+		}
 	}
-	return nil
+	return errors.New("invalid status transition")
 }
 
 func ValidateStatus(val Status) error {
 	switch val {
-	case StatusUploaded, StatusStoredOriginal, StatusConvertedToMarkdown, StatusPublishedToGitHub, StatusFailed:
+	case StatusUploaded, StatusInProgress, StatusStoredOriginal, StatusConvertedToMarkdown, StatusPublishedToGitHub, StatusFailed:
 		return nil
 	default:
 		return errors.New("unsupported status")

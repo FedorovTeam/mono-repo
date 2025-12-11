@@ -232,6 +232,9 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 	if errorReason != "" && doc.ErrorReason != errorReason {
 		doc.ErrorReason = errorReason
 		docUpdated = true
+	} else if statusChanged && errorReason == "" && doc.ErrorReason != "" {
+		doc.ErrorReason = ""
+		docUpdated = true
 	}
 
 	if docUpdated {

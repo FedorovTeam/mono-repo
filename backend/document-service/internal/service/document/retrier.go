@@ -114,18 +114,30 @@ func (r *WorkflowRetrier) retry(ctx context.Context, doc model.Document, attempt
 	if err != nil {
 		var alreadyStarted *serviceerror.WorkflowExecutionAlreadyStarted
 		if errors.As(err, &alreadyStarted) {
+			if alreadyStarted.RunId != "" {
+				if _, updateErr := r.repo.UpdateWorkflowID(ctx, doc.ID, alreadyStarted.RunId); updateErr != nil {
+					r.logf("workflow-retrier: update workflow id for already started workflow document_id=%s correlation_id=%s: %v", doc.ID, correlationID, updateErr)
+				}
+			}
+			if _, updateErr := r.repo.UpdateStatus(ctx, doc.ID, model.StatusInProgress, "", "", nil); updateErr != nil {
+				r.logf("workflow-retrier: update status to in-progress for already started workflow document_id=%s correlation_id=%s: %v", doc.ID, correlationID, updateErr)
+			}
 			r.logf("workflow-retrier: workflow already started document_id=%s correlation_id=%s", doc.ID, correlationID)
 			return
 		}
 
-		reason := fmt.Sprintf("%s %v", startWorkflowErrorPrefix, err)
+		reason := fmt.Sprintf("%s %v (attempt %d/%d)", startWorkflowErrorPrefix, err, attempt, r.maxTries)
 		_, _ = r.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
 		r.logf("workflow-retrier: failed to start workflow document_id=%s correlation_id=%s: %v", doc.ID, correlationID, err)
 		return
 	}
 
-	if _, err := r.repo.UpdateWorkflowID(ctx, doc.ID, run.GetID()); err != nil {
+	if _, err := r.repo.UpdateWorkflowID(ctx, doc.ID, run.GetRunID()); err != nil {
 		r.logf("workflow-retrier: update workflow id for document_id=%s correlation_id=%s: %v", doc.ID, correlationID, err)
+	}
+
+	if _, err := r.repo.UpdateStatus(ctx, doc.ID, model.StatusInProgress, "", "", nil); err != nil {
+		r.logf("workflow-retrier: update status to in-progress for document_id=%s correlation_id=%s: %v", doc.ID, correlationID, err)
 	}
 }
 
