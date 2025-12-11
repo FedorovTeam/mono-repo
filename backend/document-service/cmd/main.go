@@ -154,6 +154,14 @@ func main() {
 
 	go githubRetrier.Run(ctx, cfg.GithubRetryer.Interval)
 
+	jobFollower := docservice.NewJobFollower(
+		repo,
+		cfg.JobFollower.BatchSize,
+		cfg.JobFollower.RescheduleAfter,
+	)
+
+	go jobFollower.Run(ctx, cfg.JobFollower.Interval)
+
 	server := transport.NewServer(service)
 	if err := server.ListenAndServe(ctx, cfg.Server.Addr); err != nil {
 		log.Printf("server stopped: %v", err)

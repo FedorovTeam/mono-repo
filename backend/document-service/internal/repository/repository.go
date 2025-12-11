@@ -364,6 +364,66 @@ LIMIT 1
 	return &job, nil
 }
 
+// ListFinishedJobs возвращает завершённые или окончательно упавшие задачи и откладывает их повторную обработку.
+func (r *Repository) ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]model.ProcessingJob, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if postpone <= 0 {
+		postpone = time.Minute
+	}
+
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	rows, err := tx.QueryContext(ctx, `
+SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE status IN ($1,$2) AND next_run_at <= $3
+ORDER BY next_run_at
+LIMIT $4
+FOR UPDATE SKIP LOCKED
+`, model.JobStatusCompleted, model.JobStatusFailed, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []model.ProcessingJob
+	for rows.Next() {
+		var job model.ProcessingJob
+		var payloadRaw json.RawMessage
+		if err := rows.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(payloadRaw, &job.Payload)
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	nextRun := now.Add(postpone)
+	for _, job := range jobs {
+		if _, err := tx.ExecContext(ctx, `
+        UPDATE processing_jobs SET next_run_at=$1, updated_at=$2 WHERE task_id=$3
+    `, nextRun, now, job.TaskID); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
+}
+
 func (r *Repository) attachActiveJob(ctx context.Context, doc *model.Document) error {
 	if doc == nil {
 		return nil

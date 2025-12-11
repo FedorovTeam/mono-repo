@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"regexp"
 	"testing"
 	"time"
@@ -169,5 +170,41 @@ func TestListDocuments(t *testing.T) {
 	docs, err := repo.ListDocuments(ctx, 0, 0, nil)
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListFinishedJobs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := New(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	postpone := 5 * time.Minute
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE status IN ($1,$2) AND next_run_at <= $3
+ORDER BY next_run_at
+LIMIT $4
+FOR UPDATE SKIP LOCKED`)).
+		WithArgs(model.JobStatusCompleted, model.JobStatusFailed, sqlmock.AnyArg(), 10).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "document_id", "stage", "status", "attempts", "next_run_at", "payload", "created_at", "updated_at"}).
+			AddRow("job-1", "doc-1", model.JobStageStoreOriginal, model.JobStatusCompleted, 1, now, json.RawMessage(`{"foo":"bar"}`), now, now))
+
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE processing_jobs SET next_run_at=$1, updated_at=$2 WHERE task_id=$3")).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "job-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	jobs, err := repo.ListFinishedJobs(ctx, 10, postpone)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, "doc-1", jobs[0].DocumentID)
+	require.Equal(t, model.JobStageStoreOriginal, jobs[0].Stage)
+	require.Equal(t, "bar", jobs[0].Payload["foo"])
 	require.NoError(t, mock.ExpectationsWereMet())
 }

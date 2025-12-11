@@ -6,41 +6,40 @@ sequenceDiagram
     participant G as gRPC сервер DocumentService
     participant S as Бизнес-логика DocumentService
     participant K as KeyManager (MinIO)
-    participant R as Репозиторий (PostgreSQL)
-    participant UR as Cron Upload Reconciler
-    participant MC as Cron Markdown Converter
-    participant GPJ as Cron Github Publisher
-    participant ST as storage-service
-    participant TR as docling-transformer-service
-    participant GP as github-publisher-service
+    participant R as PostgreSQL (documents + processing_jobs)
+    participant UR as UploadReconciler
+    participant F as JobFollower (cron)
+    participant SW as storage worker (store_original)
+    participant TW as transformer worker (convert_to_markdown)
+    participant PW as publisher worker (publish_to_github)
 
-    C->>G: CreateDocument(id?, fileName, owner/repository?, branch?, baseBranch?, path?)
-    G->>S: Провалидировать вход и defaults
-    S->>K: GenerateKeys(documentId, fileName, path, publishPath)
+    C->>G: CreateDocument(id?, fileName, repo?, path?)
+    G->>S: Валидация + defaults
+    S->>K: GenerateKeys
     K-->>S: originalKey + markdownKey
-    S->>R: Транзакция: вставка document со статусом Uploaded,
-        версия v1 (originalKey/markdownKey), запись в document_status_logs
-    S-->>C: Document{status=Uploaded, buckets/object keys}
+    S->>R: INSERT document{status=Uploaded}, версии, status_logs
+    S-->>C: Document c upload/markdown ключами
 
-    Note over UR,R: Cron UploadReconciler ищет Uploaded
-    UR-->>ST: StatObject(uploadBucket, uploadObjectKey)
+    Note over UR,R: UploadReconciler проверяет наличие исходника в MinIO
     UR->>G: ConfirmUpload(document_id, bucket, object_key)
-    G->>S: Проверка bucket/object_key, UpdateStatus StoredOriginal (+version)
-    S->>R: Обновить document_versions, document_status_logs
+    G->>S: Валидация bucket/object_key
+    S->>R: UPDATE document -> Uploaded/Failed, CREATE job store_original (pending)
 
-    Note over MC,R: Cron MarkdownConverter выбирает StoredOriginal
-    MC->>ST: GetObject(originalBucket, originalObjectKey)
-    MC->>TR: ConvertDocumentToMarkdown
-    TR-->>MC: markdown_bucket/object_key
-    MC->>R: UpdateStatus ConvertedToMarkdown (version+1, markdown_object_key)
+    Note over SW,R: storage worker берёт job=store_original (pending)
+    SW->>R: UPDATE processing_jobs status=in_progress
+    SW->>R: UPDATE document status=StoredOriginal
+    SW->>R: UPDATE processing_jobs status=completed/failed
 
-    Note over GPJ,R: Cron GithubPublisher выбирает ConvertedToMarkdown
-    GPJ->>ST: Проверка наличия markdown
-    GPJ->>GP: PublishMarkdown(owner, repository, branch/baseBranch, path)
-    GP-->>GPJ: CommitSha/PR info
-    GPJ->>R: UpdateStatus PublishedToGitHub (version+1) либо Failed
-
-    opt Любая ошибка cron-шага
-        S/Jobs->>R: UpdateStatus Failed(reason, error_reason)
+    Note over F,R: JobFollower опрашивает completed/failed
+    F->>R: SELECT processing_jobs(status in completed/failed) FOR UPDATE
+    alt store_original completed
+        F->>R: INSERT job convert_to_markdown (pending)
+    else convert_to_markdown completed
+        F->>R: INSERT job publish_to_github (pending)
+    else any failed
+        F->>R: UPDATE document status=Failed (reason from payload)
     end
+
+    Note over TW,R: transformer worker выполняет convert_to_markdown → completed/failed
+    Note over PW,R: publisher worker выполняет publish_to_github → completed/failed
 ```
