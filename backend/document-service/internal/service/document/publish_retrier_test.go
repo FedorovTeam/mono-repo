@@ -97,6 +97,7 @@ type retryRepo struct {
 	logs      map[string][]model.DocumentStatusLog
 	nonFailed map[string]model.Status
 	now       func() time.Time
+	jobs      map[string]model.ProcessingJob
 }
 
 func newRetryRepo(doc *model.Document) *retryRepo {
@@ -182,11 +183,42 @@ func (r *retryRepo) CreateProcessingJob(ctx context.Context, job *model.Processi
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()
 	}
+	if r.jobs == nil {
+		r.jobs = make(map[string]model.ProcessingJob)
+	}
+	if job.Status == "" {
+		job.Status = model.JobStatusPending
+	}
+	r.jobs[job.TaskID] = *job
 	return job, nil
 }
 
 func (r *retryRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
+	job := model.ProcessingJob{TaskID: taskID, Status: status}
+	if payload != nil {
+		job.Payload = payload
+	}
+	if nextRunAt != nil {
+		job.NextRunAt = *nextRunAt
+	}
+	if r.jobs == nil {
+		r.jobs = make(map[string]model.ProcessingJob)
+	}
+	r.jobs[taskID] = job
+	return &job, nil
+}
+
+func (r *retryRepo) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+	for _, job := range r.jobs {
+		if job.DocumentID != documentID {
+			continue
+		}
+		if job.Status == model.JobStatusPending || job.Status == model.JobStatusInProgress {
+			copy := job
+			return &copy, nil
+		}
+	}
+	return nil, nil
 }
 
 func (r *retryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {

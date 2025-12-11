@@ -77,6 +77,7 @@ type memoryRepo struct {
 	mu        sync.Mutex
 	documents map[string]model.Document
 	logs      map[string][]model.Status
+	jobs      map[string]model.ProcessingJob
 }
 
 func (m *memoryRepo) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
@@ -162,11 +163,42 @@ func (m *memoryRepo) CreateProcessingJob(ctx context.Context, job *model.Process
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()
 	}
+	if m.jobs == nil {
+		m.jobs = make(map[string]model.ProcessingJob)
+	}
+	if job.Status == "" {
+		job.Status = model.JobStatusPending
+	}
+	m.jobs[job.TaskID] = *job
 	return job, nil
 }
 
 func (m *memoryRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
+	job := model.ProcessingJob{TaskID: taskID, Status: status}
+	if nextRunAt != nil {
+		job.NextRunAt = *nextRunAt
+	}
+	if payload != nil {
+		job.Payload = payload
+	}
+	if m.jobs == nil {
+		m.jobs = make(map[string]model.ProcessingJob)
+	}
+	m.jobs[taskID] = job
+	return &job, nil
+}
+
+func (m *memoryRepo) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+	for _, job := range m.jobs {
+		if job.DocumentID != documentID {
+			continue
+		}
+		if job.Status == model.JobStatusPending || job.Status == model.JobStatusInProgress {
+			copy := job
+			return &copy, nil
+		}
+	}
+	return nil, nil
 }
 
 func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {

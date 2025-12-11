@@ -81,25 +81,31 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
+
+	doc.ActualStatus = doc.Status
 	return doc, nil
 }
 
 func (r *Repository) GetDocument(ctx context.Context, id string) (*model.Document, error) {
 	row := r.db.QueryRowContext(ctx, `
-        SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at
-        FROM documents WHERE id=$1
-    `, id)
+SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at
+FROM documents WHERE id=$1
+`, id)
 
 	var doc model.Document
 	if err := row.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
+	doc.ActualStatus = doc.Status
 
 	versions, err := r.fetchVersions(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	doc.Versions = versions
+	if err := r.attachActiveJob(ctx, &doc); err != nil {
+		return nil, err
+	}
 	return &doc, nil
 }
 
@@ -158,6 +164,10 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	for rows.Next() {
 		var doc model.Document
 		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+			return nil, err
+		}
+		doc.ActualStatus = doc.Status
+		if err := r.attachActiveJob(ctx, &doc); err != nil {
 			return nil, err
 		}
 		result = append(result, doc)
@@ -279,6 +289,11 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
+
+	doc.ActualStatus = doc.Status
+	if err := r.attachActiveJob(ctx, &doc); err != nil {
+		return nil, err
+	}
 	return &doc, nil
 }
 
@@ -318,7 +333,49 @@ func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
+
+	doc.ActualStatus = doc.Status
+	if err := r.attachActiveJob(ctx, &doc); err != nil {
+		return nil, err
+	}
 	return &doc, nil
+}
+
+// ActiveJob возвращает активную задачу для документа, если она есть.
+func (r *Repository) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+	row := r.db.QueryRowContext(ctx, `
+SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE document_id=$1 AND status IN ($2,$3)
+ORDER BY created_at DESC
+LIMIT 1
+`, documentID, model.JobStatusPending, model.JobStatusInProgress)
+
+	var job model.ProcessingJob
+	var payloadRaw json.RawMessage
+	if err := row.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	_ = json.Unmarshal(payloadRaw, &job.Payload)
+	return &job, nil
+}
+
+func (r *Repository) attachActiveJob(ctx context.Context, doc *model.Document) error {
+	if doc == nil {
+		return nil
+	}
+	job, err := r.ActiveJob(ctx, doc.ID)
+	if err != nil {
+		return err
+	}
+	if job != nil {
+		doc.ActiveJobID = job.TaskID
+	}
+	return nil
 }
 
 func (r *Repository) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {

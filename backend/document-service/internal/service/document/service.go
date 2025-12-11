@@ -22,6 +22,7 @@ type Repository interface {
 	CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error)
 	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
 	LastNonFailedStatus(ctx context.Context, id string) (model.Status, error)
+	ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error)
 	CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error)
 	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
 }
@@ -234,10 +235,15 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		Payload:    payload,
 	}
 	event := &model.JobEvent{EventType: "scheduled", Message: "confirmed upload"}
-	if _, err := s.repo.CreateProcessingJob(ctx, job, event); err != nil {
+	createdJob, err := s.repo.CreateProcessingJob(ctx, job, event)
+	if err != nil {
 		reason := fmt.Sprintf("enqueue store_original: %v", err)
 		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
 		return nil, fmt.Errorf("enqueue processing job: %w", err)
+	}
+
+	if createdJob != nil {
+		doc.ActiveJobID = createdJob.TaskID
 	}
 
 	return doc, nil
@@ -287,11 +293,15 @@ func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*mode
 		return nil, err
 	}
 
-	s.enqueueNextStage(ctx, updated)
+	if job := s.enqueueNextStage(ctx, updated); job != nil {
+		updated.ActiveJobID = job.TaskID
+	} else if activeJob, err := s.repo.ActiveJob(ctx, updated.ID); err == nil && activeJob != nil {
+		updated.ActiveJobID = activeJob.TaskID
+	}
 	return updated, nil
 }
 
-func (s *Service) enqueueNextStage(ctx context.Context, doc *model.Document) {
+func (s *Service) enqueueNextStage(ctx context.Context, doc *model.Document) *model.ProcessingJob {
 	var stage model.JobStage
 	switch doc.Status {
 	case model.StatusStoredOriginal:
@@ -299,13 +309,16 @@ func (s *Service) enqueueNextStage(ctx context.Context, doc *model.Document) {
 	case model.StatusConvertedToMarkdown:
 		stage = model.JobStagePublishToGitHub
 	default:
-		return
+		return nil
 	}
 
 	event := &model.JobEvent{EventType: "scheduled", Message: fmt.Sprintf("next stage after %s", doc.Status)}
-	_, err := s.repo.CreateProcessingJob(ctx, &model.ProcessingJob{DocumentID: doc.ID, Stage: stage, Status: model.JobStatusPending}, event)
+	job, err := s.repo.CreateProcessingJob(ctx, &model.ProcessingJob{DocumentID: doc.ID, Stage: stage, Status: model.JobStatusPending}, event)
 	if err != nil {
 		reason := fmt.Sprintf("enqueue %s: %v", stage, err)
 		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
+		return nil
 	}
+
+	return job
 }

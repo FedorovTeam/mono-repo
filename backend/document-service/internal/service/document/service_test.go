@@ -113,6 +113,13 @@ func (r *repoMock) UpdateProcessingJob(ctx context.Context, taskID string, statu
 	return &model.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
 }
 
+func (r *repoMock) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+	if r.job != nil && r.job.DocumentID == documentID {
+		return r.job, nil
+	}
+	return nil, nil
+}
+
 type keyMock struct {
 	lastData storage.KeyGenerationData
 }

@@ -33,6 +33,8 @@ message Document {
   string owner = 15;
   string base_branch = 16;
   bool create_pr = 17;
+  string job_id = 18;
+  DocumentStatus actual_status = 19;
 }
 
 message CreateDocumentRequest {

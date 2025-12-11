@@ -69,7 +69,7 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		return nil, fmt.Errorf("cannot create document: %w", err)
 	}
 
-	logger.Info("upload request handled", zap.String("document_id", created.GetId()), zap.String("workflow_id", created.GetWorkflowId()), zap.String("upload_bucket", uploadURL.GetBucket()), zap.String("upload_object_key", uploadURL.GetObjectKey()))
+	logger.Info("upload request handled", zap.String("document_id", created.GetId()), zap.String("job_id", created.GetJobId()), zap.String("upload_bucket", uploadURL.GetBucket()), zap.String("upload_object_key", uploadURL.GetObjectKey()))
 	return &model.UploadKnowledgeDocumentPayload{Document: mapDocument(created), UploadURL: uploadURL.GetUploadUrl(), UploadMethod: http.MethodPut}, nil
 }
 

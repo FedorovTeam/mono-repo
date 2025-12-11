@@ -19,7 +19,7 @@ type KnowledgeDocument struct {
 	Branch          string                  `json:"branch"`
 	Path            string                  `json:"path"`
 	Status          KnowledgeDocumentStatus `json:"status"`
-	WorkflowID      *string                 `json:"workflowId,omitempty"`
+	JobID           *string                 `json:"jobId,omitempty"`
 	Error           *string                 `json:"error,omitempty"`
 }
 

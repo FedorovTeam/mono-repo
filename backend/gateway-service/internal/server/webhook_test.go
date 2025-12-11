@@ -28,7 +28,7 @@ func (s *stubDocumentClient) ConfirmUpload(ctx context.Context, in *documentpb.C
 	if s.err != nil {
 		return nil, s.err
 	}
-	return &documentpb.Document{Id: in.GetDocumentId(), WorkflowId: "wf"}, nil
+	return &documentpb.Document{Id: in.GetDocumentId(), WorkflowId: "wf", JobId: "wf", ActualStatus: documentpb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 }
 func (s *stubDocumentClient) CreateDocument(context.Context, *documentpb.CreateDocumentRequest, ...grpc.CallOption) (*documentpb.Document, error) {
 	return nil, errors.New("not implemented")
