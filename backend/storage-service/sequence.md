@@ -7,13 +7,16 @@ sequenceDiagram
     participant MinIO
     participant Events as Webhook/Queue Target
 
-    Note over Storage,MinIO: При старте: ConfigureUploadNotification(UploadBucket, WebhookArn)
+    Note over Storage,MinIO: При старте: загрузка config.yaml → NewMinioClient(инициализация knowledge-original, knowledge-md, uploadBucket)
+    Storage->>MinIO: Проверка/создание обязательных бакетов
+    MinIO-->>Storage: OK
+    Note over Storage,MinIO: ConfigureUploadNotification(UploadBucket, WebhookArn)
     Storage->>MinIO: Настроить уведомления ObjectCreated на targetArn
     MinIO-->>Storage: OK
 
     %% UploadOriginal
     Client->>Storage: UploadOriginal(org_slug?, project_slug?, document_id, filename_extension, content)
-    Storage->>Storage: resolve org/project (metadata или значения по умолчанию)
+    Storage->>Storage: resolve org/project (metadata/org-slug, project-slug или умолчания knowledge/documents)
     Storage->>Storage: validate filename_extension и content
     Storage->>MinIO: BucketExists(knowledge-original)
     MinIO-->>Storage: exists
@@ -25,7 +28,7 @@ sequenceDiagram
 
     %% UploadMarkdown
     Client->>Storage: UploadMarkdown(org_slug?, project_slug?, document_id, content)
-    Storage->>Storage: resolve org/project (metadata или значения по умолчанию)
+    Storage->>Storage: resolve org/project (metadata/org-slug, project-slug или умолчания knowledge/documents)
     Storage->>Storage: validate content
     Storage->>MinIO: BucketExists(knowledge-md)
     MinIO-->>Storage: exists
@@ -45,10 +48,10 @@ sequenceDiagram
     %% GenerateUploadURL
     Client->>Storage: GenerateUploadURL(document_id, file_name, content_length, expires_in_seconds, correlation_id?)
     Storage->>Storage: validate content_length > 0, expires_in_seconds > 0, ext ∈ {doc, docx, pdf}
-    Storage->>Storage: BuildKey(default org/project, document_id, ext) // с uuid сегментом
+    Storage->>Storage: BuildKey(org=knowledge, project=documents, document_id, ext) // включает uuid сегмент
     Storage->>MinIO: BucketExists(uploadBucket)
     MinIO-->>Storage: exists
-    Storage->>MinIO: PresignHeader(PUT, bucket=uploadBucket, key, expires, x-amz-meta-correlation-id?)
+    Storage->>MinIO: PresignHeader(PUT, bucket=uploadBucket, key, expires, x-amz-meta-correlation-id из запроса/метаданных)
     MinIO-->>Storage: upload_url
-    Storage-->>Client: upload_url, bucket, object_key, expires_in_seconds (+ response metadata)
+    Storage-->>Client: upload_url, bucket, object_key, expires_in_seconds (+ response metadata: correlation-id, org-slug, project-slug)
 ```
