@@ -16,7 +16,7 @@ minio:
   endpoint: "api.minio.tech.fedorov-team.tech"
   access_key: "xUCM3lvYME7MrYTwegSA"
   secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
-  secure: false
+  secure: true
 
 observability:
   otlp_endpoint: otel-collector:4317
