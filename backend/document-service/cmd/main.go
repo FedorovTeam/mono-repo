@@ -133,7 +133,6 @@ func main() {
 		cfg.Github.Repository,
 		cfg.Github.Branch,
 		cfg.Github.BaseBranch,
-		cfg.Github.BaseURL,
 	)
 
 	workerInstance.RegisterWorkflow(docservice.DocumentProcessingWorkflow)

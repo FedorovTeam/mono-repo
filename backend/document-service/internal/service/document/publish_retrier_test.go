@@ -48,8 +48,7 @@ func TestPublishRetrierRetriesAndPublishes(t *testing.T) {
 	repo.logs[doc.ID] = []model.DocumentStatusLog{{ToStatus: model.StatusConvertedToMarkdown}}
 
 	publisher := &retryPublisher{}
-	activities := NewActivities(repo, &stubStorageClient{}, nil, publisher, "owner", "repo", "main", "main", "http://example.com")
-	activities.baseURL = ""
+	activities := NewActivities(repo, &stubStorageClient{}, nil, publisher, "owner", "repo", "main", "main")
 	retrier := NewPublishRetrier(repo, activities, 10, 3, time.Second, time.Minute)
 	retrier.now = func() time.Time { return time.Now().Add(time.Minute) }
 	retrier.logf = func(string, ...interface{}) {}

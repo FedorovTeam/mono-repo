@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -80,11 +78,6 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 	})
 	defer publisherConn.Close()
 
-	githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer githubServer.Close()
-
 	docID := uuid.NewString()
 	repo := &memoryRepo{doc: &model.Document{
 		ID:                docID,
@@ -104,8 +97,7 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 		CreatePR:          true,
 	}}
 
-	activities := NewActivities(repo, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main", githubServer.URL)
-	activities.httpClient = githubServer.Client()
+	activities := NewActivities(repo, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main")
 	workerInstance := worker.New(temporalClient, "document-processing", worker.Options{})
 	workerInstance.RegisterWorkflow(DocumentProcessingWorkflow)
 	workerInstance.RegisterActivityWithOptions(activities.AwaitOriginal, activity.RegisterOptions{Name: ActivityAwaitOriginalName})
@@ -208,11 +200,6 @@ func TestDocumentWorkflowRetrySkipsCompletedSteps(t *testing.T) {
 	})
 	defer publisherConn.Close()
 
-	githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer githubServer.Close()
-
 	docID := uuid.NewString()
 	repo := &memoryRepo{doc: &model.Document{
 		ID:                docID,
@@ -232,8 +219,7 @@ func TestDocumentWorkflowRetrySkipsCompletedSteps(t *testing.T) {
 		CreatePR:          true,
 	}, logs: []model.Status{model.StatusUploaded}}
 
-	activities := NewActivities(repo, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main", githubServer.URL)
-	activities.httpClient = githubServer.Client()
+	activities := NewActivities(repo, storagev1.NewStorageServiceClient(storageConn), transformerv1.NewTransformerServiceClient(transformerConn), githubpublisherv1.NewGithubPublisherServiceClient(publisherConn), "owner", "repo", "main", "main")
 	workerInstance := worker.New(temporalClient, "document-processing", worker.Options{})
 	workerInstance.RegisterWorkflow(DocumentProcessingWorkflow)
 	workerInstance.RegisterActivityWithOptions(activities.AwaitOriginal, activity.RegisterOptions{Name: ActivityAwaitOriginalName})
