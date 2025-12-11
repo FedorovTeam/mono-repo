@@ -383,7 +383,7 @@ type fakeTransformerServer struct {
 
 func (f *fakeTransformerServer) ConvertDocumentToMarkdown(ctx context.Context, req *transformerv1.ConvertDocumentToMarkdownRequest) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
 	f.recorder.record(ctx)
-	return &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownContent: nil, MarkdownObjectKey: req.GetMarkdownObjectKey(), MediaType: "text/markdown"}, nil
+	return &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-123", Status: "pending", MarkdownObjectKey: req.GetMarkdownObjectKey(), MarkdownBucket: req.GetMarkdownBucket()}, nil
 }
 
 type fakePublisherServer struct {

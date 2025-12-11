@@ -22,6 +22,4 @@ message ConvertDocumentToMarkdownResponse {
   string status = 2;
   string markdown_bucket = 3;
   string markdown_object_key = 4;
-  bool waiting_docling = 5;
-  bool docling_timeout = 6;
 }

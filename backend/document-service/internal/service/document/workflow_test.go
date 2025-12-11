@@ -111,7 +111,7 @@ func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpubli
 
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{doc: &model.Document{ID: "doc-1", Status: model.StatusStoredOriginal, Versions: []model.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
-	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownContent: []byte("md"), MediaType: "text/markdown", MarkdownObjectKey: "md-key"}}
+	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending", MarkdownObjectKey: "md-key"}}
 	storage := &fakeStorageClient{}
 
 	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main", "https://api.github.com")
@@ -145,8 +145,12 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		t.Fatalf("unexpected filename extension: %s", transformer.lastRequest.GetFilenameExtension())
 	}
 
-	if result.MediaType != "text/markdown" {
-		t.Fatalf("unexpected media type: %s", result.MediaType)
+	if result.QueueID != "queue-1" {
+		t.Fatalf("unexpected queue id: %s", result.QueueID)
+	}
+
+	if result.Status != "pending" {
+		t.Fatalf("unexpected status: %s", result.Status)
 	}
 
 	if repo.lastStatus != model.StatusConvertedToMarkdown {
@@ -155,6 +159,10 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 
 	if repo.lastVersion == nil || repo.lastVersion.Version != 3 || repo.lastVersion.MarkdownObjectKey != "md-key" {
 		t.Fatalf("version was not saved correctly: %+v", repo.lastVersion)
+	}
+
+	if repo.lastVersion.MarkdownQueueID != "queue-1" {
+		t.Fatalf("queue id was not saved correctly: %s", repo.lastVersion.MarkdownQueueID)
 	}
 }
 
