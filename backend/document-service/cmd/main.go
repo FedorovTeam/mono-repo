@@ -13,6 +13,7 @@ import (
 	"backend-document-service/db/migrations"
 	"backend-document-service/internal/config"
 	"backend-document-service/internal/grpcdial"
+	"backend-document-service/internal/model"
 	"backend-document-service/internal/observability"
 	"backend-document-service/internal/repository"
 	docservice "backend-document-service/internal/service/document"
@@ -142,6 +143,14 @@ func main() {
 	)
 
 	go reconciler.Run(ctx, cfg.Reconciler.Interval)
+
+	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false)
+	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, cfg.StageWorker.WaitMarkdown)
+	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false)
+
+	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
+	go convertWorker.Run(ctx, cfg.StageWorker.Interval)
+	go publishWorker.Run(ctx, cfg.StageWorker.Interval)
 
 	githubRetrier := docservice.NewPublishRetrier(
 		repo,

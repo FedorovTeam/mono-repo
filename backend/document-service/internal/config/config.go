@@ -40,6 +40,7 @@ type Config struct {
 	Reconciler    Reconciler    `yaml:"reconciler"`
 	GithubRetryer GithubRetryer `yaml:"github_retryer"`
 	JobFollower   JobFollower   `yaml:"job_follower"`
+	StageWorker   StageWorker   `yaml:"stage_worker"`
 }
 
 type GRPCClient struct {
@@ -94,6 +95,13 @@ type JobFollower struct {
 	RescheduleAfter time.Duration `yaml:"reschedule_after"`
 }
 
+type StageWorker struct {
+	Interval     time.Duration `yaml:"interval"`
+	BatchSize    int           `yaml:"batch_size"`
+	RetryDelay   time.Duration `yaml:"retry_delay"`
+	WaitMarkdown bool          `yaml:"wait_markdown"`
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -135,6 +143,9 @@ func (c *Config) Validate() error {
 	}
 	if c.JobFollower.Interval <= 0 || c.JobFollower.BatchSize <= 0 {
 		return fmt.Errorf("job_follower.interval and batch_size must be positive")
+	}
+	if c.StageWorker.Interval <= 0 || c.StageWorker.BatchSize <= 0 || c.StageWorker.RetryDelay <= 0 {
+		return fmt.Errorf("stage_worker interval, batch_size and retry_delay must be positive")
 	}
 	return nil
 }

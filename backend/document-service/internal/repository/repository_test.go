@@ -208,3 +208,38 @@ FOR UPDATE SKIP LOCKED`)).
 	require.Equal(t, "bar", jobs[0].Payload["foo"])
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestAcquirePendingJobs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := New(db)
+	ctx := context.Background()
+
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{"task_id", "document_id", "stage", "status", "attempts", "next_run_at", "payload", "created_at", "updated_at"}).
+		AddRow("task-1", "doc-1", model.JobStageStoreOriginal, model.JobStatusPending, 0, now, json.RawMessage(`{"foo":"bar"}`), now.Add(-time.Hour), now.Add(-time.Hour))
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE stage=$1 AND status=$2 AND next_run_at <= $3
+ORDER BY next_run_at
+LIMIT $4
+FOR UPDATE SKIP LOCKED`)).
+		WithArgs(model.JobStageStoreOriginal, model.JobStatusPending, sqlmock.AnyArg(), 5).
+		WillReturnRows(rows)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE processing_jobs SET status=$1, attempts=$2, updated_at=$3, payload=$4 WHERE task_id=$5")).
+		WithArgs(model.JobStatusInProgress, 1, sqlmock.AnyArg(), json.RawMessage(`{"foo":"bar"}`), "task-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	jobs, err := repo.AcquirePendingJobs(ctx, model.JobStageStoreOriginal, 5)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, model.JobStatusInProgress, jobs[0].Status)
+	require.Equal(t, 1, jobs[0].Attempts)
+	require.Equal(t, "bar", jobs[0].Payload["foo"])
+	require.NoError(t, mock.ExpectationsWereMet())
+}

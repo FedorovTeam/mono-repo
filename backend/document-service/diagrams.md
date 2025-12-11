@@ -6,7 +6,7 @@ flowchart TD
     B --> C[MinIO ключи сгенерированы]
     C --> D[Запись documents + version]
     D --> E[Status: Uploaded]
-    E --> F[Дальнейшие шаги workflow: store → convert → publish]
+    E --> F[Периодические воркеры: store → convert → publish через processing_jobs]
 ```
 
 ```mermaid

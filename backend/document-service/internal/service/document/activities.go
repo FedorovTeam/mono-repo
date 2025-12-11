@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -12,28 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
-
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/log"
-	"go.temporal.io/sdk/temporal"
-	"go.temporal.io/sdk/workflow"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 )
 
 const (
-	ActivityAwaitOriginalName     = "document.awaitOriginal"
-	ActivityUploadOriginalName    = "document.uploadOriginal"
-	ActivityConvertToMarkdownName = "document.convertToMarkdown"
-	ActivityAwaitMarkdownName     = "document.awaitMarkdown"
-	ActivityPublishMarkdownName   = "document.publishMarkdown"
-
 	publishGithubReasonPrefix    = "publish_github_"
 	publishGithubTimeoutReason   = publishGithubReasonPrefix + "timeout"
 	publishGithub5xxReason       = publishGithubReasonPrefix + "5xx"
@@ -54,14 +44,6 @@ const (
 	publishObjectCheckMaxBackoff     = 5 * time.Second
 	publishObjectCheckAttempts       = 3
 )
-
-type WorkflowStarter interface {
-	ExecuteWorkflow(ctx context.Context, options client.StartWorkflowOptions, workflow interface{}, args ...interface{}) (client.WorkflowRun, error)
-}
-
-type WorkflowInput struct {
-	DocumentID string
-}
 
 type documentSnapshot struct {
 	DocumentID        string
@@ -149,92 +131,6 @@ func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient
 		branch:      branch,
 		baseBranch:  baseBranch,
 	}
-}
-
-func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error {
-	options := workflow.ActivityOptions{
-		StartToCloseTimeout: 2 * time.Minute,
-		RetryPolicy: &temporal.RetryPolicy{
-			InitialInterval:    time.Second,
-			BackoffCoefficient: 2,
-			MaximumAttempts:    3,
-		},
-	}
-	ctx = workflow.WithActivityOptions(ctx, options)
-	logger := workflow.GetLogger(ctx)
-	correlationID := workflow.GetInfo(ctx).WorkflowExecution.ID
-
-	var snapshot documentSnapshot
-	if err := workflow.ExecuteActivity(ctx, ActivityAwaitOriginalName, input.DocumentID).Get(ctx, &snapshot); err != nil {
-		return err
-	}
-
-	convArg := convertInput{
-		DocumentID:        snapshot.DocumentID,
-		OriginalBucket:    snapshot.OriginalBucket,
-		MarkdownBucket:    snapshot.MarkdownBucket,
-		OriginalObjectKey: snapshot.OriginalObjectKey,
-		MarkdownObjectKey: snapshot.MarkdownObjectKey,
-		FilenameExtension: strings.TrimPrefix(strings.ToLower(filepath.Ext(snapshot.OriginalObjectKey)), "."),
-		Version:           snapshot.Version + 1,
-	}
-
-	var convRes convertResult
-	if err := workflow.ExecuteActivity(ctx, ActivityConvertToMarkdownName, convArg).Get(ctx, &convRes); err != nil {
-		return err
-	}
-
-	markdownKey := convRes.MarkdownKey
-	if markdownKey == "" {
-		markdownKey = snapshot.MarkdownObjectKey
-	}
-
-	shouldAwait := !strings.EqualFold(convRes.Status, "done")
-	if shouldAwait {
-		logger.Info("awaiting markdown availability", "document_id", input.DocumentID, "correlation_id", correlationID, "queue_id", convRes.QueueID)
-		waitCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-			StartToCloseTimeout: markdownAwaitTimeout + markdownAwaitMaxBackoff,
-			RetryPolicy: &temporal.RetryPolicy{
-				MaximumAttempts: 1,
-			},
-		})
-		awaitArg := awaitMarkdownInput{
-			DocumentID:        snapshot.DocumentID,
-			MarkdownBucket:    snapshot.MarkdownBucket,
-			MarkdownObjectKey: markdownKey,
-			CorrelationID:     correlationID,
-			QueueID:           convRes.QueueID,
-			TransformerStatus: convRes.Status,
-		}
-		if err := workflow.ExecuteActivity(waitCtx, ActivityAwaitMarkdownName, awaitArg).Get(ctx, nil); err != nil {
-			return err
-		}
-	} else {
-		logger.Info("markdown marked done by transformer", "document_id", input.DocumentID, "correlation_id", correlationID, "queue_id", convRes.QueueID)
-	}
-
-	logger.Info("markdown availability confirmed, publishing", "document_id", input.DocumentID, "correlation_id", correlationID)
-
-	pubArg := publishInput{
-		DocumentID:        snapshot.DocumentID,
-		DocumentName:      snapshot.DocumentName,
-		Owner:             snapshot.Owner,
-		MarkdownBucket:    snapshot.MarkdownBucket,
-		MarkdownObjectKey: markdownKey,
-		Version:           convArg.Version + 1,
-		Repository:        snapshot.Repository,
-		Branch:            snapshot.Branch,
-		BaseBranch:        snapshot.BaseBranch,
-		Path:              snapshot.PublishPath,
-		CreatePR:          snapshot.CreatePR,
-		CorrelationID:     correlationID,
-	}
-
-	if err := workflow.ExecuteActivity(ctx, ActivityPublishMarkdownName, pubArg).Get(ctx, nil); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (a *Activities) AwaitOriginal(ctx context.Context, documentID string) (documentSnapshot, error) {
@@ -364,7 +260,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	if markdownKey == "" {
 		reason := fmt.Sprintf("markdown object key is empty for bucket=%q", input.MarkdownBucket)
 		_ = a.fail(ctx, input.DocumentID, reason)
-		return convertResult{}, temporal.NewNonRetryableApplicationError(reason, "MarkdownObjectUnavailable", nil)
+		return convertResult{}, status.Error(codes.FailedPrecondition, reason)
 	}
 
 	version := latestVersion(doc).Version + 1
@@ -387,22 +283,21 @@ func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput
 		return fmt.Errorf("markdown bucket/object key is required")
 	}
 
-	logger := activityLogger(ctx)
 	deadline := time.Now().Add(markdownAwaitTimeout)
 	backoff := markdownAwaitInitialBackoff
 
 	for {
 		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: input.MarkdownBucket, ObjectKey: input.MarkdownObjectKey}); err == nil {
-			logger.Info("markdown object detected", "document_id", input.DocumentID, "correlation_id", correlationIDFromContext(ctx))
+			log.Printf("markdown object detected: document_id=%s correlation_id=%s queue_id=%s", input.DocumentID, correlationIDFromContext(ctx), input.QueueID)
 			return nil
 		}
 
 		if time.Now().After(deadline) {
 			_ = a.fail(ctx, input.DocumentID, conversionNotificationTimeout)
-			return temporal.NewNonRetryableApplicationError(conversionNotificationTimeout, conversionNotificationTimeout, nil)
+			return errors.New(conversionNotificationTimeout)
 		}
 
-		logger.Info("markdown object not ready, retrying", "document_id", input.DocumentID, "correlation_id", correlationIDFromContext(ctx), "backoff", backoff.String())
+		log.Printf("markdown object not ready, retrying: document_id=%s correlation_id=%s backoff=%s", input.DocumentID, correlationIDFromContext(ctx), backoff)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -418,7 +313,6 @@ func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput
 
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {
 	ctx = a.withCorrelationID(ctx, input.CorrelationID)
-	logger := activityLogger(ctx)
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
@@ -427,11 +321,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		return err
 	}
 
-	status, err := a.progressStatus(ctx, doc)
+	statusVal, err := a.progressStatus(ctx, doc)
 	if err != nil {
 		return err
 	}
-	if status == model.StatusPublishedToGitHub {
+	if statusVal == model.StatusPublishedToGitHub {
 		return nil
 	}
 	owner := strings.TrimSpace(input.Owner)
@@ -472,9 +366,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 
 	correlationID := input.CorrelationID
 	if correlationID == "" {
-		if info, ok := activityInfo(ctx); ok {
-			correlationID = info.WorkflowExecution.ID
-		}
+		correlationID = correlationIDFromContext(ctx)
 	}
 
 	commitMessage := input.DocumentName
@@ -500,7 +392,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if markdownBucket == "" || markdownObjectKey == "" {
 		reason := fmt.Sprintf("markdown content is empty (bucket=%q, object_key=%q)", markdownBucket, markdownObjectKey)
 		_ = a.fail(ctx, input.DocumentID, reason)
-		return temporal.NewNonRetryableApplicationError(reason, "MarkdownObjectUnavailable", nil)
+		return status.Error(codes.FailedPrecondition, reason)
 	}
 
 	if a.storage == nil {
@@ -512,12 +404,12 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: markdownBucket, ObjectKey: markdownObjectKey}); err == nil {
 			break
 		} else {
-			logger.Info("markdown object not available", "document_id", input.DocumentID, "bucket", markdownBucket, "object_key", markdownObjectKey, "correlation_id", correlationIDFromContext(ctx), "attempt", attempt, "error", err)
+			log.Printf("markdown object not available: document_id=%s bucket=%s object_key=%s correlation_id=%s attempt=%d error=%v", input.DocumentID, markdownBucket, markdownObjectKey, correlationIDFromContext(ctx), attempt, err)
 
 			if attempt == publishObjectCheckAttempts {
-				reason := fmt.Sprintf("markdown object %s/%s unavailable (correlation_id=%s): %v", markdownBucket, markdownObjectKey, correlationID, err)
+				reason := fmt.Sprintf("markdown object %s/%s unavailable (correlation_id=%s): %v", markdownBucket, markdownObjectKey, correlationIDFromContext(ctx), err)
 				_ = a.fail(ctx, input.DocumentID, reason)
-				return temporal.NewNonRetryableApplicationError(reason, "MarkdownObjectUnavailable", err)
+				return fmt.Errorf("%s", reason)
 			}
 
 			select {
@@ -533,36 +425,46 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		}
 	}
 
+	repoPath := path
+	if repoPath == "" {
+		repoPath = doc.Path
+	}
+
 	req := &githubpublisherv1.PublishMarkdownRequest{
-		Owner:         owner,
-		Repository:    repository,
-		Branch:        branch,
-		BaseBranch:    baseBranch,
-		Path:          path,
-		CommitMessage: commitMessage,
-		CreatePr:      input.CreatePR,
-		CorrelationId: correlationID,
-		Bucket:        markdownBucket,
-		ObjectKey:     markdownObjectKey,
+		DocumentId:        input.DocumentID,
+		RepositoryOwner:   owner,
+		RepositoryName:    repository,
+		Branch:            branch,
+		BaseBranch:        baseBranch,
+		Path:              repoPath,
+		CommitMessage:     commitMessage,
+		MarkdownBucket:    markdownBucket,
+		MarkdownObjectKey: markdownObjectKey,
+		CreatePr:          input.CreatePR,
 	}
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)
 	if err != nil {
+		correlation := correlationID
+		if correlation == "" {
+			correlation = correlationIDFromContext(ctx)
+		}
 		info := classifyPublishError(err)
-		reason := fmt.Sprintf("%s: %v", info.reason, err)
-		_ = a.fail(ctx, input.DocumentID, reason)
+		log.Printf("publish markdown failed: document_id=%s correlation_id=%s reason=%s retryable=%v error=%v", input.DocumentID, correlation, info.reason, info.retryable, err)
+		if _, updErr := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusFailed, info.reason, info.reason, nil); updErr != nil {
+			log.Printf("update status after publish error: %v", updErr)
+		}
 		if info.retryable {
 			return err
 		}
-		return temporal.NewNonRetryableApplicationError(reason, info.reason, err)
+		return fmt.Errorf("publish markdown: %w", err)
 	}
-	if resp == nil || resp.CommitSha == "" {
-		_ = a.fail(ctx, input.DocumentID, "publish: empty response")
-		return fmt.Errorf("publish returned empty response")
+
+	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), nil); err != nil {
+		return err
 	}
-	version := latestVersion(doc).Version + 1
-	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, "", "", &model.DocumentVersion{Version: version})
-	return err
+
+	return nil
 }
 
 type publishErrorInfo struct {
@@ -570,59 +472,68 @@ type publishErrorInfo struct {
 	retryable bool
 }
 
-var httpStatusPattern = regexp.MustCompile(`(?i)status\s+(\d{3})`)
-
 func classifyPublishError(err error) publishErrorInfo {
-	info := publishErrorInfo{reason: publishGithubUnknownReason}
+	info := publishErrorInfo{reason: publishGithubUnknownReason, retryable: false}
 	if err == nil {
 		return info
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) {
+	st, ok := status.FromError(err)
+	if !ok {
+		return info
+	}
+
+	code := st.Code()
+	lowerMsg := strings.ToLower(st.Message())
+
+	if code == codes.DeadlineExceeded { //nolint:errorlint
 		info.reason = publishGithubTimeoutReason
 		info.retryable = true
 		return info
 	}
 
-	if st, ok := status.FromError(err); ok {
-		switch st.Code() {
-		case codes.DeadlineExceeded, codes.Unavailable:
-			info.reason = publishGithubTimeoutReason
-			info.retryable = true
-			return info
-		}
-		return classifyPublishMessage(st.Message())
-	}
-
-	return classifyPublishMessage(err.Error())
-}
-
-func classifyPublishMessage(msg string) publishErrorInfo {
-	info := publishErrorInfo{reason: publishGithubUnknownReason}
-	lowerMsg := strings.ToLower(msg)
-
-	statusCode := parseHTTPStatusCode(msg)
-	switch {
-	case statusCode >= http.StatusInternalServerError:
-		info.reason = publishGithub5xxReason
-		info.retryable = true
-		return info
-	case statusCode == http.StatusConflict:
-		info.reason = publishGithubConflictReason
-		return info
-	case statusCode == http.StatusTooManyRequests:
+	if code == codes.ResourceExhausted { //nolint:errorlint
 		info.reason = publishGithubRateLimitReason
 		info.retryable = true
 		return info
-	case statusCode == http.StatusRequestTimeout:
+	}
+
+	if code == codes.AlreadyExists { //nolint:errorlint
+		info.reason = publishGithubConflictReason
+		return info
+	}
+
+	statusCode := parseHTTPStatusCode(lowerMsg)
+	if statusCode >= 500 {
+		info.reason = publishGithub5xxReason
+		info.retryable = true
+		return info
+	}
+
+	if strings.Contains(lowerMsg, "refusing to allow an oauth app") {
+		info.reason = publishGithubPermanentReason
+		return info
+	}
+
+	if strings.Contains(lowerMsg, "rate limit") {
+		info.reason = publishGithubRateLimitReason
+		info.retryable = true
+		return info
+	}
+
+	if strings.Contains(lowerMsg, "conflict") || strings.Contains(lowerMsg, "merge") || strings.Contains(lowerMsg, "conflicting files") {
+		info.reason = publishGithubConflictReason
+		return info
+	}
+
+	if strings.Contains(lowerMsg, "timeout") || strings.Contains(lowerMsg, "deadline") {
 		info.reason = publishGithubTimeoutReason
 		info.retryable = true
 		return info
 	}
 
-	if strings.Contains(lowerMsg, "timeout") {
-		info.reason = publishGithubTimeoutReason
-		info.retryable = true
+	if strings.Contains(lowerMsg, "not found") {
+		info.reason = publishGithubPermanentReason
 		return info
 	}
 
@@ -658,7 +569,7 @@ func (a *Activities) progressStatus(ctx context.Context, doc *model.Document) (m
 		return doc.Status, nil
 	}
 
-	status, err := a.repo.LastNonFailedStatus(ctx, doc.ID)
+	statusVal, err := a.repo.LastNonFailedStatus(ctx, doc.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.StatusUploaded, nil
@@ -666,11 +577,11 @@ func (a *Activities) progressStatus(ctx context.Context, doc *model.Document) (m
 		return "", err
 	}
 
-	if status == "" {
+	if statusVal == "" {
 		return model.StatusUploaded, nil
 	}
 
-	return status, nil
+	return statusVal, nil
 }
 
 func latestVersion(doc *model.Document) model.DocumentVersion {
@@ -697,21 +608,9 @@ func (a *Activities) withCorrelationID(ctx context.Context, explicit string) con
 		id = correlationIDFromContext(ctx)
 	}
 	if id == "" {
-		if info, ok := activityInfo(ctx); ok {
-			id = info.WorkflowExecution.ID
-		}
-	}
-	if id == "" {
 		return ctx
 	}
 	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, id)
-}
-
-func activityInfo(ctx context.Context) (activity.Info, bool) {
-	defer func() {
-		_ = recover()
-	}()
-	return activity.GetInfo(ctx), true
 }
 
 func correlationIDFromContext(ctx context.Context) string {
@@ -728,20 +627,4 @@ func correlationIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-type noopLogger struct{}
-
-func (noopLogger) Debug(string, ...interface{}) {}
-func (noopLogger) Info(string, ...interface{})  {}
-func (noopLogger) Warn(string, ...interface{})  {}
-func (noopLogger) Error(string, ...interface{}) {}
-
-func activityLogger(ctx context.Context) (logger log.Logger) {
-	defer func() {
-		if r := recover(); r != nil || logger == nil {
-			logger = noopLogger{}
-		}
-	}()
-
-	logger = activity.GetLogger(ctx)
-	return
-}
+var httpStatusPattern = regexp.MustCompile(`http status code: (\d{3})`)

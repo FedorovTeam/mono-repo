@@ -46,6 +46,11 @@ job_follower:
   interval: 30s
   batch_size: 100
   reschedule_after: 5m
+stage_worker:
+  interval: 30s
+  batch_size: 100
+  retry_delay: 1m
+  wait_markdown: true
 observability:
   logs:
     enabled: true

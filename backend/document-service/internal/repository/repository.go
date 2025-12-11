@@ -424,6 +424,72 @@ FOR UPDATE SKIP LOCKED
 	return jobs, nil
 }
 
+// AcquirePendingJobs выбирает pending-задачи для указанной стадии и помечает их in_progress.
+func (r *Repository) AcquirePendingJobs(ctx context.Context, stage model.JobStage, limit int) ([]model.ProcessingJob, error) {
+	if err := model.ValidateJobStage(stage); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	rows, err := tx.QueryContext(ctx, `
+SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE stage=$1 AND status=$2 AND next_run_at <= $3
+ORDER BY next_run_at
+LIMIT $4
+FOR UPDATE SKIP LOCKED
+`, stage, model.JobStatusPending, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []model.ProcessingJob
+	for rows.Next() {
+		var job model.ProcessingJob
+		var payloadRaw json.RawMessage
+		if err := rows.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(payloadRaw, &job.Payload)
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range jobs {
+		jobs[i].Status = model.JobStatusInProgress
+		jobs[i].Attempts++
+		jobs[i].UpdatedAt = now
+		payloadBytes, err := json.Marshal(jobs[i].Payload)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+        UPDATE processing_jobs SET status=$1, attempts=$2, updated_at=$3, payload=$4 WHERE task_id=$5
+    `, jobs[i].Status, jobs[i].Attempts, jobs[i].UpdatedAt, payloadBytes, jobs[i].TaskID); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
+}
+
 func (r *Repository) attachActiveJob(ctx context.Context, doc *model.Document) error {
 	if doc == nil {
 		return nil
