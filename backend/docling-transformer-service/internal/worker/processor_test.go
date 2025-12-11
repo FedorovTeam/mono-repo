@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,9 @@ type pollingRepoStub struct {
 	updateInfoCalls  int
 	markDoneCalls    int
 	markWaitingCalls int
+	lastNextPoll     time.Time
+	lastPollCount    int
+	lastJobID        string
 	restored         int
 	restoreCalls     int
 }
@@ -40,8 +44,11 @@ func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, 
 	p.updateInfoCalls++
 	return nil
 }
-func (p *pollingRepoStub) MarkDoclingWaiting(context.Context, uuid.UUID, string, int, time.Time) error {
+func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPoll time.Time) error {
 	p.markWaitingCalls++
+	p.lastJobID = jobID
+	p.lastPollCount = pollCount
+	p.lastNextPoll = nextPoll
 	return nil
 }
 func (p *pollingRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
@@ -195,6 +202,45 @@ func TestPollDoclingJobLogsStatusError(t *testing.T) {
 	errorField := fmt.Sprint(entries[0].ContextMap()["error"])
 	if !strings.Contains(errorField, "response="+responseBody) {
 		t.Fatalf("expected response body in log, got: %s", errorField)
+	}
+}
+
+func TestPollDoclingJobRetriesOnTemporaryError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/status/poll/"):
+			http.Error(w, "temporary outage", http.StatusBadGateway)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	repo := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, zap.NewNop())
+
+	logCore, logs := observer.New(zap.InfoLevel)
+	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingInitialInterval: time.Second})
+
+	task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: "job-temp", CreatedAt: time.Now()}
+
+	err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0)
+	if !errors.Is(err, errDoclingWaiting) {
+		t.Fatalf("expected waiting error, got: %v", err)
+	}
+
+	if repo.markWaitingCalls != 1 {
+		t.Fatalf("expected MarkDoclingWaiting to be called once, got %d", repo.markWaitingCalls)
+	}
+
+	if task.NextPollAt == nil || task.NextPollAt.Before(time.Now()) {
+		t.Fatalf("expected next poll to be scheduled in the future, got %v", task.NextPollAt)
+	}
+
+	entries := logs.FilterMessage("docling temporary error, will retry").All()
+	if len(entries) == 0 {
+		t.Fatalf("expected temporary error log, got %d entries", logs.Len())
 	}
 }
 
