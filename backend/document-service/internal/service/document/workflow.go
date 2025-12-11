@@ -484,11 +484,6 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		return fmt.Errorf("%s", reason)
 	}
 
-	//if err := a.validateRepository(ctx, owner, repository); err != nil {
-	//	_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))
-	//	return err
-	//}
-
 	markdownBucket := input.MarkdownBucket
 	if markdownBucket == "" {
 		markdownBucket = doc.MarkdownBucket
@@ -658,38 +653,4 @@ func activityLogger(ctx context.Context) (logger log.Logger) {
 
 	logger = activity.GetLogger(ctx)
 	return
-}
-
-func (a *Activities) validateRepository(ctx context.Context, owner, repository string) error {
-	client := a.httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
-	}
-
-	baseURL := strings.TrimSuffix(a.baseURL, "/")
-	if baseURL == "" {
-		baseURL = "https://api.github.com"
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s/%s", baseURL, owner, repository), nil)
-	if err != nil {
-		return fmt.Errorf("build repository check request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("github repository validation failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return nil
-	case http.StatusNotFound:
-		return fmt.Errorf("repository %s/%s not found", owner, repository)
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return fmt.Errorf("no access to repository %s/%s: %s", owner, repository, resp.Status)
-	default:
-		return fmt.Errorf("github repository validation returned status %s", resp.Status)
-	}
 }
