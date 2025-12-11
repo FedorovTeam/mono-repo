@@ -43,6 +43,7 @@ type workerMetrics struct {
 	doclingGauge    metric.Int64ObservableGauge
 	restoredCounter metric.Int64Counter
 	rejectedCounter metric.Int64Counter
+	temporaryRetry  metric.Int64Counter
 	durationHist    metric.Float64Histogram
 	doclingWaitHist metric.Float64Histogram
 	doclingPolls    metric.Int64Histogram
@@ -62,6 +63,24 @@ type Processor struct {
 }
 
 var errDoclingWaiting = errors.New("waiting for docling")
+
+type temporaryError interface{ Temporary() bool }
+
+type statusCoder interface{ StatusCode() int }
+
+func isTemporaryDoclingError(err error) (bool, int) {
+	var tmp temporaryError
+	if errors.As(err, &tmp) && tmp.Temporary() {
+		var code statusCoder
+		if errors.As(err, &code) {
+			return true, code.StatusCode()
+		}
+
+		return true, 0
+	}
+
+	return false, 0
+}
 
 func NewProcessor(repo repository.QueueRepository, conv converter.Converter, storage storage.ObjectStorage, logger *zap.Logger, cfg Config) *Processor {
 	if logger == nil {
@@ -95,6 +114,10 @@ func newWorkerMetrics(logger *zap.Logger) *workerMetrics {
 	m.rejectedCounter, err = meter.Int64Counter("docling_transformer_tasks_rejected")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create rejected counter", zap.Error(err))
+	}
+	m.temporaryRetry, err = meter.Int64Counter("docling_transformer_docling_temporary_retries")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create temporary retry counter", zap.Error(err))
 	}
 	m.durationHist, err = meter.Float64Histogram("docling_transformer_processing_duration_ms")
 	if err != nil && logger != nil {
@@ -190,6 +213,14 @@ func (m *workerMetrics) recordDoclingPolls(ctx context.Context, attempts int) {
 	}
 
 	m.doclingPolls.Record(ctx, int64(attempts))
+}
+
+func (m *workerMetrics) recordTemporaryRetry(ctx context.Context, retries int) {
+	if m == nil || m.temporaryRetry == nil {
+		return
+	}
+
+	m.temporaryRetry.Add(ctx, int64(retries))
 }
 
 func (p *Processor) Run(ctx context.Context) {
@@ -362,6 +393,20 @@ func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.Transfo
 
 	if err != nil {
 		p.metrics.recordDoclingPolls(ctx, 1)
+		if isTemporary, statusCode := isTemporaryDoclingError(err); isTemporary {
+			nextPoll := p.nextPollTime(time.Now(), newPollCount)
+			task.DoclingPollCount = newPollCount
+			task.NextPollAt = &nextPoll
+			if markErr := p.repo.MarkDoclingWaiting(ctx, task.ID, jobID, newPollCount, nextPoll); markErr != nil {
+				return fmt.Errorf("store docling waiting: %w", markErr)
+			}
+
+			p.metrics.recordTemporaryRetry(ctx, 1)
+			p.logger.Warn("docling temporary error, will retry", zap.String("job_id", jobID), zap.Int("docling_polls", newPollCount), zap.Int("status_code", statusCode), zap.Time("next_poll_at", nextPoll), zap.Error(err))
+
+			return errDoclingWaiting
+		}
+
 		p.logger.Error("docling status check failed", zap.String("job_id", jobID), zap.Int("docling_polls", newPollCount), zap.Error(err))
 
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

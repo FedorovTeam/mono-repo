@@ -87,6 +87,18 @@ func isPendingStatus(status string) bool {
 
 var ErrDoclingPollingAttemptsExceeded = errors.New("docling polling attempts exceeded")
 
+type temporaryDoclingError struct {
+	statusCode int
+	body       string
+	cause      error
+}
+
+func (e *temporaryDoclingError) Error() string   { return e.cause.Error() }
+func (e *temporaryDoclingError) Unwrap() error   { return e.cause }
+func (e *temporaryDoclingError) Temporary() bool { return true }
+func (e *temporaryDoclingError) StatusCode() int { return e.statusCode }
+func (e *temporaryDoclingError) Body() string    { return e.body }
+
 func responseSnippet(body []byte) string {
 	if len(body) == 0 {
 		return ""
@@ -613,7 +625,12 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return taskStatusResponse{}, body, fmt.Errorf("docling status returned %d: %s", resp.StatusCode, string(body))
+		baseErr := fmt.Errorf("docling status returned %d: %s", resp.StatusCode, string(body))
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			return taskStatusResponse{}, body, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
+		}
+
+		return taskStatusResponse{}, body, baseErr
 	}
 
 	var statusResp taskStatusResponse

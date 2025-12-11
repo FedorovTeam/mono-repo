@@ -3,6 +3,7 @@ package converter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -236,6 +237,38 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 
 	if status.Status == "" {
 		t.Fatalf("status should be propagated")
+	}
+}
+
+func TestCheckStatusMarks5xxAsTemporary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, "docling unavailable", http.StatusBadGateway)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
+
+	_, err := conv.CheckStatus(context.Background(), "job-5xx")
+	if err == nil {
+		t.Fatal("expected error from status check")
+	}
+
+	var tmp interface {
+		Temporary() bool
+		StatusCode() int
+	}
+	if !errors.As(err, &tmp) || !tmp.Temporary() {
+		t.Fatalf("expected temporary error, got: %v", err)
+	}
+
+	if tmp.StatusCode() != http.StatusBadGateway {
+		t.Fatalf("unexpected status code: %d", tmp.StatusCode())
 	}
 }
 
