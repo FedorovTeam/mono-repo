@@ -6,12 +6,11 @@
 
 2. **Загрузка файла и запуск автоматической обработки**
    - Клиент загружает оригинал в MinIO, используя выданные `upload_bucket` и `upload_object_key`.
-   - После успешной загрузки вызывается `ConfirmUpload`. Сервис проверяет, что бакет и ключ совпадают с ожидаемыми, и, если Temporal настроен, запускает `DocumentProcessingWorkflow` с идентификатором документа, сохраняя реальный `workflow_id`. При ошибке старта статус помечается `Failed` с причиной `start workflow: ...`; если Temporal отключён, документ просто возвращается без изменений.
+   - После успешной загрузки вызывается `ConfirmUpload`. Сервис проверяет, что бакет и ключ совпадают с ожидаемыми, и создаёт запись в `processing_jobs` со стадией `store_original`, фиксируя событие в `job_events` при ошибке постановки.
 
-3. **Автоматическая обработка Temporal‑воркфлоу**
-   - `AwaitOriginal` проверяет наличие объекта через `StorageService.GetObject`. При статусе `Uploaded` переводит документ в `StoredOriginal`, создавая версию (если ранее её не было) и учитывая путь публикации (по умолчанию — `path` или имя файла) и `base_branch` (по умолчанию — `branch`).
-   - `ConvertToMarkdown` вызывает `TransformerService.ConvertDocumentToMarkdown`, вычисляя расширение исходника из ключа, и сохраняет статус `ConvertedToMarkdown` с новой версией и `markdown_queue_id`. Если преобразователь вернул статус, отличный от `done`, воркфлоу запускает `AwaitMarkdown`, который с экспоненциальной задержкой ожидает появления markdown‑объекта в хранилище и падает с `Failed` по таймауту.
-   - `PublishMarkdown` перед публикацией повторно убеждается, что markdown доступен в хранилище (несколько попыток с бэк‑оффом). Параметры owner/repository/branch/baseBranch/path берутся из входа, документа или дефолтов сервиса; при пустом `repository`/`owner` шаг завершается ошибкой. После успешного вызова `GithubPublisherService.PublishMarkdown` статус становится `PublishedToGitHub`.
+3. **Автоматическая обработка cron‑воркеров**
+   - Воркеры читают `processing_jobs` со статусом `pending` и актуальным `next_run_at`, захватывают задачи `SELECT ... FOR UPDATE SKIP LOCKED`, обновляют статус в `job_events` и переводят документ в следующий этап (`StoredOriginal`, `ConvertedToMarkdown`, `PublishedToGitHub`).
+   - При переходе `StoredOriginal → ConvertedToMarkdown → PublishedToGitHub` сервис создаёт новые задачи для последующей стадии, чтобы цепочка продолжалась без участия пользователя.
 
 4. **Ручное обновление статуса и резюмы после сбоя**
    - `UpdateDocumentStatus` принимает желаемый статус, причину, версии и новые ключи. Переходы валидируются: последовательность `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, перевод в `Failed` из любого состояния, а также возобновление после ошибки в `StoredOriginal`/`ConvertedToMarkdown`/`PublishedToGitHub`.
@@ -23,7 +22,7 @@
 
 6. **Фоновые помощники**
    - `UploadReconciler` периодически ищет документы в статусе `Uploaded`, у которых оригинал уже лежит в MinIO (проверка через `StatObject`), и автоматически вызывает `ConfirmUpload`, чтобы запустить обработку без участия клиента.
-   - `WorkflowRetrier` повторно стартует Temporal‑воркфлоу для документов в статусе `Failed`, если предыдущая попытка завершилась ошибкой запуска (`start workflow: ...`) и число ретраев не превышено.
+   - Cron-воркеры опираются на `processing_jobs` и повторяют попытки согласно счётчикам `attempts` и расписанию `next_run_at`, записывая детали в `job_events`.
 
 7. **Обработка ошибок в воркфлоу**
    - Если любой шаг (`AwaitOriginal`, `ConvertToMarkdown`, `AwaitMarkdown`, `PublishMarkdown`) завершается ошибкой или не находит необходимые данные, сервис проставляет `Failed` с текстом причины; дальнейшие шаги воркфлоу не выполняются.

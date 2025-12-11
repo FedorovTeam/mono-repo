@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
-	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/sdk/client"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -22,17 +21,14 @@ type Repository interface {
 	ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
 	CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error)
 	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
-	UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error)
 	LastNonFailedStatus(ctx context.Context, id string) (model.Status, error)
+	CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error)
+	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
 }
-
-const startWorkflowErrorPrefix = "start workflow:"
 
 type Service struct {
 	repo                  Repository
 	keyManager            storage.KeyManager
-	temporal              WorkflowStarter
-	taskQueue             string
 	defaultOriginalBucket string
 	defaultMarkdownBucket string
 	defaultOwner          string
@@ -41,12 +37,10 @@ type Service struct {
 	defaultBaseBranch     string
 }
 
-func New(repo Repository, keyManager storage.KeyManager, temporal WorkflowStarter, taskQueue string, _ *Activities, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
+func New(repo Repository, keyManager storage.KeyManager, _ *Activities, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
 	return &Service{
 		repo:                  repo,
 		keyManager:            keyManager,
-		temporal:              temporal,
-		taskQueue:             taskQueue,
 		defaultOriginalBucket: defaultOriginalBucket,
 		defaultMarkdownBucket: defaultMarkdownBucket,
 		defaultOwner:          defaultOwner,
@@ -229,27 +223,24 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 		return nil, fmt.Errorf("object key mismatch: expected %s, got %s", doc.OriginalObjectKey, in.ObjectKey)
 	}
 
-	if s.temporal == nil {
-		return doc, nil
+	payload := map[string]any{
+		"bucket":     in.Bucket,
+		"object_key": in.ObjectKey,
 	}
-
-	opts := client.StartWorkflowOptions{
-		ID:        doc.ID,
-		TaskQueue: s.taskQueue,
+	job := &model.ProcessingJob{
+		DocumentID: doc.ID,
+		Stage:      model.JobStageStoreOriginal,
+		Status:     model.JobStatusPending,
+		Payload:    payload,
 	}
-
-	run, err := s.temporal.ExecuteWorkflow(ctx, opts, DocumentProcessingWorkflow, WorkflowInput{DocumentID: doc.ID})
-	if err != nil {
-		var alreadyStarted *serviceerror.WorkflowExecutionAlreadyStarted
-		if errors.As(err, &alreadyStarted) {
-			return doc, nil
-		}
-		reason := fmt.Sprintf("%s %v", startWorkflowErrorPrefix, err)
+	event := &model.JobEvent{EventType: "scheduled", Message: "confirmed upload"}
+	if _, err := s.repo.CreateProcessingJob(ctx, job, event); err != nil {
+		reason := fmt.Sprintf("enqueue store_original: %v", err)
 		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
-		return nil, fmt.Errorf("start workflow: %w", err)
+		return nil, fmt.Errorf("enqueue processing job: %w", err)
 	}
 
-	return s.repo.UpdateWorkflowID(ctx, doc.ID, run.GetID())
+	return doc, nil
 }
 
 func (s *Service) GetDocument(ctx context.Context, id string) (*model.Document, error) {
@@ -291,5 +282,30 @@ func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*mode
 			version.Version = 1
 		}
 	}
-	return s.repo.UpdateStatus(ctx, in.DocumentID, in.Status, in.Reason, in.ErrorReason, version)
+	updated, err := s.repo.UpdateStatus(ctx, in.DocumentID, in.Status, in.Reason, in.ErrorReason, version)
+	if err != nil {
+		return nil, err
+	}
+
+	s.enqueueNextStage(ctx, updated)
+	return updated, nil
+}
+
+func (s *Service) enqueueNextStage(ctx context.Context, doc *model.Document) {
+	var stage model.JobStage
+	switch doc.Status {
+	case model.StatusStoredOriginal:
+		stage = model.JobStageConvertToMarkdown
+	case model.StatusConvertedToMarkdown:
+		stage = model.JobStagePublishToGitHub
+	default:
+		return
+	}
+
+	event := &model.JobEvent{EventType: "scheduled", Message: fmt.Sprintf("next stage after %s", doc.Status)}
+	_, err := s.repo.CreateProcessingJob(ctx, &model.ProcessingJob{DocumentID: doc.ID, Stage: stage, Status: model.JobStatusPending}, event)
+	if err != nil {
+		reason := fmt.Sprintf("enqueue %s: %v", stage, err)
+		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
+	}
 }

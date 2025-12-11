@@ -158,6 +158,17 @@ func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string
 	return &doc, nil
 }
 
+func (m *memoryRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+	if job.TaskID == "" {
+		job.TaskID = uuid.NewString()
+	}
+	return job, nil
+}
+
+func (m *memoryRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
+}
+
 func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -182,7 +193,7 @@ func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.
 
 func TestGRPCWorkflow(t *testing.T) {
 	repo := &memoryRepo{}
-	svc := document.New(repo, staticKey{}, nil, "", nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := document.New(repo, staticKey{}, nil, "orig", "md", "owner", "repo", "main", "main")
 	srv := NewServer(svc)
 	grpcServer := grpc.NewServer()
 	documentv1.RegisterDocumentServiceServer(grpcServer, srv)

@@ -23,11 +23,6 @@ type Config struct {
 		MarkdownBucket string `yaml:"markdown_bucket"`
 		BucketPrefix   string `yaml:"bucket_prefix"`
 	} `yaml:"minio"`
-	Temporal struct {
-		Address   string `yaml:"address"`
-		Namespace string `yaml:"namespace"`
-		TaskQueue string `yaml:"task_queue"`
-	} `yaml:"temporal"`
 	Services struct {
 		StorageService         string     `yaml:"storage_service"`
 		TransformerService     string     `yaml:"transformer_service"`
@@ -43,7 +38,6 @@ type Config struct {
 	} `yaml:"github"`
 	Observability Observability `yaml:"observability"`
 	Reconciler    Reconciler    `yaml:"reconciler"`
-	Retryer       Retryer       `yaml:"workflow_retryer"`
 	GithubRetryer GithubRetryer `yaml:"github_retryer"`
 }
 
@@ -83,12 +77,6 @@ type Reconciler struct {
 	Interval       time.Duration `yaml:"interval"`
 	MinUploadedAge time.Duration `yaml:"min_uploaded_age"`
 	BatchSize      int           `yaml:"batch_size"`
-}
-
-type Retryer struct {
-	Interval    time.Duration `yaml:"interval"`
-	BatchSize   int           `yaml:"batch_size"`
-	MaxAttempts int           `yaml:"max_attempts"`
 }
 
 type GithubRetryer struct {

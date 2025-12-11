@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
@@ -128,6 +131,17 @@ func (r *integrationRepo) UpdateStatus(ctx context.Context, id string, to model.
 
 func (r *integrationRepo) UpdateWorkflowID(context.Context, string, string) (*model.Document, error) {
 	return nil, nil
+}
+
+func (r *integrationRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+	if job.TaskID == "" {
+		job.TaskID = uuid.NewString()
+	}
+	return job, nil
+}
+
+func (r *integrationRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
 }
 
 type recordingPublisher struct {

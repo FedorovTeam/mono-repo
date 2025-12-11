@@ -10,10 +10,6 @@ minio:
   original_bucket: "knowledge-original"
   markdown_bucket: "knowledge-md"
   bucket_prefix: "documents"
-temporal:
-  address: "temporal-frontend.temporal.svc.cluster.local:7233"
-  namespace: "knowledge-base"
-  task_queue: "document-processing"
 services:
   storage_service: "storage-service.storage-service.svc.cluster.local:9090"
   transformer_service: "docling-transformer-service.docling-transformer-service.svc.cluster.local:9090"
@@ -40,10 +36,6 @@ reconciler:
   interval: 1m
   min_uploaded_age: 1m
   batch_size: 100
-workflow_retryer:
-  interval: 1m
-  batch_size: 100
-  max_attempts: 3
 github_retryer:
   interval: 1m
   batch_size: 100

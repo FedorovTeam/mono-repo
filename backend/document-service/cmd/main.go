@@ -25,9 +25,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"go.temporal.io/sdk/activity"
-	"go.temporal.io/sdk/client"
-	"go.temporal.io/sdk/worker"
 )
 
 func main() {
@@ -92,15 +89,6 @@ func main() {
 		cfg.Minio.MarkdownBucket,
 	)
 
-	temporalClient, err := client.Dial(client.Options{
-		HostPort:  cfg.Temporal.Address,
-		Namespace: cfg.Temporal.Namespace,
-	})
-	if err != nil {
-		log.Fatalf("temporal client: %v", err)
-	}
-	defer temporalClient.Close()
-
 	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)
@@ -122,8 +110,6 @@ func main() {
 	storageClient := storagev1.NewStorageServiceClient(storageConn)
 	transformerClient := transformerv1.NewTransformerServiceClient(transformerConn)
 	publisherClient := githubpublisherv1.NewGithubPublisherServiceClient(publisherConn)
-
-	workerInstance := worker.New(temporalClient, cfg.Temporal.TaskQueue, worker.Options{})
 	activities := docservice.NewActivities(
 		repo,
 		storageClient,
@@ -135,39 +121,9 @@ func main() {
 		cfg.Github.BaseBranch,
 	)
 
-	workerInstance.RegisterWorkflow(docservice.DocumentProcessingWorkflow)
-	workerInstance.RegisterActivityWithOptions(
-		activities.AwaitOriginal,
-		activity.RegisterOptions{Name: docservice.ActivityAwaitOriginalName},
-	)
-	workerInstance.RegisterActivityWithOptions(
-		activities.UploadOriginal,
-		activity.RegisterOptions{Name: docservice.ActivityUploadOriginalName},
-	)
-	workerInstance.RegisterActivityWithOptions(
-		activities.ConvertToMarkdown,
-		activity.RegisterOptions{Name: docservice.ActivityConvertToMarkdownName},
-	)
-	workerInstance.RegisterActivityWithOptions(
-		activities.AwaitMarkdown,
-		activity.RegisterOptions{Name: docservice.ActivityAwaitMarkdownName},
-	)
-	workerInstance.RegisterActivityWithOptions(
-		activities.PublishMarkdown,
-		activity.RegisterOptions{Name: docservice.ActivityPublishMarkdownName},
-	)
-
-	go func() {
-		if err := workerInstance.Run(worker.InterruptCh()); err != nil {
-			log.Fatalf("temporal worker: %v", err)
-		}
-	}()
-
 	service := docservice.New(
 		repo,
 		keyManager,
-		temporalClient,
-		cfg.Temporal.TaskQueue,
 		activities,
 		cfg.Minio.OriginalBucket,
 		cfg.Minio.MarkdownBucket,
@@ -186,16 +142,6 @@ func main() {
 	)
 
 	go reconciler.Run(ctx, cfg.Reconciler.Interval)
-
-	retrier := docservice.NewWorkflowRetrier(
-		repo,
-		temporalClient,
-		cfg.Temporal.TaskQueue,
-		cfg.Retryer.BatchSize,
-		cfg.Retryer.MaxAttempts,
-	)
-
-	go retrier.Run(ctx, cfg.Retryer.Interval)
 
 	githubRetrier := docservice.NewPublishRetrier(
 		repo,
