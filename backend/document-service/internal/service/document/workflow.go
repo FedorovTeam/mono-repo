@@ -136,11 +136,9 @@ type Activities struct {
 	repoName    string
 	branch      string
 	baseBranch  string
-	baseURL     string
-	httpClient  *http.Client
 }
 
-func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch, baseURL string) *Activities {
+func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string) *Activities {
 	return &Activities{
 		repo:        repo,
 		storage:     storageClient,
@@ -150,8 +148,6 @@ func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient
 		repoName:    repoName,
 		branch:      branch,
 		baseBranch:  baseBranch,
-		baseURL:     baseURL,
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -491,40 +487,6 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		_ = a.fail(ctx, input.DocumentID, reason)
 		return fmt.Errorf("%s", reason)
 	}
-	if strings.Contains(repository, "/") {
-		reason := fmt.Sprintf("repository should not contain owner prefix: %s", repository)
-		_ = a.fail(ctx, input.DocumentID, reason)
-		return fmt.Errorf("%s", reason)
-	}
-	if strings.TrimSpace(a.baseURL) != "" {
-		validationURL := fmt.Sprintf("%s/repos/%s/%s", strings.TrimSuffix(a.baseURL, "/"), owner, repository)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, validationURL, nil)
-		if err != nil {
-			return fmt.Errorf("create repository validation request: %w", err)
-		}
-		if correlationID != "" {
-			req.Header.Set(correlationIDHeader, correlationID)
-		}
-
-		resp, err := a.httpClient.Do(req)
-		if err != nil {
-			reason := fmt.Sprintf("%s: repository validation request failed: %v", publishGithubNetworkReason, err)
-			_ = a.fail(ctx, input.DocumentID, reason)
-			return err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			info := classifyPublishMessage(resp.Status)
-			reason := fmt.Sprintf("%s: repository validation failed with status %d", info.reason, resp.StatusCode)
-			_ = a.fail(ctx, input.DocumentID, reason)
-			if info.retryable {
-				return fmt.Errorf("%s", reason)
-			}
-			return temporal.NewNonRetryableApplicationError(reason, info.reason, nil)
-		}
-	}
-
 	markdownBucket := input.MarkdownBucket
 	if markdownBucket == "" {
 		markdownBucket = doc.MarkdownBucket

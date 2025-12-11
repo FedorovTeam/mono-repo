@@ -2,8 +2,6 @@ package document
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -17,22 +15,13 @@ import (
 func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 	t.Parallel()
 
-	t.Run("publishes markdown from storage when repository exists", func(t *testing.T) {
+	t.Run("publishes markdown from storage without github validation", func(t *testing.T) {
 		t.Parallel()
 
 		repo := &integrationRepo{}
 		storage := &stubStorageClient{}
 		publisher := &recordingPublisher{}
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/repos/owner/repo" {
-				t.Fatalf("unexpected validation path: %s", r.URL.Path)
-			}
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", server.URL)
-		activities.httpClient = server.Client()
+		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main")
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-1",
@@ -69,57 +58,13 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		}
 	})
 
-	t.Run("fails when github repository not found", func(t *testing.T) {
-		t.Parallel()
-
-		repo := &integrationRepo{}
-		publisher := &recordingPublisher{}
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/repos/owner/repo" {
-				t.Fatalf("unexpected validation path: %s", r.URL.Path)
-			}
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer server.Close()
-
-		activities := NewActivities(repo, &stubStorageClient{}, nil, publisher, "owner", "repo", "main", "main", server.URL)
-		activities.httpClient = server.Client()
-
-		err := activities.PublishMarkdown(context.Background(), publishInput{
-			DocumentID:        "doc-404",
-			MarkdownBucket:    "bucket",
-			MarkdownObjectKey: "missing.md",
-			Path:              "docs/missing.md",
-			Version:           5,
-		})
-		if err == nil {
-			t.Fatal("expected error for missing repository")
-		}
-
-		if repo.lastStatus != model.StatusFailed {
-			t.Fatalf("expected failed status, got %v", repo.lastStatus)
-		}
-		if repo.lastError == "" {
-			t.Fatal("expected github error to be preserved in repo")
-		}
-		if publisher.called {
-			t.Fatal("publisher should not be called when validation fails")
-		}
-	})
-
 	t.Run("fails when markdown object is missing", func(t *testing.T) {
 		t.Parallel()
 
 		repo := &integrationRepo{}
 		storage := &stubStorageClient{err: status.Error(codes.NotFound, "not found")}
 		publisher := &recordingPublisher{}
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer server.Close()
-
-		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", server.URL)
-		activities.httpClient = server.Client()
+		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main")
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-missing",
