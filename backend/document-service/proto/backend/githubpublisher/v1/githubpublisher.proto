@@ -4,6 +4,25 @@ package backend.githubpublisher.v1;
 
 option go_package = "backend-document-service/proto/backend/githubpublisher/v1;githubpublisherv1";
 
+enum PublishResultStatus {
+  PUBLISH_RESULT_STATUS_UNSPECIFIED = 0;
+  PUBLISH_RESULT_STATUS_SUCCESS = 1;
+  PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE = 2;
+  PUBLISH_RESULT_STATUS_PERMANENT_FAILURE = 3;
+}
+
+enum PublishErrorCode {
+  PUBLISH_ERROR_CODE_UNSPECIFIED = 0;
+  PUBLISH_ERROR_CODE_TIMEOUT = 1;
+  PUBLISH_ERROR_CODE_SERVER_ERROR = 2;
+  PUBLISH_ERROR_CODE_RATE_LIMIT = 3;
+  PUBLISH_ERROR_CODE_CONFLICT = 4;
+  PUBLISH_ERROR_CODE_PERMISSION = 5;
+  PUBLISH_ERROR_CODE_NETWORK = 6;
+  PUBLISH_ERROR_CODE_NOT_FOUND = 7;
+  PUBLISH_ERROR_CODE_UNKNOWN = 8;
+}
+
 message PublishMarkdownRequest {
   string owner = 1;
   string repository = 2;
@@ -23,9 +42,12 @@ message PublishMarkdownRequest {
 }
 
 message PublishMarkdownResponse {
-  string commit_sha = 1;
-  int64 pull_request_number = 2;
-  string pull_request_url = 3;
+  PublishResultStatus status = 1;
+  string commit_sha = 2;
+  int64 pull_request_number = 3;
+  string pull_request_url = 4;
+  PublishErrorCode error_code = 5;
+  string error_message = 6;
 }
 
 service GithubPublisherService {

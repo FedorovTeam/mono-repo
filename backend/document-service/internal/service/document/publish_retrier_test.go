@@ -3,7 +3,6 @@ package document
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -14,16 +13,28 @@ import (
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-func TestClassifyPublishErrorDetects5xx(t *testing.T) {
-	err := errors.New("unexpected status 502 from github")
-	info := classifyPublishError(err)
+func TestMapPublishErrorCode(t *testing.T) {
+	cases := []struct {
+		name string
+		code githubpublisherv1.PublishErrorCode
+		want string
+	}{
+		{name: "timeout", code: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT, want: publishGithubTimeoutReason},
+		{name: "server", code: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_SERVER_ERROR, want: publishGithub5xxReason},
+		{name: "rate limit", code: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_RATE_LIMIT, want: publishGithubRateLimitReason},
+		{name: "conflict", code: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_CONFLICT, want: publishGithubConflictReason},
+		{name: "network", code: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_NETWORK, want: publishGithubNetworkReason},
+		{name: "unknown", code: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_UNKNOWN, want: publishGithubUnknownReason},
+	}
 
-	if info.reason != publishGithub5xxReason || !info.retryable {
-		t.Fatalf("unexpected classification: %+v", info)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapPublishErrorCode(tc.code); got != tc.want {
+				t.Fatalf("expected %s, got %s", tc.want, got)
+			}
+		})
 	}
 }
 
@@ -244,11 +255,5 @@ func (r *retryPublisher) PublishMarkdown(ctx context.Context, in *githubpublishe
 	if r.fail != nil {
 		return nil, r.fail
 	}
-	return &githubpublisherv1.PublishMarkdownResponse{CommitSha: "sha"}, nil
-}
-
-type failingPublisher struct{}
-
-func (f failingPublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
-	return nil, status.Error(codes.Unavailable, "temporary unavailable")
+	return &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "sha"}, nil
 }

@@ -326,22 +326,21 @@ func TestPublishMarkdownIntegration_GitHubError(t *testing.T) {
 	client := githubpublisherv1.NewGithubPublisherServiceClient(conn)
 
 	respCtx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-error"))
-	_, err = client.PublishMarkdown(respCtx, &githubpublisherv1.PublishMarkdownRequest{
+	resp, err := client.PublishMarkdown(respCtx, &githubpublisherv1.PublishMarkdownRequest{
 		Path:          "docs/a.md",
 		Bucket:        "md",
 		ObjectKey:     "docs/a.md",
 		CommitMessage: "Add doc",
 	})
-	if err == nil {
-		t.Fatalf("expected error")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	st, ok := status.FromError(err)
-	if !ok {
-		t.Fatalf("status not returned")
+	if resp.GetStatus() != githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
+		t.Fatalf("unexpected status: %v", resp.GetStatus())
 	}
-	if st.Code() != codes.FailedPrecondition {
-		t.Fatalf("unexpected code: %s", st.Code())
+	if resp.GetErrorCode() != githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_SERVER_ERROR {
+		t.Fatalf("unexpected error code: %v", resp.GetErrorCode())
 	}
 	if !strings.Contains(logBuf.String(), "corr-error") {
 		t.Fatalf("correlation id not logged")

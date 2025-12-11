@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -226,13 +223,13 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
-	status, err := a.progressStatus(ctx, doc)
+	currentStatus, err := a.progressStatus(ctx, doc)
 	if err != nil {
 		return convertResult{}, err
 	}
-	if status == model.StatusConvertedToMarkdown || status == model.StatusPublishedToGitHub {
+	if currentStatus == model.StatusConvertedToMarkdown || currentStatus == model.StatusPublishedToGitHub {
 		latest := latestVersion(doc)
-		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(status)}, nil
+		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(currentStatus)}, nil
 	}
 	extension := input.FilenameExtension
 	if extension == "" {
@@ -431,132 +428,73 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	}
 
 	req := &githubpublisherv1.PublishMarkdownRequest{
-		DocumentId:        input.DocumentID,
-		RepositoryOwner:   owner,
-		RepositoryName:    repository,
-		Branch:            branch,
-		BaseBranch:        baseBranch,
-		Path:              repoPath,
-		CommitMessage:     commitMessage,
-		MarkdownBucket:    markdownBucket,
-		MarkdownObjectKey: markdownObjectKey,
-		CreatePr:          input.CreatePR,
+		Owner:         owner,
+		Repository:    repository,
+		Branch:        branch,
+		BaseBranch:    baseBranch,
+		Path:          repoPath,
+		CommitMessage: commitMessage,
+		Bucket:        markdownBucket,
+		ObjectKey:     markdownObjectKey,
+		CreatePr:      input.CreatePR,
+		CorrelationId: correlationID,
 	}
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)
 	if err != nil {
+		return fmt.Errorf("publish markdown rpc: %w", err)
+	}
+
+	if resp.GetStatus() != githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS {
+		reason := mapPublishErrorCode(resp.GetErrorCode())
+		if msg := strings.TrimSpace(resp.GetErrorMessage()); msg != "" {
+			reason = fmt.Sprintf("%s: %s", reason, msg)
+		}
 		correlation := correlationID
 		if correlation == "" {
 			correlation = correlationIDFromContext(ctx)
 		}
-		info := classifyPublishError(err)
-		log.Printf("publish markdown failed: document_id=%s correlation_id=%s reason=%s retryable=%v error=%v", input.DocumentID, correlation, info.reason, info.retryable, err)
-		if _, updErr := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusFailed, info.reason, info.reason, nil); updErr != nil {
+		log.Printf("publish markdown failed: document_id=%s correlation_id=%s reason=%s status=%v", input.DocumentID, correlation, reason, resp.GetStatus())
+		if _, updErr := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusFailed, reason, reason, nil); updErr != nil {
 			log.Printf("update status after publish error: %v", updErr)
 		}
-		if info.retryable {
-			return err
+		if resp.GetStatus() == githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
+			return fmt.Errorf("temporary github failure: %s", resp.GetErrorMessage())
 		}
-		return fmt.Errorf("publish markdown: %w", err)
+		return fmt.Errorf("permanent github failure: %s", resp.GetErrorMessage())
 	}
 
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), nil); err != nil {
+	var version *model.DocumentVersion
+	if input.Version > 0 {
+		version = &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: markdownObjectKey}
+	}
+
+	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), version); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-type publishErrorInfo struct {
-	reason    string
-	retryable bool
-}
-
-func classifyPublishError(err error) publishErrorInfo {
-	info := publishErrorInfo{reason: publishGithubUnknownReason, retryable: false}
-	if err == nil {
-		return info
+func mapPublishErrorCode(code githubpublisherv1.PublishErrorCode) string {
+	switch code {
+	case githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT:
+		return publishGithubTimeoutReason
+	case githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_SERVER_ERROR:
+		return publishGithub5xxReason
+	case githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_RATE_LIMIT:
+		return publishGithubRateLimitReason
+	case githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_CONFLICT:
+		return publishGithubConflictReason
+	case githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_PERMISSION:
+		return publishGithubPermanentReason
+	case githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_NETWORK:
+		return publishGithubNetworkReason
+	case githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_NOT_FOUND:
+		return publishGithubPermanentReason
+	default:
+		return publishGithubUnknownReason
 	}
-
-	st, ok := status.FromError(err)
-	if !ok {
-		return info
-	}
-
-	code := st.Code()
-	lowerMsg := strings.ToLower(st.Message())
-
-	if code == codes.DeadlineExceeded { //nolint:errorlint
-		info.reason = publishGithubTimeoutReason
-		info.retryable = true
-		return info
-	}
-
-	if code == codes.ResourceExhausted { //nolint:errorlint
-		info.reason = publishGithubRateLimitReason
-		info.retryable = true
-		return info
-	}
-
-	if code == codes.AlreadyExists { //nolint:errorlint
-		info.reason = publishGithubConflictReason
-		return info
-	}
-
-	statusCode := parseHTTPStatusCode(lowerMsg)
-	if statusCode >= 500 {
-		info.reason = publishGithub5xxReason
-		info.retryable = true
-		return info
-	}
-
-	if strings.Contains(lowerMsg, "refusing to allow an oauth app") {
-		info.reason = publishGithubPermanentReason
-		return info
-	}
-
-	if strings.Contains(lowerMsg, "rate limit") {
-		info.reason = publishGithubRateLimitReason
-		info.retryable = true
-		return info
-	}
-
-	if strings.Contains(lowerMsg, "conflict") || strings.Contains(lowerMsg, "merge") || strings.Contains(lowerMsg, "conflicting files") {
-		info.reason = publishGithubConflictReason
-		return info
-	}
-
-	if strings.Contains(lowerMsg, "timeout") || strings.Contains(lowerMsg, "deadline") {
-		info.reason = publishGithubTimeoutReason
-		info.retryable = true
-		return info
-	}
-
-	if strings.Contains(lowerMsg, "not found") {
-		info.reason = publishGithubPermanentReason
-		return info
-	}
-
-	if strings.Contains(lowerMsg, "connection reset") || strings.Contains(lowerMsg, "connection refused") || strings.Contains(lowerMsg, "network is unreachable") {
-		info.reason = publishGithubNetworkReason
-		info.retryable = true
-		return info
-	}
-
-	return info
-}
-
-func parseHTTPStatusCode(msg string) int {
-	matches := httpStatusPattern.FindStringSubmatch(msg)
-	if len(matches) < 2 {
-		return 0
-	}
-
-	code, err := strconv.Atoi(matches[1])
-	if err != nil {
-		return 0
-	}
-	return code
 }
 
 func (a *Activities) fail(ctx context.Context, documentID, reason string) error {
@@ -626,5 +564,3 @@ func correlationIDFromContext(ctx context.Context) string {
 	}
 	return ""
 }
-
-var httpStatusPattern = regexp.MustCompile(`http status code: (\d{3})`)

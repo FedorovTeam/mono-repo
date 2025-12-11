@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net"
+	"net/http"
 	"strings"
 
 	"backend-github-publisher-service/internal/config"
@@ -104,7 +107,8 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 	commitSHA, err := client.CommitMarkdown(ctx, req.GetPath(), content, req.GetCommitMessage(), branch, correlationID, req.GetAuthorName(), req.GetAuthorEmail())
 	if err != nil {
 		log.Printf("correlation_id=%s commit markdown error: %v", correlationID, err)
-		return nil, status.Errorf(codes.FailedPrecondition, "commit markdown: %v", err)
+		statusValue, code, message := classifyPublishError(err)
+		return &githubpublisherv1.PublishMarkdownResponse{Status: statusValue, ErrorCode: code, ErrorMessage: message}, nil
 	}
 
 	var prNumber int64
@@ -113,11 +117,13 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		prNumber, prURL, err = client.CreatePullRequest(ctx, branch, baseBranch, req.GetPrTitle(), req.GetPrBody(), correlationID)
 		if err != nil {
 			log.Printf("correlation_id=%s create pr error: %v", correlationID, err)
-			return nil, status.Errorf(codes.FailedPrecondition, "create pull request: %v", err)
+			statusValue, code, message := classifyPublishError(err)
+			return &githubpublisherv1.PublishMarkdownResponse{Status: statusValue, ErrorCode: code, ErrorMessage: message, CommitSha: commitSHA}, nil
 		}
 	}
 
 	resp := &githubpublisherv1.PublishMarkdownResponse{
+		Status:            githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS,
 		CommitSha:         commitSHA,
 		PullRequestNumber: prNumber,
 		PullRequestUrl:    prURL,
@@ -145,4 +151,51 @@ func (s *PublisherServer) pickCorrelationID(ctx context.Context, explicit string
 		}
 	}
 	return ""
+}
+
+func classifyPublishError(err error) (githubpublisherv1.PublishResultStatus, githubpublisherv1.PublishErrorCode, string) {
+	if err == nil {
+		return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_UNSPECIFIED, ""
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) { //nolint:errorlint
+		return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT, err.Error()
+	}
+
+	var apiErr *githubclient.APIError
+	if errors.As(err, &apiErr) {
+		switch {
+		case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden:
+			return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_PERMANENT_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_PERMISSION, apiErr.Error()
+		case apiErr.StatusCode == http.StatusNotFound:
+			return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_PERMANENT_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_NOT_FOUND, apiErr.Error()
+		case apiErr.StatusCode == http.StatusConflict:
+			return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_PERMANENT_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_CONFLICT, apiErr.Error()
+		case apiErr.StatusCode == http.StatusTooManyRequests:
+			return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_RATE_LIMIT, apiErr.Error()
+		case apiErr.StatusCode >= 500:
+			return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_SERVER_ERROR, apiErr.Error()
+		}
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT, err.Error()
+		}
+		return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_NETWORK, err.Error()
+	}
+
+	lowerMsg := strings.ToLower(err.Error())
+	if strings.Contains(lowerMsg, "rate limit") {
+		return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_RATE_LIMIT, err.Error()
+	}
+	if strings.Contains(lowerMsg, "timeout") || strings.Contains(lowerMsg, "deadline") {
+		return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT, err.Error()
+	}
+	if strings.Contains(lowerMsg, "connection reset") || strings.Contains(lowerMsg, "connection refused") || strings.Contains(lowerMsg, "network is unreachable") {
+		return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_NETWORK, err.Error()
+	}
+
+	return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_PERMANENT_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_UNKNOWN, err.Error()
 }
