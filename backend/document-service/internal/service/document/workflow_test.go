@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
@@ -52,8 +55,15 @@ func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to model.Status,
 	return &model.Document{ID: id, Status: to}, nil
 }
 
-func (f *fakeRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
-	return &model.Document{ID: id, WorkflowID: workflowID}, nil
+func (f *fakeRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+	if job.TaskID == "" {
+		job.TaskID = uuid.NewString()
+	}
+	return job, nil
+}
+
+func (f *fakeRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
 }
 
 type fakeTransformerClient struct {

@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"backend-document-service/internal/config"
 	"backend-document-service/internal/grpcdial"
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
-
-	"github.com/google/uuid"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"go.temporal.io/sdk/activity"
@@ -28,6 +28,7 @@ import (
 )
 
 func TestDocumentWorkflowEndToEnd(t *testing.T) {
+	t.Skip("Temporal workflow deprecated in favour of cron workers")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -150,6 +151,7 @@ func TestDocumentWorkflowEndToEnd(t *testing.T) {
 }
 
 func TestDocumentWorkflowRetrySkipsCompletedSteps(t *testing.T) {
+	t.Skip("Temporal workflow deprecated in favour of cron workers")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
@@ -471,4 +473,15 @@ func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string
 		return m.doc, nil
 	}
 	return &model.Document{ID: id, WorkflowID: workflowID}, nil
+}
+
+func (m *memoryRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+	if job.TaskID == "" {
+		job.TaskID = uuid.NewString()
+	}
+	return job, nil
+}
+
+func (m *memoryRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
 }

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 
@@ -174,6 +176,17 @@ func (r *retryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string)
 	}
 	doc.WorkflowID = workflowID
 	return doc, nil
+}
+
+func (r *retryRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+	if job.TaskID == "" {
+		job.TaskID = uuid.NewString()
+	}
+	return job, nil
+}
+
+func (r *retryRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+	return &model.ProcessingJob{TaskID: taskID, Status: status}, nil
 }
 
 func (r *retryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {

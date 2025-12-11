@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -318,6 +319,175 @@ func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string
 		return nil, err
 	}
 	return &doc, nil
+}
+
+func (r *Repository) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+	if job == nil {
+		return nil, errors.New("job is required")
+	}
+	if err := model.ValidateJobStage(job.Stage); err != nil {
+		return nil, err
+	}
+	if job.Status == "" {
+		job.Status = model.JobStatusPending
+	}
+	if err := model.ValidateJobStatus(job.Status); err != nil {
+		return nil, err
+	}
+	if job.DocumentID == "" {
+		return nil, errors.New("document_id is required")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	if job.TaskID == "" {
+		job.TaskID = uuid.NewString()
+	}
+	job.CreatedAt = now
+	job.UpdatedAt = now
+	if job.Payload == nil {
+		job.Payload = map[string]any{}
+	}
+
+	payloadBytes, err := json.Marshal(job.Payload)
+	if err != nil {
+		return nil, err
+	}
+
+	row := tx.QueryRowContext(ctx, `
+        INSERT INTO processing_jobs (task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        ON CONFLICT (document_id, stage) DO UPDATE
+        SET status = EXCLUDED.status,
+            attempts = EXCLUDED.attempts,
+            next_run_at = EXCLUDED.next_run_at,
+            payload = EXCLUDED.payload,
+            updated_at = EXCLUDED.updated_at
+        RETURNING task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+    `, job.TaskID, job.DocumentID, job.Stage, job.Status, job.Attempts, now, payloadBytes, job.CreatedAt, job.UpdatedAt)
+
+	var payload json.RawMessage
+	if err := row.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payload, &job.CreatedAt, &job.UpdatedAt); err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal(payload, &job.Payload)
+
+	if event != nil {
+		if event.ID == "" {
+			event.ID = uuid.NewString()
+		}
+		event.JobID = job.TaskID
+		event.Stage = job.Stage
+		if event.Status == "" {
+			event.Status = job.Status
+		}
+		event.CreatedAt = now
+		if event.Payload == nil {
+			event.Payload = map[string]any{}
+		}
+		eventPayload, err := json.Marshal(event.Payload)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := tx.ExecContext(ctx, `
+            INSERT INTO job_events (id, job_id, stage, status, event_type, message, payload, created_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `, event.ID, event.JobID, event.Stage, event.Status, event.EventType, event.Message, eventPayload, event.CreatedAt); err != nil {
+			return nil, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+func (r *Repository) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+	if taskID == "" {
+		return nil, errors.New("task_id is required")
+	}
+	if err := model.ValidateJobStatus(status); err != nil {
+		return nil, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var job model.ProcessingJob
+	row := tx.QueryRowContext(ctx, `
+        SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+        FROM processing_jobs WHERE task_id=$1 FOR UPDATE
+    `, taskID)
+	var payloadRaw json.RawMessage
+	if err := row.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal(payloadRaw, &job.Payload)
+
+	now := time.Now().UTC()
+	if incrementAttempt {
+		job.Attempts++
+	}
+	job.Status = status
+	job.UpdatedAt = now
+	if nextRunAt != nil {
+		job.NextRunAt = *nextRunAt
+	}
+	if payload != nil {
+		job.Payload = payload
+	}
+
+	payloadBytes, err := json.Marshal(job.Payload)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+        UPDATE processing_jobs SET status=$1, attempts=$2, next_run_at=$3, payload=$4, updated_at=$5 WHERE task_id=$6
+    `, job.Status, job.Attempts, job.NextRunAt, payloadBytes, job.UpdatedAt, job.TaskID); err != nil {
+		return nil, err
+	}
+
+	if event != nil {
+		if event.ID == "" {
+			event.ID = uuid.NewString()
+		}
+		event.JobID = job.TaskID
+		event.Stage = job.Stage
+		if event.Status == "" {
+			event.Status = job.Status
+		}
+		event.CreatedAt = now
+		if event.Payload == nil {
+			event.Payload = map[string]any{}
+		}
+		eventPayload, err := json.Marshal(event.Payload)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, `
+            INSERT INTO job_events (id, job_id, stage, status, event_type, message, payload, created_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `, event.ID, event.JobID, event.Stage, event.Status, event.EventType, event.Message, eventPayload, event.CreatedAt); err != nil {
+			return nil, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return &job, nil
 }
 
 func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]model.DocumentVersion, error) {

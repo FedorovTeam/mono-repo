@@ -21,6 +21,23 @@ var allowedTransitions = map[Status]Status{
 	StatusConvertedToMarkdown: StatusPublishedToGitHub,
 }
 
+type JobStage string
+
+const (
+	JobStageStoreOriginal     JobStage = "store_original"
+	JobStageConvertToMarkdown JobStage = "convert_to_markdown"
+	JobStagePublishToGitHub   JobStage = "publish_to_github"
+)
+
+type JobStatus string
+
+const (
+	JobStatusPending    JobStatus = "pending"
+	JobStatusInProgress JobStatus = "in_progress"
+	JobStatusCompleted  JobStatus = "completed"
+	JobStatusFailed     JobStatus = "failed"
+)
+
 func ValidateTransition(from, to Status) error {
 	if to == StatusFailed {
 		return nil
@@ -97,4 +114,45 @@ type DocumentStatusLog struct {
 	WorkflowID string
 	Reason     string
 	CreatedAt  time.Time
+}
+
+type ProcessingJob struct {
+	TaskID     string
+	DocumentID string
+	Stage      JobStage
+	Status     JobStatus
+	Attempts   int
+	NextRunAt  time.Time
+	Payload    map[string]any
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type JobEvent struct {
+	ID        string
+	JobID     string
+	Stage     JobStage
+	Status    JobStatus
+	EventType string
+	Message   string
+	Payload   map[string]any
+	CreatedAt time.Time
+}
+
+func ValidateJobStage(stage JobStage) error {
+	switch stage {
+	case JobStageStoreOriginal, JobStageConvertToMarkdown, JobStagePublishToGitHub:
+		return nil
+	default:
+		return errors.New("unsupported job stage")
+	}
+}
+
+func ValidateJobStatus(status JobStatus) error {
+	switch status {
+	case JobStatusPending, JobStatusInProgress, JobStatusCompleted, JobStatusFailed:
+		return nil
+	default:
+		return errors.New("unsupported job status")
+	}
 }
