@@ -352,6 +352,12 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		markdownKey = input.MarkdownObjectKey
 	}
 
+	if markdownKey == "" {
+		reason := fmt.Sprintf("markdown object key is empty for bucket=%q", input.MarkdownBucket)
+		_ = a.fail(ctx, input.DocumentID, reason)
+		return convertResult{}, temporal.NewNonRetryableApplicationError(reason, "MarkdownObjectUnavailable", nil)
+	}
+
 	version := latestVersion(doc).Version + 1
 	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{
 		Version:           version,
@@ -483,14 +489,20 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		return err
 	}
 
+	markdownBucket := input.MarkdownBucket
+	if markdownBucket == "" {
+		markdownBucket = doc.MarkdownBucket
+	}
+
 	markdownObjectKey := input.MarkdownObjectKey
 	if markdownObjectKey == "" {
 		markdownObjectKey = resolvedMarkdownKey(doc)
 	}
 
-	if input.MarkdownBucket == "" || markdownObjectKey == "" {
-		_ = a.fail(ctx, input.DocumentID, "markdown content is empty and no bucket/object_key provided")
-		return fmt.Errorf("markdown content is empty and no bucket/object_key provided")
+	if markdownBucket == "" || markdownObjectKey == "" {
+		reason := fmt.Sprintf("markdown content is empty (bucket=%q, object_key=%q)", markdownBucket, markdownObjectKey)
+		_ = a.fail(ctx, input.DocumentID, reason)
+		return temporal.NewNonRetryableApplicationError(reason, "MarkdownObjectUnavailable", nil)
 	}
 
 	if a.storage == nil {
@@ -499,13 +511,13 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 
 	backoff := publishObjectCheckInitialBackoff
 	for attempt := 1; attempt <= publishObjectCheckAttempts; attempt++ {
-		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: input.MarkdownBucket, ObjectKey: markdownObjectKey}); err == nil {
+		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: markdownBucket, ObjectKey: markdownObjectKey}); err == nil {
 			break
 		} else {
-			logger.Info("markdown object not available", "document_id", input.DocumentID, "bucket", input.MarkdownBucket, "object_key", markdownObjectKey, "correlation_id", correlationIDFromContext(ctx), "attempt", attempt, "error", err)
+			logger.Info("markdown object not available", "document_id", input.DocumentID, "bucket", markdownBucket, "object_key", markdownObjectKey, "correlation_id", correlationIDFromContext(ctx), "attempt", attempt, "error", err)
 
 			if attempt == publishObjectCheckAttempts {
-				reason := fmt.Sprintf("markdown object %s/%s unavailable (correlation_id=%s): %v", input.MarkdownBucket, markdownObjectKey, correlationID, err)
+				reason := fmt.Sprintf("markdown object %s/%s unavailable (correlation_id=%s): %v", markdownBucket, markdownObjectKey, correlationID, err)
 				_ = a.fail(ctx, input.DocumentID, reason)
 				return temporal.NewNonRetryableApplicationError(reason, "MarkdownObjectUnavailable", err)
 			}
@@ -532,7 +544,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		CommitMessage: commitMessage,
 		CreatePr:      input.CreatePR,
 		CorrelationId: correlationID,
-		Bucket:        input.MarkdownBucket,
+		Bucket:        markdownBucket,
 		ObjectKey:     markdownObjectKey,
 	}
 
