@@ -44,6 +44,7 @@ type Config struct {
 	Observability Observability `yaml:"observability"`
 	Reconciler    Reconciler    `yaml:"reconciler"`
 	Retryer       Retryer       `yaml:"workflow_retryer"`
+	GithubRetryer GithubRetryer `yaml:"github_retryer"`
 }
 
 type GRPCClient struct {
@@ -88,6 +89,14 @@ type Retryer struct {
 	Interval    time.Duration `yaml:"interval"`
 	BatchSize   int           `yaml:"batch_size"`
 	MaxAttempts int           `yaml:"max_attempts"`
+}
+
+type GithubRetryer struct {
+	Interval       time.Duration `yaml:"interval"`
+	BatchSize      int           `yaml:"batch_size"`
+	MaxAttempts    int           `yaml:"max_attempts"`
+	InitialBackoff time.Duration `yaml:"initial_backoff"`
+	MaxBackoff     time.Duration `yaml:"max_backoff"`
 }
 
 func Load(path string) (*Config, error) {

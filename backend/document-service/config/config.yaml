@@ -44,6 +44,12 @@ workflow_retryer:
   interval: 1m
   batch_size: 100
   max_attempts: 3
+github_retryer:
+  interval: 1m
+  batch_size: 100
+  max_attempts: 5
+  initial_backoff: 1m
+  max_backoff: 30m
 observability:
   logs:
     enabled: true

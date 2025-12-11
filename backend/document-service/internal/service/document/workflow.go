@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +22,9 @@ import (
 	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -29,6 +33,15 @@ const (
 	ActivityConvertToMarkdownName = "document.convertToMarkdown"
 	ActivityAwaitMarkdownName     = "document.awaitMarkdown"
 	ActivityPublishMarkdownName   = "document.publishMarkdown"
+
+	publishGithubReasonPrefix    = "publish_github_"
+	publishGithubTimeoutReason   = publishGithubReasonPrefix + "timeout"
+	publishGithub5xxReason       = publishGithubReasonPrefix + "5xx"
+	publishGithubConflictReason  = publishGithubReasonPrefix + "conflict"
+	publishGithubRateLimitReason = publishGithubReasonPrefix + "rate_limit"
+	publishGithubNetworkReason   = publishGithubReasonPrefix + "network"
+	publishGithubPermanentReason = publishGithubReasonPrefix + "permanent"
+	publishGithubUnknownReason   = publishGithubReasonPrefix + "unknown"
 
 	correlationIDHeader = "x-correlation-id"
 
@@ -483,6 +496,34 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		_ = a.fail(ctx, input.DocumentID, reason)
 		return fmt.Errorf("%s", reason)
 	}
+	if strings.TrimSpace(a.baseURL) != "" {
+		validationURL := fmt.Sprintf("%s/repos/%s/%s", strings.TrimSuffix(a.baseURL, "/"), owner, repository)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, validationURL, nil)
+		if err != nil {
+			return fmt.Errorf("create repository validation request: %w", err)
+		}
+		if correlationID != "" {
+			req.Header.Set(correlationIDHeader, correlationID)
+		}
+
+		resp, err := a.httpClient.Do(req)
+		if err != nil {
+			reason := fmt.Sprintf("%s: repository validation request failed: %v", publishGithubNetworkReason, err)
+			_ = a.fail(ctx, input.DocumentID, reason)
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			info := classifyPublishMessage(resp.Status)
+			reason := fmt.Sprintf("%s: repository validation failed with status %d", info.reason, resp.StatusCode)
+			_ = a.fail(ctx, input.DocumentID, reason)
+			if info.retryable {
+				return fmt.Errorf("%s", reason)
+			}
+			return temporal.NewNonRetryableApplicationError(reason, info.reason, nil)
+		}
+	}
 
 	markdownBucket := input.MarkdownBucket
 	if markdownBucket == "" {
@@ -545,8 +586,13 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)
 	if err != nil {
-		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("publish: %v", err))
-		return err
+		info := classifyPublishError(err)
+		reason := fmt.Sprintf("%s: %v", info.reason, err)
+		_ = a.fail(ctx, input.DocumentID, reason)
+		if info.retryable {
+			return err
+		}
+		return temporal.NewNonRetryableApplicationError(reason, info.reason, err)
 	}
 	if resp == nil || resp.CommitSha == "" {
 		_ = a.fail(ctx, input.DocumentID, "publish: empty response")
@@ -555,6 +601,89 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	version := latestVersion(doc).Version + 1
 	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, "", "", &model.DocumentVersion{Version: version})
 	return err
+}
+
+type publishErrorInfo struct {
+	reason    string
+	retryable bool
+}
+
+var httpStatusPattern = regexp.MustCompile(`(?i)status\s+(\d{3})`)
+
+func classifyPublishError(err error) publishErrorInfo {
+	info := publishErrorInfo{reason: publishGithubUnknownReason}
+	if err == nil {
+		return info
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		info.reason = publishGithubTimeoutReason
+		info.retryable = true
+		return info
+	}
+
+	if st, ok := status.FromError(err); ok {
+		switch st.Code() {
+		case codes.DeadlineExceeded, codes.Unavailable:
+			info.reason = publishGithubTimeoutReason
+			info.retryable = true
+			return info
+		}
+		return classifyPublishMessage(st.Message())
+	}
+
+	return classifyPublishMessage(err.Error())
+}
+
+func classifyPublishMessage(msg string) publishErrorInfo {
+	info := publishErrorInfo{reason: publishGithubUnknownReason}
+	lowerMsg := strings.ToLower(msg)
+
+	statusCode := parseHTTPStatusCode(msg)
+	switch {
+	case statusCode >= http.StatusInternalServerError:
+		info.reason = publishGithub5xxReason
+		info.retryable = true
+		return info
+	case statusCode == http.StatusConflict:
+		info.reason = publishGithubConflictReason
+		return info
+	case statusCode == http.StatusTooManyRequests:
+		info.reason = publishGithubRateLimitReason
+		info.retryable = true
+		return info
+	case statusCode == http.StatusRequestTimeout:
+		info.reason = publishGithubTimeoutReason
+		info.retryable = true
+		return info
+	}
+
+	if strings.Contains(lowerMsg, "timeout") {
+		info.reason = publishGithubTimeoutReason
+		info.retryable = true
+		return info
+	}
+
+	if strings.Contains(lowerMsg, "connection reset") || strings.Contains(lowerMsg, "connection refused") || strings.Contains(lowerMsg, "network is unreachable") {
+		info.reason = publishGithubNetworkReason
+		info.retryable = true
+		return info
+	}
+
+	return info
+}
+
+func parseHTTPStatusCode(msg string) int {
+	matches := httpStatusPattern.FindStringSubmatch(msg)
+	if len(matches) < 2 {
+		return 0
+	}
+
+	code, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0
+	}
+	return code
 }
 
 func (a *Activities) fail(ctx context.Context, documentID, reason string) error {

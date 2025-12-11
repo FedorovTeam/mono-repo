@@ -198,6 +198,17 @@ func main() {
 
 	go retrier.Run(ctx, cfg.Retryer.Interval)
 
+	githubRetrier := docservice.NewPublishRetrier(
+		repo,
+		activities,
+		cfg.GithubRetryer.BatchSize,
+		cfg.GithubRetryer.MaxAttempts,
+		cfg.GithubRetryer.InitialBackoff,
+		cfg.GithubRetryer.MaxBackoff,
+	)
+
+	go githubRetrier.Run(ctx, cfg.GithubRetryer.Interval)
+
 	server := transport.NewServer(service)
 	if err := server.ListenAndServe(ctx, cfg.Server.Addr); err != nil {
 		log.Printf("server stopped: %v", err)
