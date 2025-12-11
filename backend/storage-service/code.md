@@ -4,6 +4,7 @@
 classDiagram
     class ObjectKeyGenerator {
         -TimeProvider now
+        -UUIDProvider newUUID
         +BuildKey(orgSlug, projectSlug, documentID, extension) string
     }
 
@@ -19,11 +20,25 @@ classDiagram
     }
     MinioAPI ..|> Client
 
+    class MinioClientConfig {
+        +string Endpoint
+        +string AccessKey
+        +string SecretKey
+        +bool UseSSL
+        +[]string Buckets
+    }
+
+    class MinioClientFactory {
+        +NewMinioClient(ctx, cfg MinioClientConfig) MinioAPI
+    }
+    MinioClientFactory --> MinioAPI
+
     class Service {
         -Client client
         -ObjectKeyGenerator keyGenerator
         -string docxBucket
         -string markdownBucket
+        +NewService(client, keyGenerator, docxBucket, markdownBucket) Service
         +UploadOriginal(ctx, orgSlug, projectSlug, documentID, extension, content) ObjectLocation
         +UploadMarkdown(ctx, orgSlug, projectSlug, documentID, content) ObjectLocation
         +DownloadObject(ctx, bucket, key) []byte
@@ -39,6 +54,7 @@ classDiagram
         -string uploadBucket
         -string orgSlug
         -string projectSlug
+        +New(client, keyGenerator, uploadBucket, service) Server
         +UploadOriginal(ctx, req) UploadObjectResponse
         +UploadMarkdown(ctx, req) UploadObjectResponse
         +GetObject(ctx, req) GetObjectResponse
@@ -64,4 +80,38 @@ classDiagram
     UploadEventHandler --> DocumentNotifier
     NotificationSetup ..> Client
     NotificationSetup ..> UploadEventHandler
+
+    class GenerateUploadURLParams {
+        +string OrgSlug
+        +string ProjectSlug
+        +string DocumentID
+        +string FileName
+        +int64 ContentLength
+        +string CorrelationID
+        +int64 ExpiresInSeconds
+    }
+
+    class PresignedUpload {
+        +URL UploadURL
+        +string Bucket
+        +string ObjectKey
+        +int64 ExpiresInSeconds
+    }
+
+    class ObjectLocation {
+        +string Bucket
+        +string Key
+    }
+
+    Service ..> GenerateUploadURLParams
+    Service ..> PresignedUpload
+    Service ..> ObjectLocation
+
+    class ObservabilityConfig {
+        +bool EnableMetrics
+        +bool EnableTraces
+        +bool EnableLogs
+        +ConfigureProviders(cfg)
+        +GRPCServerOptions(cfg, interceptors)
+    }
 ```
