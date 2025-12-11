@@ -16,8 +16,8 @@ sequenceDiagram
     Gateway->>StorageService: GenerateUploadURL(DocumentId, FileName, ContentLength, CorrelationId, ExpiresInSeconds, gRPC meta: X-Correlation-ID + X-API-Key)
     StorageService-->>Gateway: uploadUrl + bucket + objectKey
     Gateway->>DocumentService: CreateDocument(id, fileName, repository, [repositoryOwner], branch, path, contentLength, upload bucket/objectKey, correlation-id; gRPC meta: X-Correlation-ID + X-API-Key)
-    DocumentService-->>Gateway: документ (id/status[/workflowId])
-    Gateway-->>Client: uploadUrl + uploadMethod=PUT + document{id,status,workflowId}
+    DocumentService-->>Gateway: документ (id/status)
+    Gateway-->>Client: uploadUrl + uploadMethod=PUT + document{id,status}
     Client-->>MinIO: PUT файла по presigned URL
     MinIO-->>Gateway: POST /internal/storage/uploaded (s3:ObjectCreated:Put, correlation-id в userMetadata/responseElements)
     Gateway->>Gateway: извлечь documentId из objectKey (basename до расширения); correlation-id из вебхука или новый

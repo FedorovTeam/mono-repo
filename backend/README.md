@@ -16,7 +16,7 @@
 5. Публикует Markdown-файл в **GitHub Repository**;
 6. Показывает клиенту **статусы** всех этапов процесса.
 
-Система устойчива к сбоям за счёт **Temporal Workflow** + записи жизненного цикла в PostgreSQL.
+Система устойчива к сбоям за счёт **цепочки cron-воркеров**, которые читают и обновляют статусы в PostgreSQL.
 
 ---
 
@@ -26,7 +26,7 @@
 
 - Внешний API: **GraphQL** через `99designs/gqlgen`
 - Внутренние коммуникации: **gRPC**
-- Межсервисные операции — **асинхронные**, через Temporal Activities
+- Межсервисные операции — **асинхронные**, через cron-воркеры, которые опираются на статусы в PostgreSQL
 
 ### 2.2. Авторизация
 
@@ -42,8 +42,8 @@
 
 ### 2.4. Устойчивость
 
-- Temporal гарантирует выполнение workflow
-- Каждое состояние документа фиксируется в **PostgreSQL**
+- Цепочка cron-воркеров гарантирует повторное выполнение шагов до успеха
+- Каждое состояние документа фиксируется в **PostgreSQL** и служит источником правды
 - Каждый сервис должен быть безопасно повторяемым (idempotent)
 
 ---
@@ -60,9 +60,9 @@
 # 9. 📦 Краткая схема микросервисов
 
 ```
-Client → gateway-service → knowledge-service → Temporal Workflow
+Client → gateway-service → document-service → cron-воркеры (upload→convert→publish по статусам в PostgreSQL)
                          ↘ gRPC calls →
       storage-service | transformation-service | publishing-service
 ```
 
-MinIO, PostgreSQL, Temporal — отдельные сервисы.
+MinIO и PostgreSQL — отдельные сервисы; оркестрация строится на cron-задачах, которые читают статусы и двигают процесс дальше.
