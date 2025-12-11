@@ -10,14 +10,16 @@
 
 2. **Подтверждение загрузки**
    - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после уведомления от MinIO.
-   - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями. При успехе фиксирует `StoredOriginal` и логирует переход; при ошибке пишет `Failed` с причиной.
+   - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями. При успехе заводится задача `processing_jobs` со стадией `store_original` в статусе `pending`; при ошибке документ переводится в `Failed`.
    - Периодический cron-воркер `UploadReconciler` опрашивает таблицу `documents` в статусе `Uploaded`, проверяет наличие исходника в MinIO и при необходимости сам вызывает `ConfirmUpload`, чтобы не зависеть только от вебхуков.
 
 3. **Обработка по статусам**
-   - Цепочка обработки строится на cron-воркерах. Каждый воркер читает текущий статус в PostgreSQL, выполняет свой шаг и переводит документ дальше, чтобы следующий воркер мог его подобрать.
-   - `UploadReconciler` уже перевёл документ в `StoredOriginal` и сохранил оригинальный объект в `document_versions`.
-   - `MarkdownConverter` (cron) выбирает документы `StoredOriginal`, подтягивает исходник через `storage-service.GetObject`, вызывает `docling-transformer-service` и при успехе сохраняет `ConvertedToMarkdown` с новым `markdown_object_key` и версией `previous+1`. Ошибка конвертации фиксируется как `Failed` с причиной.
-   - `GithubPublisher` (cron) читает записи `ConvertedToMarkdown`, проверяет наличие Markdown-объекта через `storage-service` и вызывает gRPC `github-publisher-service`. При успехе выставляет `PublishedToGitHub` и новую версию, при ошибке — `Failed`. Повторный проход пропускает уже опубликованные документы.
+   - Цепочка построена на таблице `processing_jobs`. Исполнители стадий (`storage-service`, `docling-transformer-service`, `github-publisher-service`) меняют статус задачи (`pending` → `in_progress` → `completed|failed`).
+   - Воркер `JobFollower` внутри `document-service` каждые N секунд читает готовые задачи (`completed`/`failed`) и решает переход:
+     - `store_original` → создаёт новую задачу `convert_to_markdown` с payload из документа.
+     - `convert_to_markdown` → создаёт `publish_to_github`.
+     - Любая стадия в статусе `failed` → переводит документ в `Failed`, причина берётся из `payload.last_error`.
+   - Стадии можно повторять: если исполнитель вернул задачу в `pending` (retry), `JobFollower` её не трогает до окончательного `completed`/`failed`.
 
 4. **Ручное обновление статуса**
    - Клиент вызывает `UpdateDocumentStatus`. Допустимы переходы `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, повторное выставление текущего статуса, либо перевод в `Failed` (если `error_reason` не задан, используется `reason`).

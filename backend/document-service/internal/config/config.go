@@ -39,6 +39,7 @@ type Config struct {
 	Observability Observability `yaml:"observability"`
 	Reconciler    Reconciler    `yaml:"reconciler"`
 	GithubRetryer GithubRetryer `yaml:"github_retryer"`
+	JobFollower   JobFollower   `yaml:"job_follower"`
 }
 
 type GRPCClient struct {
@@ -85,6 +86,12 @@ type GithubRetryer struct {
 	MaxAttempts    int           `yaml:"max_attempts"`
 	InitialBackoff time.Duration `yaml:"initial_backoff"`
 	MaxBackoff     time.Duration `yaml:"max_backoff"`
+}
+
+type JobFollower struct {
+	Interval        time.Duration `yaml:"interval"`
+	BatchSize       int           `yaml:"batch_size"`
+	RescheduleAfter time.Duration `yaml:"reschedule_after"`
 }
 
 func Load(path string) (*Config, error) {
