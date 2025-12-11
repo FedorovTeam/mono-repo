@@ -46,9 +46,13 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 	assertTableExists(t, ctx, db, "documents")
 	assertTableExists(t, ctx, db, "document_versions")
 	assertTableExists(t, ctx, db, "document_status_logs")
+	assertTableExists(t, ctx, db, "processing_jobs")
+	assertTableExists(t, ctx, db, "job_events")
 
 	assertEnumValues(t, ctx, db)
+	assertJobEnums(t, ctx, db)
 	assertIndexes(t, ctx, db)
+	assertJobQueueIndexes(t, ctx, db)
 
 	assertColumnExists(t, ctx, db, "documents", "repository")
 	assertColumnExists(t, ctx, db, "documents", "branch")
@@ -113,4 +117,59 @@ func assertColumnExists(t *testing.T, ctx context.Context, db *sql.DB, table, co
     `, table, column)
 	require.NoError(t, row.Scan(&exists))
 	require.Truef(t, exists, "column %s.%s does not exist", table, column)
+}
+
+func assertJobEnums(t *testing.T, ctx context.Context, db *sql.DB) {
+	rows, err := db.QueryContext(ctx, `
+        SELECT enumlabel FROM pg_enum WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'job_stage') ORDER BY enumsortorder
+    `)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var stages []string
+	for rows.Next() {
+		var v string
+		require.NoError(t, rows.Scan(&v))
+		stages = append(stages, v)
+	}
+	require.Equal(t, []string{"store_original", "convert_to_markdown", "publish_to_github"}, stages)
+
+	statusRows, err := db.QueryContext(ctx, `
+        SELECT enumlabel FROM pg_enum WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'job_status') ORDER BY enumsortorder
+    `)
+	require.NoError(t, err)
+	defer statusRows.Close()
+
+	var statuses []string
+	for statusRows.Next() {
+		var v string
+		require.NoError(t, statusRows.Scan(&v))
+		statuses = append(statuses, v)
+	}
+	require.Equal(t, []string{"pending", "in_progress", "completed", "failed"}, statuses)
+}
+
+func assertJobQueueIndexes(t *testing.T, ctx context.Context, db *sql.DB) {
+	rows, err := db.QueryContext(ctx, `
+        SELECT tablename, indexname FROM pg_indexes WHERE tablename IN ('processing_jobs', 'job_events')
+    `)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	indexes := map[string]map[string]bool{}
+	for rows.Next() {
+		var table string
+		var name string
+		require.NoError(t, rows.Scan(&table, &name))
+
+		if _, ok := indexes[table]; !ok {
+			indexes[table] = map[string]bool{}
+		}
+		indexes[table][name] = true
+	}
+
+	require.True(t, indexes["processing_jobs"]["idx_processing_jobs_stage_status_next_run"])
+	require.True(t, indexes["processing_jobs"]["idx_processing_jobs_next_run"])
+	require.True(t, indexes["job_events"]["idx_job_events_job"])
+	require.True(t, indexes["job_events"]["idx_job_events_created"])
 }
