@@ -65,26 +65,47 @@ func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
 INSERT INTO transformations_queue (
     id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
     created_at, started_at, retry_count, correlation_id, docling_job_id, docling_poll_count
-) VALUES ($1, 'processing', 'doc-1', 'orig', 'path/file.docx', 'md', 'dest/file.md', 'docx', $2, $3, 1, 'corr', 'job-123', 4)
+) VALUES ($1, 'processing', 'doc-1', 'orig', 'path/file.docx', 'md', 'dest/file.md', 'docx', $2, $3, 1, 'corr', 'job-123', 1)
 `, taskID, startedAt.Add(-time.Minute), startedAt)
 	require.NoError(t, err)
 
-	restored, failed, err := repo.RestoreStuckProcessing(ctx, 30*time.Second, 3, 0)
+	timeoutFailedID := uuid.New()
+	_, err = pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, started_at, retry_count, correlation_id
+) VALUES ($1, 'processing', 'doc-4', 'orig', 'path/fourth.docx', 'md', 'dest/fourth.md', 'docx', $2, $3, 5, 'corr-timeout')
+`, timeoutFailedID, startedAt.Add(-2*time.Minute), startedAt.Add(-time.Minute))
+	require.NoError(t, err)
+
+	doclingFailedID := uuid.New()
+	_, err = pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, started_at, retry_count, correlation_id, docling_job_id, docling_poll_count
+) VALUES ($1, 'processing', 'doc-5', 'orig', 'path/fifth.docx', 'md', 'dest/fifth.md', 'docx', $2, $3, 1, 'corr-docling', 'docling-999', 3)
+`, doclingFailedID, startedAt.Add(-3*time.Minute), startedAt.Add(-90*time.Second))
+	require.NoError(t, err)
+
+	restored, failed, err := repo.RestoreStuckProcessing(ctx, 30*time.Second, 3, 3)
 	require.NoError(t, err)
 	require.Equal(t, 1, restored)
-	require.Equal(t, 0, failed)
+	require.Equal(t, 2, failed)
 
 	var status TransformationStatus
 	var started *time.Time
 	var jobID string
 	var pollCount int
-	err = pool.QueryRow(ctx, `SELECT status, started_at, docling_job_id, docling_poll_count FROM transformations_queue WHERE id = $1`, taskID).
-		Scan(&status, &started, &jobID, &pollCount)
+	var errorMessage string
+	err = pool.QueryRow(ctx, `SELECT status, started_at, docling_job_id, docling_poll_count, error FROM transformations_queue WHERE id = $1`, taskID).
+		Scan(&status, &started, &jobID, &pollCount, &errorMessage)
 	require.NoError(t, err)
 	require.Equal(t, StatusPending, status)
 	require.Nil(t, started)
 	require.Equal(t, "", jobID)
 	require.Equal(t, 0, pollCount)
+	require.Contains(t, errorMessage, "restored after timeout")
+	require.Contains(t, errorMessage, "started_at")
 
 	task, err := repo.AcquireNext(ctx)
 	require.NoError(t, err)
@@ -93,6 +114,20 @@ INSERT INTO transformations_queue (
 	require.Equal(t, StatusProcessing, task.Status)
 	require.Equal(t, "", task.DoclingJobID)
 	require.Equal(t, 0, task.DoclingPollCount)
+
+	var timeoutStatus TransformationStatus
+	var timeoutError string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status, error FROM transformations_queue WHERE id = $1`, timeoutFailedID).Scan(&timeoutStatus, &timeoutError))
+	require.Equal(t, StatusFailed, timeoutStatus)
+	require.Contains(t, timeoutError, "processing timeout exceeded")
+	require.Contains(t, timeoutError, "retries=5/3")
+
+	var doclingStatus TransformationStatus
+	var doclingError string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status, error FROM transformations_queue WHERE id = $1`, doclingFailedID).Scan(&doclingStatus, &doclingError))
+	require.Equal(t, StatusFailed, doclingStatus)
+	require.Contains(t, doclingError, "docling-999")
+	require.Contains(t, doclingError, "3/3")
 
 	waitingID := uuid.New()
 	expiredID := uuid.New()
