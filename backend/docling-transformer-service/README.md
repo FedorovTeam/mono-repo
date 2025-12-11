@@ -22,7 +22,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - `docling.status_initial_interval` / `docling.status_backoff_factor` / `docling.status_max_interval` / `docling.status_max_attempts` — шаг, экспоненциальный backoff и лимит запросов статуса Docling (для ожидания длительных задач без блокировки воркеров).
 - `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — учётные данные, `minio.bucket` — обязательный бакет для результата, `minio.region` и `minio.use_ssl` — параметры подключения.
 - `observability.tracingEnabled` / `observability.metricsEnabled` / `observability.loggingEnabled` — флаги включения трассировки, метрик и логов (при `false` провайдеры и middleware не поднимаются).
-- `temporal` блок оставлен для совместимости, но в текущей версии не используется.
+- `scheduler.poll_interval` / `scheduler.maintenance_interval` — шаг опроса очереди и периодичность технического цикла восстановления/очистки; `scheduler.batch_size` ограничивает размер выборки `SELECT ... FOR UPDATE SKIP LOCKED`, `scheduler.retry_backoff`/`scheduler.max_processing_retries` задают параметры повторов при ошибках обработки, а `scheduler.cleanup_retention` определяет TTL для завершённых задач.
 
 ## Локальный запуск
 ```bash
@@ -57,3 +57,5 @@ go test ./...
 
 ## Логи и наблюдаемость
 Каждый запрос логируется с `correlation_id` и входными метаданными, если разрешён `observability.loggingEnabled`. Заголовок `x-correlation-id` генерируется, если не пришёл снаружи. Трассировка и метрики отправляются через OTEL только при активных флагах `observability.tracingEnabled` и `observability.metricsEnabled`.
+
+Фоновый воркер отдаёт метрики загрузки очереди: gauge `docling_transformer_queue_pending`/`processing`/`waiting_docling`, гистограмму размеров выборки `docling_transformer_queue_batch_size`, счётчики успешных/ошибочных задач (`docling_transformer_tasks_acquired`/`docling_transformer_tasks_completed`/`docling_transformer_tasks_failed`) и длительности `docling_transformer_processing_duration_ms` вместе с ожиданием Docling (`docling_transformer_docling_wait_duration_ms`, `docling_transformer_docling_poll_attempts`). В логах фиксируются выборки пачек и ошибки Docling, чтобы отслеживать частоту сбоев.

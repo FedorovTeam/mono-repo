@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -56,6 +57,7 @@ type QueueRepository interface {
 	Enqueue(ctx context.Context, params EnqueueParams) (uuid.UUID, error)
 	CountActive(ctx context.Context) (int, error)
 	AcquireNext(ctx context.Context) (*TransformationTask, error)
+	AcquireBatch(ctx context.Context, limit int) ([]*TransformationTask, error)
 	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
@@ -120,15 +122,29 @@ FROM transformations_queue`
 }
 
 func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*TransformationTask, error) {
+	tasks, err := r.AcquireBatch(ctx, 1)
+	if err != nil || len(tasks) == 0 {
+		return nil, err
+	}
+
+	return tasks[0], nil
+}
+
+// AcquireBatch выбирает несколько задач из очереди и помечает их как processing в одной транзакции.
+func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) ([]*TransformationTask, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	task, err := r.selectNextTask(ctx, tx)
+	tasks, err := r.selectNextTasks(ctx, tx, limit)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			if commitErr := tx.Commit(ctx); commitErr != nil {
 				return nil, fmt.Errorf("commit empty tx: %w", commitErr)
 			}
@@ -138,44 +154,77 @@ func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*Transformat
 		return nil, err
 	}
 
-	if err := r.markProcessing(ctx, tx, task); err != nil {
-		return nil, err
+	for _, task := range tasks {
+		if err := r.markProcessing(ctx, tx, task); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit acquire: %w", err)
 	}
 
-	return task, nil
+	return tasks, nil
 }
 
-func (r *PostgresQueueRepository) selectNextTask(ctx context.Context, tx pgx.Tx) (*TransformationTask, error) {
-	const selectPendingQuery = `
+func (r *PostgresQueueRepository) selectNextTasks(ctx context.Context, tx pgx.Tx, limit int) ([]*TransformationTask, error) {
+	tasks, err := r.fetchTasks(ctx, tx, `
 SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'pending'
 ORDER BY created_at
-LIMIT 1
-FOR UPDATE SKIP LOCKED`
-
-	task, err := scanTask(tx.QueryRow(ctx, selectPendingQuery))
-	if err == nil {
-		return task, nil
+LIMIT $1
+FOR UPDATE SKIP LOCKED`, limit)
+	if err == nil && len(tasks) > 0 {
+		return tasks, nil
 	}
-
-	if err != pgx.ErrNoRows {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 
-	const selectWaitingQuery = `
+	tasks, err = r.fetchTasks(ctx, tx, `
 SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
-LIMIT 1
-FOR UPDATE SKIP LOCKED`
+LIMIT $1
+FOR UPDATE SKIP LOCKED`, limit)
+	if err != nil {
+		return nil, err
+	}
 
-	return scanTask(tx.QueryRow(ctx, selectWaitingQuery))
+	if len(tasks) == 0 {
+		return nil, pgx.ErrNoRows
+	}
+
+	return tasks, nil
+}
+
+func (r *PostgresQueueRepository) fetchTasks(ctx context.Context, tx pgx.Tx, query string, limit int) ([]*TransformationTask, error) {
+	rows, err := tx.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*TransformationTask
+	for rows.Next() {
+		task, scanErr := scanTask(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		tasks = append(tasks, task)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(tasks) == 0 {
+		return nil, pgx.ErrNoRows
+	}
+
+	return tasks, nil
 }
 
 func (r *PostgresQueueRepository) markProcessing(ctx context.Context, tx pgx.Tx, task *TransformationTask) error {

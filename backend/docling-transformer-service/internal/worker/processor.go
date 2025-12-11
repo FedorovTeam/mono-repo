@@ -25,9 +25,11 @@ type Config struct {
 	MarkdownBucket         string
 	MaxWorkers             int
 	PollInterval           time.Duration
+	BatchSize              int
 	ProcessingTimeout      time.Duration
 	FastOperationTimeout   time.Duration
 	MaxProcessingRetries   int
+	RetryBackoff           time.Duration
 	CleanupInterval        time.Duration
 	CleanupRetention       time.Duration
 	DoclingInitialInterval time.Duration
@@ -38,19 +40,23 @@ type Config struct {
 }
 
 type workerMetrics struct {
-	pendingGauge    metric.Int64ObservableGauge
-	processingGauge metric.Int64ObservableGauge
-	doclingGauge    metric.Int64ObservableGauge
-	restoredCounter metric.Int64Counter
-	rejectedCounter metric.Int64Counter
-	temporaryRetry  metric.Int64Counter
-	durationHist    metric.Float64Histogram
-	doclingWaitHist metric.Float64Histogram
-	doclingPolls    metric.Int64Histogram
-	mu              sync.Mutex
-	lastPending     int64
-	lastProcessing  int64
-	lastDocling     int64
+	pendingGauge     metric.Int64ObservableGauge
+	processingGauge  metric.Int64ObservableGauge
+	doclingGauge     metric.Int64ObservableGauge
+	restoredCounter  metric.Int64Counter
+	rejectedCounter  metric.Int64Counter
+	temporaryRetry   metric.Int64Counter
+	acquiredCounter  metric.Int64Counter
+	completedCounter metric.Int64Counter
+	failedCounter    metric.Int64Counter
+	durationHist     metric.Float64Histogram
+	doclingWaitHist  metric.Float64Histogram
+	doclingPolls     metric.Int64Histogram
+	batchHist        metric.Int64Histogram
+	mu               sync.Mutex
+	lastPending      int64
+	lastProcessing   int64
+	lastDocling      int64
 }
 
 type Processor struct {
@@ -119,6 +125,18 @@ func newWorkerMetrics(logger *zap.Logger) *workerMetrics {
 	if err != nil && logger != nil {
 		logger.Warn("failed to create temporary retry counter", zap.Error(err))
 	}
+	m.acquiredCounter, err = meter.Int64Counter("docling_transformer_tasks_acquired")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create acquired counter", zap.Error(err))
+	}
+	m.completedCounter, err = meter.Int64Counter("docling_transformer_tasks_completed")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create completed counter", zap.Error(err))
+	}
+	m.failedCounter, err = meter.Int64Counter("docling_transformer_tasks_failed")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create failed counter", zap.Error(err))
+	}
 	m.durationHist, err = meter.Float64Histogram("docling_transformer_processing_duration_ms")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create duration histogram", zap.Error(err))
@@ -130,6 +148,10 @@ func newWorkerMetrics(logger *zap.Logger) *workerMetrics {
 	m.doclingPolls, err = meter.Int64Histogram("docling_transformer_docling_poll_attempts")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create docling polls histogram", zap.Error(err))
+	}
+	m.batchHist, err = meter.Int64Histogram("docling_transformer_queue_batch_size")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create batch size histogram", zap.Error(err))
 	}
 
 	observables := make([]metric.Observable, 0, 3)
@@ -191,6 +213,33 @@ func (m *workerMetrics) recordRecoveries(ctx context.Context, restored, failed i
 	}
 }
 
+func (m *workerMetrics) recordAcquired(ctx context.Context, count int) {
+	if m == nil || count <= 0 {
+		return
+	}
+
+	if m.acquiredCounter != nil {
+		m.acquiredCounter.Add(ctx, int64(count))
+	}
+
+	if m.batchHist != nil {
+		m.batchHist.Record(ctx, int64(count))
+	}
+}
+
+func (m *workerMetrics) recordOutcome(ctx context.Context, success bool) {
+	if m == nil {
+		return
+	}
+
+	switch {
+	case success && m.completedCounter != nil:
+		m.completedCounter.Add(ctx, 1)
+	case !success && m.failedCounter != nil:
+		m.failedCounter.Add(ctx, 1)
+	}
+}
+
 func (m *workerMetrics) recordDuration(ctx context.Context, duration time.Duration) {
 	if m == nil || m.durationHist == nil {
 		return
@@ -236,19 +285,29 @@ func (p *Processor) Run(ctx context.Context) {
 		interval = time.Second
 	}
 
+	batchSize := p.cfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = 1
+	}
+
+	retryBackoff := p.cfg.RetryBackoff
+	if retryBackoff <= 0 {
+		retryBackoff = interval
+	}
+
 	maintenanceInterval := p.cfg.CleanupInterval
 	if maintenanceInterval <= 0 {
 		maintenanceInterval = 30 * time.Second
 	}
 
 	for i := 0; i < workers; i++ {
-		go p.workerLoop(ctx, interval)
+		go p.workerLoop(ctx, interval, retryBackoff, batchSize)
 	}
 
 	go p.maintenanceLoop(ctx, maintenanceInterval)
 }
 
-func (p *Processor) workerLoop(ctx context.Context, interval time.Duration) {
+func (p *Processor) workerLoop(ctx context.Context, interval, retryBackoff time.Duration, batchSize int) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -256,49 +315,60 @@ func (p *Processor) workerLoop(ctx context.Context, interval time.Duration) {
 		default:
 		}
 
-		task, err := p.repo.AcquireNext(ctx)
+		tasks, err := p.repo.AcquireBatch(ctx, batchSize)
 		if err != nil {
 			p.logger.Error("acquire next task failed", zap.Error(err))
+			p.wait(ctx, retryBackoff)
+			continue
+		}
+
+		if len(tasks) == 0 {
 			p.wait(ctx, interval)
 			continue
 		}
 
-		if task == nil {
-			p.wait(ctx, interval)
-			continue
-		}
+		p.metrics.recordAcquired(ctx, len(tasks))
 
-		start := time.Now()
-		if task.StartedAt != nil {
-			start = *task.StartedAt
-		}
-
-		taskCtx, correlationID := telemetry.ContextWithCorrelationID(ctx, task.CorrelationID)
-		p.logger.Info("processing transformation", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID))
-
-		if err := p.handleTask(taskCtx, task); err != nil {
-			p.metrics.recordDuration(taskCtx, time.Since(start))
-			if errors.Is(err, errDoclingWaiting) {
-				nextPoll := time.Time{}
-				if task.NextPollAt != nil {
-					nextPoll = *task.NextPollAt
-				}
-				p.logger.Info("docling pending", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Time("next_poll_at", nextPoll))
-				continue
-			}
-
-			doclingWaiting := task.DoclingJobID != ""
-			doclingLimit := errors.Is(err, converter.ErrDoclingPollingAttemptsExceeded)
-			p.logger.Error("transformation failed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", time.Since(start)), zap.Bool("docling_waiting", doclingWaiting), zap.Bool("docling_limit", doclingLimit), zap.String("docling_job_id", task.DoclingJobID), zap.Int("docling_poll_count", task.DoclingPollCount), zap.Error(err))
-			if markErr := p.repo.MarkFailed(ctx, task.ID, buildFailureMessage(err, task)); markErr != nil {
-				p.logger.Error("mark failed errored", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Error(markErr))
-			}
-		} else {
-			duration := time.Since(start)
-			p.metrics.recordDuration(taskCtx, duration)
-			p.logger.Info("transformation completed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", duration))
+		for _, task := range tasks {
+			p.processSingleTask(ctx, task)
 		}
 	}
+}
+
+func (p *Processor) processSingleTask(ctx context.Context, task *repository.TransformationTask) {
+	start := time.Now()
+	if task.StartedAt != nil {
+		start = *task.StartedAt
+	}
+
+	taskCtx, correlationID := telemetry.ContextWithCorrelationID(ctx, task.CorrelationID)
+	p.logger.Info("processing transformation", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID))
+
+	if err := p.handleTask(taskCtx, task); err != nil {
+		p.metrics.recordDuration(taskCtx, time.Since(start))
+		if errors.Is(err, errDoclingWaiting) {
+			nextPoll := time.Time{}
+			if task.NextPollAt != nil {
+				nextPoll = *task.NextPollAt
+			}
+			p.logger.Info("docling pending", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Time("next_poll_at", nextPoll))
+			return
+		}
+
+		doclingWaiting := task.DoclingJobID != ""
+		doclingLimit := errors.Is(err, converter.ErrDoclingPollingAttemptsExceeded)
+		p.logger.Error("transformation failed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", time.Since(start)), zap.Bool("docling_waiting", doclingWaiting), zap.Bool("docling_limit", doclingLimit), zap.String("docling_job_id", task.DoclingJobID), zap.Int("docling_poll_count", task.DoclingPollCount), zap.Error(err))
+		p.metrics.recordOutcome(taskCtx, false)
+		if markErr := p.repo.MarkFailed(ctx, task.ID, buildFailureMessage(err, task)); markErr != nil {
+			p.logger.Error("mark failed errored", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Error(markErr))
+		}
+		return
+	}
+
+	duration := time.Since(start)
+	p.metrics.recordDuration(taskCtx, duration)
+	p.metrics.recordOutcome(taskCtx, true)
+	p.logger.Info("transformation completed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", duration))
 }
 
 func (p *Processor) handleTask(ctx context.Context, task *repository.TransformationTask) error {

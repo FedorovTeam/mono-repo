@@ -11,25 +11,31 @@ import (
 // Config описывает параметры для gRPC сервера, подключения к Docling и инфраструктурных сервисов.
 type Config struct {
 	Service       ServiceConfig       `yaml:"service"`
+	Scheduler     SchedulerConfig     `yaml:"scheduler"`
 	Docling       DoclingConfig       `yaml:"docling"`
 	Minio         MinioConfig         `yaml:"minio"`
 	Postgres      PostgresConfig      `yaml:"postgres"`
-	Temporal      TemporalConfig      `yaml:"temporal"`
 	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 // ServiceConfig описывает базовые настройки сервиса.
 type ServiceConfig struct {
-	Name                 string        `yaml:"name"`
-	GRPCPort             int           `yaml:"grpc_port"`
-	MaxWorkers           int           `yaml:"max_workers"`
-	QueueLimit           int           `yaml:"queue_limit"`
+	Name              string        `yaml:"name"`
+	GRPCPort          int           `yaml:"grpc_port"`
+	MaxWorkers        int           `yaml:"max_workers"`
+	QueueLimit        int           `yaml:"queue_limit"`
+	ProcessingTimeout time.Duration `yaml:"processing_timeout"`
+	IOTimeout         time.Duration `yaml:"io_timeout"`
+}
+
+// SchedulerConfig описывает интервалы и параметры повторных попыток для cron-воркеров.
+type SchedulerConfig struct {
 	PollInterval         time.Duration `yaml:"poll_interval"`
-	ProcessingTimeout    time.Duration `yaml:"processing_timeout"`
-	IOTimeout            time.Duration `yaml:"io_timeout"`
+	MaintenanceInterval  time.Duration `yaml:"maintenance_interval"`
+	BatchSize            int           `yaml:"batch_size"`
+	RetryBackoff         time.Duration `yaml:"retry_backoff"`
 	MaxProcessingRetries int           `yaml:"max_processing_retries"`
-	CleanupInterval      time.Duration `yaml:"cleanup_interval"`
-	RetentionPeriod      time.Duration `yaml:"retention_period"`
+	CleanupRetention     time.Duration `yaml:"cleanup_retention"`
 }
 
 // DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.
@@ -62,12 +68,6 @@ type PostgresConfig struct {
 	MaxConnections int32  `yaml:"max_connections"`
 }
 
-// TemporalConfig описывает подключение к Temporal.
-type TemporalConfig struct {
-	Address   string `yaml:"address"`
-	Namespace string `yaml:"namespace"`
-}
-
 // ObservabilityConfig описывает флаги включения подсистем наблюдаемости.
 type ObservabilityConfig struct {
 	TracingEnabled bool `yaml:"tracingEnabled"`
@@ -85,6 +85,10 @@ func Load(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(content, &cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
 	}
 
 	return &cfg, nil
@@ -108,4 +112,49 @@ func MustLoadFromPath(path string) *Config {
 	}
 
 	return cfg
+}
+
+// Validate проверяет, что обязательные параметры заданы и имеют допустимые значения.
+func (c *Config) Validate() error {
+	if c.Service.Name == "" {
+		return fmt.Errorf("service.name is required")
+	}
+	if c.Service.GRPCPort <= 0 {
+		return fmt.Errorf("service.grpc_port must be positive")
+	}
+	if c.Service.QueueLimit < 0 {
+		return fmt.Errorf("service.queue_limit cannot be negative")
+	}
+	if c.Service.ProcessingTimeout <= 0 {
+		return fmt.Errorf("service.processing_timeout must be positive")
+	}
+	if c.Service.IOTimeout <= 0 {
+		return fmt.Errorf("service.io_timeout must be positive")
+	}
+
+	if c.Scheduler.BatchSize <= 0 {
+		return fmt.Errorf("scheduler.batch_size must be positive")
+	}
+	if c.Scheduler.PollInterval <= 0 {
+		return fmt.Errorf("scheduler.poll_interval must be positive")
+	}
+	if c.Scheduler.MaintenanceInterval <= 0 {
+		return fmt.Errorf("scheduler.maintenance_interval must be positive")
+	}
+	if c.Scheduler.MaxProcessingRetries < 0 {
+		return fmt.Errorf("scheduler.max_processing_retries cannot be negative")
+	}
+	if c.Scheduler.CleanupRetention < 0 {
+		return fmt.Errorf("scheduler.cleanup_retention cannot be negative")
+	}
+	if c.Postgres.DSN == "" {
+		return fmt.Errorf("postgres.dsn is required")
+	}
+	if c.Minio.Endpoint == "" || c.Minio.AccessKey == "" || c.Minio.SecretKey == "" || c.Minio.Bucket == "" {
+		return fmt.Errorf("minio configuration is incomplete")
+	}
+	if c.Docling.Endpoint == "" {
+		return fmt.Errorf("docling.endpoint is required")
+	}
+	return nil
 }
