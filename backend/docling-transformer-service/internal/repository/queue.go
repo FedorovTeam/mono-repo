@@ -331,15 +331,17 @@ RETURNING 1`
 func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error) {
 	const query = `
 WITH stalled AS (
-    SELECT id, retry_count, docling_job_id, docling_poll_count FROM transformations_queue
+    SELECT id, retry_count, docling_job_id, docling_poll_count, started_at FROM transformations_queue
     WHERE status = 'processing' AND started_at < NOW() - $1::interval
 ),
 failed AS (
     UPDATE transformations_queue
     SET status = 'failed', finished_at = NOW(),
         error = CASE
-            WHEN docling_job_id IS NOT NULL AND docling_job_id <> '' AND $3 > 0 AND docling_poll_count >= $3 THEN 'docling polling attempts exceeded'
-            ELSE 'processing timeout exceeded'
+            WHEN docling_job_id IS NOT NULL AND docling_job_id <> '' AND $3 > 0 AND docling_poll_count >= $3 THEN
+                format('docling job %s exceeded polling limit (%s/%s)', docling_job_id, docling_poll_count, $3)
+            ELSE
+                format('processing timeout exceeded after %s (started_at=%s, retries=%s/%s)', $1, COALESCE(started_at::text, 'unknown'), retry_count, $2)
         END
     WHERE id IN (
         SELECT id FROM stalled
@@ -350,7 +352,7 @@ failed AS (
 ),
 restored AS (
     UPDATE transformations_queue
-    SET status = 'pending', started_at = NULL, error = 'restored after timeout',
+    SET status = 'pending', started_at = NULL, error = format('restored after timeout %s (started_at=%s)', $1, COALESCE(started_at::text, 'unknown')),
         docling_job_id = NULL, docling_poll_count = 0, next_poll_at = NULL
     WHERE id IN (SELECT id FROM stalled EXCEPT SELECT id FROM failed)
     RETURNING id
