@@ -24,9 +24,9 @@ grpcurl -plaintext -d '{"documentId":"doc-1","originalBucket":"orig","originalOb
 3. Убедиться, что в логах есть строчки `incoming gRPC request` и `ConvertDocumentToMarkdown completed` с тем же идентификатором и что прокинуты заголовки до Docling.
 
 ### Переполнение очереди и метрики
-1. В `config.yaml` установить `service.max_workers: 1`.
+1. В `config.yaml` установить, например, `service.queue_limit: 1` (оставив `service.max_workers: 1` для последовательной обработки).
 2. Отправить две gRPC-заявки подряд.
-3. Вторая заявка должна завершиться `ResourceExhausted`, а метрика `docling_transformer_queue_pending` в OTEL покажет рост ожидания.
+3. Вторая заявка должна завершиться `ResourceExhausted`, а метрика `docling_transformer_queue_pending` в OTEL покажет рост ожидания. При `service.queue_limit: 0` обе заявки принимаются и получают `queue_id` со статусом `pending`, ожидая воркер.
 
 ### Восстановление зависших задач
 1. В БД вставить запись в `transformations_queue` со статусом `processing`, `started_at` в прошлом (более `service.processing_timeout`) и валидным `correlation_id`.

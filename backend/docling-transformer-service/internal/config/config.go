@@ -23,6 +23,7 @@ type ServiceConfig struct {
 	Name                 string        `yaml:"name"`
 	GRPCPort             int           `yaml:"grpc_port"`
 	MaxWorkers           int           `yaml:"max_workers"`
+	QueueLimit           int           `yaml:"queue_limit"`
 	PollInterval         time.Duration `yaml:"poll_interval"`
 	ProcessingTimeout    time.Duration `yaml:"processing_timeout"`
 	IOTimeout            time.Duration `yaml:"io_timeout"`

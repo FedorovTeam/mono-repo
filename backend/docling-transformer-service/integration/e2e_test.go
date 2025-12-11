@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,9 +150,22 @@ func (s *stubStorage) Upload(_ context.Context, _, _ string, _ string, content [
 type stubConverter struct {
 	result converter.DoclingConvertResult
 	err    error
+	delay  time.Duration
+
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
 }
 
 func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+	current := s.inFlight.Add(1)
+	if current > s.maxInFlight.Load() {
+		s.maxInFlight.Store(current)
+	}
+	defer s.inFlight.Add(-1)
+
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	if s.err != nil {
 		return "", s.err
 	}
@@ -159,6 +173,15 @@ func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest)
 }
 
 func (s *stubConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
+	current := s.inFlight.Add(1)
+	if current > s.maxInFlight.Load() {
+		s.maxInFlight.Store(current)
+	}
+	defer s.inFlight.Add(-1)
+
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	if s.err != nil {
 		return converter.StatusCheckResult{}, s.err
 	}
@@ -172,7 +195,7 @@ var _ converter.Converter = (*stubConverter)(nil)
 
 func TestConvertDocumentQueuesTask(t *testing.T) {
 	repo := &stubQueueRepo{active: 0}
-	api := server.NewTransformerAPI(repo, "markdown-bucket", 1, zap.NewNop())
+	api := server.NewTransformerAPI(repo, "markdown-bucket", 0, zap.NewNop())
 
 	resp, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-1",
@@ -201,8 +224,8 @@ func TestConvertDocumentQueuesTask(t *testing.T) {
 }
 
 func TestConvertDocumentResourceExhausted(t *testing.T) {
-	repo := &stubQueueRepo{active: 2}
-	api := server.NewTransformerAPI(repo, "md", 1, zap.NewNop())
+	repo := &stubQueueRepo{pending: 1, processing: 1}
+	api := server.NewTransformerAPI(repo, "md", 2, zap.NewNop())
 
 	_, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-1",
@@ -248,6 +271,47 @@ func TestWorkerProcessesTask(t *testing.T) {
 
 	if string(storage.uploaded) != "converted" {
 		t.Fatalf("expected markdown to be uploaded")
+	}
+}
+
+func TestWorkerProcessesTasksSequentiallyWithSingleWorker(t *testing.T) {
+	taskID1 := uuid.New()
+	taskID2 := uuid.New()
+	repo := &stubQueueRepo{
+		acquireTasks: []*repository.TransformationTask{{
+			ID:                taskID1,
+			OriginalBucket:    "orig",
+			OriginalObjectKey: "path/first.docx",
+			MarkdownBucket:    "md",
+			MarkdownObjectKey: "dest/first.md",
+			FilenameExtension: "docx",
+		}, {
+			ID:                taskID2,
+			OriginalBucket:    "orig",
+			OriginalObjectKey: "path/second.docx",
+			MarkdownBucket:    "md",
+			MarkdownObjectKey: "dest/second.md",
+			FilenameExtension: "docx",
+		}},
+	}
+
+	storage := &stubStorage{downloadContent: []byte("source")}
+	conv := &stubConverter{result: converter.DoclingConvertResult{Content: []byte("converted"), MediaType: "text/markdown"}, delay: 20 * time.Millisecond}
+
+	processor := worker.NewProcessor(repo, conv, storage, zap.NewNop(), worker.Config{MaxWorkers: 1, PollInterval: 5 * time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	processor.Run(ctx)
+
+	assertWithin(t, time.Second, func() bool {
+		repo.markMutex.Lock()
+		defer repo.markMutex.Unlock()
+		return len(repo.markDoneIDs) == 2
+	})
+
+	if max := conv.maxInFlight.Load(); max > 1 {
+		t.Fatalf("expected sequential processing, max concurrency = %d", max)
 	}
 }
 

@@ -11,7 +11,7 @@ sequenceDiagram
 
     GW->>TR: ConvertDocumentToMarkdown(document_id, original_bucket, original_object_key, filename_extension?, markdown_bucket?, markdown_object_key?) + x-correlation-id
     TR->>TR: валидация bucket/extension
-    TR->>TR: проверка лимита service.max_workers
+    TR->>TR: проверка лимита service.queue_limit
     TR->>PG: INSERT transformations_queue status=pending
     TR-->>GW: queue_id, status=pending, markdown_bucket/object_key
 

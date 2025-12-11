@@ -25,13 +25,13 @@ type TransformerAPI struct {
 	transformerv1.UnimplementedTransformerServiceServer
 	queueRepo      repository.QueueRepository
 	markdownBucket string
-	maxWorkers     int
+	queueLimit     int
 	logger         *zap.Logger
 }
 
 // NewTransformerAPI конструирует обработчик с переданным конвертером.
-func NewTransformerAPI(queueRepo repository.QueueRepository, markdownBucket string, maxWorkers int, logger *zap.Logger) *TransformerAPI {
-	return &TransformerAPI{queueRepo: queueRepo, markdownBucket: markdownBucket, maxWorkers: maxWorkers, logger: logger}
+func NewTransformerAPI(queueRepo repository.QueueRepository, markdownBucket string, queueLimit int, logger *zap.Logger) *TransformerAPI {
+	return &TransformerAPI{queueRepo: queueRepo, markdownBucket: markdownBucket, queueLimit: queueLimit, logger: logger}
 }
 
 // ConvertDocumentToMarkdown выполняет преобразование документа через конвертер.
@@ -76,15 +76,19 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		markdownKey = transformations.BuildMarkdownKey(req.GetOriginalObjectKey())
 	}
 
-	if s.maxWorkers > 0 {
-		active, err := s.queueRepo.CountActive(ctx)
+	if s.queueLimit > 0 {
+		pending, processing, waiting, err := s.queueRepo.CountByStatus(ctx)
 		if err != nil {
-			s.logger.Error("count active tasks failed", zap.String("correlation_id", correlationID), zap.Error(err))
-			return nil, status.Errorf(codes.Internal, "count active tasks: %v", err)
+			s.logger.Error("count queue tasks failed", zap.String("correlation_id", correlationID), zap.Error(err))
+			return nil, status.Errorf(codes.Internal, "count queue tasks: %v", err)
 		}
 
-		if active >= s.maxWorkers {
-			return nil, status.Error(codes.ResourceExhausted, "no free worker slots")
+		currentSize := pending + processing + waiting
+		if currentSize >= s.queueLimit {
+			s.logger.Warn("queue limit reached", zap.String("correlation_id", correlationID),
+				zap.Int("queue_limit", s.queueLimit),
+				zap.Int("pending", pending), zap.Int("processing", processing), zap.Int("waiting_docling", waiting))
+			return nil, status.Error(codes.ResourceExhausted, "queue limit reached")
 		}
 	}
 
@@ -113,9 +117,9 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 }
 
 // Run запускает gRPC сервер на указанном порте.
-func Run(ctx context.Context, logger *zap.Logger, queueRepo repository.QueueRepository, markdownBucket string, maxWorkers int, port int, obsCfg config.ObservabilityConfig) error {
+func Run(ctx context.Context, logger *zap.Logger, queueRepo repository.QueueRepository, markdownBucket string, queueLimit int, port int, obsCfg config.ObservabilityConfig) error {
 	srv := newGRPCServer(logger, obsCfg)
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(queueRepo, markdownBucket, maxWorkers, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(queueRepo, markdownBucket, queueLimit, logger))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
