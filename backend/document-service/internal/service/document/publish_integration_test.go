@@ -188,5 +188,5 @@ func (p *recordingPublisher) PublishMarkdown(ctx context.Context, in *githubpubl
 	if p.err != nil {
 		return nil, p.err
 	}
-	return &githubpublisherv1.PublishMarkdownResponse{CommitSha: "integration-sha"}, nil
+	return &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "integration-sha"}, nil
 }

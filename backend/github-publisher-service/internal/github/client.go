@@ -13,6 +13,16 @@ import (
 	"backend-github-publisher-service/internal/config"
 )
 
+// APIError описывает неуспешный ответ GitHub API.
+type APIError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *APIError) Error() string {
+	return e.Message
+}
+
 // HTTPClient определяет интерфейс минимального HTTP-клиента.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
@@ -244,13 +254,16 @@ func (c *Client) unexpectedStatusError(resp *http.Response, branch, url string) 
 		hint = "; возможно, указан некорректный репозиторий или токен не имеет нужных прав"
 	}
 
-	return fmt.Errorf(
-		"unexpected status %d%s (repo=%s, branch=%s, url=%s): %s",
-		resp.StatusCode,
-		hint,
-		repo,
-		branch,
-		url,
-		string(body),
-	)
+	return &APIError{
+		StatusCode: resp.StatusCode,
+		Message: fmt.Sprintf(
+			"unexpected status %d%s (repo=%s, branch=%s, url=%s): %s",
+			resp.StatusCode,
+			hint,
+			repo,
+			branch,
+			url,
+			string(body),
+		),
+	}
 }

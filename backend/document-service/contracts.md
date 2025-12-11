@@ -81,3 +81,4 @@
   }
   ```
 - **Связь с GitHub:** воркер скачивает Markdown из MinIO, формирует коммит/PR через `github-publisher-service` и по успеху фиксирует статус `PublishedToGitHub` и событие в `job_events`.
+- **Обработка ошибок:** `github-publisher-service` возвращает нормализованные статусы (`SUCCESS`, `TEMPORARY_FAILURE`, `PERMANENT_FAILURE`) и коды ошибок; воркер сохраняет их в `documents.error_reason` без дополнительного парсинга HTTP-кодов.
