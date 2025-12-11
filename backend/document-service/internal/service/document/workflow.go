@@ -32,7 +32,7 @@ const (
 
 	correlationIDHeader = "x-correlation-id"
 
-	markdownAwaitTimeout          = 2 * time.Minute
+	markdownAwaitTimeout          = 15 * time.Minute
 	markdownAwaitInitialBackoff   = 2 * time.Second
 	markdownAwaitMaxBackoff       = 20 * time.Second
 	conversionNotificationTimeout = "conversion notification timeout"
