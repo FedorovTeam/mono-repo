@@ -17,6 +17,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 	"google.golang.org/grpc/metadata"
@@ -35,6 +36,10 @@ const (
 	markdownAwaitInitialBackoff   = 2 * time.Second
 	markdownAwaitMaxBackoff       = 20 * time.Second
 	conversionNotificationTimeout = "conversion notification timeout"
+
+	publishObjectCheckInitialBackoff = 500 * time.Millisecond
+	publishObjectCheckMaxBackoff     = 5 * time.Second
+	publishObjectCheckAttempts       = 3
 )
 
 type WorkflowStarter interface {
@@ -367,7 +372,7 @@ func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput
 		return fmt.Errorf("markdown bucket/object key is required")
 	}
 
-	logger := activity.GetLogger(ctx)
+	logger := activityLogger(ctx)
 	deadline := time.Now().Add(markdownAwaitTimeout)
 	backoff := markdownAwaitInitialBackoff
 
@@ -398,6 +403,7 @@ func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput
 
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {
 	ctx = a.withCorrelationID(ctx, input.CorrelationID)
+	logger := activityLogger(ctx)
 	if a.publisher == nil {
 		return fmt.Errorf("publisher client is not configured")
 	}
@@ -485,6 +491,36 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if input.MarkdownBucket == "" || markdownObjectKey == "" {
 		_ = a.fail(ctx, input.DocumentID, "markdown content is empty and no bucket/object_key provided")
 		return fmt.Errorf("markdown content is empty and no bucket/object_key provided")
+	}
+
+	if a.storage == nil {
+		return fmt.Errorf("storage client is not configured")
+	}
+
+	backoff := publishObjectCheckInitialBackoff
+	for attempt := 1; attempt <= publishObjectCheckAttempts; attempt++ {
+		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: input.MarkdownBucket, ObjectKey: markdownObjectKey}); err == nil {
+			break
+		} else {
+			logger.Info("markdown object not available", "document_id", input.DocumentID, "bucket", input.MarkdownBucket, "object_key", markdownObjectKey, "correlation_id", correlationIDFromContext(ctx), "attempt", attempt, "error", err)
+
+			if attempt == publishObjectCheckAttempts {
+				reason := fmt.Sprintf("markdown object %s/%s unavailable (correlation_id=%s): %v", input.MarkdownBucket, markdownObjectKey, correlationID, err)
+				_ = a.fail(ctx, input.DocumentID, reason)
+				return temporal.NewNonRetryableApplicationError(reason, "MarkdownObjectUnavailable", err)
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+
+			backoff *= 2
+			if backoff > publishObjectCheckMaxBackoff {
+				backoff = publishObjectCheckMaxBackoff
+			}
+		}
 	}
 
 	req := &githubpublisherv1.PublishMarkdownRequest{
@@ -592,6 +628,24 @@ func correlationIDFromContext(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+type noopLogger struct{}
+
+func (noopLogger) Debug(string, ...interface{}) {}
+func (noopLogger) Info(string, ...interface{})  {}
+func (noopLogger) Warn(string, ...interface{})  {}
+func (noopLogger) Error(string, ...interface{}) {}
+
+func activityLogger(ctx context.Context) (logger log.Logger) {
+	defer func() {
+		if r := recover(); r != nil || logger == nil {
+			logger = noopLogger{}
+		}
+	}()
+
+	logger = activity.GetLogger(ctx)
+	return
 }
 
 func (a *Activities) validateRepository(ctx context.Context, owner, repository string) error {

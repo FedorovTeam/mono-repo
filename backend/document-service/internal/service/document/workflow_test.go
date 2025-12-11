@@ -270,6 +270,7 @@ func TestPublishMarkdownRejectsRepositoryWithSlash(t *testing.T) {
 
 func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	repo := &fakeRepo{doc: &model.Document{ID: "doc-2", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: model.StatusStoredOriginal}}
+	storage := &stubStorageClient{}
 	publisher := &trackingPublisher{}
 	var requestedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +279,7 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	}))
 	defer server.Close()
 
-	activities := NewActivities(repo, nil, nil, publisher, "owner", "repo", "main", "main", server.URL)
+	activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", server.URL)
 	activities.httpClient = server.Client()
 
 	err := activities.PublishMarkdown(context.Background(), publishInput{
@@ -300,5 +301,8 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	}
 	if repo.lastStatus != model.StatusPublishedToGitHub {
 		t.Fatalf("expected published status, got %v", repo.lastStatus)
+	}
+	if storage.attempts == 0 {
+		t.Fatal("storage client was not used before publishing")
 	}
 }
