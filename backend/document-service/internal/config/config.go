@@ -103,5 +103,38 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
 	return &cfg, nil
+}
+
+// Validate проверяет обязательные поля и интервальные параметры конфигурации.
+func (c *Config) Validate() error {
+	if c.Server.Addr == "" {
+		return fmt.Errorf("server.addr is required")
+	}
+	if c.Postgres.DSN == "" {
+		return fmt.Errorf("postgres.dsn is required")
+	}
+	if c.Minio.Endpoint == "" || c.Minio.AccessKey == "" || c.Minio.SecretKey == "" || c.Minio.OriginalBucket == "" || c.Minio.MarkdownBucket == "" {
+		return fmt.Errorf("minio configuration is incomplete")
+	}
+	if c.Services.StorageService == "" || c.Services.TransformerService == "" || c.Services.GithubPublisherService == "" {
+		return fmt.Errorf("services endpoints must be provided")
+	}
+
+	if c.Reconciler.Interval <= 0 || c.Reconciler.BatchSize <= 0 {
+		return fmt.Errorf("reconciler.interval and batch_size must be positive")
+	}
+	if c.GithubRetryer.Interval <= 0 || c.GithubRetryer.BatchSize <= 0 {
+		return fmt.Errorf("github_retryer.interval and batch_size must be positive")
+	}
+	if c.GithubRetryer.MaxAttempts <= 0 {
+		return fmt.Errorf("github_retryer.max_attempts must be positive")
+	}
+	if c.JobFollower.Interval <= 0 || c.JobFollower.BatchSize <= 0 {
+		return fmt.Errorf("job_follower.interval and batch_size must be positive")
+	}
+	return nil
 }

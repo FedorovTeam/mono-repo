@@ -25,6 +25,7 @@ type PublishRetrier struct {
 	maxBackoff     time.Duration
 	now            func() time.Time
 	logf           func(format string, args ...interface{})
+	metrics        *workerMetrics
 }
 
 func NewPublishRetrier(repo Repository, activities publishActivity, batchSize, maxAttempts int, initialBackoff, maxBackoff time.Duration) *PublishRetrier {
@@ -50,6 +51,7 @@ func NewPublishRetrier(repo Repository, activities publishActivity, batchSize, m
 		maxBackoff:     maxBackoff,
 		now:            time.Now,
 		logf:           log.Printf,
+		metrics:        newWorkerMetrics("publish_retrier"),
 	}
 }
 
@@ -81,14 +83,18 @@ func (r *PublishRetrier) reconcile(ctx context.Context) {
 		docs, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &status)
 		if err != nil {
 			r.logf("publish-retrier: list documents: %v", err)
+			r.metrics.recordError(ctx)
 			return
 		}
+		r.metrics.observeBatch(ctx, len(docs))
 		if len(docs) == 0 {
+			r.metrics.observeBatch(ctx, 0)
 			return
 		}
 
 		for i := range docs {
 			doc := docs[i]
+			start := time.Now()
 			code := githubReasonCode(doc.ErrorReason)
 			if code == "" {
 				continue
@@ -148,6 +154,10 @@ func (r *PublishRetrier) reconcile(ctx context.Context) {
 
 			if err := r.activities.PublishMarkdown(ctx, input); err != nil {
 				r.logf("publish-retrier: publish document_id=%s correlation_id=%s attempt=%d/%d: %v", doc.ID, correlationID(fullDoc), attempts+1, r.maxAttempts, err)
+				r.metrics.recordError(ctx)
+				r.metrics.recordDuration(ctx, time.Since(start))
+			} else {
+				r.metrics.recordDuration(ctx, time.Since(start))
 			}
 		}
 

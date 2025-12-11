@@ -3,12 +3,16 @@ service:
   grpc_port: 9090
   max_workers: 1
   queue_limit: 100
-  poll_interval: 5s
   processing_timeout: 30s
   io_timeout: 15s
+
+scheduler:
+  poll_interval: 5s
+  maintenance_interval: 1m
+  batch_size: 50
+  retry_backoff: 10s
   max_processing_retries: 3
-  cleanup_interval: 1m
-  retention_period: 24h
+  cleanup_retention: 24h
 
 postgres:
   dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/docling_adapter?sslmode=disable"
@@ -33,10 +37,6 @@ minio:
   bucket: knowledge-md
   region: us-east-1
   use_ssl: true
-
-temporal:
-  address: temporal-frontend.temporal.svc.cluster.local:7233
-  namespace: knowledge-base
 
 observability:
   tracingEnabled: false

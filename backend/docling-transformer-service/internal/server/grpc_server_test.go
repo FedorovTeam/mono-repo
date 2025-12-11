@@ -60,6 +60,9 @@ func (f *fakeQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
 func (*fakeQueueRepo) AcquireNext(context.Context) (*repository.TransformationTask, error) {
 	return nil, nil
 }
+func (*fakeQueueRepo) AcquireBatch(context.Context, int) ([]*repository.TransformationTask, error) {
+	return nil, nil
+}
 func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
 func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
 func (*fakeQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {

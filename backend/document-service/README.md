@@ -34,12 +34,17 @@ documents/year=2024/month=05/day=09/6c0c24a8-4c83-4e5b-8ab5-21f0db363e51/9b902e5
 - `server.addr` — адрес gRPC сервера (по умолчанию `:50051`).
 - `postgres.dsn` — строка подключения к PostgreSQL.
 - `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — креденшелы, `minio.use_ssl=true`, `minio.original_bucket` / `minio.markdown_bucket` / `minio.bucket_prefix` — обязательные имена бакетов/префикса.
-- `temporal.address` — `temporal-frontend.temporal.svc.cluster.local:7233`, `temporal.namespace` — `knowledge-base`, `temporal.task_queue` — имя task queue.
+- `reconciler.interval` / `reconciler.batch_size` / `reconciler.min_uploaded_age` — периодичность и размер выборки задач для подтверждения загрузок, минимальный возраст загруженного объекта перед повторной проверкой.
+- `github_retryer.interval` / `github_retryer.batch_size` / `github_retryer.max_attempts` / `github_retryer.initial_backoff` / `github_retryer.max_backoff` — параметры крон-ретраев публикации в GitHub.
+- `job_follower.interval` / `job_follower.batch_size` / `job_follower.reschedule_after` — периодичность чтения завершённых задач и задержка перед повторным запуском следующей стадии.
 - `services.storage_service` — `storage.backend.svc.cluster.local:50052`, `services.transformer_service` — `transformer.backend.svc.cluster.local:9092`, `services.github_publisher_service` — `github-publisher.backend.svc.cluster.local:9097`.
 - `services.grpc` — общие параметры подключения к gRPC клиентам: `dial_timeout` для `grpc.WithBlock`, `min_connect_timeout` и `backoff` для `grpc.WithConnectParams`, `keepalive` для `grpc.WithKeepaliveParams` (все значения задаются в формате `time.Duration`).
 - `github.repository` — целевой репозиторий (по умолчанию `FedorovTeam/knowledge-base`), `github.branch` — рабочая ветка. На входе сервис ожидает раздельные `owner` и `repository`; если в `repository` передан формат `owner/repo`, владелец выделяется автоматически, а в базе сохраняется только имя репозитория без префикса владельца.
 - `observability.logs.enabled` — включает вывод стандартных логов; при `false` логгер работает в no-op режиме.
 - `observability.traces.enabled` / `observability.metrics.enabled` — включает экспорт OTLP-трейсов и метрик через gRPC. Для работы требуется доступный OTLP Collector (адрес берется из `OTEL_EXPORTER_OTLP_ENDPOINT`, по умолчанию `localhost:4317` с нешифрованным соединением).
+
+## Наблюдаемость
+Периодические воркеры публикуют метрики очереди и ошибок: gauge `document_service_upload_reconciler_queue_size`/`document_service_publish_retrier_queue_size`/`document_service_job_follower_queue_size`, гистограммы размеров пачек (`document_service_*_batch_size`) и длительности (`document_service_*_duration_ms`), счётчики ошибок (`document_service_*_errors_total`). В логах фиксируются некорректные выборки, пропуски объектов и ошибки публикации/маршрутизации, чтобы отслеживать частоту сбоев на каждой стадии.
 
 ## Быстрый старт
 1. Запустите PostgreSQL и MinIO (см. `infrastructure.md`).

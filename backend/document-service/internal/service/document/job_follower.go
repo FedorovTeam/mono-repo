@@ -24,6 +24,7 @@ type JobFollower struct {
 	batchSize int
 	postpone  time.Duration
 	logf      func(format string, args ...interface{})
+	metrics   *workerMetrics
 }
 
 func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration) *JobFollower {
@@ -39,6 +40,7 @@ func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration)
 		batchSize: batchSize,
 		postpone:  postpone,
 		logf:      log.Printf,
+		metrics:   newWorkerMetrics("job_follower"),
 	}
 }
 
@@ -67,9 +69,12 @@ func (f *JobFollower) reconcile(ctx context.Context) {
 		jobs, err := f.repo.ListFinishedJobs(ctx, f.batchSize, f.postpone)
 		if err != nil {
 			f.logf("job-follower: list finished jobs: %v", err)
+			f.metrics.recordError(ctx)
 			return
 		}
+		f.metrics.observeBatch(ctx, len(jobs))
 		if len(jobs) == 0 {
+			f.metrics.observeBatch(ctx, 0)
 			return
 		}
 
@@ -84,13 +89,18 @@ func (f *JobFollower) reconcile(ctx context.Context) {
 }
 
 func (f *JobFollower) handleJob(ctx context.Context, job model.ProcessingJob) {
+	start := time.Now()
+	defer f.metrics.recordDuration(ctx, time.Since(start))
+
 	doc, err := f.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
 		f.logf("job-follower: load document %s: %v", job.DocumentID, err)
+		f.metrics.recordError(ctx)
 		return
 	}
 	if doc == nil {
 		f.logf("job-follower: document %s not found for job %s", job.DocumentID, job.TaskID)
+		f.metrics.recordError(ctx)
 		return
 	}
 

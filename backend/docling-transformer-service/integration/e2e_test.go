@@ -65,6 +65,25 @@ func (s *stubQueueRepo) AcquireNext(context.Context) (*repository.Transformation
 	return task, nil
 }
 
+func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*repository.TransformationTask, error) {
+	if len(s.acquireTasks) == 0 {
+		return nil, nil
+	}
+
+	if limit <= 0 || limit > len(s.acquireTasks) {
+		limit = 1
+		if len(s.acquireTasks) < 1 {
+			return nil, nil
+		}
+	}
+
+	tasks := make([]*repository.TransformationTask, limit)
+	copy(tasks, s.acquireTasks[:limit])
+	s.acquireTasks = s.acquireTasks[limit:]
+	s.currentTask = tasks[len(tasks)-1]
+	return tasks, nil
+}
+
 func (s *stubQueueRepo) MarkDone(_ context.Context, id uuid.UUID, _, _ string) error {
 	s.markMutex.Lock()
 	defer s.markMutex.Unlock()
