@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -455,8 +456,18 @@ func (c *DoclingConverter) writeDoclingOptions(
 		}
 	}
 
+	if lang := c.selectLanguage(contentType); lang != "" {
+		if err := writer.WriteField("language", lang); err != nil {
+			return fmt.Errorf("write language: %w", err)
+		}
+	}
+
 	// Опции для PDF + OCR
 	if c.shouldEnableOCR(contentType) {
+		if err := writer.WriteField("ocr", "true"); err != nil {
+			return fmt.Errorf("write ocr: %w", err)
+		}
+
 		// Включаем OCR (Docling сам решит, когда его применять)
 		if err := writer.WriteField("do_ocr", "true"); err != nil {
 			return fmt.Errorf("write do_ocr: %w", err)
@@ -508,6 +519,20 @@ func (c *DoclingConverter) submit(
 ) (string, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
 
+	submitURL, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("parse docling submit endpoint: %w", err)
+	}
+
+	query := submitURL.Query()
+	if lang := c.selectLanguage(contentType); lang != "" {
+		query.Set("language", lang)
+	}
+	if c.shouldEnableOCR(contentType) {
+		query.Set("ocr", "true")
+	}
+	submitURL.RawQuery = query.Encode()
+
 	payload := &bytes.Buffer{}
 	writer := multipart.NewWriter(payload)
 
@@ -540,7 +565,7 @@ func (c *DoclingConverter) submit(
 		return "", fmt.Errorf("build docling multipart: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, payload)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, submitURL.String(), payload)
 	if err != nil {
 		return "", fmt.Errorf("build docling request: %w", err)
 	}
