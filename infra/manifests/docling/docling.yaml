@@ -21,7 +21,7 @@ spec:
             - name: DOCLING_SERVE_ENABLE_UI
               value: "1"
             - name: DOCLING_SERVE_RESULT_REMOVAL_DELAY
-              value: "3600"
+              value: "6200"
             - name: DOCLING_SERVE_SINGLE_USE_RESULTS
               value: "true"
             - name: DOCLING_SERVE_MAX_FILE_SIZE
@@ -48,11 +48,11 @@ spec:
               name: http
           resources:
             requests:
-              cpu: "2"
+              cpu: "3"
               memory: "3Gi"
             limits:
-              cpu: "4"
-              memory: "4Gi"
+              cpu: "5"
+              memory: "5Gi"
           # Если потребуется доступ к модели/кэшу на диске – сюда можно добавить volumeMounts
 ---
 apiVersion: v1
