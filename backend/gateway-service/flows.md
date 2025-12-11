@@ -1,14 +1,13 @@
 # flows
 
 ## Upload → Convert → Publish
-1. Клиент выполняет GraphQL-мутацию `uploadKnowledgeDocument` с `fileName`, `fileSizeBytes`, целевыми `repository`, `branch`, `path`.
+1. Клиент выполняет GraphQL-мутацию `uploadKnowledgeDocument` с `fileName`, `fileSizeBytes`, целевыми `repository`, `branch`, `path`. Репозиторий может быть передан как `<repo>` или `<owner>/<repo>` — gateway выделяет владельца и нормализует имя репозитория.
 2. Доступ к GraphQL защищён `X-API-Key`; gateway проверяет ключ, извлекает/создаёт `correlation-id` и валидирует вход (обязательные поля, `fileSizeBytes`, допустимые расширения, лимит `uploads.maxSizeBytes`).
-3. Gateway генерирует `documentId` (UUID) и запрашивает presigned ссылку через gRPC `storage-service.GenerateUploadURL`, передавая `documentId`, `correlation-id`, `fileName`, размер и TTL из `uploads.signedUrlTtlSeconds`.
-4. После получения ссылки создаётся запись через gRPC `document-service.CreateDocument` с `id`, путём, размером, `correlation-id`, а также `uploadBucket` и `uploadObjectKey` из ответа storage-service. Возвращённый `workflowId` прокидывается клиенту (если его нет — используется `documentId`).
+3. Gateway генерирует `documentId` (UUID) и запрашивает presigned ссылку через gRPC `storage-service.GenerateUploadURL`, передавая `documentId`, `correlation-id`, `fileName`, размер и TTL из `uploads.signedUrlTtlSeconds`. В ответе приходят `bucket`/`objectKey`, которые используются дальше.
+4. После получения ссылки создаётся запись через gRPC `document-service.CreateDocument` с `id`, путём, размером, `correlation-id`, нормализованным `repository` и опциональным `repositoryOwner`, а также `uploadBucket` и `uploadObjectKey` из ответа storage-service. Возвращённый `workflowId` прокидывается клиенту (если его нет — используется `documentId`).
 5. Мутация отвечает GraphQL-пейлоадом с сущностью `document`, полями `uploadUrl` и `uploadMethod = PUT`.
 6. Клиент загружает файл по `uploadUrl` (HTTP PUT). После события `s3:ObjectCreated:*` MinIO отправляет webhook на `/internal/storage/uploaded`.
-7. Webhook-драйвер gateway читает уведомление, извлекает `documentId` из имени объекта и `correlation-id` из `x-amz-meta-correlation-id` (user metadata/response elements), затем подтверждает загрузку через gRPC `document-service.ConfirmUpload` с bucket/objectKey/`correlation-id`. Если ни одна запись не обработана, возвращается 400. Дальнейшее выполнение workflow инициируется на стороне document-service.
-8. Если MinIO не смог доставить webhook (например, короткий сетевой сбой), событие можно безопасно воспроизвести тем же телом: обработчик идемпотентен, а `document-service` запустит workflow повторно. Дополнительно в document-service работает периодический reconciler, который для статуса `Uploaded` проверяет наличие объекта в MinIO и сам вызывает `ConfirmUpload`, покрывая случаи, когда webhook был потерян.
+7. Webhook-драйвер gateway обрабатывает все записи из уведомления: декодирует `objectKey`, извлекает `documentId` из имени файла и пробует достать `correlation-id` из `x-amz-meta-correlation-id` в user metadata/response elements. Если `correlation-id` отсутствует, генерируется новый. Для каждой записи выполняется gRPC-вызов `document-service.ConfirmUpload` с bucket/objectKey/`correlation-id`. Если ни одна запись не обработана, возвращается 400, иначе 202 Accepted.
 8. При необходимости клиент вызывает `retryProcessing(documentId)` — gateway проксирует вызов в `document-service.RetryProcessing` c текущим `correlation-id`.
 
 ## Получение статуса
