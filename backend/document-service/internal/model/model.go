@@ -84,6 +84,7 @@ type DocumentVersion struct {
 	Version           int32
 	OriginalObjectKey string
 	MarkdownObjectKey string
+	MarkdownQueueID   string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }

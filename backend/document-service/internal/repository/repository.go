@@ -49,9 +49,9 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 		version.CreatedAt = now
 		version.UpdatedAt = now
 		if _, err = tx.ExecContext(ctx, `
-            INSERT INTO document_versions (id, document_id, version, original_object_key, markdown_object_key, created_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7)
-        `, version.ID, version.DocumentID, version.Version, version.OriginalObjectKey, version.MarkdownObjectKey, version.CreatedAt, version.UpdatedAt); err != nil {
+            INSERT INTO document_versions (id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `, version.ID, version.DocumentID, version.Version, version.OriginalObjectKey, version.MarkdownObjectKey, version.MarkdownQueueID, version.CreatedAt, version.UpdatedAt); err != nil {
 			return nil, err
 		}
 		doc.Versions = []model.DocumentVersion{*version}
@@ -209,9 +209,9 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 			version.CreatedAt = now
 			version.UpdatedAt = now
 			if _, err = tx.ExecContext(ctx, `
-            INSERT INTO document_versions (id, document_id, version, original_object_key, markdown_object_key, created_at, updated_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7)
-        `, version.ID, version.DocumentID, version.Version, version.OriginalObjectKey, version.MarkdownObjectKey, version.CreatedAt, version.UpdatedAt); err != nil {
+            INSERT INTO document_versions (id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `, version.ID, version.DocumentID, version.Version, version.OriginalObjectKey, version.MarkdownObjectKey, version.MarkdownQueueID, version.CreatedAt, version.UpdatedAt); err != nil {
 				return nil, err
 			}
 			versionInserted = true
@@ -322,7 +322,7 @@ func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string
 
 func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]model.DocumentVersion, error) {
 	rows, err := r.db.QueryContext(ctx, `
-        SELECT id, document_id, version, original_object_key, markdown_object_key, created_at, updated_at
+        SELECT id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at
         FROM document_versions WHERE document_id=$1 ORDER BY version
     `, documentID)
 	if err != nil {
@@ -332,7 +332,7 @@ func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]mo
 	var versions []model.DocumentVersion
 	for rows.Next() {
 		var v model.DocumentVersion
-		if err := rows.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.MarkdownQueueID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
 		versions = append(versions, v)
@@ -342,11 +342,11 @@ func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]mo
 
 func (r *Repository) getVersionTx(ctx context.Context, tx *sql.Tx, documentID string, version int32) (*model.DocumentVersion, error) {
 	row := tx.QueryRowContext(ctx, `
-        SELECT id, document_id, version, original_object_key, markdown_object_key, created_at, updated_at
+        SELECT id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at
         FROM document_versions WHERE document_id=$1 AND version=$2
     `, documentID, version)
 	var v model.DocumentVersion
-	if err := row.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.CreatedAt, &v.UpdatedAt); err != nil {
+	if err := row.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.MarkdownQueueID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &v, nil
@@ -354,7 +354,7 @@ func (r *Repository) getVersionTx(ctx context.Context, tx *sql.Tx, documentID st
 
 func (r *Repository) fetchVersionsTx(ctx context.Context, tx *sql.Tx, documentID string) ([]model.DocumentVersion, error) {
 	rows, err := tx.QueryContext(ctx, `
-        SELECT id, document_id, version, original_object_key, markdown_object_key, created_at, updated_at
+        SELECT id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at
         FROM document_versions WHERE document_id=$1 ORDER BY version
     `, documentID)
 	if err != nil {
@@ -364,7 +364,7 @@ func (r *Repository) fetchVersionsTx(ctx context.Context, tx *sql.Tx, documentID
 	var versions []model.DocumentVersion
 	for rows.Next() {
 		var v model.DocumentVersion
-		if err := rows.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.MarkdownQueueID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
 		versions = append(versions, v)

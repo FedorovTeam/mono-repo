@@ -154,13 +154,17 @@ func TestPollDoclingJobLogsStatusError(t *testing.T) {
 	const responseBody = `{"task_status":"unknown","message":"docling refused"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/status/poll/") {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/status/poll/"):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseBody))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/result/"):
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"errors":[{"module_name":"worker"}]}`))
+		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(responseBody))
 	}))
 	defer server.Close()
 

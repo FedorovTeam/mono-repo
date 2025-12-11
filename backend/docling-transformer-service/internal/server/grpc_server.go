@@ -109,8 +109,6 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		Status:            string(repository.StatusPending),
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
-		WaitingDocling:    false,
-		DoclingTimeout:    false,
 	}, nil
 }
 

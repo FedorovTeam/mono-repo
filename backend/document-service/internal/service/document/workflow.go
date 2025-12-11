@@ -99,12 +99,14 @@ type awaitMarkdownInput struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	CorrelationID     string
+	QueueID           string
+	TransformerStatus string
 }
 
 type convertResult struct {
-	MarkdownContent []byte
-	MarkdownKey     string
-	MediaType       string
+	MarkdownKey string
+	QueueID     string
+	Status      string
 }
 
 type Activities struct {
@@ -173,21 +175,28 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		markdownKey = snapshot.MarkdownObjectKey
 	}
 
-	logger.Info("awaiting markdown availability", "document_id", input.DocumentID, "correlation_id", correlationID)
-	waitCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: markdownAwaitTimeout + markdownAwaitMaxBackoff,
-		RetryPolicy: &temporal.RetryPolicy{
-			MaximumAttempts: 1,
-		},
-	})
-	awaitArg := awaitMarkdownInput{
-		DocumentID:        snapshot.DocumentID,
-		MarkdownBucket:    snapshot.MarkdownBucket,
-		MarkdownObjectKey: markdownKey,
-		CorrelationID:     correlationID,
-	}
-	if err := workflow.ExecuteActivity(waitCtx, ActivityAwaitMarkdownName, awaitArg).Get(ctx, nil); err != nil {
-		return err
+	shouldAwait := !strings.EqualFold(convRes.Status, "done")
+	if shouldAwait {
+		logger.Info("awaiting markdown availability", "document_id", input.DocumentID, "correlation_id", correlationID, "queue_id", convRes.QueueID)
+		waitCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: markdownAwaitTimeout + markdownAwaitMaxBackoff,
+			RetryPolicy: &temporal.RetryPolicy{
+				MaximumAttempts: 1,
+			},
+		})
+		awaitArg := awaitMarkdownInput{
+			DocumentID:        snapshot.DocumentID,
+			MarkdownBucket:    snapshot.MarkdownBucket,
+			MarkdownObjectKey: markdownKey,
+			CorrelationID:     correlationID,
+			QueueID:           convRes.QueueID,
+			TransformerStatus: convRes.Status,
+		}
+		if err := workflow.ExecuteActivity(waitCtx, ActivityAwaitMarkdownName, awaitArg).Get(ctx, nil); err != nil {
+			return err
+		}
+	} else {
+		logger.Info("markdown marked done by transformer", "document_id", input.DocumentID, "correlation_id", correlationID, "queue_id", convRes.QueueID)
 	}
 
 	logger.Info("markdown availability confirmed, publishing", "document_id", input.DocumentID, "correlation_id", correlationID)
@@ -312,7 +321,8 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 	if status == model.StatusConvertedToMarkdown || status == model.StatusPublishedToGitHub {
-		return convertResult{MarkdownKey: resolvedMarkdownKey(doc)}, nil
+		latest := latestVersion(doc)
+		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(status)}, nil
 	}
 	extension := input.FilenameExtension
 	if extension == "" {
@@ -332,11 +342,20 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
+	markdownKey := resp.GetMarkdownObjectKey()
+	if markdownKey == "" {
+		markdownKey = input.MarkdownObjectKey
+	}
+
 	version := latestVersion(doc).Version + 1
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{Version: version, MarkdownObjectKey: resp.MarkdownObjectKey}); err != nil {
+	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{
+		Version:           version,
+		MarkdownObjectKey: markdownKey,
+		MarkdownQueueID:   resp.GetQueueId(),
+	}); err != nil {
 		return convertResult{}, err
 	}
-	return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: resp.MarkdownObjectKey, MediaType: resp.MediaType}, nil
+	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: resp.GetStatus()}, nil
 }
 
 func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput) error {

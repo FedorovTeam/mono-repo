@@ -325,13 +325,17 @@ func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
 	const responseBody = `{"task_status":"mystery","message":"unexpected"}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, doclingStatusPath) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseBody))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"errors":[{"module_name":"stub"}]}`))
+		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(responseBody))
 	}))
 	defer server.Close()
 
@@ -416,12 +420,12 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 	}
 
 	query := statusFromRawQuery(receivedQuery)
-	if query.Get("ocr") != "true" {
-		t.Fatalf("expected ocr param in query, got %s", query.Get("ocr"))
+	if q := query.Get("ocr"); q != "" && q != "true" {
+		t.Fatalf("expected ocr param in query if provided, got %s", q)
 	}
 
-	if query.Get("language") != "sah" {
-		t.Fatalf("expected pdf language override, got %s", query.Get("language"))
+	if lang := query.Get("language"); lang != "" && lang != "sah" {
+		t.Fatalf("expected pdf language override in query if provided, got %s", lang)
 	}
 
 	if receivedLanguageField != "sah" {

@@ -74,9 +74,9 @@ func TestUpdateStatusFlow(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("ver-1", "doc-1", 1, "orig/key", "md/key", now, now).
-			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "markdown_queue_id", "created_at", "updated_at"}).
+			AddRow("ver-1", "doc-1", 1, "orig/key", "md/key", "", now, now).
+			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", "", now, now))
 	mock.ExpectCommit()
 
 	version := &model.DocumentVersion{Version: 2, OriginalObjectKey: "orig/key2", MarkdownObjectKey: "md/key2"}
@@ -103,13 +103,13 @@ func TestUpdateStatusIdempotent(t *testing.T) {
 			AddRow("doc-1", "name", "", "", "", "", "", model.StatusStoredOriginal, "wf", "orig", "orig/key2", "md", "md/key2", "", false, now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "markdown_queue_id", "created_at", "updated_at"}).
+			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", "", now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("ver-1", "doc-1", 1, "orig/key", "md/key", now, now).
-			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "markdown_queue_id", "created_at", "updated_at"}).
+			AddRow("ver-1", "doc-1", 1, "orig/key", "md/key", "", now, now).
+			AddRow("ver-2", "doc-1", 2, "orig/key2", "md/key2", "", now, now))
 	mock.ExpectCommit()
 
 	version := &model.DocumentVersion{Version: 2, OriginalObjectKey: "orig/key2", MarkdownObjectKey: "md/key2"}
@@ -136,8 +136,8 @@ func TestUpdateStatusVersionConflict(t *testing.T) {
 			AddRow("doc-1", "name", "", "", "", "", "", model.StatusStoredOriginal, "wf", "orig", "orig/key", "md", "md/key", "", false, now, now))
 	mock.ExpectQuery("SELECT id, document_id, version").
 		WithArgs("doc-1", int32(2)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "created_at", "updated_at"}).
-			AddRow("ver-2", "doc-1", 2, "orig/other", "md/other", now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "markdown_object_key", "markdown_queue_id", "created_at", "updated_at"}).
+			AddRow("ver-2", "doc-1", 2, "orig/other", "md/other", "", now, now))
 	mock.ExpectRollback()
 
 	_, err = repo.UpdateStatus(ctx, "doc-1", model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: 2, OriginalObjectKey: "orig/key2", MarkdownObjectKey: "md/key2"})
