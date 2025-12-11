@@ -2,17 +2,24 @@
 
 ```mermaid
 graph LR
-    GW[Gateway / Workflows clients] -->|gRPC :service.grpc_port (9090 по умолчанию)| TR[docling-transformer-service]
+    GW[Gateway / Workflows clients] -->|gRPC :service.grpc_port (9090 по умолчанию)| API[Transformer gRPC API]
+
     subgraph App
-        TR
+        API -->|enqueue / restore| PG[(PostgreSQL\ntransformations_queue)]
+        WRK[Queue worker\n(MaxWorkers)] -->|polls + updates| PG
     end
-    TR -->|HTTP POST /v1/convert/file\nX-Correlation-Id, X-Docling-Source-Filename, X-Api-Key?\nmultipart files| DL[Docling Wrapper]
-    TR -->|S3 API download/upload| MN[(MinIO buckets: original* / docling-transformations)]
-    TR -->|OTLP (traces/metrics/logs)\nкогда включено| OBS[OTel Collector]
+
+    WRK -->|S3 API download/upload| MN[(MinIO buckets: original* / markdown_bucket)]
+    WRK -->|HTTP POST /v1/convert/file/async\nX-Correlation-Id, X-Docling-Source-Filename, X-Docling-Endpoint, X-Api-Key?\nmultipart files| DL[Docling Serve]
+    WRK -->|HTTP GET /v1/status/poll/{job_id}\nHTTP GET /v1/result/{job_id}| DL
+
+    API -.->|OTLP (traces/metrics/logs)\nкогда включено| OBS[OTel Collector]
+    WRK -.->|OTLP (traces/metrics/logs)\nкогда включено| OBS
 ```
 
-- gRPC сервер слушает порт из `service.grpc_port` (в `config/config.yaml` по умолчанию `9090`).
-- Docling вызывается по HTTP `POST` на `/v1/convert/file` с формой `files`, прокидыванием `X-Correlation-Id`, исходного имени файла (`X-Docling-Source-Filename`) и при необходимости `X-Api-Key`.
-- MinIO используется для скачивания оригинала (bucket передаётся в gRPC-запросе) и загрузки Markdown в bucket по умолчанию `docling-transformations` из настроек.
+- gRPC сервер слушает порт из `service.grpc_port` (в `config/config.yaml` по умолчанию `9090`) и принимает запрос `ConvertDocumentToMarkdown`, который ставит задачу в таблицу `transformations_queue` PostgreSQL. Ограничение на параллелизм устанавливается через `service.max_workers`.
+- Воркер (`internal/worker`) периодически забирает задания из очереди, скачивает исходный файл из MinIO (bucket и key приходят в gRPC-запросе), отправляет документ в Docling асинхронно и обновляет очередь после получения результата.
+- Docling вызывается по HTTP `POST /v1/convert/file/async` с формой `files`, прокидыванием `X-Correlation-Id`, исходного имени файла (`X-Docling-Source-Filename`), выбранного эндпоинта (`X-Docling-Endpoint`) и при необходимости `X-Api-Key`. Результат запрашивается через `/v1/status/poll/{job_id}` и `/v1/result/{job_id}`.
+- Markdown сохраняется в MinIO в `markdown_bucket` (по умолчанию `minio.bucket` из конфигурации); ключ результата строится в gRPC слое, если не передан явно.
 - Параметры Temporal присутствуют в конфигурации для клиента, но сервис пока не устанавливает подключение.
-- Трассировка, метрики и логирование активируются флагами `observability.tracingEnabled`, `observability.metricsEnabled`, `observability.loggingEnabled`; при выключении соответствующие провайдеры и middleware не поднимаются.
+- Трассировка, метрики и логирование активируются флагами `observability.tracingEnabled`, `observability.metricsEnabled`, `observability.loggingEnabled`; при выключении соответствующие провайдеры и middleware не поднимаются ни для gRPC сервера, ни для воркера.
