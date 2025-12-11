@@ -26,9 +26,15 @@ const (
 	ActivityAwaitOriginalName     = "document.awaitOriginal"
 	ActivityUploadOriginalName    = "document.uploadOriginal"
 	ActivityConvertToMarkdownName = "document.convertToMarkdown"
+	ActivityAwaitMarkdownName     = "document.awaitMarkdown"
 	ActivityPublishMarkdownName   = "document.publishMarkdown"
 
 	correlationIDHeader = "x-correlation-id"
+
+	markdownAwaitTimeout          = 2 * time.Minute
+	markdownAwaitInitialBackoff   = 2 * time.Second
+	markdownAwaitMaxBackoff       = 20 * time.Second
+	conversionNotificationTimeout = "conversion notification timeout"
 )
 
 type WorkflowStarter interface {
@@ -88,6 +94,13 @@ type publishInput struct {
 	CorrelationID     string
 }
 
+type awaitMarkdownInput struct {
+	DocumentID        string
+	MarkdownBucket    string
+	MarkdownObjectKey string
+	CorrelationID     string
+}
+
 type convertResult struct {
 	MarkdownContent []byte
 	MarkdownKey     string
@@ -132,6 +145,8 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		},
 	}
 	ctx = workflow.WithActivityOptions(ctx, options)
+	logger := workflow.GetLogger(ctx)
+	correlationID := workflow.GetInfo(ctx).WorkflowExecution.ID
 
 	var snapshot documentSnapshot
 	if err := workflow.ExecuteActivity(ctx, ActivityAwaitOriginalName, input.DocumentID).Get(ctx, &snapshot); err != nil {
@@ -158,6 +173,25 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		markdownKey = snapshot.MarkdownObjectKey
 	}
 
+	logger.Info("awaiting markdown availability", "document_id", input.DocumentID, "correlation_id", correlationID)
+	waitCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: markdownAwaitTimeout + markdownAwaitMaxBackoff,
+		RetryPolicy: &temporal.RetryPolicy{
+			MaximumAttempts: 1,
+		},
+	})
+	awaitArg := awaitMarkdownInput{
+		DocumentID:        snapshot.DocumentID,
+		MarkdownBucket:    snapshot.MarkdownBucket,
+		MarkdownObjectKey: markdownKey,
+		CorrelationID:     correlationID,
+	}
+	if err := workflow.ExecuteActivity(waitCtx, ActivityAwaitMarkdownName, awaitArg).Get(ctx, nil); err != nil {
+		return err
+	}
+
+	logger.Info("markdown availability confirmed, publishing", "document_id", input.DocumentID, "correlation_id", correlationID)
+
 	pubArg := publishInput{
 		DocumentID:        snapshot.DocumentID,
 		DocumentName:      snapshot.DocumentName,
@@ -170,7 +204,7 @@ func DocumentProcessingWorkflow(ctx workflow.Context, input WorkflowInput) error
 		BaseBranch:        snapshot.BaseBranch,
 		Path:              snapshot.PublishPath,
 		CreatePR:          snapshot.CreatePR,
-		CorrelationID:     workflow.GetInfo(ctx).WorkflowExecution.ID,
+		CorrelationID:     correlationID,
 	}
 
 	if err := workflow.ExecuteActivity(ctx, ActivityPublishMarkdownName, pubArg).Get(ctx, nil); err != nil {
@@ -305,6 +339,44 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	return convertResult{MarkdownContent: resp.MarkdownContent, MarkdownKey: resp.MarkdownObjectKey, MediaType: resp.MediaType}, nil
 }
 
+func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput) error {
+	ctx = a.withCorrelationID(ctx, input.CorrelationID)
+	if a.storage == nil {
+		return fmt.Errorf("storage client is not configured")
+	}
+	if input.MarkdownBucket == "" || input.MarkdownObjectKey == "" {
+		return fmt.Errorf("markdown bucket/object key is required")
+	}
+
+	logger := activity.GetLogger(ctx)
+	deadline := time.Now().Add(markdownAwaitTimeout)
+	backoff := markdownAwaitInitialBackoff
+
+	for {
+		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: input.MarkdownBucket, ObjectKey: input.MarkdownObjectKey}); err == nil {
+			logger.Info("markdown object detected", "document_id", input.DocumentID, "correlation_id", correlationIDFromContext(ctx))
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			_ = a.fail(ctx, input.DocumentID, conversionNotificationTimeout)
+			return temporal.NewNonRetryableApplicationError(conversionNotificationTimeout, conversionNotificationTimeout, nil)
+		}
+
+		logger.Info("markdown object not ready, retrying", "document_id", input.DocumentID, "correlation_id", correlationIDFromContext(ctx), "backoff", backoff.String())
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff = backoff * 2
+		if backoff > markdownAwaitMaxBackoff {
+			backoff = markdownAwaitMaxBackoff
+		}
+	}
+}
+
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {
 	ctx = a.withCorrelationID(ctx, input.CorrelationID)
 	if a.publisher == nil {
@@ -381,10 +453,10 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		return fmt.Errorf("%s", reason)
 	}
 
-	//if err := a.validateRepository(ctx, owner, repository); err != nil {
-	//	_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))
-	//	return err
-	//}
+	if err := a.validateRepository(ctx, owner, repository); err != nil {
+		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("validate repository: %v", err))
+		return err
+	}
 
 	markdownObjectKey := input.MarkdownObjectKey
 	if markdownObjectKey == "" {
