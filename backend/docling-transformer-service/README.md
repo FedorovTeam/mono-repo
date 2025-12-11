@@ -4,7 +4,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 
 ## Возможности
 - gRPC метод `ConvertDocumentToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` принимает данные об исходном объекте и ставит задачу в очередь `transformations_queue`, возвращая `queue_id`, `status=pending` и итоговый путь для Markdown.
-- Проверка на переполнение слотов (`service.max_workers`): при превышении лимита задач в статусах `pending`/`processing` возвращается gRPC код `ResourceExhausted`.
+- Проверка на переполнение очереди (`service.queue_limit`): gRPC код `ResourceExhausted` возвращается только если суммарное число задач в статусах `pending`/`processing`/`waiting_docling` достигло установленного лимита; `service.max_workers` ограничивает только параллелизм фоновых воркеров.
 - HTTP-запрос к Docling-конвертеру выполняется воркером в фоне; результат сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
 - При старте воркеров сервис восстанавливает незавершённые задачи из статуса `processing` в `pending` (или продолжает опрос Docling по сохранённому `docling_job_id`), чтобы после рестартов очередь автоматически возобновлялась без ручных действий.
 - Проксирование correlation-id во все внешние вызовы (Docling, MinIO) из воркера.
@@ -15,7 +15,8 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 ## Конфигурация
 Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл). Обязательные поля и их рекомендованные значения:
 - `service.name` и `service.grpc_port` — идентификатор сервиса и порт gRPC (9090).
-- `service.max_workers` — количество одновременных воркеров очереди (по умолчанию 1; используется также как лимит слотов для входящих gRPC запросов).
+- `service.max_workers` — количество одновременных воркеров очереди (по умолчанию 1; не влияет на приём входящих заявок).
+- `service.queue_limit` — максимальное количество задач в очереди (учитываются статусы `pending`/`processing`/`waiting_docling`); при значении `0` лимит выключен.
 - `postgres.dsn` и `postgres.max_connections` — строка подключения и лимит коннектов пула для очереди `transformations_queue`.
 - `docling.endpoint` — HTTPS endpoint Docling: `https://docling.tech.fedorov-team.tech`.
 - `docling.status_initial_interval` / `docling.status_backoff_factor` / `docling.status_max_interval` / `docling.status_max_attempts` — шаг, экспоненциальный backoff и лимит запросов статуса Docling (для ожидания длительных задач без блокировки воркеров).

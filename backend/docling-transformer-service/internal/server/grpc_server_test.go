@@ -23,7 +23,9 @@ const bufSize = 1024 * 1024
 
 type fakeQueueRepo struct {
 	enqueueCalls []repository.EnqueueParams
-	active       int
+	pending      int
+	processing   int
+	waiting      int
 	enqueueErr   error
 	countErr     error
 	queueID      uuid.UUID
@@ -44,7 +46,15 @@ func (f *fakeQueueRepo) CountActive(context.Context) (int, error) {
 	if f.countErr != nil {
 		return 0, f.countErr
 	}
-	return f.active, nil
+	return f.pending + f.processing + f.waiting, nil
+}
+
+func (f *fakeQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
+	if f.countErr != nil {
+		return 0, 0, 0, f.countErr
+	}
+
+	return f.pending, f.processing, f.waiting, nil
 }
 
 func (*fakeQueueRepo) AcquireNext(context.Context) (*repository.TransformationTask, error) {
@@ -52,7 +62,6 @@ func (*fakeQueueRepo) AcquireNext(context.Context) (*repository.TransformationTa
 }
 func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
 func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
-func (*fakeQueueRepo) CountByStatus(context.Context) (int, int, int, error)      { return 0, 0, 0, nil }
 func (*fakeQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
 	return nil
 }
@@ -74,7 +83,7 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 
 	lis := bufconn.Listen(bufSize)
 	srv := newGRPCServer(logger, config.ObservabilityConfig{LoggingEnabled: true})
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "markdown-bucket", 2, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "markdown-bucket", 0, logger))
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
@@ -129,7 +138,7 @@ func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 
 	lis := bufconn.Listen(bufSize)
 	srv := newGRPCServer(logger, config.ObservabilityConfig{})
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 1, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 2, logger))
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
@@ -149,7 +158,8 @@ func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 		t.Fatalf("expected invalid argument, got %v", err)
 	}
 
-	repo.active = 2
+	repo.pending = 1
+	repo.processing = 1
 	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-123",
 		OriginalBucket:    "bucket",
@@ -158,5 +168,66 @@ func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 
 	if status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("expected resource exhausted, got %v", err)
+	}
+}
+
+func TestConvertDocumentToMarkdownReturnsPendingWithQueueIDOnParallelRequests(t *testing.T) {
+	repo := &fakeQueueRepo{}
+	logger := zap.NewNop()
+
+	lis := bufconn.Listen(bufSize)
+	srv := newGRPCServer(logger, config.ObservabilityConfig{})
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 0, logger))
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	ctx := context.Background()
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial bufnet: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+
+	req := &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-123",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.docx",
+	}
+
+	respCh := make(chan *transformerv1.ConvertDocumentToMarkdownResponse, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			resp, callErr := client.ConvertDocumentToMarkdown(ctx, req)
+			if callErr != nil {
+				t.Errorf("unexpected error: %v", callErr)
+				return
+			}
+			respCh <- resp
+		}()
+	}
+
+	var responses []*transformerv1.ConvertDocumentToMarkdownResponse
+	timeout := time.After(time.Second)
+	for len(responses) < 2 {
+		select {
+		case <-timeout:
+			t.Fatalf("timed out waiting for responses")
+		case resp := <-respCh:
+			responses = append(responses, resp)
+		}
+	}
+
+	for _, resp := range responses {
+		if resp.GetStatus() != string(repository.StatusPending) {
+			t.Fatalf("expected pending status, got %s", resp.GetStatus())
+		}
+		if resp.GetQueueId() == "" {
+			t.Fatalf("queue id must be returned")
+		}
 	}
 }

@@ -7,7 +7,7 @@
   - `original_bucket` и `original_object_key` обязательны.
   - `filename_extension` берётся из запроса или вычисляется из `original_object_key`; поддерживаются только `doc` / `docx` / `pdf` (иначе `InvalidArgument`).
   - `markdown_bucket` берётся из запроса или из конфигурации; если оба пустые — `InvalidArgument`.
-  - При превышении лимита активных задач (`pending`/`processing`/`waiting_docling` >= `service.max_workers`) возвращается `ResourceExhausted`.
+  - При превышении лимита очереди (`pending`/`processing`/`waiting_docling` >= `service.queue_limit`, если он задан) возвращается `ResourceExhausted`.
 - **Шаги:**
   1. Принять gRPC вызов `ConvertDocumentToMarkdown` с обязательными `document_id`, `original_bucket`, `original_object_key`, опциональными `markdown_bucket`, `markdown_object_key`, `filename_extension`; `x-correlation-id` читается из метаданных или генерируется заново.
   2. Нормализовать расширение и вычислить `markdown_object_key`, если не передан (замена исходного расширения на `.md`).
