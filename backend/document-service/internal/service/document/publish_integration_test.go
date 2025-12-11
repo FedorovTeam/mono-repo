@@ -4,11 +4,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
@@ -18,6 +21,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		t.Parallel()
 
 		repo := &integrationRepo{}
+		storage := &stubStorageClient{}
 		publisher := &recordingPublisher{}
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/repos/owner/repo" {
@@ -27,7 +31,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		}))
 		defer server.Close()
 
-		activities := NewActivities(repo, nil, nil, publisher, "owner", "repo", "main", "main", server.URL)
+		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", server.URL)
 		activities.httpClient = server.Client()
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
@@ -50,6 +54,9 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 
 		if !publisher.called {
 			t.Fatal("publisher was not called")
+		}
+		if storage.attempts == 0 {
+			t.Fatal("storage client was not used to verify markdown object")
 		}
 		if publisher.lastReq == nil {
 			t.Fatal("publisher request was not recorded")
@@ -75,7 +82,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		}))
 		defer server.Close()
 
-		activities := NewActivities(repo, nil, nil, publisher, "owner", "repo", "main", "main", server.URL)
+		activities := NewActivities(repo, &stubStorageClient{}, nil, publisher, "owner", "repo", "main", "main", server.URL)
 		activities.httpClient = server.Client()
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
@@ -97,6 +104,46 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		}
 		if publisher.called {
 			t.Fatal("publisher should not be called when validation fails")
+		}
+	})
+
+	t.Run("fails when markdown object is missing", func(t *testing.T) {
+		t.Parallel()
+
+		repo := &integrationRepo{}
+		storage := &stubStorageClient{err: status.Error(codes.NotFound, "not found")}
+		publisher := &recordingPublisher{}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", server.URL)
+		activities.httpClient = server.Client()
+
+		err := activities.PublishMarkdown(context.Background(), publishInput{
+			DocumentID:        "doc-missing",
+			MarkdownBucket:    "bucket",
+			MarkdownObjectKey: "missing.md",
+			Path:              "docs/missing.md",
+			Version:           3,
+			CorrelationID:     "corr-1",
+		})
+		if err == nil {
+			t.Fatal("expected error for missing markdown object")
+		}
+
+		if repo.lastStatus != model.StatusFailed {
+			t.Fatalf("expected failed status, got %v", repo.lastStatus)
+		}
+		if repo.lastError == "" || !strings.Contains(repo.lastError, "corr-1") {
+			t.Fatalf("expected error to contain correlation id, got %q", repo.lastError)
+		}
+		if publisher.called {
+			t.Fatal("publisher should not be called when markdown object is missing")
+		}
+		if storage.attempts != publishObjectCheckAttempts {
+			t.Fatalf("expected %d storage attempts, got %d", publishObjectCheckAttempts, storage.attempts)
 		}
 	})
 }
