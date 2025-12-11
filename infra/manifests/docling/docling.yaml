@@ -49,10 +49,10 @@ spec:
           resources:
             requests:
               cpu: "3"
-              memory: "3Gi"
+              memory: "2Gi"
             limits:
               cpu: "5"
-              memory: "5Gi"
+              memory: "4Gi"
           # Если потребуется доступ к модели/кэшу на диске – сюда можно добавить volumeMounts
 ---
 apiVersion: v1
