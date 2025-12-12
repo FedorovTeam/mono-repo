@@ -121,6 +121,8 @@ func (r *publishRepoStub) ActiveJob(context.Context, string) (*domain.Processing
 	return nil, nil
 }
 
+func (r *publishRepoStub) AddJobEvent(context.Context, *domain.JobEvent) error { return nil }
+
 func (r *publishRepoStub) CreateProcessingJob(context.Context, *domain.ProcessingJob, *domain.JobEvent) (*domain.ProcessingJob, error) {
 	return nil, nil
 }
@@ -179,20 +181,20 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 	activities := NewActivities(repo, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
-	worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
+	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
 		"commit_message": "commit",
 		"author_name":    "Author",
 		"author_email":   "author@example.com",
 	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	if repo.lastEvent == nil {
-		t.Fatal("expected job event to be recorded")
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %#v", result.Event)
 	}
-	if repo.lastEvent.EventType != "completed" {
-		t.Fatalf("unexpected event type: %s", repo.lastEvent.EventType)
-	}
-	if repo.lastEvent.Payload == nil || repo.lastEvent.Payload["commit_sha"] != "abc123" {
-		t.Fatalf("expected commit_sha in event payload, got %#v", repo.lastEvent.Payload)
+	if result.Event.Payload == nil || result.Event.Payload["commit_sha"] != "abc123" {
+		t.Fatalf("expected commit_sha in event payload, got %#v", result.Event.Payload)
 	}
 	if publisher.lastRequest == nil || publisher.lastRequest.GetCommitMessage() != "commit" || publisher.lastRequest.GetAuthorName() != "Author" {
 		t.Fatalf("expected commit metadata to be propagated, got %#v", publisher.lastRequest)
@@ -226,30 +228,27 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
 	start := time.Now()
-	worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
+	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
 		"commit_message": "commit",
 		"author_name":    "Author",
 		"author_email":   "author@example.com",
 	}})
+	if err == nil {
+		t.Fatal("expected error from publisher")
+	}
 
-	if repo.lastEvent == nil {
-		t.Fatal("expected failed event to be recorded")
+	if result.Event == nil || result.Event.EventType != "failed" {
+		t.Fatalf("unexpected event: %#v", result.Event)
 	}
-	if repo.lastEvent.EventType != "failed" {
-		t.Fatalf("unexpected event type: %s", repo.lastEvent.EventType)
+	if result.Event.Payload == nil || result.Event.Payload["retry_after"] == nil {
+		t.Fatalf("expected retry_after hint in payload, got %#v", result.Event.Payload)
 	}
-	if repo.lastEvent.Payload == nil || repo.lastEvent.Payload["retry_after"] == nil {
-		t.Fatalf("expected retry_after hint in payload, got %#v", repo.lastEvent.Payload)
-	}
-	if repo.nextRun == nil {
+	if result.NextRun == nil {
 		t.Fatal("expected next run to be scheduled")
 	}
-	delay := repo.nextRun.Sub(start)
+	delay := result.NextRun.Sub(start)
 	if delay < 2*time.Second || delay > 4*time.Second {
 		t.Fatalf("expected retry_after to be respected, got delay=%s", delay)
-	}
-	if doc.Status != domain.DocumentStatusFailed {
-		t.Fatalf("expected document to be marked failed, got %s", doc.Status)
 	}
 }
 
@@ -306,13 +305,28 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	activities := NewActivities(repo, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 2, time.Second)
 
-	worker.reconcile(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	go worker.Run(ctx, time.Second)
 
-	completed := repo.jobs["job-stuck"]
-	if completed.Status != domain.JobStatusCompleted {
-		t.Fatalf("expected job to be completed after recovery, got %s", completed.Status)
-	}
-	if doc.Status != domain.DocumentStatusPublishedToGitHub {
-		t.Fatalf("expected document to be published, got %s", doc.Status)
+	waitUntil(t, func() bool {
+		completed := repo.jobs["job-stuck"]
+		return completed.Status == domain.JobStatusCompleted && doc.Status == domain.DocumentStatusPublishedToGitHub
+	})
+	cancel()
+}
+
+func waitUntil(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		if cond() {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("condition not met in time")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }
