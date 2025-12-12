@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v3.21.12
-// source: backend/transformer/v1/transformer.proto
+// source: backend/docling-transformer-service/proto/backend/transformer/v1/transformer.proto
 
 package transformerv1
 
@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	TransformerService_ConvertDocumentToMarkdown_FullMethodName = "/backend.transformer.v1.TransformerService/ConvertDocumentToMarkdown"
+	TransformerService_ConvertDocxToMarkdown_FullMethodName     = "/backend.transformer.v1.TransformerService/ConvertDocxToMarkdown"
 )
 
 // TransformerServiceClient is the client API for TransformerService service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TransformerServiceClient interface {
 	ConvertDocumentToMarkdown(ctx context.Context, in *ConvertDocumentToMarkdownRequest, opts ...grpc.CallOption) (*ConvertDocumentToMarkdownResponse, error)
+	ConvertDocxToMarkdown(ctx context.Context, in *ConvertDocxToMarkdownRequest, opts ...grpc.CallOption) (*ConvertDocxToMarkdownResponse, error)
 }
 
 type transformerServiceClient struct {
@@ -47,11 +49,22 @@ func (c *transformerServiceClient) ConvertDocumentToMarkdown(ctx context.Context
 	return out, nil
 }
 
+func (c *transformerServiceClient) ConvertDocxToMarkdown(ctx context.Context, in *ConvertDocxToMarkdownRequest, opts ...grpc.CallOption) (*ConvertDocxToMarkdownResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConvertDocxToMarkdownResponse)
+	err := c.cc.Invoke(ctx, TransformerService_ConvertDocxToMarkdown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TransformerServiceServer is the server API for TransformerService service.
 // All implementations must embed UnimplementedTransformerServiceServer
 // for forward compatibility.
 type TransformerServiceServer interface {
 	ConvertDocumentToMarkdown(context.Context, *ConvertDocumentToMarkdownRequest) (*ConvertDocumentToMarkdownResponse, error)
+	ConvertDocxToMarkdown(context.Context, *ConvertDocxToMarkdownRequest) (*ConvertDocxToMarkdownResponse, error)
 	mustEmbedUnimplementedTransformerServiceServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedTransformerServiceServer struct{}
 
 func (UnimplementedTransformerServiceServer) ConvertDocumentToMarkdown(context.Context, *ConvertDocumentToMarkdownRequest) (*ConvertDocumentToMarkdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ConvertDocumentToMarkdown not implemented")
+}
+func (UnimplementedTransformerServiceServer) ConvertDocxToMarkdown(context.Context, *ConvertDocxToMarkdownRequest) (*ConvertDocxToMarkdownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConvertDocxToMarkdown not implemented")
 }
 func (UnimplementedTransformerServiceServer) mustEmbedUnimplementedTransformerServiceServer() {}
 func (UnimplementedTransformerServiceServer) testEmbeddedByValue()                            {}
@@ -104,6 +120,24 @@ func _TransformerService_ConvertDocumentToMarkdown_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TransformerService_ConvertDocxToMarkdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConvertDocxToMarkdownRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TransformerServiceServer).ConvertDocxToMarkdown(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TransformerService_ConvertDocxToMarkdown_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TransformerServiceServer).ConvertDocxToMarkdown(ctx, req.(*ConvertDocxToMarkdownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TransformerService_ServiceDesc is the grpc.ServiceDesc for TransformerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -115,7 +149,11 @@ var TransformerService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ConvertDocumentToMarkdown",
 			Handler:    _TransformerService_ConvertDocumentToMarkdown_Handler,
 		},
+		{
+			MethodName: "ConvertDocxToMarkdown",
+			Handler:    _TransformerService_ConvertDocxToMarkdown_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "backend/transformer/v1/transformer.proto",
+	Metadata: "backend/docling-transformer-service/proto/backend/transformer/v1/transformer.proto",
 }

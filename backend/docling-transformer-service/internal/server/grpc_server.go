@@ -2,9 +2,16 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
+	"path"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/mono-repo/docling-transformer-service/internal/config"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
@@ -23,15 +30,43 @@ import (
 // TransformerAPI реализует gRPC-контракт TransformerService.
 type TransformerAPI struct {
 	transformerv1.UnimplementedTransformerServiceServer
-	queueRepo      repository.QueueRepository
-	markdownBucket string
-	queueLimit     int
-	logger         *zap.Logger
+	queueRepo       repository.QueueRepository
+	converter       converter.Converter
+	markdownBucket  string
+	queueLimit      int
+	pollInterval    time.Duration
+	pollMaxInterval time.Duration
+	pollAttempts    int
+	logger          *zap.Logger
+	httpClient      *http.Client
 }
 
 // NewTransformerAPI конструирует обработчик с переданным конвертером.
-func NewTransformerAPI(queueRepo repository.QueueRepository, markdownBucket string, queueLimit int, logger *zap.Logger) *TransformerAPI {
-	return &TransformerAPI{queueRepo: queueRepo, markdownBucket: markdownBucket, queueLimit: queueLimit, logger: logger}
+func NewTransformerAPI(queueRepo repository.QueueRepository, markdownBucket string, queueLimit int, conv converter.Converter, pollInterval, pollMaxInterval time.Duration, pollAttempts int, logger *zap.Logger) *TransformerAPI {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	if pollInterval <= 0 {
+		pollInterval = 2 * time.Second
+	}
+	if pollMaxInterval <= 0 {
+		pollMaxInterval = 10 * time.Second
+	}
+	if pollAttempts <= 0 {
+		pollAttempts = 10
+	}
+
+	return &TransformerAPI{
+		queueRepo:       queueRepo,
+		converter:       conv,
+		markdownBucket:  markdownBucket,
+		queueLimit:      queueLimit,
+		pollInterval:    pollInterval,
+		pollMaxInterval: pollMaxInterval,
+		pollAttempts:    pollAttempts,
+		logger:          logger,
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
+	}
 }
 
 // ConvertDocumentToMarkdown выполняет преобразование документа через конвертер.
@@ -116,10 +151,129 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 	}, nil
 }
 
+// ConvertDocxToMarkdown принимает содержимое DOCX либо ссылку, отправляет задачу в Docling и дожидается результата.
+func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+
+	if s.converter == nil {
+		return nil, status.Error(codes.Unimplemented, "converter is not configured")
+	}
+
+	if (len(req.GetDocxContent()) == 0 && req.GetDocxUrl() == "") || (len(req.GetDocxContent()) > 0 && req.GetDocxUrl() != "") {
+		return nil, status.Error(codes.InvalidArgument, "provide either docx_content or docx_url")
+	}
+
+	filename := strings.TrimSpace(req.GetFilename())
+	if filename == "" && req.GetDocxUrl() != "" {
+		if parsed, err := url.Parse(req.GetDocxUrl()); err == nil {
+			filename = path.Base(parsed.Path)
+		}
+	}
+	if filename == "" {
+		filename = "document.docx"
+	}
+
+	content := req.GetDocxContent()
+	if len(content) == 0 {
+		data, err := s.fetchByURL(ctx, req.GetDocxUrl())
+		if err != nil {
+			return nil, err
+		}
+		content = data
+	}
+
+	contentType, err := converter.ResolveContentTypeByExtension(filepath.Ext(filename))
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "filename must point to supported doc: %v", err)
+	}
+
+	jobID, err := s.converter.Submit(ctx, converter.DoclingConvertRequest{FileName: filename, Content: content, ContentType: contentType})
+	if err != nil {
+		s.logger.Error("docx submit failed", zap.String("correlation_id", correlationID), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "submit docx: %v", err)
+	}
+
+	result, err := s.pollUntilReady(ctx, jobID)
+	if err != nil {
+		s.logger.Error("docx conversion failed", zap.String("correlation_id", correlationID), zap.String("job_id", jobID), zap.Error(err))
+		return nil, status.Errorf(codes.DeadlineExceeded, "docling result: %v", err)
+	}
+
+	return &transformerv1.ConvertDocxToMarkdownResponse{
+		Markdown:  string(result.Content),
+		MediaType: result.MediaType,
+		Charset:   result.Charset,
+	}, nil
+}
+
+func (s *TransformerAPI) pollUntilReady(ctx context.Context, jobID string) (converter.DoclingConvertResult, error) {
+	backoff := s.pollInterval
+
+	for attempt := 1; attempt <= s.pollAttempts; attempt++ {
+		statusResult, err := s.converter.CheckStatus(ctx, jobID)
+		if err != nil {
+			return converter.DoclingConvertResult{}, err
+		}
+		if statusResult.Result != nil {
+			return *statusResult.Result, nil
+		}
+
+		if attempt == s.pollAttempts {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return converter.DoclingConvertResult{}, ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff = backoff * 2
+		if s.pollMaxInterval > 0 && backoff > s.pollMaxInterval {
+			backoff = s.pollMaxInterval
+		}
+	}
+
+	return converter.DoclingConvertResult{}, errors.New("docling result not ready")
+}
+
+func (s *TransformerAPI) fetchByURL(ctx context.Context, rawURL string) ([]byte, error) {
+	if rawURL == "" {
+		return nil, status.Error(codes.InvalidArgument, "docx_url is required when content is empty")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "build request: %v", err)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "fetch docx: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, status.Errorf(codes.InvalidArgument, "docx_url responded with %d: %s", resp.StatusCode, string(body))
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "read docx: %v", err)
+	}
+
+	if len(data) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "docx_url returned empty body")
+	}
+
+	return data, nil
+}
+
 // Run запускает gRPC сервер на указанном порте.
-func Run(ctx context.Context, logger *zap.Logger, queueRepo repository.QueueRepository, markdownBucket string, queueLimit int, port int, obsCfg config.ObservabilityConfig) error {
+func Run(ctx context.Context, logger *zap.Logger, queueRepo repository.QueueRepository, markdownBucket string, queueLimit int, conv converter.Converter, doclingCfg config.DoclingConfig, port int, obsCfg config.ObservabilityConfig) error {
 	srv := newGRPCServer(logger, obsCfg)
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(queueRepo, markdownBucket, queueLimit, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(queueRepo, markdownBucket, queueLimit, conv, doclingCfg.StatusInitialInterval, doclingCfg.StatusMaxInterval, doclingCfg.StatusMaxAttempts, logger))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {

@@ -117,7 +117,7 @@ func main() {
 	})
 	workerProcessor.Run(ctx)
 
-	if err := server.Run(ctx, logger, queueRepo, cfg.Minio.Bucket, cfg.Service.QueueLimit, cfg.Service.GRPCPort, cfg.Observability); err != nil {
+	if err := server.Run(ctx, logger, queueRepo, cfg.Minio.Bucket, cfg.Service.QueueLimit, conv, cfg.Docling, cfg.Service.GRPCPort, cfg.Observability); err != nil {
 		logger.Fatal("server failed", zap.Error(err))
 	}
 }

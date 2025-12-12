@@ -170,7 +170,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 		job.Payload["queue_id"] = result.QueueID
 	}
 
-	if w.waitMarkdown && !strings.EqualFold(result.Status, "done") {
+	if w.waitMarkdown && !result.Ready {
 		awaitInput := awaitMarkdownInput{
 			DocumentID:        job.DocumentID,
 			MarkdownBucket:    markdownBucket,
@@ -183,6 +183,16 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 			w.failJob(ctx, job, err.Error())
 			return
 		}
+
+		result.Ready = true
+		if result.Status == "" {
+			result.Status = string(model.StatusConvertedToMarkdown)
+		}
+	}
+
+	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
+		w.failJob(ctx, job, fmt.Sprintf("update status: %v", err))
+		return
 	}
 
 	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed"}); err != nil {

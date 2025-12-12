@@ -214,7 +214,7 @@ var _ converter.Converter = (*stubConverter)(nil)
 
 func TestConvertDocumentQueuesTask(t *testing.T) {
 	repo := &stubQueueRepo{active: 0}
-	api := server.NewTransformerAPI(repo, "markdown-bucket", 0, zap.NewNop())
+	api := server.NewTransformerAPI(repo, "markdown-bucket", 0, nil, 0, 0, 0, zap.NewNop())
 
 	resp, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-1",
@@ -244,7 +244,7 @@ func TestConvertDocumentQueuesTask(t *testing.T) {
 
 func TestConvertDocumentResourceExhausted(t *testing.T) {
 	repo := &stubQueueRepo{pending: 1, processing: 1}
-	api := server.NewTransformerAPI(repo, "md", 2, zap.NewNop())
+	api := server.NewTransformerAPI(repo, "md", 2, nil, 0, 0, 0, zap.NewNop())
 
 	_, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        "doc-1",

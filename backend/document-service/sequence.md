@@ -6,6 +6,7 @@ sequenceDiagram
     participant G as gRPC сервер DocumentService
     participant S as Бизнес-логика DocumentService
     participant ST as StorageService (gRPC)
+    participant TR as TransformerService (gRPC)
     participant R as PostgreSQL (documents + processing_jobs)
     participant UR as UploadReconciler
     participant F as JobFollower (cron)
@@ -40,6 +41,9 @@ sequenceDiagram
         F->>R: UPDATE document status=Failed (reason from payload)
     end
 
-    Note over TW,R: transformer worker выполняет convert_to_markdown → completed/failed
+    Note over TW,TR: transformer worker вызывает gRPC ConvertDocumentToMarkdown → Docling-конвертер кладёт Markdown в MinIO и возвращает queue_id
+    TW->>TR: ConvertDocumentToMarkdown(document_id, buckets, object_keys, extension) + x-correlation-id
+    TR-->>TW: queue_id, status
+    Note over TW,R: TW при необходимости ждёт появления markdown-объекта в MinIO и только после этого переводит документ в ConvertedToMarkdown
     Note over PW,R: publisher worker выполняет publish_to_github → completed/failed
 ```

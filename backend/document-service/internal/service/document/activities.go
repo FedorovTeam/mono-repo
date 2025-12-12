@@ -97,6 +97,8 @@ type convertResult struct {
 	MarkdownKey string
 	QueueID     string
 	Status      string
+	Version     int32
+	Ready       bool
 }
 
 type Activities struct {
@@ -204,7 +206,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	}
 	if currentStatus == model.StatusConvertedToMarkdown || currentStatus == model.StatusPublishedToGitHub {
 		latest := latestVersion(doc)
-		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(currentStatus)}, nil
+		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(currentStatus), Version: latest.Version, Ready: true}, nil
 	}
 	extension := input.FilenameExtension
 	if extension == "" {
@@ -235,15 +237,45 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, status.Error(codes.FailedPrecondition, reason)
 	}
 
-	version := latestVersion(doc).Version + 1
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{
+	version := input.Version
+	if version == 0 {
+		version = latestVersion(doc).Version + 1
+	}
+
+	ready := strings.EqualFold(resp.GetStatus(), "done") || strings.EqualFold(resp.GetStatus(), string(model.StatusConvertedToMarkdown))
+
+	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: resp.GetStatus(), Version: version, Ready: ready}, nil
+}
+
+func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, markdownKey, queueID string, version int32) error {
+	if doc == nil {
+		return fmt.Errorf("document is required")
+	}
+	statusVal, err := a.progressStatus(ctx, doc)
+	if err != nil {
+		return err
+	}
+	if statusVal == model.StatusConvertedToMarkdown || statusVal == model.StatusPublishedToGitHub {
+		return nil
+	}
+
+	if markdownKey == "" {
+		markdownKey = resolvedMarkdownKey(doc)
+	}
+	if markdownKey == "" {
+		return fmt.Errorf("markdown object key is empty for document %s", doc.ID)
+	}
+
+	if version == 0 {
+		version = latestVersion(doc).Version + 1
+	}
+
+	_, err = a.repo.UpdateStatus(ctx, doc.ID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{
 		Version:           version,
 		MarkdownObjectKey: markdownKey,
-		MarkdownQueueID:   resp.GetQueueId(),
-	}); err != nil {
-		return convertResult{}, err
-	}
-	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: resp.GetStatus()}, nil
+		MarkdownQueueID:   queueID,
+	})
+	return err
 }
 
 func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput) error {

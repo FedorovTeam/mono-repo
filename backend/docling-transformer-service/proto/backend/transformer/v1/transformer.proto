@@ -6,6 +6,7 @@ option go_package = "github.com/mono-repo/docling-transformer-service/proto/back
 
 service TransformerService {
   rpc ConvertDocumentToMarkdown(ConvertDocumentToMarkdownRequest) returns (ConvertDocumentToMarkdownResponse);
+  rpc ConvertDocxToMarkdown(ConvertDocxToMarkdownRequest) returns (ConvertDocxToMarkdownResponse);
 }
 
 message ConvertDocumentToMarkdownRequest {
@@ -22,4 +23,19 @@ message ConvertDocumentToMarkdownResponse {
   string status = 2;
   string markdown_bucket = 3;
   string markdown_object_key = 4;
+}
+
+message ConvertDocxToMarkdownRequest {
+  string document_id = 1;
+  oneof source {
+    bytes docx_content = 2;
+    string docx_url = 3;
+  }
+  string filename = 4;
+}
+
+message ConvertDocxToMarkdownResponse {
+  string markdown = 1;
+  string media_type = 2;
+  string charset = 3;
 }
