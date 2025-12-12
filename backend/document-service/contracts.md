@@ -7,9 +7,9 @@
 - `ListDocuments` — пагинация и фильтры по статусу.
 - `UpdateDocumentStatus` — обновление статуса с валидацией переходов.
 
-## MinIO
-- Для каждого документа генерируются ключи в указанных бакетах: базовый путь `documents/<uuid>[.<ext>]` используется для Markdown, оригинал сохраняется по пути `documents/<uuid>[.<ext>]/original`.
-- Фактическая загрузка вне сервиса; мы храним только ключи и записываем их в базу.
+## MinIO / storage-service
+- Для каждого документа `storage-service` формирует ключи по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>` для оригинала и `.../<uuid>/<document_id>.md` для Markdown.
+- Фактическая загрузка выполняется через RPC `UploadOriginal` / `UploadMarkdown` `storage-service`, document-service сохраняет только бакеты и ключи, которые возвращает этот сервис.
 
 ## БД
 - Таблицы `documents`, `document_versions`, `document_status_logs` (см. миграции в `db/migrations`).
@@ -28,8 +28,8 @@
 - **Пример:**
   ```json
   {
-    "bucket": "uploads",
-    "object_key": "documents/2024/05/14/7c1.../report.docx/original",
+    "bucket": "knowledge-original",
+    "object_key": "org/knowledge/project/documents/year=2024/month=05/day=14/7c1.../report.docx",
     "correlation_id": "7f3d7c8b-1c3f-4a4c-9f2e-8c6a1e8dbbaf"
   }
   ```
@@ -46,10 +46,10 @@
 - **Пример:**
   ```json
   {
-    "original_bucket": "uploads",
-    "original_object_key": "documents/2024/05/14/7c1.../report.docx/original",
-    "markdown_bucket": "markdown",
-    "markdown_object_key": "documents/2024/05/14/7c1.../report.md",
+    "original_bucket": "knowledge-original",
+    "original_object_key": "org/knowledge/project/documents/year=2024/month=05/day=14/7c1.../report.docx",
+    "markdown_bucket": "knowledge-md",
+    "markdown_object_key": "org/knowledge/project/documents/year=2024/month=05/day=14/7c1.../report.md",
     "correlation_id": "7f3d7c8b-1c3f-4a4c-9f2e-8c6a1e8dbbaf",
     "queue_id": "docling-42"
   }

@@ -8,7 +8,7 @@ option go_package = "backend-storage-service/proto/backend/storage/v1;storagev1"
 
 // StorageService отвечает за прием и выдачу объектов MinIO.
 // Ключи формируются по шаблону
-// org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>.
+// org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>.
 service StorageService {
   // UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-original.
   rpc UploadOriginal(UploadOriginalRequest) returns (UploadObjectResponse);

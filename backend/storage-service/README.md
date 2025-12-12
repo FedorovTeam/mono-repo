@@ -4,7 +4,7 @@
 
 ## Назначение
 - Прием исходных файлов (knowledge-original) и Markdown (knowledge-md) через gRPC (`UploadOriginal`, `UploadMarkdown`).
-- Генерация ключей по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>`.
+- Генерация ключей по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>`.
 - Для выдачи presigned ссылок используются дефолтные `org_slug=knowledge` и `project_slug=documents`, чтобы сохранять единый путь размещения объектов.
 - Выдача сохраненных объектов по ключу через RPC `GetObject`.
 - Выдача presigned PUT ссылки через RPC `GenerateUploadURL` (получает `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds`) с установкой `x-amz-meta-correlation-id` в MinIO.
