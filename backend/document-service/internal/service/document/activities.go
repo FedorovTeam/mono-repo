@@ -2,8 +2,6 @@ package document
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -69,6 +67,7 @@ type convertResult struct {
 
 type Activities struct {
 	repo        Repository
+	statuses    *StatusApplication
 	transformer transformerv1.TransformerServiceClient
 	publisher   githubpublisherv1.GithubPublisherServiceClient
 }
@@ -76,6 +75,7 @@ type Activities struct {
 func NewActivities(repo Repository, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient) *Activities {
 	return &Activities{
 		repo:        repo,
+		statuses:    NewStatusApplication(repo),
 		transformer: transformerClient,
 		publisher:   publisherClient,
 	}
@@ -91,7 +91,7 @@ func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) 
 		return fmt.Errorf("document %s not found", documentID)
 	}
 
-	status, err := a.progressStatus(ctx, doc)
+	status, err := a.statuses.ResolveActualStatus(ctx, doc)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) 
 		version = 1
 	}
 
-	_, err = a.repo.UpdateStatus(ctx, documentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey})
+	_, err = a.statuses.Transition(ctx, doc, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey})
 	return err
 }
 
@@ -121,7 +121,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
-	currentStatus, err := a.progressStatus(ctx, doc)
+	currentStatus, err := a.statuses.ResolveActualStatus(ctx, doc)
 	if err != nil {
 		return convertResult{}, err
 	}
@@ -167,7 +167,7 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, mar
 	if doc == nil {
 		return fmt.Errorf("document is required")
 	}
-	statusVal, err := a.progressStatus(ctx, doc)
+	statusVal, err := a.statuses.ResolveActualStatus(ctx, doc)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, mar
 		version = latestVersion(doc).Version + 1
 	}
 
-	_, err = a.repo.UpdateStatus(ctx, doc.ID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{
+	_, err = a.statuses.Transition(ctx, doc, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{
 		Version:           version,
 		MarkdownObjectKey: markdownKey,
 		MarkdownQueueID:   queueID,
@@ -204,7 +204,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		return nil, err
 	}
 
-	statusVal, err := a.progressStatus(ctx, doc)
+	statusVal, err := a.statuses.ResolveActualStatus(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
@@ -297,8 +297,8 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		if retryAfter := resp.GetRetryAfter(); retryAfter != nil {
 			log.Printf("publish markdown retry hint: document_id=%s correlation_id=%s retry_after=%s", input.DocumentID, correlation, retryAfter.AsDuration())
 		}
-		if _, updErr := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusFailed, reason, reason, nil); updErr != nil {
-			log.Printf("update status after publish error: %v", updErr)
+		if err := a.statuses.Fail(ctx, input.DocumentID, reason); err != nil {
+			log.Printf("update status after publish error: %v", err)
 		}
 		if resp.GetStatus() == githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
 			return resp, fmt.Errorf("temporary github failure: %s", resp.GetErrorMessage())
@@ -311,7 +311,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		version = &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: markdownObjectKey}
 	}
 
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), version); err != nil {
+	if _, err := a.statuses.TransitionByID(ctx, input.DocumentID, model.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), version); err != nil {
 		return resp, err
 	}
 
@@ -342,26 +342,6 @@ func mapPublishErrorCode(code githubpublisherv1.PublishErrorCode) string {
 func (a *Activities) fail(ctx context.Context, documentID, reason string) error {
 	_, err := a.repo.UpdateStatus(ctx, documentID, model.StatusFailed, reason, reason, nil)
 	return err
-}
-
-func (a *Activities) progressStatus(ctx context.Context, doc *model.Document) (model.Status, error) {
-	if doc.Status != model.StatusFailed {
-		return doc.Status, nil
-	}
-
-	statusVal, err := a.repo.LastNonFailedStatus(ctx, doc.ID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return model.StatusUploaded, nil
-		}
-		return "", err
-	}
-
-	if statusVal == "" {
-		return model.StatusUploaded, nil
-	}
-
-	return statusVal, nil
 }
 
 func latestVersion(doc *model.Document) model.DocumentVersion {

@@ -1,77 +1,44 @@
 package model
 
 import (
-	"errors"
 	"time"
+
+	"backend-document-service/internal/domain"
 )
 
-type Status string
+type Status = domain.DocumentStatus
 
 const (
-	StatusUploaded            Status = "Uploaded"
-	StatusStoredOriginal      Status = "StoredOriginal"
-	StatusConvertedToMarkdown Status = "ConvertedToMarkdown"
-	StatusPublishedToGitHub   Status = "PublishedToGitHub"
-	StatusFailed              Status = "Failed"
+	StatusUploaded            Status = domain.DocumentStatusUploaded
+	StatusStoredOriginal      Status = domain.DocumentStatusStoredOriginal
+	StatusConvertedToMarkdown Status = domain.DocumentStatusConvertedToMarkdown
+	StatusPublishedToGitHub   Status = domain.DocumentStatusPublishedToGitHub
+	StatusFailed              Status = domain.DocumentStatusFailed
 )
 
-var allowedTransitions = map[Status]Status{
-	StatusUploaded:            StatusStoredOriginal,
-	StatusStoredOriginal:      StatusConvertedToMarkdown,
-	StatusConvertedToMarkdown: StatusPublishedToGitHub,
-}
-
-type JobStage string
+type JobStage = domain.JobStage
 
 const (
-	JobStageStoreOriginal     JobStage = "store_original"
-	JobStageConvertToMarkdown JobStage = "convert_to_markdown"
-	JobStagePublishToGitHub   JobStage = "publish_to_github"
+	JobStageStoreOriginal     JobStage = domain.JobStageStoreOriginal
+	JobStageConvertToMarkdown JobStage = domain.JobStageConvertToMarkdown
+	JobStagePublishToGitHub   JobStage = domain.JobStagePublishToGitHub
 )
 
-type JobStatus string
+type JobStatus = domain.JobStatus
 
 const (
-	JobStatusPending    JobStatus = "pending"
-	JobStatusInProgress JobStatus = "in_progress"
-	JobStatusCompleted  JobStatus = "completed"
-	JobStatusFailed     JobStatus = "failed"
+	JobStatusPending    JobStatus = domain.JobStatusPending
+	JobStatusInProgress JobStatus = domain.JobStatusInProgress
+	JobStatusCompleted  JobStatus = domain.JobStatusCompleted
+	JobStatusFailed     JobStatus = domain.JobStatusFailed
 )
 
 func ValidateTransition(from, to Status) error {
-	if to == StatusFailed {
-		return nil
-	}
-	if from == to {
-		return nil
-	}
-
-	if from == StatusFailed {
-		switch to {
-		case StatusStoredOriginal, StatusConvertedToMarkdown, StatusPublishedToGitHub:
-			return nil
-		default:
-			return errors.New("invalid status transition")
-		}
-	}
-
-	next, ok := allowedTransitions[from]
-	if !ok {
-		return errors.New("unknown current status")
-	}
-	if next != to {
-		return errors.New("invalid status transition")
-	}
-	return nil
+	return domain.ValidateDocumentStatusTransition(domain.DocumentStatus(from), domain.DocumentStatus(to))
 }
 
 func ValidateStatus(val Status) error {
-	switch val {
-	case StatusUploaded, StatusStoredOriginal, StatusConvertedToMarkdown, StatusPublishedToGitHub, StatusFailed:
-		return nil
-	default:
-		return errors.New("unsupported status")
-	}
+	return domain.ValidateDocumentStatus(domain.DocumentStatus(val))
 }
 
 type Document struct {
@@ -146,19 +113,9 @@ type JobEvent struct {
 }
 
 func ValidateJobStage(stage JobStage) error {
-	switch stage {
-	case JobStageStoreOriginal, JobStageConvertToMarkdown, JobStagePublishToGitHub:
-		return nil
-	default:
-		return errors.New("unsupported job stage")
-	}
+	return domain.ValidateJobStage(domain.JobStage(stage))
 }
 
 func ValidateJobStatus(status JobStatus) error {
-	switch status {
-	case JobStatusPending, JobStatusInProgress, JobStatusCompleted, JobStatusFailed:
-		return nil
-	default:
-		return errors.New("unsupported job status")
-	}
+	return domain.ValidateJobStatus(domain.JobStatus(status))
 }
