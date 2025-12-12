@@ -1,6 +1,7 @@
 package main
 
 import (
+	"backend-github-publisher-service/internal/infrastructure/github"
 	"backend-github-publisher-service/internal/infrastructure/storage"
 	"backend-github-publisher-service/pkg/config"
 	"backend-github-publisher-service/pkg/observability"
@@ -67,7 +68,8 @@ func main() {
 
 	grpcServer := grpc.NewServer(observability.GRPCServerOptions(otelProviders)...)
 	httpClient := &http.Client{Timeout: 15 * time.Second, Transport: observability.HTTPTransport(otelProviders, nil)}
-	publisher := service.NewPublisherServer(cfg, httpClient, minioStorage)
+	publisherAdapter := github.NewPublisher(cfg.GitHub, httpClient)
+	publisher := service.NewPublisherServer(cfg, publisherAdapter, minioStorage)
 
 	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, publisher)
 	go func() {
