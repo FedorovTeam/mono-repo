@@ -72,7 +72,8 @@ func (s *Server) UploadOriginal(ctx context.Context, req *storagev1.UploadOrigin
 		return nil, status.Error(codes.InvalidArgument, "content не должен быть пустым")
 	}
 
-	s.attachResponseMetadata(ctx, s.correlationID(ctx, ""), orgSlug, projectSlug)
+	correlationID := s.correlationID(ctx, req.GetCorrelationId())
+	s.attachResponseMetadata(ctx, correlationID, orgSlug, projectSlug)
 
 	location, err := s.service.UploadOriginal(ctx, orgSlug, projectSlug, req.GetDocumentId(), ext, req.GetContent())
 	if err != nil {
@@ -103,7 +104,8 @@ func (s *Server) UploadMarkdown(ctx context.Context, req *storagev1.UploadMarkdo
 		return nil, status.Error(codes.InvalidArgument, "content не должен быть пустым")
 	}
 
-	s.attachResponseMetadata(ctx, s.correlationID(ctx, ""), orgSlug, projectSlug)
+	correlationID := s.correlationID(ctx, req.GetCorrelationId())
+	s.attachResponseMetadata(ctx, correlationID, orgSlug, projectSlug)
 
 	location, err := s.service.UploadMarkdown(ctx, orgSlug, projectSlug, req.GetDocumentId(), req.GetContent())
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -118,6 +119,7 @@ func TestUploadOriginalStoresContent(t *testing.T) {
 		DocumentId:        "doc-123",
 		FilenameExtension: "docx",
 		Content:           []byte("payload"),
+		CorrelationId:     "corr-req",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "knowledge-original", resp.GetBucket())
@@ -132,13 +134,56 @@ func TestUploadMarkdownUsesDefaultsFromServer(t *testing.T) {
 	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	resp, err := server.UploadMarkdown(context.Background(), &storagev1.UploadMarkdownRequest{
-		DocumentId: "doc-md",
-		Content:    []byte("markdown"),
+		DocumentId:    "doc-md",
+		Content:       []byte("markdown"),
+		CorrelationId: "corr-md",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "knowledge-md", resp.GetBucket())
 	require.Equal(t, []byte("markdown"), client.storedData[resp.GetBucket()][resp.GetObjectKey()])
 	assertObjectKey(t, resp.GetObjectKey(), "org/knowledge/project/documents/year=2024/month=11/day=05", "doc-md.md")
+}
+
+func TestUploadOriginal_AttachesCorrelationFromRequest(t *testing.T) {
+	client := newMockClient("knowledge-original", "knowledge-md")
+	generator := storage.NewObjectKeyGenerator(time.Now)
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
+	server := New(client, generator, "knowledge-original", "knowledge-md", service)
+
+	stream := &headerCapturingStream{}
+	ctx := grpc.NewContextWithServerTransportStream(context.Background(), stream)
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-correlation-id", "corr-meta"))
+
+	_, err := server.UploadOriginal(ctx, &storagev1.UploadOriginalRequest{
+		OrgSlug:           "acme",
+		ProjectSlug:       "docs",
+		DocumentId:        "doc-1",
+		FilenameExtension: "docx",
+		Content:           []byte("content"),
+		CorrelationId:     "corr-request",
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"corr-request"}, stream.header.Get("x-correlation-id"))
+	require.Equal(t, []string{"corr-request"}, stream.header.Get("x-amz-meta-correlation-id"))
+}
+
+func TestUploadMarkdown_UsesMetadataCorrelationWhenRequestEmpty(t *testing.T) {
+	client := newMockClient("knowledge-original", "knowledge-md")
+	generator := storage.NewObjectKeyGenerator(time.Now)
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
+	server := New(client, generator, "knowledge-original", "knowledge-md", service)
+
+	stream := &headerCapturingStream{}
+	ctx := grpc.NewContextWithServerTransportStream(context.Background(), stream)
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-correlation-id", "corr-meta"))
+
+	_, err := server.UploadMarkdown(ctx, &storagev1.UploadMarkdownRequest{
+		DocumentId: "doc-md",
+		Content:    []byte("markdown"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"corr-meta"}, stream.header.Get("x-correlation-id"))
+	require.Equal(t, []string{"corr-meta"}, stream.header.Get("x-amz-meta-correlation-id"))
 }
 
 func TestGetObjectReturnsStoredData(t *testing.T) {
@@ -280,4 +325,26 @@ func (m *mockClient) GetObject(_ context.Context, bucketName, objectName string)
 
 func (m *mockClient) PresignHeader(_ context.Context, _ string, _ string, _ string, _ time.Duration, _ url.Values, _ http.Header) (*url.URL, error) {
 	return nil, errors.New("not implemented")
+}
+
+type headerCapturingStream struct {
+	header metadata.MD
+}
+
+func (h *headerCapturingStream) Method() string {
+	return ""
+}
+
+func (h *headerCapturingStream) SetHeader(md metadata.MD) error {
+	h.header = md
+	return nil
+}
+
+func (h *headerCapturingStream) SendHeader(md metadata.MD) error {
+	h.header = md
+	return nil
+}
+
+func (h *headerCapturingStream) SetTrailer(metadata.MD) error {
+	return nil
 }
