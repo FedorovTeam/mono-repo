@@ -94,6 +94,12 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		return nil, status.Error(codes.InvalidArgument, "markdown bucket is required")
 	}
 
+	existingTask, err := s.queueRepo.GetLatestByDocument(ctx, req.GetDocumentId())
+	if err != nil {
+		s.logger.Error("fetch latest task failed", zap.String("correlation_id", correlationID), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "fetch latest task: %v", err)
+	}
+
 	fileExt := transformations.NormalizeExtension(req.GetFilenameExtension())
 	if fileExt == "" {
 		fileExt = transformations.NormalizeExtension(filepath.Ext(req.GetOriginalObjectKey()))
@@ -109,6 +115,28 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 	markdownKey := req.GetMarkdownObjectKey()
 	if markdownKey == "" {
 		markdownKey = transformations.BuildMarkdownKey(req.GetOriginalObjectKey())
+	}
+
+	if existingTask != nil && existingTask.Status != repository.StatusFailed {
+		bucket := markdownBucket
+		if existingTask.MarkdownBucket != "" {
+			bucket = existingTask.MarkdownBucket
+		}
+
+		key := markdownKey
+		if existingTask.MarkdownObjectKey != "" {
+			key = existingTask.MarkdownObjectKey
+		}
+
+		s.logger.Info("ConvertDocumentToMarkdown reused existing task", zap.String("correlation_id", correlationID),
+			zap.String("queue_id", existingTask.ID.String()), zap.String("status", string(existingTask.Status)))
+
+		return &transformerv1.ConvertDocumentToMarkdownResponse{
+			QueueId:           existingTask.ID.String(),
+			Status:            string(existingTask.Status),
+			MarkdownBucket:    bucket,
+			MarkdownObjectKey: key,
+		}, nil
 	}
 
 	if s.queueLimit > 0 {

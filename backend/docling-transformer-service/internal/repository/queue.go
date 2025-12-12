@@ -58,6 +58,7 @@ type QueueRepository interface {
 	CountActive(ctx context.Context) (int, error)
 	AcquireNext(ctx context.Context) (*TransformationTask, error)
 	AcquireBatch(ctx context.Context, limit int) ([]*TransformationTask, error)
+	GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error)
 	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
@@ -75,6 +76,29 @@ type PostgresQueueRepository struct {
 
 func NewQueueRepository(pool *pgxpool.Pool) *PostgresQueueRepository {
 	return &PostgresQueueRepository{pool: pool}
+}
+
+// GetLatestByDocument возвращает самую свежую задачу для документа, если она есть.
+// При отсутствии записей возвращает (nil, nil).
+func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
+	const query = `
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+FROM transformations_queue
+WHERE document_id = $1
+ORDER BY created_at DESC
+LIMIT 1`
+
+	row := r.pool.QueryRow(ctx, query, documentID)
+
+	task, err := scanTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get latest by document: %w", err)
+	}
+
+	return task, nil
 }
 
 func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueueParams) (uuid.UUID, error) {

@@ -14,6 +14,11 @@
 - `payload` в `processing_jobs` и `job_events` хранит только ссылки и параметры для gRPC-исполнителей (`bucket`/`object_key`, `queue_id`, `github_path`, `create_pr`), бинарные данные не пишутся в БД, а сами интеграции выполняют внешние сервисы (MinIO обслуживается через gRPC `storage-service`, без прямых клиентов внутри document-service).
 - Индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run` поддерживают выборку готовых задач, `SELECT ... FOR UPDATE SKIP LOCKED` защищает от двойного захвата при нескольких воркерах.
 
+### Политика retry/timeout конвертации
+- Stage worker `convert_to_markdown` вызывается с интервалом `stage_worker.interval` и пачкой `stage_worker.batch_size`; если transformer возвращает `status=pending|processing|waiting_docling`, задача переводится в `pending` с `next_run_at = now()+stage_worker.retry_delay` без создания дублей в `processing_jobs`.
+- gRPC вызов `ConvertDocumentToMarkdown` фиксирует `queue_id` и `markdown_object_key` только в `processing_jobs.payload` и `document_versions`/`documents`; других таблиц конвертер не трогает.
+- При получении `status=done` document-service помечает документ как `ConvertedToMarkdown`, записывает `markdown_queue_id` в последнюю версию и передает управление `JobFollower` для постановки стадии публикации.
+
 ## Статусы и повторная обработка
 - Жизненный цикл документа фиксируется в статусах `UPLOADED → STORED_ORIGINAL → CONVERTED_TO_MARKDOWN → PUBLISHED_TO_GITHUB` с отдельным состоянием `FAILED`. Источник правды — таблица `documents`.
 - Каждая стадия обработки («сохранить оригинал», «конвертировать», «опубликовать в GitHub») заводится в очереди `processing_jobs` со стадией (`job_stage`) и статусом (`job_status`), а все попытки фиксируются в `job_events`.

@@ -84,6 +84,10 @@ func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*repositor
 	return tasks, nil
 }
 
+func (s *stubQueueRepo) GetLatestByDocument(context.Context, string) (*repository.TransformationTask, error) {
+	return s.currentTask, nil
+}
+
 func (s *stubQueueRepo) MarkDone(_ context.Context, id uuid.UUID, _, _ string) error {
 	s.markMutex.Lock()
 	defer s.markMutex.Unlock()

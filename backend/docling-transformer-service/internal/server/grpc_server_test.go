@@ -32,6 +32,7 @@ type fakeQueueRepo struct {
 	enqueueErr   error
 	countErr     error
 	queueID      uuid.UUID
+	latestTask   *repository.TransformationTask
 }
 
 func (f *fakeQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
@@ -65,6 +66,9 @@ func (*fakeQueueRepo) AcquireNext(context.Context) (*repository.TransformationTa
 }
 func (*fakeQueueRepo) AcquireBatch(context.Context, int) ([]*repository.TransformationTask, error) {
 	return nil, nil
+}
+func (f *fakeQueueRepo) GetLatestByDocument(context.Context, string) (*repository.TransformationTask, error) {
+	return f.latestTask, nil
 }
 func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
 func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
@@ -164,6 +168,59 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 	}
 	if enqueued.CorrelationID != "corr-123" {
 		t.Fatalf("correlation id not propagated: %s", enqueued.CorrelationID)
+	}
+}
+
+func TestConvertDocumentToMarkdownReusesExistingTask(t *testing.T) {
+	repo := &fakeQueueRepo{latestTask: &repository.TransformationTask{
+		ID:                uuid.New(),
+		Status:            repository.StatusProcessing,
+		MarkdownBucket:    "persisted-md",
+		MarkdownObjectKey: "existing.md",
+	}}
+	logger := zap.NewNop()
+
+	lis := bufconn.Listen(bufSize)
+	srv := newGRPCServer(logger, config.ObservabilityConfig{LoggingEnabled: true})
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "fallback-md", 0, nil, 0, 0, 0, logger))
+
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(_ context.Context, s string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial bufnet: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+	resp, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-123",
+		OriginalBucket:    "bucket-orig",
+		OriginalObjectKey: "path/file.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "md/file.md",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.GetQueueId() != repo.latestTask.ID.String() {
+		t.Fatalf("expected existing queue id, got %s", resp.GetQueueId())
+	}
+	if resp.GetStatus() != string(repository.StatusProcessing) {
+		t.Fatalf("expected processing status, got %s", resp.GetStatus())
+	}
+	if resp.GetMarkdownBucket() != "persisted-md" {
+		t.Fatalf("expected reused bucket, got %s", resp.GetMarkdownBucket())
+	}
+	if resp.GetMarkdownObjectKey() != "existing.md" {
+		t.Fatalf("expected reused key, got %s", resp.GetMarkdownObjectKey())
+	}
+	if len(repo.enqueueCalls) != 0 {
+		t.Fatalf("expected no new enqueue calls, got %d", len(repo.enqueueCalls))
 	}
 }
 

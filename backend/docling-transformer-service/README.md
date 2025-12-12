@@ -3,7 +3,7 @@
 Docling Transformer Service — gRPC-обёртка над Docling для конвертации DOC/DOCX/PDF в Markdown с обязательным прокидыванием `x-correlation-id`. Запросы на конвертацию ставятся в очередь в PostgreSQL и обрабатываются воркером, чтобы сохранять предсказуемую нагрузку на Docling и MinIO. Сервис повторяет структуру `template-service` и конфигурируется через один `config.yaml`.
 
 ## Возможности
-- gRPC метод `ConvertDocumentToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` принимает данные об исходном объекте и ставит задачу в очередь `transformations_queue`, возвращая `queue_id`, `status=pending` и итоговый путь для Markdown.
+- gRPC метод `ConvertDocumentToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` принимает данные об исходном объекте и ставит задачу в очередь `transformations_queue`, возвращая `queue_id`, `status=pending` и итоговый путь для Markdown. Повторный вызов с тем же `document_id` возвращает статус и параметры существующей задачи без создания дублей.
 - gRPC метод `ConvertDocxToMarkdown` принимает байты или ссылку на DOCX/DOC/PDF, отправляет задачу напрямую в Docling и возвращает Markdown/charset без постановки в очередь.
 - Проверка на переполнение очереди (`service.queue_limit`): gRPC код `ResourceExhausted` возвращается только если суммарное число задач в статусах `pending`/`processing`/`waiting_docling` достигло установленного лимита; `service.max_workers` ограничивает только параллелизм фоновых воркеров.
 - HTTP-запрос к Docling-конвертеру выполняется воркером в фоне; результат сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
@@ -12,6 +12,11 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - Очередь хранится в PostgreSQL, схема создаётся через миграции `db/migrations/ и применяется автоматически при старте сервиса.
 - Настройки Docling, MinIO, PostgreSQL и наблюдаемости в одном конфигурационном файле.
 - Unit-тесты покрывают постановку задач в очередь и работу воркера.
+
+### Политика retry/timeout конвертации
+- gRPC-слой не дублирует задачи: если в очереди уже есть запись для `document_id`, возвращается её `queue_id` и текущий статус (`pending`/`processing`/`waiting_docling`/`done`), что позволяет внешнему воркеру опрашивать готовность без раздувания очереди.
+- Лимит активных задач контролируется `service.queue_limit` (сумма `pending`/`processing`/`waiting_docling`); при превышении возвращается `ResourceExhausted`.
+- Фоновый воркер использует `scheduler.retry_backoff`, `scheduler.max_processing_retries` и `docling.status_*` для экспоненциального опроса Docling и восстановления зависших задач; `scheduler.processing_timeout` обрывает слишком долгие обработки, `scheduler.cleanup_retention` удаляет завершённые задачи.
 
 ## Конфигурация
 Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл). Обязательные поля и их рекомендованные значения:
