@@ -26,7 +26,11 @@ sequenceDiagram
 
     Note over SW,R: stage worker берёт job=store_original (pending)
     SW->>S: Activities.MarkStoredOriginal(document_id) -> repo.UpdateStatus(StatusStoredOriginal)
-    SW->>R: UPDATE processing_jobs status=completed либо status=failed
+    alt Успешно
+        SW->>R: UPDATE processing_jobs status=completed
+    else Ошибка (например, нет bucket/object_key)
+        SW->>R: UPDATE processing_jobs status=failed + payload.last_error
+    end
 
     Note over F,R: JobFollower опрашивает completed/failed
     alt store_original completed
@@ -35,30 +39,29 @@ sequenceDiagram
         F->>R: INSERT job publish_to_github (pending)
     else any failed
         F->>R: UPDATE document status=Failed (reason from payload.last_error)
+        F->>R: UPDATE processing_jobs status=failed {handled}
     end
 
-    Note over SW,TR: convert_to_markdown синхронно вызывает transformer-service и использует ответ статуса
+    Note over SW,TR: convert_to_markdown вызывает transformer-service c WaitForResult=true
     SW->>TR: ConvertDocumentToMarkdown(bucket/object_key + markdown_bucket, correlation-id)
-    TR-->>SW: queue_id, markdown_object_key, status
-    alt status pending/processing/waiting_docling
-        SW->>R: UPDATE processing_jobs status=pending, next_run_at=now()+retry_delay (payload включает queue_id/markdown_object_key)
-    else status done
+    TR-->>SW: markdown_object_key?, queue_id, status
+    alt success (status=done/ConvertedToMarkdown)
         SW->>S: Activities.MarkConverted -> UPDATE document status=ConvertedToMarkdown (+markdown_queue_id/object_key, version++)
         SW->>R: UPDATE processing_jobs status=completed
-    else error
+    else error / пустой markdown_object_key
         SW->>S: Activities.fail -> UPDATE document status=Failed(reason)
-        SW->>R: UPDATE processing_jobs status=failed + payload.last_error
+        SW->>R: UPDATE processing_jobs status=failed + payload.last_error + next_run_at=now()+retry_delay
     end
 
-    Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service с idempotency_key, attempt, retry_policy
-    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, path, create_pr, idempotency_key, attempt, retry_policy)
+    Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service с idempotency_key и correlation-id
+    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, branch/base_branch, path, create_pr, idempotency_key, correlation-id)
     GP-->>SW: status + commit_sha/pr + retry_after + idempotency_hit
     alt success
         SW->>S: Activities.PublishMarkdown -> UPDATE document status=PublishedToGitHub (+commit_sha)
         SW->>R: UPDATE processing_jobs status=completed + job_events{commit_sha,pull_request?,retry_after?,idempotency_hit?}
     else failure (temporary/permanent)
         SW->>S: Activities.PublishMarkdown -> UPDATE document status=Failed(reason)
-        SW->>R: UPDATE processing_jobs status=failed, next_run_at=retry_after или backoff, payload.last_error=reason
+        SW->>R: UPDATE processing_jobs status=failed, next_run_at=retry_after или retry_delay, payload.last_error=reason
     end
 
     Note over F,R: JobFollower читает completed/failed jobs с паузой postpone
