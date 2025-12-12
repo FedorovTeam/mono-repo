@@ -25,7 +25,6 @@ type Client interface {
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) error
 	GetObject(ctx context.Context, bucketName, objectName string) (io.ReadCloser, error)
 	PresignHeader(ctx context.Context, method, bucketName, objectName string, expires time.Duration, reqParams url.Values, extraHeaders http.Header) (*url.URL, error)
-	ListenBucketNotification(ctx context.Context, bucketName, prefix, suffix string, events []string) <-chan notification.Info
 	SetBucketNotification(ctx context.Context, bucketName string, config notification.Configuration) error
 }
 
@@ -67,11 +66,6 @@ func (m *MinioAPI) GetObject(ctx context.Context, bucketName, objectName string)
 // PresignHeader проксирует вызов к minio.Client с сохранением всех подписываемых заголовков.
 func (m *MinioAPI) PresignHeader(ctx context.Context, method, bucketName, objectName string, expires time.Duration, reqParams url.Values, extraHeaders http.Header) (*url.URL, error) {
 	return m.client.PresignHeader(ctx, method, bucketName, objectName, expires, reqParams, extraHeaders)
-}
-
-// ListenBucketNotification проксирует подписку на события бакета.
-func (m *MinioAPI) ListenBucketNotification(ctx context.Context, bucketName, prefix, suffix string, events []string) <-chan notification.Info {
-	return m.client.ListenBucketNotification(ctx, bucketName, prefix, suffix, events)
 }
 
 // SetBucketNotification проксирует конфигурацию уведомлений бакета.
