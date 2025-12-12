@@ -23,8 +23,6 @@ import (
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 func main() {
@@ -73,14 +71,6 @@ func main() {
 		return
 	}
 
-	minioClient, err := minio.New(cfg.Minio.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.Minio.AccessKey, cfg.Minio.SecretKey, ""),
-		Secure: cfg.Minio.UseSSL,
-	})
-	if err != nil {
-		log.Fatalf("minio init: %v", err)
-	}
-
 	repo := repository.New(db)
 	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
@@ -117,8 +107,8 @@ func main() {
 	service := docservice.New(
 		repo,
 		activities,
-		cfg.Minio.OriginalBucket,
-		cfg.Minio.MarkdownBucket,
+		cfg.Storage.OriginalBucket,
+		cfg.Storage.MarkdownBucket,
 		cfg.Github.Owner,
 		cfg.Github.Repository,
 		cfg.Github.Branch,
@@ -127,7 +117,7 @@ func main() {
 
 	reconciler := docservice.NewUploadReconciler(
 		repo,
-		minioClient,
+		storageClient,
 		service,
 		cfg.Reconciler.BatchSize,
 		cfg.Reconciler.MinUploadedAge,
