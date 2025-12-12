@@ -100,6 +100,10 @@ func (f *fakeRepo) ActiveJob(ctx context.Context, documentID string) (*model.Pro
 	return nil, nil
 }
 
+func (f *fakeRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+	return nil, nil
+}
+
 type fakeTransformerClient struct {
 	lastRequest *transformerv1.ConvertDocumentToMarkdownRequest
 	resp        *transformerv1.ConvertDocumentToMarkdownResponse

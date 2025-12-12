@@ -22,6 +22,33 @@ func (c *confirmUploadMock) ConfirmUpload(ctx context.Context, in ConfirmUploadI
 	return &model.Document{ID: in.DocumentID}, nil
 }
 
+type staleJobRepo struct {
+	jobs           []model.ProcessingJob
+	calledWith     time.Time
+	lastReason     string
+	lastNextRun    time.Time
+	lastBatchLimit int
+}
+
+func (r *staleJobRepo) RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error) {
+	r.calledWith = staleBefore
+	r.lastReason = reason
+	r.lastNextRun = nextRunAt
+	r.lastBatchLimit = limit
+
+	var restored []model.ProcessingJob
+	for i := range r.jobs {
+		if r.jobs[i].Status != model.JobStatusInProgress || r.jobs[i].UpdatedAt.After(staleBefore) || len(restored) >= limit {
+			continue
+		}
+		r.jobs[i].Status = model.JobStatusPending
+		r.jobs[i].Attempts++
+		r.jobs[i].NextRunAt = nextRunAt
+		restored = append(restored, r.jobs[i])
+	}
+	return restored, nil
+}
+
 func TestUploadReconcilerConfirmsExistingObjects(t *testing.T) {
 	fixed := time.Date(2024, 12, 1, 12, 0, 0, 0, time.UTC)
 	doc := model.Document{
@@ -78,4 +105,27 @@ func TestUploadReconcilerSkipsWhenNoObjectKey(t *testing.T) {
 	reconciler.reconcile(context.Background())
 
 	require.Zero(t, confirm.calls)
+}
+
+func TestProcessingReconcilerReturnsStaleJobsToPending(t *testing.T) {
+	fixed := time.Date(2024, 12, 1, 12, 0, 0, 0, time.UTC)
+	repo := &staleJobRepo{jobs: []model.ProcessingJob{{
+		TaskID:     "task-1",
+		DocumentID: "doc-1",
+		Stage:      model.JobStagePublishToGitHub,
+		Status:     model.JobStatusInProgress,
+		Attempts:   1,
+		UpdatedAt:  fixed.Add(-3 * time.Minute),
+	}}}
+
+	reconciler := NewProcessingReconciler(repo, 5, 30*time.Second, 15*time.Second)
+	reconciler.now = func() time.Time { return fixed }
+
+	reconciler.reconcile(context.Background())
+
+	require.Equal(t, model.JobStatusPending, repo.jobs[0].Status)
+	require.Equal(t, 2, repo.jobs[0].Attempts)
+	require.Equal(t, fixed, repo.jobs[0].NextRunAt)
+	require.Equal(t, fixed.Add(-(45 * time.Second)), repo.calledWith)
+	require.Contains(t, repo.lastReason, "restored")
 }
