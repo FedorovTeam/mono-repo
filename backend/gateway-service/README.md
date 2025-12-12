@@ -27,8 +27,8 @@ gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `doc
 Все GraphQL запросы и мутации требуют заголовок `X-API-Key`; `X-Correlation-ID` (необязательный) прокидывается в gRPC-метаданные `document-service`/`storage-service` и возвращается в ответе.
 
 ### Валидация
-- Gateway проверяет только пустые строки (`fileName`, `repository`, `branch`, `path`) и то, что `fileSizeBytes` положителен и не превышает `uploads.maxSizeBytes`.
-- Проверка формата репозитория (`owner/repo`), нормализация владельца, обязательность ключей/бакетов и прочая бизнес-валидация выполняются в document-service. Ошибки gRPC из document-service возвращаются клиенту без повторной интерпретации.
+- Gateway проверяет только пустые строки (`fileName`, `repository`, `branch`, `path`) и то, что `fileSizeBytes` положителен; лимиты размера и допустимые расширения проверяются в `storage-service` при генерации presigned URL.
+- Проверка формата репозитория (`owner/repo`), нормализация владельца, обязательность ключей/бакетов и прочая бизнес-валидация выполняются в downstream-сервисах (`document-service` и `storage-service`). Ошибки gRPC возвращаются клиенту без повторной интерпретации.
 
 ### Примеры запросов
 ```bash
@@ -57,7 +57,7 @@ curl -X POST "$ENDPOINT" \
 - `documentService.address` — `document.backend.svc.cluster.local:50051`.
 - `storageService.address` — `storage.backend.svc.cluster.local:50052`.
 - `documentService.grpc` / `storageService.grpc` — настройки gRPC-подключений (TLS через `insecure`, таймауты подключения `dialTimeout`/`minConnectTimeout`, keepalive `time`/`timeout`/`permitWithoutStream`, бэкофф `baseDelay`/`multiplier`/`jitter`/`maxDelay`).
-- `uploads.maxSizeBytes`, `uploads.allowedExtensions`, `uploads.signedUrlTtlSeconds` — лимиты загрузки и TTL presigned ссылок.
+- `uploads.signedUrlTtlSeconds` — TTL presigned ссылок, передаваемый в `storage-service`.
 - `observability.enabled` — включает/отключает экспорт метрик и трассировок (при `false` вместо экспортеров используются no-op провайдеры и обработчики).
 - `observability.otlpEndpoint`/`observability.serviceName` — адрес OTLP-коллектора и сервисное имя (обязателен при включённой телеметрии).
 - `logging.level` — уровень логирования.

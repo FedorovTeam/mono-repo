@@ -67,7 +67,7 @@ func (m *mockStorageClient) GenerateUploadURL(ctx context.Context, in *storagepb
 func (m *mockStorageClient) Close() error { return nil }
 
 func TestUploadValidation(t *testing.T) {
-	resolver := &Resolver{DocumentClient: &mockDocumentClient{}, StorageClient: &mockStorageClient{}, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024, AllowedExtensions: []string{"docx"}}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: &mockDocumentClient{}, StorageClient: &mockStorageClient{}, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	_, err := mr.UploadKnowledgeDocument(ctxutils.WithAPIKey(context.Background(), "secret"), model.UploadKnowledgeDocumentInput{})
@@ -85,13 +85,13 @@ func TestUploadDelegatesValidationToDocumentService(t *testing.T) {
 
 	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
 		return nil, fmt.Errorf("document-service rejected input: repository must be in owner/repo format")
-	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
+	}, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
 		return nil, nil
 	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
 	}}
 
-	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2048}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	_, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{
@@ -155,7 +155,7 @@ func TestUploadHappyPath(t *testing.T) {
 		return nil, nil
 	}}
 
-	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2 * 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{
@@ -218,7 +218,7 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 		return nil, nil
 	}}
 
-	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2048, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 600}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	payload, err := mr.UploadKnowledgeDocument(ctxutils.WithAPIKey(context.Background(), "secret"), model.UploadKnowledgeDocumentInput{
@@ -298,7 +298,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/signed", Bucket: "docx", ObjectKey: fmt.Sprintf("docx/%s.docx", capturedDocID), ExpiresInSeconds: 600}, nil
 	}}
 
-	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: logger}
 	gqlServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
@@ -395,7 +395,7 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 		},
 	}
 
-	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: logger}
 	gqlServer := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 

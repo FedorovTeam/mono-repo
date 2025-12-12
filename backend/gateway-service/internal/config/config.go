@@ -146,9 +146,7 @@ type Config struct {
 	DocumentService GRPCServiceConfig `yaml:"documentService"`
 	StorageService  GRPCServiceConfig `yaml:"storageService"`
 	Uploads         struct {
-		MaxSizeBytes       int64    `yaml:"maxSizeBytes"`
-		AllowedExtensions  []string `yaml:"allowedExtensions"`
-		SignedURLTTLSecond int64    `yaml:"signedUrlTtlSeconds"`
+		SignedURLTTLSecond int64 `yaml:"signedUrlTtlSeconds"`
 	} `yaml:"uploads"`
 	Observability ObservabilityConfig `yaml:"observability"`
 	Logging       struct {
@@ -188,12 +186,6 @@ func Load(path string) (Config, error) {
 	cfg.StorageService.GRPC.setDefaults()
 	if err := cfg.StorageService.GRPC.validate("storageService"); err != nil {
 		return Config{}, err
-	}
-	if cfg.Uploads.MaxSizeBytes <= 0 {
-		return Config{}, fmt.Errorf("uploads.maxSizeBytes must be positive")
-	}
-	if len(cfg.Uploads.AllowedExtensions) == 0 {
-		return Config{}, fmt.Errorf("uploads.allowedExtensions is required")
 	}
 	if cfg.Uploads.SignedURLTTLSecond <= 0 {
 		cfg.Uploads.SignedURLTTLSecond = 900

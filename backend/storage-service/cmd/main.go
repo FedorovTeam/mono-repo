@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"google.golang.org/grpc"
@@ -67,6 +68,11 @@ func main() {
 		keyGenerator,
 		cfg.Minio.Buckets.KnowledgeDocx,
 		cfg.Minio.Buckets.KnowledgeMD,
+		storage.UploadValidationConfig{
+			AllowedExtensions: toExtensionsMap(cfg.Uploads.AllowedExtensions),
+			MaxSizeBytes:      cfg.Uploads.MaxSizeBytes,
+			SignedURLTTL:      cfg.Uploads.SignedURLTTLSecond,
+		},
 	)
 
 	log.Printf("инициализированы бакеты: docx=%s, md=%s", cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD)
@@ -138,4 +144,17 @@ func correlationIDFromContext(ctx context.Context, req interface{}) string {
 	}
 
 	return ""
+}
+
+func toExtensionsMap(exts []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(exts))
+	for _, ext := range exts {
+		normalized := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(ext), "."))
+		if normalized == "" {
+			continue
+		}
+		result[normalized] = struct{}{}
+	}
+
+	return result
 }

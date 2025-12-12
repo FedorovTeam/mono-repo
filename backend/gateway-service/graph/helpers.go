@@ -3,7 +3,6 @@ package graph
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"backend-gateway-service/graph/model"
@@ -13,8 +12,6 @@ import (
 
 // UploadValidationConfig описывает ограничения на входные данные загрузки.
 type UploadValidationConfig struct {
-	MaxSizeBytes        int64
-	AllowedExtensions   []string
 	SignedURLTTLSeconds int64
 }
 
@@ -36,9 +33,6 @@ func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadVal
 	}
 	if input.FileSizeBytes <= 0 {
 		return "", nil, errors.New("fileSizeBytes must be positive")
-	}
-	if cfg.MaxSizeBytes > 0 && int64(input.FileSizeBytes) > cfg.MaxSizeBytes {
-		return "", nil, fmt.Errorf("fileSizeBytes exceeds limit %d", cfg.MaxSizeBytes)
 	}
 	return repository, owner, nil
 }

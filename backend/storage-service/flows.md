@@ -28,12 +28,13 @@
 4. **GenerateUploadURL**
    - Клиент запрашивает подписанную PUT-ссылку, передавая document_id, file_name, content_length, expires_in_seconds и
      опциональный correlation_id.
-   - Сервис валидирует параметры (document_id/file_name обязательны, content_length и expires_in_seconds должны быть больше
-     нуля), проверяет, что расширение файла входит в список `doc`, `docx`, `pdf`, и убеждается в доступности бакета загрузки
-     (`events.upload_bucket` или `knowledge-original`) и markdown-бакета (`minio.buckets.knowledge_md`).
+   - Сервис валидирует параметры (document_id/file_name обязательны, content_length должен быть > 0 и <= `uploads.max_size_bytes`,
+     expires_in_seconds должен быть > 0 или заменяется на `uploads.signed_url_ttl_seconds`), проверяет расширение на вхождение в
+     `uploads.allowed_extensions` и убеждается в доступности бакета загрузки (`events.upload_bucket` или `knowledge-original`) и
+     markdown-бакета (`minio.buckets.knowledge_md`).
    - org_slug и project_slug используются из дефолтов сервера (`knowledge`/`documents`) для генерации ключа с промежуточным UUID-сегментом;
      в подписанную ссылку добавляется заголовок `x-amz-meta-correlation-id` при наличии correlation_id.
-   - В ответе возвращаются upload_url, bucket, object_key, markdown_bucket/markdown_object_key и время жизни ссылки, а также
+   - В ответе возвращаются upload_url, bucket, object_key, markdown_bucket/markdown_object_key и фактическое время жизни ссылки, а также
      служебные заголовки с correlation_id и дефолтными slug’ами (`knowledge`/`documents`).
 
 Все операции используют приватные бакеты MinIO; логирование запросов реализовано через серверные интерцепторы gRPC.

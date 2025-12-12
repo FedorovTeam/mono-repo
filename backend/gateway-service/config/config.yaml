@@ -33,11 +33,6 @@ storageService:
       jitter: 0.2
       maxDelay: 30s
 uploads:
-  maxSizeBytes: 10485760
-  allowedExtensions:
-    - doc
-    - docx
-    - pdf
   signedUrlTtlSeconds: 900
 observability:
   enabled: false

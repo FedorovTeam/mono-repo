@@ -2,8 +2,8 @@
 
 ## Upload → Convert → Publish
 1. Клиент выполняет GraphQL-мутацию `uploadKnowledgeDocument` с `fileName`, `fileSizeBytes`, целевыми `repository`, `branch`, `path`. Репозиторий может быть передан как `<repo>` или `<owner>/<repo>` — gateway выделяет владельца и нормализует имя репозитория. Все GraphQL-запросы и мутации требуют `X-API-Key`.
-2. Gateway проверяет ключ, извлекает/создаёт `correlation-id` и валидирует вход (обязательные поля, `fileSizeBytes`, допустимые расширения, лимит `uploads.maxSizeBytes`).
-3. Gateway генерирует `documentId` (UUID) и запрашивает presigned ссылку через gRPC `storage-service.GenerateUploadURL`, передавая `documentId`, `correlation-id`, `fileName`, размер и TTL из `uploads.signedUrlTtlSeconds`. В ответе приходят `bucket`/`objectKey`, которые используются дальше.
+2. Gateway проверяет ключ, извлекает/создаёт `correlation-id` и валидирует только обязательные поля (`fileName`, `repository`, `branch`, `path`) и положительный `fileSizeBytes`.
+3. Gateway генерирует `documentId` (UUID) и запрашивает presigned ссылку через gRPC `storage-service.GenerateUploadURL`, передавая `documentId`, `correlation-id`, `fileName`, размер и TTL из `uploads.signedUrlTtlSeconds`. `storage-service` применяет лимиты размера и проверку расширения, в ответе приходят `bucket`/`objectKey`, которые используются дальше.
 4. После получения ссылки создаётся запись через gRPC `document-service.CreateDocument` с `id`, путём, размером, `correlation-id`, нормализованным `repository` и опциональным `repositoryOwner`, а также `uploadBucket` и `uploadObjectKey` из ответа storage-service. Клиент получает `documentId` и текущий статус; дальнейшие шаги выполняются на стороне document-service.
 5. Мутация отвечает GraphQL-пейлоадом с сущностью `document`, полями `uploadUrl` и `uploadMethod = PUT`.
 6. Клиент загружает файл по `uploadUrl` (HTTP PUT). После события `s3:ObjectCreated:*` MinIO отправляет webhook на `/internal/storage/uploaded`.

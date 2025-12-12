@@ -27,7 +27,7 @@ import (
 func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 	client := &mockPresignClient{bucketExists: true}
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
-	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
+	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig()))
 
 	resp, err := server.GenerateUploadURL(context.Background(), &storagev1.GenerateUploadURLRequest{
 		DocumentId:       "doc-123",
@@ -61,7 +61,7 @@ func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
 	client := &mockPresignClient{bucketExists: true}
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2024, time.December, 31, 0, 0, 0, 0, time.UTC) })
-	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
+	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig()))
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-meta"))
 	resp, err := server.GenerateUploadURL(ctx, &storagev1.GenerateUploadURLRequest{
@@ -85,7 +85,7 @@ func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
 func TestGenerateUploadURL_ValidatesLengthAndExtension(t *testing.T) {
 	client := &mockPresignClient{bucketExists: true}
 	generator := storage.NewObjectKeyGenerator(time.Now)
-	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
+	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig()))
 
 	_, err := server.GenerateUploadURL(context.Background(), &storagev1.GenerateUploadURLRequest{
 		DocumentId:       "doc-1",
@@ -109,7 +109,7 @@ func TestGenerateUploadURL_ValidatesLengthAndExtension(t *testing.T) {
 func TestUploadOriginalStoresContent(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
-	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig())
 	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-123"))
@@ -130,7 +130,7 @@ func TestUploadOriginalStoresContent(t *testing.T) {
 func TestUploadMarkdownUsesDefaultsFromServer(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2024, time.November, 5, 0, 0, 0, 0, time.UTC) })
-	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig())
 	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	resp, err := server.UploadMarkdown(context.Background(), &storagev1.UploadMarkdownRequest{
@@ -147,7 +147,7 @@ func TestUploadMarkdownUsesDefaultsFromServer(t *testing.T) {
 func TestUploadOriginal_AttachesCorrelationFromRequest(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(time.Now)
-	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig())
 	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	stream := &headerCapturingStream{}
@@ -170,7 +170,7 @@ func TestUploadOriginal_AttachesCorrelationFromRequest(t *testing.T) {
 func TestUploadMarkdown_UsesMetadataCorrelationWhenRequestEmpty(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(time.Now)
-	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig())
 	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	stream := &headerCapturingStream{}
@@ -189,7 +189,7 @@ func TestUploadMarkdown_UsesMetadataCorrelationWhenRequestEmpty(t *testing.T) {
 func TestGetObjectReturnsStoredData(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2024, time.March, 10, 0, 0, 0, 0, time.UTC) })
-	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig())
 	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	location, err := service.UploadMarkdown(context.Background(), "org", "project", "doc-get", []byte("content"))
@@ -201,6 +201,18 @@ func TestGetObjectReturnsStoredData(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []byte("content"), resp.GetContent())
+}
+
+func validationConfig() storage.UploadValidationConfig {
+	return storage.UploadValidationConfig{
+		AllowedExtensions: map[string]struct{}{
+			"doc":  {},
+			"docx": {},
+			"pdf":  {},
+		},
+		MaxSizeBytes: 10 * 1024 * 1024,
+		SignedURLTTL: 900,
+	}
 }
 
 type mockPresignClient struct {

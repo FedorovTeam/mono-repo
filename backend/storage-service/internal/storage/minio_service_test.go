@@ -119,7 +119,7 @@ func TestService_UploadAndDownload(t *testing.T) {
 	generator.newUUID = func() uuid.UUID {
 		return uuid.MustParse("123e4567-e89b-12d3-a456-426614174001")
 	}
-	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
+	svc := NewService(client, generator, "knowledge-original", "knowledge-md", UploadValidationConfig{})
 
 	ctx := context.Background()
 	originalContent := []byte("original-bytes")
@@ -151,7 +151,7 @@ func TestService_UploadAndDownload(t *testing.T) {
 func TestService_ErrorsOnMissingBucket(t *testing.T) {
 	client := newMockClient("knowledge-original")
 	generator := NewObjectKeyGenerator(time.Now)
-	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
+	svc := NewService(client, generator, "knowledge-original", "knowledge-md", UploadValidationConfig{})
 
 	_, err := svc.UploadMarkdown(context.Background(), "org", "proj", "id-1", []byte("md"))
 	require.Error(t, err)
@@ -160,7 +160,7 @@ func TestService_ErrorsOnMissingBucket(t *testing.T) {
 func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
-	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
+	svc := NewService(client, generator, "knowledge-original", "knowledge-md", UploadValidationConfig{MaxSizeBytes: 2048, AllowedExtensions: map[string]struct{}{"docx": {}}, SignedURLTTL: 600})
 
 	ctx := context.Background()
 
@@ -197,6 +197,14 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 		DocumentID:       "doc-1",
 		FileName:         "demo.pdf",
 		ContentLength:    -1,
+		ExpiresInSeconds: 10,
+	})
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{
+		DocumentID:       "doc-1",
+		FileName:         "demo.docx",
+		ContentLength:    4096,
 		ExpiresInSeconds: 10,
 	})
 	require.ErrorIs(t, err, ErrInvalidArgument)

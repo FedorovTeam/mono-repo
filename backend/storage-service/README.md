@@ -17,13 +17,15 @@
 - `minio.buckets.knowledge_md` — приватный бакет для Markdown.
 - `events.upload_bucket` — бакет, для которого включается webhook-уведомление о завершенной загрузке (по умолчанию `minio.buckets.knowledge_docx`).
 - `events.webhook_arn` — ARN MinIO webhook/queue для доставки события `s3:ObjectCreated:*` в gateway.
+- `uploads.max_size_bytes` / `uploads.allowed_extensions` — лимит размера и список допустимых расширений для входящих файлов при выдаче presigned URL.
+- `uploads.signed_url_ttl_seconds` — TTL подписанных ссылок; используется как дефолт, если клиент не передал `expires_in_seconds`.
 - `processing.dsn` — подключение к PostgreSQL с таблицами `processing_jobs`, `job_events`, `document_status_logs`.
 - `processing.stage` — стадия, которую обрабатывает воркер (`store_original` по умолчанию).
 - `processing.poll_interval_seconds` / `processing.backoff_seconds` — интервалы опроса задач и backoff между попытками.
 - `processing.max_attempts` — лимит попыток на одну задачу перед фиксацией статуса `failed`.
 - `observability.enable_metrics` / `observability.enable_traces` / `observability.enable_logs` — включают экспорт метрик, трейсинга и логов соответственно (по умолчанию все включено).
 
-`GenerateUploadURL` валидирует, что `content_length > 0`, `expires_in_seconds > 0`, а расширение `file_name` входит в список `doc`/`docx`/`pdf`; при формировании ссылки проверяются доступность бакета загрузки и markdown-бакета.
+`GenerateUploadURL` валидирует, что `content_length > 0` и не превышает `uploads.max_size_bytes`, `expires_in_seconds > 0` (или подставляет `uploads.signed_url_ttl_seconds`, если клиент не задал TTL), а расширение `file_name` входит в список `uploads.allowed_extensions`; при формировании ссылки проверяются доступность бакета загрузки и markdown-бакета.
 
 ## Локальный запуск
 1. Поднимите MinIO (например, через `docker-compose` шаблона template-service) и создайте бакеты `knowledge-original` и `knowledge-md` с приватной политикой.

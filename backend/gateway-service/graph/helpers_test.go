@@ -14,7 +14,7 @@ func TestValidateUploadInputBasicChecks(t *testing.T) {
 		Path:          "docs/doc.pdf",
 		Repository:    "owner/repo",
 	}
-	cfg := UploadValidationConfig{MaxSizeBytes: 100}
+	cfg := UploadValidationConfig{}
 
 	cases := []struct {
 		name        string
@@ -26,7 +26,6 @@ func TestValidateUploadInputBasicChecks(t *testing.T) {
 		{name: "missing branch", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Branch = "  " }, expectError: true},
 		{name: "missing path", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Path = "" }, expectError: true},
 		{name: "non-positive size", modify: func(input *model.UploadKnowledgeDocumentInput) { input.FileSizeBytes = 0 }, expectError: true},
-		{name: "exceeds size limit", modify: func(input *model.UploadKnowledgeDocumentInput) { input.FileSizeBytes = 101 }, expectError: true},
 		{name: "passes without normalization", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Repository = " org/repo " }},
 	}
 
