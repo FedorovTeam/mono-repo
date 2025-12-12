@@ -8,7 +8,7 @@ storage:
 services:
   storage_service: "storage-service.storage-service.svc.cluster.local:9090"
   transformer_service: "docling-transformer-service.docling-transformer-service.svc.cluster.local:9090"
-  github_publisher_service: "github-publisher.backend.svc.cluster.local:9090"
+  github_publisher_service: "github-publisher-service.github-publisher-service.svc.cluster.local:9090"
   grpc:
     dial_timeout: 5s
     min_connect_timeout: 2s
