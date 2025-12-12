@@ -150,10 +150,12 @@ func (r *publishRepoStub) RequeueStaleProcessingJobs(ctx context.Context, staleB
 }
 
 type staticPublisher struct {
-	resp *githubpublisherv1.PublishMarkdownResponse
+	resp        *githubpublisherv1.PublishMarkdownResponse
+	lastRequest *githubpublisherv1.PublishMarkdownRequest
 }
 
-func (s staticPublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
+func (s *staticPublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
+	s.lastRequest = in
 	return s.resp, nil
 }
 
@@ -173,11 +175,15 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 	}
 
 	repo := &publishRepoStub{doc: doc}
-	publisher := staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc123"}}
+	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc123"}}
 	activities := NewActivities(repo, nil, publisher)
 	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second)
 
-	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub})
+	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub, Payload: map[string]any{
+		"commit_message": "commit",
+		"author_name":    "Author",
+		"author_email":   "author@example.com",
+	}})
 
 	if repo.lastEvent == nil {
 		t.Fatal("expected job event to be recorded")
@@ -187,6 +193,9 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 	}
 	if repo.lastEvent.Payload == nil || repo.lastEvent.Payload["commit_sha"] != "abc123" {
 		t.Fatalf("expected commit_sha in event payload, got %#v", repo.lastEvent.Payload)
+	}
+	if publisher.lastRequest == nil || publisher.lastRequest.GetCommitMessage() != "commit" || publisher.lastRequest.GetAuthorName() != "Author" {
+		t.Fatalf("expected commit metadata to be propagated, got %#v", publisher.lastRequest)
 	}
 }
 
@@ -207,7 +216,7 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	retryAfter := durationpb.New(3 * time.Second)
-	publisher := staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{
+	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{
 		Status:       githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE,
 		ErrorCode:    githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT,
 		ErrorMessage: "timeout",
@@ -217,7 +226,11 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second)
 
 	start := time.Now()
-	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub})
+	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub, Payload: map[string]any{
+		"commit_message": "commit",
+		"author_name":    "Author",
+		"author_email":   "author@example.com",
+	}})
 
 	if repo.lastEvent == nil {
 		t.Fatal("expected failed event to be recorded")
@@ -266,7 +279,12 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 				Stage:      model.JobStagePublishToGitHub,
 				Status:     model.JobStatusInProgress,
 				Attempts:   1,
-				UpdatedAt:  fixed.Add(-time.Minute),
+				Payload: map[string]any{
+					"commit_message": "commit",
+					"author_name":    "Author",
+					"author_email":   "author@example.com",
+				},
+				UpdatedAt: fixed.Add(-time.Minute),
 			},
 		},
 	}
@@ -284,7 +302,7 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	}
 
 	repo.now = fixed.Add(time.Minute)
-	publisher := staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "commit-sha"}}
+	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "commit-sha"}}
 	activities := NewActivities(repo, nil, publisher)
 	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 2, time.Second)
 

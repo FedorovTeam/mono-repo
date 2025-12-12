@@ -52,6 +52,11 @@ type publishInput struct {
 	CreatePR          bool
 	CorrelationID     string
 	IdempotencyKey    string
+	CommitMessage     string
+	AuthorName        string
+	AuthorEmail       string
+	PRTitle           string
+	PRBody            string
 }
 
 type convertResult struct {
@@ -267,6 +272,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		CreatePr:       input.CreatePR,
 		CorrelationId:  correlationID,
 		IdempotencyKey: input.IdempotencyKey,
+		CommitMessage:  input.CommitMessage,
+		AuthorName:     input.AuthorName,
+		AuthorEmail:    input.AuthorEmail,
+		PrTitle:        input.PRTitle,
+		PrBody:         input.PRBody,
 	}
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)

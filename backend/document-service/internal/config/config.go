@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
+	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -25,11 +27,16 @@ type Config struct {
 		GRPC                   GRPCClient `yaml:"grpc"`
 	} `yaml:"services"`
 	Github struct {
-		Owner      string `yaml:"owner"`
-		Repository string `yaml:"repository"`
-		Branch     string `yaml:"branch"`
-		BaseBranch string `yaml:"base_branch"`
-		BaseURL    string `yaml:"base_url"`
+		Owner         string `yaml:"owner"`
+		Repository    string `yaml:"repository"`
+		Branch        string `yaml:"branch"`
+		BaseBranch    string `yaml:"base_branch"`
+		BaseURL       string `yaml:"base_url"`
+		CommitMessage string `yaml:"commit_message"`
+		PRTitle       string `yaml:"pr_title"`
+		PRBody        string `yaml:"pr_body"`
+		AuthorName    string `yaml:"author_name"`
+		AuthorEmail   string `yaml:"author_email"`
 	} `yaml:"github"`
 	Observability Observability `yaml:"observability"`
 	Reconciler    Reconciler    `yaml:"reconciler"`
@@ -130,6 +137,12 @@ func (c *Config) Validate() error {
 	}
 	if c.StageWorker.GracePeriod < 0 {
 		return fmt.Errorf("stage_worker.grace_period cannot be negative")
+	}
+	if strings.TrimSpace(c.Github.CommitMessage) == "" {
+		return fmt.Errorf("github.commit_message is required")
+	}
+	if strings.TrimSpace(c.Github.AuthorName) == "" || strings.TrimSpace(c.Github.AuthorEmail) == "" {
+		return fmt.Errorf("github.author_name and github.author_email are required")
 	}
 	return nil
 }
