@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,6 +14,7 @@ type Config struct {
 	Minio         MinioConfig         `yaml:"minio"`
 	Events        EventsConfig        `yaml:"events"`
 	Observability ObservabilityConfig `yaml:"observability"`
+	Processing    ProcessingConfig    `yaml:"processing"`
 }
 
 // ServiceConfig содержит сетевые настройки сервисного слоя.
@@ -49,6 +51,33 @@ type ObservabilityConfig struct {
 	EnableLogs    bool `yaml:"enable_logs"`
 }
 
+// ProcessingConfig описывает параметры воркера обработки processing_jobs.
+type ProcessingConfig struct {
+	DSN                 string `yaml:"dsn"`
+	Stage               string `yaml:"stage"`
+	PollIntervalSeconds int    `yaml:"poll_interval_seconds"`
+	MaxAttempts         int    `yaml:"max_attempts"`
+	BackoffSeconds      int    `yaml:"backoff_seconds"`
+}
+
+// PollInterval возвращает интервал опроса processing_jobs с дефолтом 5 секунд.
+func (p ProcessingConfig) PollInterval() time.Duration {
+	if p.PollIntervalSeconds <= 0 {
+		return 5 * time.Second
+	}
+
+	return time.Duration(p.PollIntervalSeconds) * time.Second
+}
+
+// Backoff возвращает базовый backoff между повторными попытками выполнения задачи.
+func (p ProcessingConfig) Backoff() time.Duration {
+	if p.BackoffSeconds <= 0 {
+		return 5 * time.Second
+	}
+
+	return time.Duration(p.BackoffSeconds) * time.Second
+}
+
 // LoadConfig загружает конфигурацию из config.yaml или возвращает nil при ошибке.
 func LoadConfig() *Config {
 	configPath := os.Getenv("CONFIG_PATH")
@@ -68,11 +97,30 @@ func LoadConfig() *Config {
 			EnableTraces:  true,
 			EnableLogs:    true,
 		},
+		Processing: ProcessingConfig{
+			Stage:               "store_original",
+			PollIntervalSeconds: 5,
+			MaxAttempts:         3,
+			BackoffSeconds:      5,
+		},
 	}
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		log.Printf("cannot parse config.yaml: %v", err)
 		return nil
+	}
+
+	if cfg.Processing.Stage == "" {
+		cfg.Processing.Stage = "store_original"
+	}
+	if cfg.Processing.PollIntervalSeconds <= 0 {
+		cfg.Processing.PollIntervalSeconds = 5
+	}
+	if cfg.Processing.MaxAttempts <= 0 {
+		cfg.Processing.MaxAttempts = 3
+	}
+	if cfg.Processing.BackoffSeconds <= 0 {
+		cfg.Processing.BackoffSeconds = 5
 	}
 
 	return &cfg

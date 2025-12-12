@@ -11,20 +11,25 @@
 
 ## Конфигурация
 Обязательные параметры задаются в `config/config.yaml` и читаются через `CONFIG_PATH`:
-- `service.grpc_port` — порт gRPC-сервера.
+- `service.grpc_port` — порт gRPC-сервера (единый entrypoint вместе с фоновым воркером).
 - `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — ключи доступа, `minio.use_ssl=true`.
 - `minio.buckets.knowledge_docx` — приватный бакет для оригиналов и загрузки через signed URL.
 - `minio.buckets.knowledge_md` — приватный бакет для Markdown.
 - `events.upload_bucket` — бакет, для которого включается webhook-уведомление о завершенной загрузке.
 - `events.webhook_arn` — ARN MinIO webhook/queue для доставки события `s3:ObjectCreated:*` в gateway.
+- `processing.dsn` — подключение к PostgreSQL с таблицами `processing_jobs`, `job_events`, `document_status_logs`.
+- `processing.stage` — стадия, которую обрабатывает воркер (`store_original` по умолчанию).
+- `processing.poll_interval_seconds` / `processing.backoff_seconds` — интервалы опроса задач и backoff между попытками.
+- `processing.max_attempts` — лимит попыток на одну задачу перед фиксацией статуса `failed`.
 - `observability.enable_metrics` / `observability.enable_traces` / `observability.enable_logs` — включают экспорт метрик, трейсинга и логов соответственно (по умолчанию все включено).
 
 ## Локальный запуск
 1. Поднимите MinIO (например, через `docker-compose` шаблона template-service) и создайте бакеты `knowledge-original` и `knowledge-md` с приватной политикой.
-2. Обновите `config/config.yaml` при необходимости.
-3. Сгенерируйте gRPC-код при помощи `protoc` (директория `proto`).
-4. Запустите сервис: `go run ./cmd`.
-   В логах появится инициализация MinIO и бакетов, а при gRPC-запросах — correlation-id из поля запроса или метаданных `x-correlation-id`. Завершение по `Ctrl+C` останавливает сервер graceful shutdown'ом.
+2. Подготовьте подключение к PostgreSQL, в котором доступны таблицы `processing_jobs`, `job_events`, `documents`, `document_status_logs` (используются in-process воркером).
+3. Обновите `config/config.yaml` при необходимости.
+4. Сгенерируйте gRPC-код при помощи `protoc` (директория `proto`).
+5. Запустите сервис: `go run ./cmd`. В едином процессе стартуют gRPC-сервер и фоновой воркер опроса `processing_jobs`; завершение по `Ctrl+C` останавливает оба компонента graceful shutdown'ом.
+   В логах появится инициализация MinIO и бакетов, а при gRPC-запросах — correlation-id из поля запроса или метаданных `x-correlation-id`.
 
 ## Тесты
 В модуле предусмотрены unit-тесты для генерации ключей и gRPC-обработчиков; выполнить их можно командой `go test ./...`.

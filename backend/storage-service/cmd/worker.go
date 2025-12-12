@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"backend-storage-service/config"
 )
 
 type job struct {
@@ -29,6 +31,27 @@ type worker struct {
 	stage        string
 }
 
+func startProcessingWorker(ctx context.Context, cfg config.ProcessingConfig) (*pgxpool.Pool, error) {
+	if cfg.DSN == "" {
+		return nil, fmt.Errorf("processing.dsn is required")
+	}
+
+	pool, err := pgxpool.New(ctx, cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("connect db: %w", err)
+	}
+
+	w := newWorker(pool, cfg.Stage, cfg.PollInterval(), cfg.MaxAttempts, cfg.Backoff())
+
+	go func() {
+		log.Printf("starting processing worker for stage=%s", cfg.Stage)
+		w.run(ctx)
+		log.Printf("processing worker stopped: stage=%s", cfg.Stage)
+	}()
+
+	return pool, nil
+}
+
 func newWorker(pool *pgxpool.Pool, stage string, poll time.Duration, maxAttempts int, backoff time.Duration) *worker {
 	if poll <= 0 {
 		poll = 5 * time.Second
@@ -39,6 +62,10 @@ func newWorker(pool *pgxpool.Pool, stage string, poll time.Duration, maxAttempts
 	if backoff <= 0 {
 		backoff = 5 * time.Second
 	}
+	if stage == "" {
+		stage = "store_original"
+	}
+
 	return &worker{pool: pool, pollInterval: poll, maxAttempts: maxAttempts, backoff: backoff, stage: stage}
 }
 
@@ -181,29 +208,4 @@ func (w *worker) insertEvent(ctx context.Context, tx pgx.Tx, jobID, status, even
         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, '{}'::jsonb, now())
     `, jobID, w.stage, status, eventType, message)
 	return err
-}
-
-func main() {
-	dsn := os.Getenv("PROCESSING_DSN")
-	if dsn == "" {
-		log.Fatal("PROCESSING_DSN is required")
-	}
-
-	stage := os.Getenv("PROCESSING_STAGE")
-	if stage == "" {
-		stage = "store_original"
-	}
-
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		log.Fatalf("connect db: %v", err)
-	}
-	defer pool.Close()
-
-	w := newWorker(pool, stage, 5*time.Second, 5, 10*time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	log.Printf("starting processing worker for stage=%s", stage)
-	w.run(ctx)
 }
