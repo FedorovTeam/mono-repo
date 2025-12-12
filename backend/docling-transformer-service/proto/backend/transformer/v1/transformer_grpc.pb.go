@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v3.21.12
-// source: backend/docling-transformer-service/proto/backend/transformer/v1/transformer.proto
+// source: proto/backend/transformer/v1/transformer.proto
 
 package transformerv1
 
@@ -155,5 +155,5 @@ var TransformerService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "backend/docling-transformer-service/proto/backend/transformer/v1/transformer.proto",
+	Metadata: "proto/backend/transformer/v1/transformer.proto",
 }

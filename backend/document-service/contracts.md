@@ -42,7 +42,6 @@
   - `markdown_bucket`, `markdown_object_key` — куда писать результат (`documents.markdown_*`, обновляется версией). Если `markdown_object_key` пуст, воркер использует ключ из `documents`.
 - **Опциональные поля:**
   - `correlation_id` — прокидывается в gRPC‑метаданные (`x-correlation-id`).
-  - `queue_id` — идентификатор очереди/таски конвертера, если она уже была создана.
 - **Пример:**
   ```json
   {
@@ -50,11 +49,10 @@
     "original_object_key": "org/knowledge/project/documents/year=2024/month=05/day=14/7c1.../report.docx",
     "markdown_bucket": "knowledge-md",
     "markdown_object_key": "org/knowledge/project/documents/year=2024/month=05/day=14/7c1.../report.md",
-    "correlation_id": "7f3d7c8b-1c3f-4a4c-9f2e-8c6a1e8dbbaf",
-    "queue_id": "docling-42"
+    "correlation_id": "7f3d7c8b-1c3f-4a4c-9f2e-8c6a1e8dbbaf"
   }
   ```
-- **Связь с хранилищами:** после успешного `StatObject` исходника воркер получает байты через `storage-service`, отправляет в Docling и сохраняет ключ Markdown в MinIO и в `document_versions`/`documents`.
+- **Связь с хранилищами:** воркер передаёт bucket/object_key в `transformer-service`, который сам скачивает исходник из MinIO, ставит задачу конвертации и дожидается готовности результата. Document-service получает финальные `queue_id` и `markdown_object_key` от конвертера и записывает их в `document_versions`/`documents`.
 
 ### `publish_to_github`
 - **Назначение:** передать все данные для публикации Markdown в GitHub.

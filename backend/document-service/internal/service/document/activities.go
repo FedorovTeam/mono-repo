@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,7 +38,6 @@ type convertInput struct {
 	MarkdownBucket    string
 	OriginalObjectKey string
 	MarkdownObjectKey string
-	FilenameExtension string
 	Version           int32
 }
 
@@ -160,18 +158,13 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		latest := latestVersion(doc)
 		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(currentStatus), Version: latest.Version, Ready: true}, nil
 	}
-	extension := input.FilenameExtension
-	if extension == "" {
-		extension = strings.TrimPrefix(strings.ToLower(filepath.Ext(input.OriginalObjectKey)), ".")
-	}
-
 	resp, err := a.transformer.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        input.DocumentID,
 		OriginalBucket:    input.OriginalBucket,
 		OriginalObjectKey: input.OriginalObjectKey,
 		MarkdownBucket:    input.MarkdownBucket,
 		MarkdownObjectKey: input.MarkdownObjectKey,
-		FilenameExtension: extension,
+		WaitForResult:     true,
 	})
 	if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("convert: %v", err))

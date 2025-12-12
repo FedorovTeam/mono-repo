@@ -33,6 +33,7 @@ type fakeQueueRepo struct {
 	countErr     error
 	queueID      uuid.UUID
 	latestTask   *repository.TransformationTask
+	byID         map[uuid.UUID]*repository.TransformationTask
 }
 
 func (f *fakeQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
@@ -42,6 +43,9 @@ func (f *fakeQueueRepo) Enqueue(_ context.Context, params repository.EnqueuePara
 	}
 	if f.queueID == uuid.Nil {
 		f.queueID = uuid.New()
+	}
+	if f.byID != nil {
+		f.byID[f.queueID] = &repository.TransformationTask{ID: f.queueID, Status: repository.StatusPending, MarkdownBucket: params.MarkdownBucket, MarkdownObjectKey: params.MarkdownObjectKey}
 	}
 	return f.queueID, nil
 }
@@ -69,6 +73,15 @@ func (*fakeQueueRepo) AcquireBatch(context.Context, int) ([]*repository.Transfor
 }
 func (f *fakeQueueRepo) GetLatestByDocument(context.Context, string) (*repository.TransformationTask, error) {
 	return f.latestTask, nil
+}
+func (f *fakeQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*repository.TransformationTask, error) {
+	if f.byID == nil {
+		return nil, nil
+	}
+	if task, ok := f.byID[id]; ok {
+		return task, nil
+	}
+	return nil, nil
 }
 func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
 func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
@@ -177,6 +190,7 @@ func TestConvertDocumentToMarkdownReusesExistingTask(t *testing.T) {
 		Status:            repository.StatusProcessing,
 		MarkdownBucket:    "persisted-md",
 		MarkdownObjectKey: "existing.md",
+		NextPollAt:        ptrTime(time.Now().Add(-time.Second)),
 	}}
 	logger := zap.NewNop()
 
@@ -221,6 +235,48 @@ func TestConvertDocumentToMarkdownReusesExistingTask(t *testing.T) {
 	}
 	if len(repo.enqueueCalls) != 0 {
 		t.Fatalf("expected no new enqueue calls, got %d", len(repo.enqueueCalls))
+	}
+}
+
+func TestConvertDocumentToMarkdownWaitsForResult(t *testing.T) {
+	doneID := uuid.New()
+	repo := &fakeQueueRepo{
+		latestTask: &repository.TransformationTask{ID: doneID, Status: repository.StatusProcessing, MarkdownBucket: "md-bucket"},
+		byID: map[uuid.UUID]*repository.TransformationTask{
+			doneID: {ID: doneID, Status: repository.StatusDone, MarkdownBucket: "md-bucket", MarkdownObjectKey: "ready.md"},
+		},
+	}
+
+	lis := bufconn.Listen(bufSize)
+	srv := newGRPCServer(zap.NewNop(), config.ObservabilityConfig{})
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "fallback-md", 0, nil, time.Millisecond, time.Millisecond, 3, zap.NewNop()))
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial bufnet: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+	resp, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-123",
+		OriginalBucket:    "bucket-orig",
+		OriginalObjectKey: "path/file.docx",
+		WaitForResult:     true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.GetStatus() != string(repository.StatusDone) {
+		t.Fatalf("expected done status, got %s", resp.GetStatus())
+	}
+	if resp.GetMarkdownObjectKey() != "ready.md" {
+		t.Fatalf("expected ready key, got %s", resp.GetMarkdownObjectKey())
 	}
 }
 
@@ -389,4 +445,8 @@ func TestConvertDocxToMarkdownValidation(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("expected invalid argument, got %v", err)
 	}
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }

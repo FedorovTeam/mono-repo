@@ -16,6 +16,7 @@ message ConvertDocumentToMarkdownRequest {
   string markdown_bucket = 4;
   string markdown_object_key = 5;
   string filename_extension = 6;
+  bool wait_for_result = 7;
 }
 
 message ConvertDocumentToMarkdownResponse {

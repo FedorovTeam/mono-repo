@@ -84,6 +84,18 @@ func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*repositor
 	return tasks, nil
 }
 
+func (s *stubQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*repository.TransformationTask, error) {
+	if s.currentTask != nil && s.currentTask.ID == id {
+		return s.currentTask, nil
+	}
+	for _, task := range s.acquireTasks {
+		if task != nil && task.ID == id {
+			return task, nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *stubQueueRepo) GetLatestByDocument(context.Context, string) (*repository.TransformationTask, error) {
 	return s.currentTask, nil
 }

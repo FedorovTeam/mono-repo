@@ -157,7 +157,7 @@ func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpubli
 
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{doc: &model.Document{ID: "doc-1", Status: model.StatusStoredOriginal, Versions: []model.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
-	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending", MarkdownObjectKey: "md-key"}}
+	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: string(model.StatusConvertedToMarkdown), MarkdownObjectKey: "md-key"}}
 
 	activities := NewActivities(repo, transformer, fakePublisher{}, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
@@ -167,7 +167,6 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		MarkdownBucket:    "md-bucket",
 		OriginalObjectKey: "path/doc-1.docx",
 		MarkdownObjectKey: "path/doc-1.md",
-		FilenameExtension: "docx",
 		Version:           3,
 	})
 	if err != nil {
@@ -182,24 +181,16 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
 	}
 
-	if transformer.lastRequest.GetMarkdownObjectKey() != "path/doc-1.md" {
-		t.Fatalf("unexpected markdown key: %s", transformer.lastRequest.GetMarkdownObjectKey())
-	}
-
-	if transformer.lastRequest.GetFilenameExtension() != "docx" {
-		t.Fatalf("unexpected filename extension: %s", transformer.lastRequest.GetFilenameExtension())
+	if transformer.lastRequest.GetMarkdownObjectKey() != "path/doc-1.md" || !transformer.lastRequest.GetWaitForResult() {
+		t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
 	}
 
 	if result.QueueID != "queue-1" {
 		t.Fatalf("unexpected queue id: %s", result.QueueID)
 	}
 
-	if result.Status != "pending" {
+	if result.Status != string(model.StatusConvertedToMarkdown) {
 		t.Fatalf("unexpected status: %s", result.Status)
-	}
-
-	if repo.lastStatus != "" {
-		t.Fatalf("status should not be updated before markdown is ready, got %v", repo.lastStatus)
 	}
 
 	if err := activities.MarkConverted(context.Background(), repo.doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
@@ -253,10 +244,10 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 
 	activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
-        _, err := activities.PublishMarkdown(context.Background(), publishInput{
-                DocumentID:        "doc-2",
-                DocumentName:      "doc title",
-                MarkdownBucket:    "bucket",
+	_, err := activities.PublishMarkdown(context.Background(), publishInput{
+		DocumentID:        "doc-2",
+		DocumentName:      "doc title",
+		MarkdownBucket:    "bucket",
 		MarkdownObjectKey: "object",
 		Path:              "doc.md",
 	})

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/config"
 	"github.com/mono-repo/docling-transformer-service/internal/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/repository"
@@ -131,6 +132,22 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		s.logger.Info("ConvertDocumentToMarkdown reused existing task", zap.String("correlation_id", correlationID),
 			zap.String("queue_id", existingTask.ID.String()), zap.String("status", string(existingTask.Status)))
 
+		if req.GetWaitForResult() {
+			task, waitErr := s.waitForTask(ctx, existingTask.ID)
+			if waitErr != nil {
+				return nil, waitErr
+			}
+
+			bucket, key = resolveOutput(task, bucket, key)
+
+			return &transformerv1.ConvertDocumentToMarkdownResponse{
+				QueueId:           task.ID.String(),
+				Status:            string(task.Status),
+				MarkdownBucket:    bucket,
+				MarkdownObjectKey: key,
+			}, nil
+		}
+
 		return &transformerv1.ConvertDocumentToMarkdownResponse{
 			QueueId:           existingTask.ID.String(),
 			Status:            string(existingTask.Status),
@@ -170,6 +187,22 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 	}
 
 	s.logger.Info("ConvertDocumentToMarkdown queued", zap.String("correlation_id", correlationID), zap.String("queue_id", queueID.String()))
+
+	if req.GetWaitForResult() {
+		task, waitErr := s.waitForTask(ctx, queueID)
+		if waitErr != nil {
+			return nil, waitErr
+		}
+
+		bucket, key := resolveOutput(task, markdownBucket, markdownKey)
+
+		return &transformerv1.ConvertDocumentToMarkdownResponse{
+			QueueId:           task.ID.String(),
+			Status:            string(task.Status),
+			MarkdownBucket:    bucket,
+			MarkdownObjectKey: key,
+		}, nil
+	}
 
 	return &transformerv1.ConvertDocumentToMarkdownResponse{
 		QueueId:           queueID.String(),
@@ -232,6 +265,78 @@ func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transfo
 		MediaType: result.MediaType,
 		Charset:   result.Charset,
 	}, nil
+}
+
+func (s *TransformerAPI) waitForTask(ctx context.Context, queueID uuid.UUID) (*repository.TransformationTask, error) {
+	backoff := s.pollInterval
+	if backoff <= 0 {
+		backoff = 2 * time.Second
+	}
+	maxInterval := s.pollMaxInterval
+	if maxInterval <= 0 {
+		maxInterval = 10 * time.Second
+	}
+
+	attempts := s.pollAttempts
+	if attempts <= 0 {
+		attempts = 10
+	}
+
+	for attempt := 1; attempt <= attempts; attempt++ {
+		task, err := s.queueRepo.GetByID(ctx, queueID)
+		if err != nil {
+			s.logger.Error("wait task fetch failed", zap.Error(err), zap.String("queue_id", queueID.String()))
+			return nil, status.Errorf(codes.Internal, "fetch task status: %v", err)
+		}
+		if task == nil {
+			return nil, status.Error(codes.NotFound, "queue task not found")
+		}
+
+		if task.Status == repository.StatusDone || task.Status == repository.StatusFailed {
+			return task, nil
+		}
+
+		waitFor := backoff
+		if task.NextPollAt != nil {
+			until := time.Until(*task.NextPollAt)
+			if until > 0 {
+				waitFor = until
+			}
+		}
+
+		if attempt == attempts {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(waitFor):
+		}
+
+		backoff = backoff * 2
+		if backoff > maxInterval {
+			backoff = maxInterval
+		}
+	}
+
+	return nil, status.Error(codes.DeadlineExceeded, "conversion result not ready")
+}
+
+func resolveOutput(task *repository.TransformationTask, fallbackBucket, fallbackKey string) (string, string) {
+	bucket := fallbackBucket
+	key := fallbackKey
+
+	if task != nil {
+		if task.MarkdownBucket != "" {
+			bucket = task.MarkdownBucket
+		}
+		if task.MarkdownObjectKey != "" {
+			key = task.MarkdownObjectKey
+		}
+	}
+
+	return bucket, key
 }
 
 func (s *TransformerAPI) pollUntilReady(ctx context.Context, jobID string) (converter.DoclingConvertResult, error) {
