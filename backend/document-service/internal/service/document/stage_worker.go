@@ -29,7 +29,6 @@ type StageWorker struct {
 	publishRetry *PublishRetryConfig
 	metrics      *workerMetrics
 	logf         func(format string, args ...interface{})
-	waitMarkdown bool
 }
 
 type PublishRetryConfig struct {
@@ -54,7 +53,7 @@ func (c PublishRetryConfig) backoff(attempts int) time.Duration {
 	return delay
 }
 
-func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration, waitMarkdown bool, publishRetry *PublishRetryConfig) *StageWorker {
+func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration, publishRetry *PublishRetryConfig) *StageWorker {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -71,7 +70,6 @@ func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.Job
 		publishRetry: publishRetry,
 		metrics:      newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
 		logf:         log.Printf,
-		waitMarkdown: waitMarkdown,
 	}
 }
 
@@ -140,7 +138,7 @@ func (w *StageWorker) handleStoreOriginal(ctx context.Context, job model.Process
 		return
 	}
 
-	if _, err := w.activities.AwaitOriginal(w.jobContext(ctx, job), job.DocumentID); err != nil {
+	if err := w.activities.MarkStoredOriginal(w.jobContext(ctx, job), job.DocumentID); err != nil {
 		w.failJob(ctx, job, err.Error())
 		return
 	}
@@ -194,24 +192,13 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 		job.Payload["queue_id"] = result.QueueID
 	}
 
-	if w.waitMarkdown && !result.Ready {
-		awaitInput := awaitMarkdownInput{
-			DocumentID:        job.DocumentID,
-			MarkdownBucket:    markdownBucket,
-			MarkdownObjectKey: result.MarkdownKey,
-			CorrelationID:     stringFromPayload(job.Payload, "correlation_id", correlationFromDoc(doc)),
-			QueueID:           result.QueueID,
-			TransformerStatus: result.Status,
+	if !result.Ready {
+		nextRun := time.Now().Add(w.retryDelay)
+		if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusPending, &nextRun, false, job.Payload, &model.JobEvent{EventType: "rescheduled", Message: "awaiting converter result"}); err != nil {
+			w.logf("stage-worker[%s]: reschedule convert job %s: %v", w.stage, job.TaskID, err)
+			w.metrics.recordError(ctx)
 		}
-		if err := w.activities.AwaitMarkdown(convCtx, awaitInput); err != nil {
-			w.failJob(ctx, job, err.Error())
-			return
-		}
-
-		result.Ready = true
-		if result.Status == "" {
-			result.Status = string(model.StatusConvertedToMarkdown)
-		}
+		return
 	}
 
 	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {

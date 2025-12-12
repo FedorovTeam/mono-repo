@@ -10,7 +10,7 @@
 2. **Подтверждение загрузки**
    - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после успешного `UploadOriginal`/webhook-а из MinIO.
    - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями. При успехе документ переводится в `StoredOriginal` и заводит задачу `processing_jobs` со стадией `store_original` в статусе `pending`; при ошибке документ переводится в `Failed`.
-   - Периодический cron-воркер `UploadReconciler` опрашивает таблицу `documents` в статусе `Uploaded`, проверяет наличие исходника через `storage-service.GetObject` (gRPC) и при необходимости сам вызывает `ConfirmUpload`, чтобы не зависеть только от вебхуков.
+   - Периодический cron-воркер `UploadReconciler` опрашивает таблицу `documents` в статусе `Uploaded` и повторно вызывает `ConfirmUpload`, не проверяя объект напрямую: реальную проверку выполняет storage-service.
 
 3. **Обработка по статусам**
    - Цепочка построена на таблице `processing_jobs`. Исполнители стадий (`storage-service`, `docling-transformer-service`, `github-publisher-service`) вызываются через gRPC и меняют статус задачи (`pending` → `in_progress` → `completed|failed`).
@@ -19,8 +19,7 @@
      - `convert_to_markdown` → создаёт `publish_to_github` с ссылками на Markdown-объект и параметрами публикации.
      - Любая стадия в статусе `failed` → переводит документ в `Failed`, причина берётся из `payload.last_error`.
    - Стадии можно повторять: если исполнитель вернул задачу в `pending` (retry), `JobFollower` её не трогает до окончательного `completed`/`failed`.
-   - Воркеры `convert_to_markdown` вызывают gRPC `TransformerService/ConvertDocumentToMarkdown` в `docling-transformer-service`, сохраняют `queue_id` и `markdown_object_key` в `processing_jobs`/`documents`, и, если включено ожидание (`stage_worker.wait_markdown=true`), ждут появления Markdown-файла в MinIO через `storage-service` перед установкой статуса `ConvertedToMarkdown`.
-   - Воркеры `publish_to_github` вызывают gRPC `GithubPublisherService/PublishMarkdown` и обновляют `documents` на `PublishedToGitHub`/`Failed`, сохраняя `commit_sha` или `retry_after` в `job_events`.
+   - Воркеры `convert_to_markdown` и `publish_to_github` больше не содержат бизнес-логики интеграций: они вызывают gRPC клиентов соседних сервисов, фиксируют `queue_id`/`commit_sha` и обновляют статусы в PostgreSQL, повторно планируя задачу, если внешний сервис ещё работает.
 
 4. **Ручное обновление статуса**
    - Клиент вызывает `UpdateDocumentStatus`. Допустимы переходы `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, повторное выставление текущего статуса, либо перевод в `Failed` (если `error_reason` не задан, используется `reason`).

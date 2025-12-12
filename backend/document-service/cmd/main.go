@@ -19,7 +19,6 @@ import (
 	docservice "backend-document-service/internal/service/document"
 	transport "backend-document-service/internal/transport/grpc"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
-	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -72,12 +71,6 @@ func main() {
 	}
 
 	repo := repository.New(db)
-	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
-	if err != nil {
-		log.Fatalf("storage client: %v", err)
-	}
-	defer storageConn.Close()
-
 	transformerConn, err := grpcdial.DialContext(ctx, cfg.Services.TransformerService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("transformer client: %v", err)
@@ -90,12 +83,10 @@ func main() {
 	}
 	defer publisherConn.Close()
 
-	storageClient := storagev1.NewStorageServiceClient(storageConn)
 	transformerClient := transformerv1.NewTransformerServiceClient(transformerConn)
 	publisherClient := githubpublisherv1.NewGithubPublisherServiceClient(publisherConn)
 	activities := docservice.NewActivities(
 		repo,
-		storageClient,
 		transformerClient,
 		publisherClient,
 		cfg.Github.Owner,
@@ -127,7 +118,6 @@ func main() {
 
 	reconciler := docservice.NewUploadReconciler(
 		repo,
-		storageClient,
 		service,
 		cfg.Reconciler.BatchSize,
 		cfg.Reconciler.MinUploadedAge,
@@ -135,9 +125,9 @@ func main() {
 
 	go reconciler.Run(ctx, cfg.Reconciler.Interval)
 
-	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false, nil)
-	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, cfg.StageWorker.WaitMarkdown, nil)
-	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false, publishRetryCfg)
+	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, nil)
+	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, nil)
+	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, publishRetryCfg)
 
 	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
 	go convertWorker.Run(ctx, cfg.StageWorker.Interval)

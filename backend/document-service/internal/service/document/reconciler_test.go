@@ -7,8 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
 )
@@ -34,14 +32,12 @@ func TestUploadReconcilerConfirmsExistingObjects(t *testing.T) {
 		UpdatedAt:         fixed.Add(-2 * time.Minute),
 	}
 	repo := &repoMock{doc: &doc, docs: []model.Document{doc}}
-	storage := &stubStorageClient{}
 	confirm := &confirmUploadMock{}
-	reconciler := NewUploadReconciler(repo, storage, confirm, 10, time.Minute)
+	reconciler := NewUploadReconciler(repo, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
 	reconciler.reconcile(context.Background())
 
-	require.Equal(t, 1, storage.attempts)
 	require.Equal(t, 1, confirm.calls)
 	require.Equal(t, doc.ID, confirm.lastInput.DocumentID)
 }
@@ -56,34 +52,30 @@ func TestUploadReconcilerSkipsRecentDocuments(t *testing.T) {
 		UpdatedAt:         fixed.Add(-30 * time.Second),
 	}
 	repo := &repoMock{doc: &doc, docs: []model.Document{doc}}
-	storage := &stubStorageClient{}
 	confirm := &confirmUploadMock{}
-	reconciler := NewUploadReconciler(repo, storage, confirm, 10, time.Minute)
+	reconciler := NewUploadReconciler(repo, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
 	reconciler.reconcile(context.Background())
 
-	require.Zero(t, storage.attempts)
 	require.Zero(t, confirm.calls)
 }
 
-func TestUploadReconcilerSkipsMissingObjects(t *testing.T) {
+func TestUploadReconcilerSkipsWhenNoObjectKey(t *testing.T) {
 	fixed := time.Date(2024, 12, 1, 12, 0, 0, 0, time.UTC)
 	doc := model.Document{
 		ID:                uuid.NewString(),
-		OriginalBucket:    "bucket",
-		OriginalObjectKey: "path/file.docx",
+		OriginalBucket:    "",
+		OriginalObjectKey: "",
 		Status:            model.StatusUploaded,
 		UpdatedAt:         fixed.Add(-2 * time.Minute),
 	}
 	repo := &repoMock{doc: &doc, docs: []model.Document{doc}}
-	storage := &stubStorageClient{err: status.Errorf(codes.NotFound, "not found")}
 	confirm := &confirmUploadMock{}
-	reconciler := NewUploadReconciler(repo, storage, confirm, 10, time.Minute)
+	reconciler := NewUploadReconciler(repo, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
 	reconciler.reconcile(context.Background())
 
-	require.Equal(t, 1, storage.attempts)
 	require.Zero(t, confirm.calls)
 }

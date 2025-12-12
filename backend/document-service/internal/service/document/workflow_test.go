@@ -158,9 +158,8 @@ func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpubli
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{doc: &model.Document{ID: "doc-1", Status: model.StatusStoredOriginal, Versions: []model.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending", MarkdownObjectKey: "md-key"}}
-	storage := &fakeStorageClient{}
 
-	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, transformer, fakePublisher{}, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 	result, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        "doc-1",
@@ -237,31 +236,22 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 		Versions:          []model.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/doc-1.docx", MarkdownObjectKey: "md/doc-1.md"}},
 	}
 	repo := &fakeRepo{doc: doc}
-	storage := &fakeStorageClient{}
-	activities := NewActivities(repo, storage, nil, nil, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, nil, nil, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
-	snapshot, err := activities.AwaitOriginal(context.Background(), doc.ID)
-	if err != nil {
+	if err := activities.MarkStoredOriginal(context.Background(), doc.ID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if storage.getReq == nil || storage.getReq.GetBucket() != doc.OriginalBucket || storage.getReq.GetObjectKey() != doc.OriginalObjectKey {
-		t.Fatalf("storage GetObject not called with expected params: %+v", storage.getReq)
-	}
 	if repo.lastStatus != model.StatusStoredOriginal {
 		t.Fatalf("expected status StoredOriginal, got %v", repo.lastStatus)
-	}
-	if snapshot.PublishPath != doc.Path {
-		t.Fatalf("unexpected publish path: %s", snapshot.PublishPath)
 	}
 }
 
 func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	repo := &fakeRepo{doc: &model.Document{ID: "doc-2", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: model.StatusStoredOriginal}}
-	storage := &stubStorageClient{}
 	publisher := &trackingPublisher{}
 
-	activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 	err := activities.PublishMarkdown(context.Background(), publishInput{
 		DocumentID:        "doc-2",
@@ -279,8 +269,5 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	}
 	if repo.lastStatus != model.StatusPublishedToGitHub {
 		t.Fatalf("expected published status, got %v", repo.lastStatus)
-	}
-	if storage.attempts == 0 {
-		t.Fatal("storage client was not used before publishing")
 	}
 }

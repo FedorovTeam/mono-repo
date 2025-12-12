@@ -11,20 +11,17 @@ import (
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 	t.Parallel()
 
-	t.Run("publishes markdown from storage without github validation", func(t *testing.T) {
+	t.Run("publishes markdown via publisher client", func(t *testing.T) {
 		t.Parallel()
 
 		repo := &integrationRepo{}
-		storage := &stubStorageClient{}
 		publisher := &recordingPublisher{}
-		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+		activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-1",
@@ -47,27 +44,17 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		if !publisher.called {
 			t.Fatal("publisher was not called")
 		}
-		if storage.attempts == 0 {
-			t.Fatal("storage client was not used to verify markdown object")
-		}
 		if publisher.lastReq == nil {
 			t.Fatal("publisher request was not recorded")
 		}
-		if publisher.lastReq.GetContent() != "" {
-			t.Fatalf("expected markdown to be read from storage, got inline content: %q", publisher.lastReq.GetContent())
-		}
-		if publisher.lastReq.GetBucket() != "bucket" || publisher.lastReq.GetObjectKey() != "object-key" {
-			t.Fatalf("unexpected storage reference: %s/%s", publisher.lastReq.GetBucket(), publisher.lastReq.GetObjectKey())
-		}
 	})
 
-	t.Run("fails when markdown object is missing", func(t *testing.T) {
+	t.Run("marks document failed when publisher returns failure", func(t *testing.T) {
 		t.Parallel()
 
 		repo := &integrationRepo{}
-		storage := &stubStorageClient{err: status.Error(codes.NotFound, "not found")}
-		publisher := &recordingPublisher{}
-		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+		publisher := &recordingPublisher{response: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, ErrorCode: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT, ErrorMessage: "timeout"}}
+		activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-missing",
@@ -78,20 +65,14 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 			CorrelationID:     "corr-1",
 		})
 		if err == nil {
-			t.Fatal("expected error for missing markdown object")
+			t.Fatal("expected error, got nil")
 		}
 
 		if repo.lastStatus != model.StatusFailed {
 			t.Fatalf("expected failed status, got %v", repo.lastStatus)
 		}
-		if repo.lastError == "" || !strings.Contains(repo.lastError, "corr-1") {
-			t.Fatalf("expected error to contain correlation id, got %q", repo.lastError)
-		}
-		if publisher.called {
-			t.Fatal("publisher should not be called when markdown object is missing")
-		}
-		if storage.attempts != publishObjectCheckAttempts {
-			t.Fatalf("expected %d storage attempts, got %d", publishObjectCheckAttempts, storage.attempts)
+		if repo.lastError == "" || !strings.Contains(repo.lastError, "timeout") {
+			t.Fatalf("expected error to contain publisher message, got %q", repo.lastError)
 		}
 	})
 }
@@ -177,9 +158,10 @@ func (r *integrationRepo) ActiveJob(ctx context.Context, documentID string) (*mo
 }
 
 type recordingPublisher struct {
-	called  bool
-	lastReq *githubpublisherv1.PublishMarkdownRequest
-	err     error
+	called   bool
+	lastReq  *githubpublisherv1.PublishMarkdownRequest
+	err      error
+	response *githubpublisherv1.PublishMarkdownResponse
 }
 
 func (p *recordingPublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
@@ -187,6 +169,9 @@ func (p *recordingPublisher) PublishMarkdown(ctx context.Context, in *githubpubl
 	p.lastReq = in
 	if p.err != nil {
 		return nil, p.err
+	}
+	if p.response != nil {
+		return p.response, nil
 	}
 	return &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "integration-sha"}, nil
 }
