@@ -14,14 +14,18 @@ sequenceDiagram
     Gateway->>Gateway: validateUploadInput проверяет fileName, repository[/owner], branch, path, fileSizeBytes, extension по allowlist/лимиту
     Gateway->>Gateway: сгенерировать documentId (UUID)
     Gateway->>StorageService: GenerateUploadURL(DocumentId, FileName, ContentLength, CorrelationId, ExpiresInSeconds, gRPC meta: X-Correlation-ID + X-API-Key)
-    StorageService-->>Gateway: uploadUrl + bucket + objectKey
-    Gateway->>DocumentService: CreateDocument(id, fileName, repository, [repositoryOwner], branch, path, contentLength, upload bucket/objectKey, correlation-id; gRPC meta: X-Correlation-ID + X-API-Key)
-    DocumentService-->>Gateway: документ (id/status)
-    Gateway-->>Client: uploadUrl + uploadMethod=PUT + document{id,status}
+    StorageService-->>Gateway: uploadUrl + upload bucket/objectKey + markdown bucket/objectKey
+    Gateway->>DocumentService: CreateDocument(id, fileName, repository, [repositoryOwner], branch, path, contentLength, upload bucket/objectKey, markdown bucket/objectKey, correlation-id; gRPC meta: X-Correlation-ID + X-API-Key)
+    DocumentService-->>Gateway: документ (id/status/jobId)
+    Gateway-->>Client: uploadUrl + uploadMethod=PUT + документ{id,status,jobId}
     Client-->>MinIO: PUT файла по presigned URL
     MinIO-->>Gateway: POST /internal/storage/uploaded (s3:ObjectCreated:Put, correlation-id в userMetadata/responseElements)
-    Gateway->>Gateway: извлечь documentId из objectKey (basename до расширения); correlation-id из вебхука или новый
-    Gateway->>DocumentService: ConfirmUpload(document_id, bucket, object_key, correlation-id; gRPC meta: X-Correlation-ID)
-    DocumentService-->>Gateway: подтверждение; Gateway отвечает HTTP 202, иначе 400 если ни одна запись не обработана
+    loop records in webhook
+        Gateway->>Gateway: декодировать objectKey (PathUnescape), извлечь documentId из basename без расширения
+        Gateway->>Gateway: correlation-id из userMetadata/responseElements (case-insensitive) или новый через EnsureCorrelationID
+        Gateway->>DocumentService: ConfirmUpload(document_id, bucket, object_key, correlation-id; gRPC meta: X-Correlation-ID)
+        DocumentService-->>Gateway: подтверждение
+    end
+    Gateway-->>MinIO: HTTP 202 если обработаны записи, иначе 400
 ```
 
