@@ -1,26 +1,24 @@
 # Document Service
 
-Сервис управляет метаданными документов, версиями и статусами на пути загрузки DOCX → Markdown → GitHub. Хранит ссылки на объекты, загруженные через gRPC API `storage-service`, и предоставляет собственный gRPC API для создания, чтения, перечисления и обновления статуса документа.
+Сервис управляет метаданными документов, версиями и статусами на пути загрузки DOCX → Markdown → GitHub. Он не выполняет интеграции сам: хранит только ссылки и статусную модель в PostgreSQL, а постановка/получение задач выполняется через gRPC‑клиентов соседних сервисов.
 
 ## Архитектура
 - PostgreSQL — хранение метаданных, версий и логов статусов.
-- Storage-service (gRPC) — запись и чтение оригиналов/Markdown через методы `UploadOriginal`/`UploadMarkdown`/`GetObject`, сервис хранит только ключи и сам общается с MinIO.
-- Docling-transformer-service (gRPC) — конвертация исходника в Markdown, управление очередями и статусами конвертации.
-- Github-publisher-service (gRPC) — публикация Markdown в целевой репозиторий, расчёт идемпотентных ключей и временных `retry_after`.
-- Document-service не использует SDK MinIO/GitHub/Docling напрямую: вся работа с файлами и публикацией вынесена в соседние gRPC-сервисы, сам сервис оперирует статусами и ссылками.
+- Storage-service / docling-transformer-service / github-publisher-service — отдельные сервисы с публичными gRPC API, через которые ставятся задачи и считываются результаты.
+- Внутри document-service нет прямых вызовов MinIO, Docling или GitHub: cron/воркеры только меняют статусы и дергают gRPC клиентов других сервисов.
 - gRPC — внутренний API `proto/backend/document/document.proto`.
 
 - `documents` — источник правды по статусу документа и метаданным публикации.
 - `processing_jobs` — очередь задач для крон-воркеров: `task_id` (UUID), `document_id`, `stage`, `status`, счётчик `attempts`, расписание `next_run_at`, произвольный `payload`.
 - `job_events` — аудит выполнения задач, фиксирует смену статуса, сообщение ошибки и полезную нагрузку.
-- `payload` в `processing_jobs` и `job_events` хранит только ссылки и параметры для gRPC-исполнителей (`bucket`/`object_key`, `queue_id`, `github_path`, `create_pr`), бинарные данные не пишутся в БД.
+- `payload` в `processing_jobs` и `job_events` хранит только ссылки и параметры для gRPC-исполнителей (`bucket`/`object_key`, `queue_id`, `github_path`, `create_pr`), бинарные данные не пишутся в БД, а сами интеграции выполняют внешние сервисы.
 - Индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run` поддерживают выборку готовых задач, `SELECT ... FOR UPDATE SKIP LOCKED` защищает от двойного захвата при нескольких воркерах.
 
 ## Статусы и повторная обработка
 - Жизненный цикл документа фиксируется в статусах `UPLOADED → STORED_ORIGINAL → CONVERTED_TO_MARKDOWN → PUBLISHED_TO_GITHUB` с отдельным состоянием `FAILED`. Источник правды — таблица `documents`.
 - Каждая стадия обработки («сохранить оригинал», «конвертировать», «опубликовать в GitHub») заводится в очереди `processing_jobs` со стадией (`job_stage`) и статусом (`job_status`), а все попытки фиксируются в `job_events`.
 - Крон-воркеры выбирают готовые к исполнению задачи через `SELECT ... FOR UPDATE SKIP LOCKED` с фильтром по `status = 'pending'` и `next_run_at <= now()`, опираясь на индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run`.
-- При успешном завершении задача переводится в `status = 'completed'`, документ в `documents` переключается на следующий статус. При ошибках увеличивается `attempts`, назначается новый `next_run_at`, а деталь ошибки пишется в `job_events` и `documents.error_reason`.
+- При успешном завершении задача переводится в `status = 'completed'`, документ в `documents` переключается на следующий статус. Проверки наличия файлов или публикаций выполняют профильные сервисы; document-service лишь фиксирует статусы и ошибки, полученные по gRPC.
 - Повторная обработка доступна за счёт перевода документа в предыдущий статус и постановки новой задачи с той же парой `document_id + stage` (уникальный ключ в `processing_jobs` не даёт раздувать очередь дублями). Если документ застрял в `UPLOADED`, периодический reconciler перечитывает объект через `storage-service` и перезапускает цепочку.
 
 ## Формат ключей

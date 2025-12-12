@@ -20,7 +20,7 @@ sequenceDiagram
     S->>R: INSERT document{status=Uploaded}, версии, status_logs
     S-->>C: Document с upload ссылками и gRPC ключами
 
-    Note over UR,ST: UploadReconciler опрашивает documents со статусом Uploaded и вызывает storage-service.GetObject
+    Note over UR,ST: UploadReconciler опрашивает documents со статусом Uploaded и повторно вызывает ConfirmUpload без прямых проверок объекта
     UR->>G: ConfirmUpload(document_id, bucket, object_key)
     G->>S: Валидация bucket/object_key
     S->>R: UPDATE document -> StoredOriginal, CREATE job store_original (pending)
@@ -40,13 +40,13 @@ sequenceDiagram
         F->>R: UPDATE document status=Failed (reason from payload)
     end
 
-    Note over SW,TR: convert_to_markdown вызывает gRPC ConvertDocumentToMarkdown в transformer-service
+    Note over SW,TR: convert_to_markdown через gRPC ставит задачу в transformer-service и ждёт результата статуса
     SW->>TR: ConvertDocumentToMarkdown(bucket/object_key + markdown_bucket, correlation-id)
     TR-->>SW: queue_id, markdown_object_key, status
     SW->>R: UPDATE document status=ConvertedToMarkdown (+markdown_queue_id/object_key)
-    SW->>R: UPDATE processing_jobs status=completed/failed
+    SW->>R: UPDATE processing_jobs status=completed/failed или reschedule
 
-    Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service
+    Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service без проверки содержимого
     SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, path, create_pr)
     GP-->>SW: status + commit_sha/retry_after
     SW->>R: UPDATE document status=PublishedToGitHub/Failed

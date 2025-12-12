@@ -17,7 +17,6 @@ import (
 
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
-	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 )
 
@@ -32,33 +31,7 @@ const (
 	publishGithubUnknownReason   = publishGithubReasonPrefix + "unknown"
 
 	correlationIDHeader = "x-correlation-id"
-
-	markdownAwaitTimeout          = 15 * time.Minute
-	markdownAwaitInitialBackoff   = 2 * time.Second
-	markdownAwaitMaxBackoff       = 20 * time.Second
-	conversionNotificationTimeout = "conversion notification timeout"
-
-	publishObjectCheckInitialBackoff = 500 * time.Millisecond
-	publishObjectCheckMaxBackoff     = 5 * time.Second
-	publishObjectCheckAttempts       = 3
 )
-
-type documentSnapshot struct {
-	DocumentID        string
-	DocumentName      string
-	Owner             string
-	Repository        string
-	Branch            string
-	BaseBranch        string
-	OriginalBucket    string
-	MarkdownBucket    string
-	OriginalObjectKey string
-	MarkdownObjectKey string
-	PublishPath       string
-	Path              string
-	Version           int32
-	CreatePR          bool
-}
 
 type convertInput struct {
 	DocumentID        string
@@ -85,15 +58,6 @@ type publishInput struct {
 	CorrelationID     string
 	Attempt           int
 	IdempotencyKey    string
-}
-
-type awaitMarkdownInput struct {
-	DocumentID        string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	CorrelationID     string
-	QueueID           string
-	TransformerStatus string
 }
 
 type convertResult struct {
@@ -126,7 +90,6 @@ func (p RetryPolicy) toProto() *githubpublisherv1.RetryPolicy {
 
 type Activities struct {
 	repo        Repository
-	storage     storagev1.StorageServiceClient
 	transformer transformerv1.TransformerServiceClient
 	publisher   githubpublisherv1.GithubPublisherServiceClient
 	repoOwner   string
@@ -136,10 +99,9 @@ type Activities struct {
 	retryPolicy RetryPolicy
 }
 
-func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string, retryPolicy RetryPolicy) *Activities {
+func NewActivities(repo Repository, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string, retryPolicy RetryPolicy) *Activities {
 	return &Activities{
 		repo:        repo,
-		storage:     storageClient,
 		transformer: transformerClient,
 		publisher:   publisherClient,
 		repoOwner:   repoOwner,
@@ -150,69 +112,34 @@ func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient
 	}
 }
 
-func (a *Activities) AwaitOriginal(ctx context.Context, documentID string) (documentSnapshot, error) {
+func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) error {
 	ctx = a.withCorrelationID(ctx, "")
-	if a.storage == nil {
-		return documentSnapshot{}, fmt.Errorf("storage client is not configured")
-	}
-
 	doc, err := a.repo.GetDocument(ctx, documentID)
 	if err != nil {
-		return documentSnapshot{}, err
+		return err
 	}
 	if doc == nil {
-		return documentSnapshot{}, fmt.Errorf("document %s not found", documentID)
+		return fmt.Errorf("document %s not found", documentID)
 	}
 
 	status, err := a.progressStatus(ctx, doc)
 	if err != nil {
-		return documentSnapshot{}, err
+		return err
+	}
+	if status != model.StatusUploaded {
+		return nil
 	}
 	if doc.OriginalBucket == "" || doc.OriginalObjectKey == "" {
-		return documentSnapshot{}, fmt.Errorf("document %s has no original object key", documentID)
+		return fmt.Errorf("document %s has no original object key", documentID)
 	}
 
 	version := latestVersion(doc).Version
-	if status == model.StatusUploaded {
-		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: doc.OriginalBucket, ObjectKey: doc.OriginalObjectKey}); err != nil {
-			_ = a.fail(ctx, documentID, fmt.Sprintf("wait original: %v", err))
-			return documentSnapshot{}, err
-		}
-
-		if version == 0 {
-			version = 1
-		}
-
-		if _, err := a.repo.UpdateStatus(ctx, documentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey}); err != nil {
-			return documentSnapshot{}, err
-		}
+	if version == 0 {
+		version = 1
 	}
 
-	publishPath := doc.Path
-	if publishPath == "" {
-		publishPath = doc.Name
-	}
-	baseBranch := doc.BaseBranch
-	if baseBranch == "" {
-		baseBranch = doc.Branch
-	}
-
-	return documentSnapshot{
-		DocumentID:        documentID,
-		DocumentName:      doc.Name,
-		Owner:             doc.Owner,
-		Repository:        doc.Repository,
-		Branch:            doc.Branch,
-		BaseBranch:        baseBranch,
-		OriginalBucket:    doc.OriginalBucket,
-		MarkdownBucket:    doc.MarkdownBucket,
-		OriginalObjectKey: doc.OriginalObjectKey,
-		MarkdownObjectKey: doc.MarkdownObjectKey,
-		PublishPath:       publishPath,
-		Path:              doc.Path,
-		Version:           version,
-		CreatePR:          doc.CreatePR,
-	}, nil
+	_, err = a.repo.UpdateStatus(ctx, documentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey})
+	return err
 }
 
 func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) (convertResult, error) {
@@ -303,43 +230,6 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, mar
 	return err
 }
 
-func (a *Activities) AwaitMarkdown(ctx context.Context, input awaitMarkdownInput) error {
-	ctx = a.withCorrelationID(ctx, input.CorrelationID)
-	if a.storage == nil {
-		return fmt.Errorf("storage client is not configured")
-	}
-	if input.MarkdownBucket == "" || input.MarkdownObjectKey == "" {
-		return fmt.Errorf("markdown bucket/object key is required")
-	}
-
-	deadline := time.Now().Add(markdownAwaitTimeout)
-	backoff := markdownAwaitInitialBackoff
-
-	for {
-		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: input.MarkdownBucket, ObjectKey: input.MarkdownObjectKey}); err == nil {
-			log.Printf("markdown object detected: document_id=%s correlation_id=%s queue_id=%s", input.DocumentID, correlationIDFromContext(ctx), input.QueueID)
-			return nil
-		}
-
-		if time.Now().After(deadline) {
-			_ = a.fail(ctx, input.DocumentID, conversionNotificationTimeout)
-			return errors.New(conversionNotificationTimeout)
-		}
-
-		log.Printf("markdown object not ready, retrying: document_id=%s correlation_id=%s backoff=%s", input.DocumentID, correlationIDFromContext(ctx), backoff)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(backoff):
-		}
-
-		backoff = backoff * 2
-		if backoff > markdownAwaitMaxBackoff {
-			backoff = markdownAwaitMaxBackoff
-		}
-	}
-}
-
 func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {
 	ctx = a.withCorrelationID(ctx, input.CorrelationID)
 	if a.publisher == nil {
@@ -422,36 +312,6 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 		reason := fmt.Sprintf("markdown content is empty (bucket=%q, object_key=%q)", markdownBucket, markdownObjectKey)
 		_ = a.fail(ctx, input.DocumentID, reason)
 		return status.Error(codes.FailedPrecondition, reason)
-	}
-
-	if a.storage == nil {
-		return fmt.Errorf("storage client is not configured")
-	}
-
-	backoff := publishObjectCheckInitialBackoff
-	for attempt := 1; attempt <= publishObjectCheckAttempts; attempt++ {
-		if _, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: markdownBucket, ObjectKey: markdownObjectKey}); err == nil {
-			break
-		} else {
-			log.Printf("markdown object not available: document_id=%s bucket=%s object_key=%s correlation_id=%s attempt=%d error=%v", input.DocumentID, markdownBucket, markdownObjectKey, correlationIDFromContext(ctx), attempt, err)
-
-			if attempt == publishObjectCheckAttempts {
-				reason := fmt.Sprintf("markdown object %s/%s unavailable (correlation_id=%s): %v", markdownBucket, markdownObjectKey, correlationIDFromContext(ctx), err)
-				_ = a.fail(ctx, input.DocumentID, reason)
-				return fmt.Errorf("%s", reason)
-			}
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-
-			backoff *= 2
-			if backoff > publishObjectCheckMaxBackoff {
-				backoff = publishObjectCheckMaxBackoff
-			}
-		}
 	}
 
 	repoPath := path

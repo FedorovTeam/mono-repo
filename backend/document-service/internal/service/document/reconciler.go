@@ -5,25 +5,15 @@ import (
 	"log"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"backend-document-service/internal/model"
-	storagev1 "backend-document-service/proto/backend/storage/v1"
 )
 
 type confirmUploadCaller interface {
 	ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*model.Document, error)
 }
 
-type objectStatClient interface {
-	GetObject(ctx context.Context, in *storagev1.GetObjectRequest, opts ...grpc.CallOption) (*storagev1.GetObjectResponse, error)
-}
-
 type UploadReconciler struct {
 	repo          Repository
-	storage       objectStatClient
 	confirmUpload confirmUploadCaller
 	batchSize     int
 	minAge        time.Duration
@@ -31,7 +21,7 @@ type UploadReconciler struct {
 	metrics       *workerMetrics
 }
 
-func NewUploadReconciler(repo Repository, storage objectStatClient, confirm confirmUploadCaller, batchSize int, minAge time.Duration) *UploadReconciler {
+func NewUploadReconciler(repo Repository, confirm confirmUploadCaller, batchSize int, minAge time.Duration) *UploadReconciler {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -41,7 +31,6 @@ func NewUploadReconciler(repo Repository, storage objectStatClient, confirm conf
 
 	return &UploadReconciler{
 		repo:          repo,
-		storage:       storage,
 		confirmUpload: confirm,
 		batchSize:     batchSize,
 		minAge:        minAge,
@@ -94,14 +83,6 @@ func (r *UploadReconciler) reconcile(ctx context.Context) {
 				continue
 			}
 			if doc.OriginalBucket == "" || doc.OriginalObjectKey == "" {
-				continue
-			}
-
-			if _, err := r.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: doc.OriginalBucket, ObjectKey: doc.OriginalObjectKey}); err != nil {
-				if status.Code(err) != codes.NotFound {
-					log.Printf("reconciler: get object %s/%s: %v", doc.OriginalBucket, doc.OriginalObjectKey, err)
-					r.metrics.recordError(ctx)
-				}
 				continue
 			}
 
