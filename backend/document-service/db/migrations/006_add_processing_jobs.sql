@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS processing_jobs (
     status job_status NOT NULL DEFAULT 'pending',
     attempts INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     next_run_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- payload хранит только ссылки (bucket/object_key, queue_id, repository/path) и вспомогательные флаги;
+    -- бинарные данные в JSON не допускаются, исполнители используют gRPC для работы с файлами и GitHub.
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -50,6 +52,7 @@ CREATE TABLE IF NOT EXISTS job_events (
     status job_status NOT NULL,
     event_type TEXT NOT NULL,
     message TEXT,
+    -- payload события фиксирует входные/выходные ссылки шагов (bucket/object_key, queue_id, commit_sha) без бинарных данных.
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

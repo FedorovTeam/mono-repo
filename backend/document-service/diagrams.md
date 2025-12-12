@@ -2,11 +2,11 @@
 
 ```mermaid
 flowchart TD
-    A[Upload DOCX] --> B[DocumentService Create]
-    B --> C[MinIO ключи сгенерированы]
-    C --> D[Запись documents + version]
-    D --> E[Status: Uploaded]
-    E --> F[Периодические воркеры: store → convert → publish через processing_jobs]
+    A[Upload DOCX] --> B[DocumentService gRPC]
+    B --> C[storage-service: UploadOriginal/GenerateUploadURL]
+    C --> D[DocumentService: documents + version + status Uploaded]
+    D --> E[processing_jobs: store_original]
+    E --> F[Stage workers вызывают gRPC storage/transformer/github-publisher]
 ```
 
 ```mermaid
