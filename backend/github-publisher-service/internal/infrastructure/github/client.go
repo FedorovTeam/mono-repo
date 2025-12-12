@@ -1,6 +1,7 @@
 package github
 
 import (
+	"backend-github-publisher-service/pkg/config"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -9,8 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"backend-github-publisher-service/internal/config"
 )
 
 // APIError описывает неуспешный ответ GitHub API.

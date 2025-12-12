@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	githubclient "backend-github-publisher-service/internal/infrastructure/github"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"backend-github-publisher-service/internal/domain"
-	githubclient "backend-github-publisher-service/internal/github"
 )
 
 type PublishUseCase struct {

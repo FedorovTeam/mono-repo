@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"backend-github-publisher-service/pkg/config"
 	"context"
 	"errors"
 	"fmt"
@@ -20,8 +21,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"google.golang.org/grpc"
-
-	"backend-github-publisher-service/internal/config"
 )
 
 type Providers struct {

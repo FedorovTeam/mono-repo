@@ -1,7 +1,7 @@
 package usecase
 
 import (
-	"backend-github-publisher-service/internal/charsetautodetect"
+	"backend-github-publisher-service/pkg/charsetautodetect"
 	"bytes"
 	"fmt"
 	"unicode/utf8"

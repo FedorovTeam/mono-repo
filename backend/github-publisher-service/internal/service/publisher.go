@@ -1,13 +1,13 @@
 package service
 
 import (
+	githubclient "backend-github-publisher-service/internal/infrastructure/github"
+	"backend-github-publisher-service/internal/infrastructure/storage"
+	"backend-github-publisher-service/pkg/config"
 	"context"
 	"strings"
 
-	"backend-github-publisher-service/internal/config"
 	"backend-github-publisher-service/internal/domain"
-	githubclient "backend-github-publisher-service/internal/github"
-	"backend-github-publisher-service/internal/storage"
 	"backend-github-publisher-service/internal/usecase"
 	githubpublisherv1 "backend-github-publisher-service/proto/backend/githubpublisher/v1"
 	"google.golang.org/grpc/codes"

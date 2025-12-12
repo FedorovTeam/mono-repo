@@ -1,6 +1,7 @@
 package service
 
 import (
+	"backend-github-publisher-service/pkg/config"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"backend-github-publisher-service/internal/config"
 	githubpublisherv1 "backend-github-publisher-service/proto/backend/githubpublisher/v1"
 	"github.com/dnaeon/go-vcr/cassette"
 	"github.com/dnaeon/go-vcr/recorder"

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"backend-github-publisher-service/internal/infrastructure/storage"
+	"backend-github-publisher-service/pkg/config"
+	"backend-github-publisher-service/pkg/observability"
 	"context"
 	"errors"
 	"fmt"
@@ -12,10 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"backend-github-publisher-service/internal/config"
-	"backend-github-publisher-service/internal/observability"
 	"backend-github-publisher-service/internal/service"
-	"backend-github-publisher-service/internal/storage"
 	"backend-github-publisher-service/internal/worker"
 	githubpublisherv1 "backend-github-publisher-service/proto/backend/githubpublisher/v1"
 	"google.golang.org/grpc"

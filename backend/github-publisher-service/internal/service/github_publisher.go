@@ -1,11 +1,11 @@
 package service
 
 import (
+	githubclient "backend-github-publisher-service/internal/infrastructure/github"
+	"backend-github-publisher-service/pkg/config"
 	"context"
 
-	"backend-github-publisher-service/internal/config"
 	"backend-github-publisher-service/internal/domain"
-	githubclient "backend-github-publisher-service/internal/github"
 )
 
 type GitHubClientPublisher struct {

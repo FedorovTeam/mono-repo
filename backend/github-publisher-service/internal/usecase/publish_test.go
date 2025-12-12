@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	githubclient "backend-github-publisher-service/internal/infrastructure/github"
 	"context"
 	"errors"
 	"net/http"
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"backend-github-publisher-service/internal/domain"
-	githubclient "backend-github-publisher-service/internal/github"
 )
 
 func TestPublishUseCase_ReturnsValidationError(t *testing.T) {

@@ -1,12 +1,12 @@
 package storage
 
 import (
+	"backend-github-publisher-service/pkg/config"
 	"context"
 	"fmt"
 	"io"
 	"strings"
 
-	"backend-github-publisher-service/internal/config"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
