@@ -1,100 +1,45 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/url"
-	"path"
-	"strings"
 
-	"github.com/minio/minio-go/v7/pkg/notification"
 	"go.uber.org/zap"
-
-	"backend-gateway-service/internal/ctxutils"
-	"backend-gateway-service/internal/domain"
 )
 
 func (s *Server) handleStorageNotification(w http.ResponseWriter, r *http.Request) {
-	var payload notification.Info
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		s.logger.Warn("cannot decode notification", zap.Error(err))
+	report, err := s.uploadConfirmationUC.HandleWebhook(r.Context(), r.Body)
+	if err != nil {
+		s.logger.Warn("cannot handle storage notification", zap.Error(err))
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}
 
-	processed := 0
-	for _, record := range payload.Records {
-		decodedKey, err := url.PathUnescape(record.S3.Object.Key)
-		if err != nil {
-			s.logger.Warn("cannot decode object key", zap.String("object_key", record.S3.Object.Key), zap.Error(err))
-			continue
-		}
-
-		documentID := extractDocumentID(decodedKey)
-		if documentID == "" {
-			s.logger.Warn("skip notification without document id", zap.String("object_key", decodedKey))
-			continue
-		}
-
-		correlationID := extractCorrelationID(record)
-		ctx := r.Context()
-		if correlationID != "" {
-			ctx = ctxutils.WithCorrelationID(ctx, correlationID)
-		}
-		ctx, ensured := ctxutils.EnsureCorrelationID(ctx)
-		correlationID = ensured
-
+	for _, result := range report.Results {
 		logger := s.logger.With(
-			zap.String("correlation_id", correlationID),
-			zap.String("document_id", documentID),
-			zap.String("bucket", record.S3.Bucket.Name),
-			zap.String("object_key", decodedKey),
+			zap.String("bucket", result.Bucket),
+			zap.String("object_key", result.ObjectKey),
 		)
 
-		_, err = s.documentClient.ConfirmUpload(ctx, domain.ConfirmUploadRequest{
-			DocumentID:    documentID,
-			Bucket:        record.S3.Bucket.Name,
-			ObjectKey:     decodedKey,
-			CorrelationID: correlationID,
-		})
-		if err != nil {
-			logger.Error("failed to confirm upload", zap.Error(err))
+		if result.CorrelationID != "" {
+			logger = logger.With(zap.String("correlation_id", result.CorrelationID))
+		}
+
+		if result.DocumentID != "" {
+			logger = logger.With(zap.String("document_id", result.DocumentID))
+		}
+
+		if result.Err != nil {
+			logger.Warn("failed to process upload notification", zap.Error(result.Err))
 			continue
 		}
-		processed++
+
 		logger.Info("upload confirmed")
 	}
 
-	if processed == 0 {
+	if report.ProcessedCount() == 0 {
 		http.Error(w, "no records processed", http.StatusBadRequest)
 		return
 	}
 
 	w.WriteHeader(http.StatusAccepted)
-}
-
-func extractDocumentID(objectKey string) string {
-	base := path.Base(objectKey)
-	if base == "." || base == ".." || base == "/" {
-		return ""
-	}
-	parts := strings.SplitN(base, ".", 2)
-	if len(parts) == 0 {
-		return ""
-	}
-	return parts[0]
-}
-
-func extractCorrelationID(event notification.Event) string {
-	for key, value := range event.S3.Object.UserMetadata {
-		if strings.EqualFold(key, "x-amz-meta-correlation-id") {
-			return value
-		}
-	}
-	for key, value := range event.ResponseElements {
-		if strings.EqualFold(key, "x-amz-meta-correlation-id") {
-			return value
-		}
-	}
-	return ""
 }

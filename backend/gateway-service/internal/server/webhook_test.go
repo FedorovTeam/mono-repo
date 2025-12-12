@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 
 	"backend-gateway-service/internal/domain"
+	infrawebhook "backend-gateway-service/internal/infrastructure/webhook"
+	"backend-gateway-service/internal/usecase"
 )
 
 type stubDocumentClient struct {
@@ -45,9 +47,16 @@ func (s *stubDocumentClient) ListDocuments(context.Context, domain.DocumentFilte
 
 func (s *stubDocumentClient) Close() error { return nil }
 
+func newTestServer(docClient *stubDocumentClient) *Server {
+	parser := infrawebhook.NewMinIOWebhookParser()
+	uploadConfirmation := usecase.NewUploadConfirmationService(parser, docClient)
+
+	return &Server{logger: zap.NewNop(), uploadConfirmationUC: uploadConfirmation}
+}
+
 func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {
 	docClient := &stubDocumentClient{}
-	srv := &Server{logger: zap.NewNop(), documentClient: docClient}
+	srv := newTestServer(docClient)
 
 	payload := map[string]any{
 		"Records": []map[string]any{
@@ -85,7 +94,7 @@ func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {
 
 func TestHandleStorageNotification_ConfirmUpload_URLEncodedKey(t *testing.T) {
 	docClient := &stubDocumentClient{}
-	srv := &Server{logger: zap.NewNop(), documentClient: docClient}
+	srv := newTestServer(docClient)
 
 	encodedKey := "org/project/3fa85f64-5717-4562-b3fc-2c963f66afa6%2Bv1.docx"
 	payload := map[string]any{
@@ -124,7 +133,7 @@ func TestHandleStorageNotification_ConfirmUpload_URLEncodedKey(t *testing.T) {
 
 func TestHandleStorageNotification_ReplayForRecovery(t *testing.T) {
 	docClient := &stubDocumentClient{}
-	srv := &Server{logger: zap.NewNop(), documentClient: docClient}
+	srv := newTestServer(docClient)
 
 	payload := map[string]any{
 		"Records": []map[string]any{{
@@ -154,7 +163,7 @@ func TestHandleStorageNotification_ReplayForRecovery(t *testing.T) {
 }
 
 func TestHandleStorageNotification_NoRecords(t *testing.T) {
-	srv := &Server{logger: zap.NewNop(), documentClient: &stubDocumentClient{}}
+	srv := newTestServer(&stubDocumentClient{})
 	payload := map[string]any{
 		"Records": []map[string]any{{"s3": map[string]any{"object": map[string]any{"key": "/"}}}},
 	}
