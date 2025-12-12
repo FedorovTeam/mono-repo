@@ -147,6 +147,8 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 		t.Fatalf("PublishMarkdown error: %v", err)
 	}
 
+	t.Logf("response: %+v", resp)
+
 	if resp.GetCommitSha() != "abc123" {
 		t.Fatalf("unexpected commit sha: %s", resp.GetCommitSha())
 	}
@@ -229,6 +231,8 @@ func TestPublishMarkdownIntegration_RepositoryWithSlashAndEmptyOwner(t *testing.
 	if err != nil {
 		t.Fatalf("PublishMarkdown error: %v", err)
 	}
+
+	t.Logf("response: %+v", resp)
 
 	if resp.GetCommitSha() != "with-slash" {
 		t.Fatalf("unexpected commit sha: %s", resp.GetCommitSha())
@@ -335,6 +339,8 @@ func TestPublishMarkdownIntegration_GitHubError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
+	t.Logf("response: %+v", resp)
 
 	if resp.GetStatus() != githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
 		t.Fatalf("unexpected status: %v", resp.GetStatus())

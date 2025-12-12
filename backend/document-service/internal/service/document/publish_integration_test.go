@@ -21,12 +21,12 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 
 		repo := &integrationRepo{}
 		publisher := &recordingPublisher{}
-		activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+		activities := NewActivities(repo, nil, publisher)
 
-                _, err := activities.PublishMarkdown(context.Background(), publishInput{
-                        DocumentID:        "doc-1",
-                        MarkdownBucket:    "bucket",
-                        MarkdownObjectKey: "object-key",
+		_, err := activities.PublishMarkdown(context.Background(), publishInput{
+			DocumentID:        "doc-1",
+			MarkdownBucket:    "bucket",
+			MarkdownObjectKey: "object-key",
 			Path:              "docs/doc-1.md",
 			Version:           2,
 		})
@@ -54,12 +54,12 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 
 		repo := &integrationRepo{}
 		publisher := &recordingPublisher{response: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, ErrorCode: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT, ErrorMessage: "timeout"}}
-		activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+		activities := NewActivities(repo, nil, publisher)
 
-                _, err := activities.PublishMarkdown(context.Background(), publishInput{
-                        DocumentID:        "doc-missing",
-                        MarkdownBucket:    "bucket",
-                        MarkdownObjectKey: "missing.md",
+		_, err := activities.PublishMarkdown(context.Background(), publishInput{
+			DocumentID:        "doc-missing",
+			MarkdownBucket:    "bucket",
+			MarkdownObjectKey: "missing.md",
 			Path:              "docs/missing.md",
 			Version:           3,
 			CorrelationID:     "corr-1",

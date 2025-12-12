@@ -17,6 +17,7 @@ type Config struct {
 	Minio         MinioConfig         `yaml:"minio"`
 	Observability ObservabilityConfig `yaml:"observability"`
 	Processing    ProcessingConfig    `yaml:"processing"`
+	Retry         RetryConfig         `yaml:"retry"`
 }
 
 // ServiceConfig содержит основные параметры запуска.
@@ -52,6 +53,13 @@ type ProcessingConfig struct {
 	PollInterval time.Duration `yaml:"poll_interval"`
 	MaxAttempts  int           `yaml:"max_attempts"`
 	Backoff      time.Duration `yaml:"backoff"`
+}
+
+// RetryConfig описывает базовую стратегию повтора попыток публикации.
+type RetryConfig struct {
+	InitialBackoff time.Duration `yaml:"initial_backoff"`
+	MaxBackoff     time.Duration `yaml:"max_backoff"`
+	MaxAttempts    int           `yaml:"max_attempts"`
 }
 
 // ObservabilityConfig описывает настройки телеметрии.
@@ -108,6 +116,16 @@ func Load() (*Config, error) {
 	}
 	if cfg.Processing.Backoff <= 0 {
 		cfg.Processing.Backoff = 5 * time.Second
+	}
+
+	if cfg.Retry.InitialBackoff <= 0 {
+		cfg.Retry.InitialBackoff = 5 * time.Second
+	}
+	if cfg.Retry.MaxBackoff <= 0 {
+		cfg.Retry.MaxBackoff = 30 * time.Second
+	}
+	if cfg.Retry.MaxAttempts <= 0 {
+		cfg.Retry.MaxAttempts = 3
 	}
 
 	return &cfg, nil

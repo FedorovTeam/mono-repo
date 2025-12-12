@@ -23,39 +23,16 @@ type pendingJobRepo interface {
 
 // StageWorker обрабатывает pending-задачи из processing_jobs.
 type StageWorker struct {
-	repo         pendingJobRepo
-	activities   *Activities
-	stage        model.JobStage
-	batchSize    int
-	retryDelay   time.Duration
-	publishRetry *PublishRetryConfig
-	metrics      *workerMetrics
-	logf         func(format string, args ...interface{})
+	repo       pendingJobRepo
+	activities *Activities
+	stage      model.JobStage
+	batchSize  int
+	retryDelay time.Duration
+	metrics    *workerMetrics
+	logf       func(format string, args ...interface{})
 }
 
-type PublishRetryConfig struct {
-	InitialBackoff time.Duration
-	MaxBackoff     time.Duration
-}
-
-func (c PublishRetryConfig) backoff(attempts int) time.Duration {
-	if attempts < 1 {
-		attempts = 1
-	}
-	delay := c.InitialBackoff
-	for i := 1; i < attempts; i++ {
-		delay *= 2
-		if delay >= c.MaxBackoff {
-			return c.MaxBackoff
-		}
-	}
-	if delay > c.MaxBackoff {
-		return c.MaxBackoff
-	}
-	return delay
-}
-
-func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration, publishRetry *PublishRetryConfig) *StageWorker {
+func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -64,14 +41,13 @@ func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.Job
 	}
 
 	return &StageWorker{
-		repo:         repo,
-		activities:   activities,
-		stage:        stage,
-		batchSize:    batchSize,
-		retryDelay:   retryDelay,
-		publishRetry: publishRetry,
-		metrics:      newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
-		logf:         log.Printf,
+		repo:       repo,
+		activities: activities,
+		stage:      stage,
+		batchSize:  batchSize,
+		retryDelay: retryDelay,
+		metrics:    newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
+		logf:       log.Printf,
 	}
 }
 
@@ -250,7 +226,6 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 		MarkdownBucket:    stringFromPayload(job.Payload, "markdown_bucket", doc.MarkdownBucket),
 		MarkdownObjectKey: markdownKey,
 		CorrelationID:     stringFromPayload(job.Payload, "correlation_id", correlationFromDoc(doc)),
-		Attempt:           job.Attempts,
 	}
 	if input.MarkdownObjectKey != "" {
 		input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", job.DocumentID, input.Branch, input.MarkdownObjectKey)
@@ -286,10 +261,6 @@ func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reas
 	nextRun := time.Now().Add(w.retryDelay)
 	if retryAfter != nil && retryAfter.AsDuration() > 0 {
 		nextRun = time.Now().Add(retryAfter.AsDuration())
-	} else if w.stage == model.JobStagePublishToGitHub && w.publishRetry != nil {
-		if backoff := w.publishRetry.backoff(job.Attempts); backoff > 0 {
-			nextRun = time.Now().Add(backoff)
-		}
 	}
 	if job.Payload == nil {
 		job.Payload = map[string]any{}

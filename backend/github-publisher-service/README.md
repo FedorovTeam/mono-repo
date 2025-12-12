@@ -1,6 +1,6 @@
 # Github Publisher Service
 
-Сервис публикует Markdown-файлы в GitHub-репозиторий через gRPC-метод `PublishMarkdown`. Он коммитит содержимое в указанную ветку, при необходимости открывает Pull Request, прокидывает `correlation-id` во все запросы к GitHub API и поддерживает идемпотентные повторы с рекомендациями по бэкоффу (`retry_after`). Фоновый воркер обработки статусов запускается внутри основного бинарника и двигает задачи стадии `publish_to_github` из таблицы `processing_jobs`.
+Сервис публикует Markdown-файлы в GitHub-репозиторий через gRPC-метод `PublishMarkdown`. Он коммитит содержимое в указанную ветку, при необходимости открывает Pull Request, прокидывает `correlation-id` во все запросы к GitHub API и поддерживает идемпотентные повторы с автоматическим расчётом `retry_after` и внутренними ретраями по переданному или конфигурационному `retry_policy`. Фоновый воркер обработки статусов запускается внутри основного бинарника и двигает задачи стадии `publish_to_github` из таблицы `processing_jobs`.
 
 ## Быстрый старт
 1. Сформируйте конфигурацию `config/config.yaml` с токеном GitHub, параметрами репозитория и доступом к MinIO.
@@ -22,6 +22,7 @@
 - `processing.dsn` — строка подключения к PostgreSQL с таблицами `processing_jobs`/`documents`.
 - `processing.stage` — стадия, которую обрабатывает воркер (по умолчанию `publish_to_github`).
 - `processing.poll_interval` / `processing.max_attempts` / `processing.backoff` — интервалы опроса, максимальное число попыток и рост задержки перед ретраями (если значения не заданы, сервис подставит 5s/3/5s соответственно).
+- `retry.initial_backoff` / `retry.max_backoff` / `retry.max_attempts` — политика повторов внутри одного вызова `PublishMarkdown` (используется по умолчанию, если клиент не указал `retry_policy`).
 - `observability.otlp_endpoint` — адрес OTLP-коллектора для отдачи метрик и трейсов. Он обязателен, когда включены метрики или трейсы.
 - `observability.metrics_enabled` / `observability.traces_enabled` / `observability.logs_enabled` — отдельные флаги включения экспорта. Если в конфиге все три флага опущены или выключены, сервис включает их по умолчанию. `observability.service_name`, если не задан, берётся из `service.name`, иначе падает обратно в `github-publisher-service`. Отключение логов работает только при явном `logs_enabled: false`, в противном случае логгер остаётся активным.
 

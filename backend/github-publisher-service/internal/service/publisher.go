@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"backend-github-publisher-service/internal/config"
 	githubclient "backend-github-publisher-service/internal/github"
@@ -38,9 +39,6 @@ func NewPublisherServer(cfg *config.Config, httpClient githubclient.HTTPClient, 
 func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublisherv1.PublishMarkdownRequest) (*githubpublisherv1.PublishMarkdownResponse, error) {
 	if req.GetPath() == "" {
 		return nil, status.Error(codes.InvalidArgument, "path is required")
-	}
-	if req.GetCommitMessage() == "" {
-		return nil, status.Error(codes.InvalidArgument, "commit message is required")
 	}
 
 	correlationID := s.pickCorrelationID(ctx, req.GetCorrelationId())
@@ -107,6 +105,15 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		baseBranch = s.cfg.GitHub.DefaultBranch
 	}
 
+	commitMessage := strings.TrimSpace(req.GetCommitMessage())
+	if commitMessage == "" {
+		commitMessage = defaultCommitMessage(req.GetPath())
+	}
+
+	policy := s.resolveRetryPolicy(req.GetRetryPolicy())
+
+	log.Printf("correlation_id=%s resolved retry policy: attempts=%d initial=%s max=%s", correlationID, policy.maxAttempts, policy.initialBackoff, policy.maxBackoff)
+
 	client := githubclient.NewFromConfig(
 		s.httpClient,
 		s.cfg.GitHub,
@@ -114,73 +121,176 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		repository,
 	)
 
-	commitSHA, err := client.CommitMarkdown(ctx, req.GetPath(), content, req.GetCommitMessage(), branch, correlationID, req.GetAuthorName(), req.GetAuthorEmail())
+	attempts := 0
+	var lastResp *githubpublisherv1.PublishMarkdownResponse
+
+	for attempts < policy.maxAttempts {
+		attempts++
+		resp := s.publishOnce(ctx, publishAttempt{
+			client:        client,
+			req:           req,
+			branch:        branch,
+			baseBranch:    baseBranch,
+			content:       content,
+			correlationID: correlationID,
+			commitMessage: commitMessage,
+		})
+
+		log.Printf("correlation_id=%s publish attempt status=%v error_code=%v commit=%s pr=%d", correlationID, resp.GetStatus(), resp.GetErrorCode(), resp.GetCommitSha(), resp.GetPullRequestNumber())
+
+		if resp.GetStatus() != githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
+			if resp.GetStatus() == githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS {
+				s.cache.Set(strings.TrimSpace(req.GetIdempotencyKey()), resp)
+			}
+			return resp, nil
+		}
+
+		lastResp = resp
+		delay := s.backoffDuration(policy, attempts)
+		if attempts >= policy.maxAttempts {
+			break
+		}
+		log.Printf("correlation_id=%s temporary publish failure, retry in %s (attempt %d/%d)", correlationID, delay, attempts, policy.maxAttempts)
+		select {
+		case <-ctx.Done():
+			resp.RetryAfter = durationpb.New(delay)
+			return resp, nil
+		case <-time.After(delay):
+		}
+	}
+
+	if lastResp != nil {
+		lastResp.RetryAfter = durationpb.New(s.backoffDuration(policy, attempts+1))
+		return lastResp, nil
+	}
+
+	return &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_PERMANENT_FAILURE, ErrorCode: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_UNKNOWN, ErrorMessage: "publish failed without response"}, nil
+}
+
+type publishAttempt struct {
+	client        *githubclient.Client
+	req           *githubpublisherv1.PublishMarkdownRequest
+	branch        string
+	baseBranch    string
+	content       string
+	correlationID string
+	commitMessage string
+}
+
+func (s *PublisherServer) publishOnce(ctx context.Context, attempt publishAttempt) *githubpublisherv1.PublishMarkdownResponse {
+	commitSHA, err := attempt.client.CommitMarkdown(ctx, attempt.req.GetPath(), attempt.content, attempt.commitMessage, attempt.branch, attempt.correlationID, attempt.req.GetAuthorName(), attempt.req.GetAuthorEmail())
 	if err != nil {
-		log.Printf("correlation_id=%s commit markdown error: %v", correlationID, err)
+		log.Printf("correlation_id=%s commit markdown error: %v", attempt.correlationID, err)
 		statusValue, code, message := classifyPublishError(err)
 		return &githubpublisherv1.PublishMarkdownResponse{
 			Status:       statusValue,
 			ErrorCode:    code,
 			ErrorMessage: message,
-			RetryAfter:   s.suggestRetryDelay(req.GetRetryPolicy(), req.GetAttempt()),
-		}, nil
+		}
 	}
 
 	var prNumber int64
 	var prURL string
-	if req.GetCreatePr() {
-		prNumber, prURL, err = client.CreatePullRequest(ctx, branch, baseBranch, req.GetPrTitle(), req.GetPrBody(), correlationID)
+	if attempt.req.GetCreatePr() {
+		prNumber, prURL, err = attempt.client.CreatePullRequest(ctx, attempt.branch, attempt.baseBranch, attempt.req.GetPrTitle(), attempt.req.GetPrBody(), attempt.correlationID)
 		if err != nil {
-			log.Printf("correlation_id=%s create pr error: %v", correlationID, err)
+			log.Printf("correlation_id=%s create pr error: %v", attempt.correlationID, err)
 			statusValue, code, message := classifyPublishError(err)
 			return &githubpublisherv1.PublishMarkdownResponse{
 				Status:       statusValue,
 				ErrorCode:    code,
 				ErrorMessage: message,
 				CommitSha:    commitSHA,
-				RetryAfter:   s.suggestRetryDelay(req.GetRetryPolicy(), req.GetAttempt()),
-			}, nil
+			}
 		}
 	}
 
-	resp := &githubpublisherv1.PublishMarkdownResponse{
+	log.Printf("correlation_id=%s published commit=%s pr=%d", attempt.correlationID, commitSHA, prNumber)
+
+	return &githubpublisherv1.PublishMarkdownResponse{
 		Status:            githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS,
 		CommitSha:         commitSHA,
 		PullRequestNumber: prNumber,
 		PullRequestUrl:    prURL,
 	}
-	s.cache.Set(strings.TrimSpace(req.GetIdempotencyKey()), resp)
-	log.Printf("correlation_id=%s published commit=%s pr=%d", correlationID, commitSHA, prNumber)
-
-	return resp, nil
 }
 
-func (s *PublisherServer) suggestRetryDelay(policy *githubpublisherv1.RetryPolicy, attempt uint32) *durationpb.Duration {
-	if policy == nil {
-		return nil
+func defaultCommitMessage(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "Update markdown content"
 	}
-	initial := policy.GetInitialBackoff().AsDuration()
-	maxDelay := policy.GetMaxBackoff().AsDuration()
-	if initial <= 0 || maxDelay <= 0 {
-		return nil
+	return "Update " + path
+}
+
+type retryPolicy struct {
+	initialBackoff time.Duration
+	maxBackoff     time.Duration
+	maxAttempts    int
+}
+
+func (s *PublisherServer) resolveRetryPolicy(policy *githubpublisherv1.RetryPolicy) retryPolicy {
+	defaultInitial := s.cfg.Retry.InitialBackoff
+	if defaultInitial <= 0 {
+		defaultInitial = 5 * time.Second
 	}
-	if attempt == 0 {
-		attempt = 1
+	defaultMax := s.cfg.Retry.MaxBackoff
+	if defaultMax <= 0 {
+		defaultMax = 30 * time.Second
+	}
+	defaultAttempts := s.cfg.Retry.MaxAttempts
+	if defaultAttempts <= 0 {
+		defaultAttempts = 3
 	}
 
-	delay := initial
-	for i := uint32(1); i < attempt; i++ {
-		delay *= 2
-		if delay >= maxDelay {
-			delay = maxDelay
-			break
+	resolved := retryPolicy{
+		initialBackoff: defaultInitial,
+		maxBackoff:     defaultMax,
+		maxAttempts:    defaultAttempts,
+	}
+
+	if policy != nil {
+		if policy.GetInitialBackoff().AsDuration() > 0 {
+			resolved.initialBackoff = policy.GetInitialBackoff().AsDuration()
+		}
+		if policy.GetMaxBackoff().AsDuration() > 0 {
+			resolved.maxBackoff = policy.GetMaxBackoff().AsDuration()
+		}
+		if policy.GetMaxAttempts() > 0 {
+			resolved.maxAttempts = int(policy.GetMaxAttempts())
 		}
 	}
 
-	if delay > maxDelay {
-		delay = maxDelay
+	if resolved.maxAttempts <= 0 {
+		resolved.maxAttempts = defaultAttempts
 	}
-	return durationpb.New(delay)
+	if resolved.initialBackoff <= 0 {
+		resolved.initialBackoff = defaultInitial
+	}
+	if resolved.maxBackoff <= 0 {
+		resolved.maxBackoff = defaultMax
+	}
+
+	return resolved
+}
+
+func (s *PublisherServer) backoffDuration(policy retryPolicy, attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+
+	delay := policy.initialBackoff
+	for i := 1; i < attempt; i++ {
+		delay *= 2
+		if delay >= policy.maxBackoff {
+			return policy.maxBackoff
+		}
+	}
+
+	if delay > policy.maxBackoff {
+		return policy.maxBackoff
+	}
+	return delay
 }
 
 func (s *PublisherServer) pickCorrelationID(ctx context.Context, explicit string) string {
