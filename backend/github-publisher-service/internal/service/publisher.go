@@ -1,7 +1,6 @@
 package service
 
 import (
-	githubclient "backend-github-publisher-service/internal/infrastructure/github"
 	"backend-github-publisher-service/internal/infrastructure/storage"
 	"backend-github-publisher-service/pkg/config"
 	"context"
@@ -25,10 +24,9 @@ type PublisherServer struct {
 }
 
 // NewPublisherServer создаёт сервер публикации.
-func NewPublisherServer(cfg *config.Config, httpClient githubclient.HTTPClient, storage storage.MarkdownLoader) *PublisherServer {
+func NewPublisherServer(cfg *config.Config, publisher domain.GitHubPublisher, storage storage.MarkdownLoader) *PublisherServer {
 	retryResolver := usecase.NewRetryPolicyResolver(domain.RetryPolicy{InitialBackoff: cfg.Retry.InitialBackoff, MaxBackoff: cfg.Retry.MaxBackoff, MaxAttempts: cfg.Retry.MaxAttempts})
 	idempotency := usecase.NewMemoryIdempotencyStore()
-	publisher := NewGitHubClientPublisher(cfg, httpClient)
 	uc := usecase.NewPublishUseCase(publisher, storage, idempotency, retryResolver, cfg.GitHub.Owner, cfg.GitHub.Repository, cfg.GitHub.DefaultBranch)
 
 	header := cfg.GitHub.CorrelationHeader

@@ -1,6 +1,7 @@
 package service
 
 import (
+	infragithub "backend-github-publisher-service/internal/infrastructure/github"
 	"backend-github-publisher-service/pkg/config"
 	"bytes"
 	"context"
@@ -112,7 +113,9 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	storageStub := &stubStorage{data: "# Hi"}
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, &http.Client{Transport: rec}, storageStub))
+	httpClient := &http.Client{Transport: rec}
+	publisher := infragithub.NewPublisher(cfg.GitHub, httpClient)
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, storageStub))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
@@ -203,7 +206,8 @@ func TestPublishMarkdownIntegration_RepositoryWithSlashAndEmptyOwner(t *testing.
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	storageStub := &stubStorage{data: "# Hi"}
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, server.Client(), storageStub))
+	publisher := infragithub.NewPublisher(cfg.GitHub, server.Client())
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, storageStub))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
@@ -247,7 +251,8 @@ func TestPublishMarkdownIntegration_RepositoryWithSlashOwnerMismatch(t *testing.
 
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, &http.Client{}, &stubStorage{data: "# Hi"}))
+	publisher := infragithub.NewPublisher(cfg.GitHub, &http.Client{})
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, &stubStorage{data: "# Hi"}))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
@@ -310,7 +315,8 @@ func TestPublishMarkdownIntegration_GitHubError(t *testing.T) {
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	storageStub := &stubStorage{data: "# fail"}
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, server.Client(), storageStub))
+	publisher := infragithub.NewPublisher(cfg.GitHub, server.Client())
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, storageStub))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
