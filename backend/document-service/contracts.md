@@ -67,6 +67,7 @@
   - `create_pr` — флаг авто‑PR (по умолчанию `documents.create_pr`).
   - `base_branch` — ветка для PR, если отличается от целевой.
   - `correlation_id` — прокидывается в GitHub‑клиент и логи.
+  - `attempt` — счётчик повторов публикации (увеличивается в `processing_jobs.attempts`), передаётся в `PublishMarkdown`.
 - **Пример:**
   ```json
   {
@@ -81,4 +82,5 @@
   }
   ```
 - **Связь с GitHub:** воркер скачивает Markdown из MinIO, формирует коммит/PR через `github-publisher-service` и по успеху фиксирует статус `PublishedToGitHub` и событие в `job_events`.
-- **Обработка ошибок:** `github-publisher-service` возвращает нормализованные статусы (`SUCCESS`, `TEMPORARY_FAILURE`, `PERMANENT_FAILURE`) и коды ошибок; воркер сохраняет их в `documents.error_reason` без дополнительного парсинга HTTP-кодов.
+- **Обработка ошибок:** `github-publisher-service` возвращает нормализованные статусы (`SUCCESS`, `TEMPORARY_FAILURE`, `PERMANENT_FAILURE`) и коды ошибок; воркер сохраняет их в `documents.error_reason` без дополнительного парсинга HTTP-кодов. Поле `retry_after`, вычисленное по `github_retryer.initial_backoff`/`max_backoff` и `attempt`, логируется и используется для расчёта задержки перед повторной попыткой.
+- **Идемпотентность:** для каждого документа генерируется `idempotency_key` (`document_id + branch + markdown_object_key`), который прокидывается в `PublishMarkdown`. Повторный запрос с тем же ключом не создаёт дублирующих коммитов/PR.

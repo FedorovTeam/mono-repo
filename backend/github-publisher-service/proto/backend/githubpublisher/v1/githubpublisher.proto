@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package backend.githubpublisher.v1;
 
+import "google/protobuf/duration.proto";
+
 option go_package = "backend-github-publisher-service/proto/backend/githubpublisher/v1;githubpublisherv1";
 
 enum PublishResultStatus {
@@ -39,6 +41,12 @@ message PublishMarkdownRequest {
   string author_email = 13;
   string bucket = 14;
   string object_key = 15;
+  // Ключ для идемпотентных повторов. Повторный вызов с тем же ключом и успешным исходом вернёт кэшированный результат без
+  // публикации.
+  string idempotency_key = 16;
+  // Номер попытки публикации. Используется вместе с retry_policy для расчёта рекомендуемой задержки.
+  uint32 attempt = 17;
+  RetryPolicy retry_policy = 18;
 }
 
 message PublishMarkdownResponse {
@@ -48,6 +56,14 @@ message PublishMarkdownResponse {
   string pull_request_url = 4;
   PublishErrorCode error_code = 5;
   string error_message = 6;
+  google.protobuf.Duration retry_after = 7;
+  bool idempotency_hit = 8;
+}
+
+message RetryPolicy {
+  google.protobuf.Duration initial_backoff = 1;
+  google.protobuf.Duration max_backoff = 2;
+  uint32 max_attempts = 3;
 }
 
 service GithubPublisherService {

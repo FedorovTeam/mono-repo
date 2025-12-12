@@ -160,7 +160,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending", MarkdownObjectKey: "md-key"}}
 	storage := &fakeStorageClient{}
 
-	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main")
+	activities := NewActivities(repo, storage, transformer, fakePublisher{}, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 	result, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        "doc-1",
@@ -238,7 +238,7 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 	}
 	repo := &fakeRepo{doc: doc}
 	storage := &fakeStorageClient{}
-	activities := NewActivities(repo, storage, nil, nil, "owner", "repo", "main", "main")
+	activities := NewActivities(repo, storage, nil, nil, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 	snapshot, err := activities.AwaitOriginal(context.Background(), doc.ID)
 	if err != nil {
@@ -261,7 +261,7 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	storage := &stubStorageClient{}
 	publisher := &trackingPublisher{}
 
-	activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main")
+	activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 	err := activities.PublishMarkdown(context.Background(), publishInput{
 		DocumentID:        "doc-2",

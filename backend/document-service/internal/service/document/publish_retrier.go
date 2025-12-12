@@ -150,6 +150,10 @@ func (r *PublishRetrier) reconcile(ctx context.Context) {
 				Path:              fullDoc.Path,
 				CreatePR:          fullDoc.CreatePR,
 				CorrelationID:     correlationID(fullDoc),
+				Attempt:           attempts + 1,
+			}
+			if input.MarkdownObjectKey != "" {
+				input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", doc.ID, input.Branch, input.MarkdownObjectKey)
 			}
 
 			if err := r.activities.PublishMarkdown(ctx, input); err != nil {

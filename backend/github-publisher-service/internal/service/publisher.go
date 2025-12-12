@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"backend-github-publisher-service/internal/config"
 	githubclient "backend-github-publisher-service/internal/github"
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // PublisherServer реализует gRPC слой поверх GitHub клиента.
@@ -24,11 +26,12 @@ type PublisherServer struct {
 	httpClient githubclient.HTTPClient
 	storage    storage.MarkdownLoader
 	cfg        *config.Config
+	cache      *idempotencyCache
 }
 
 // NewPublisherServer создаёт сервер публикации.
 func NewPublisherServer(cfg *config.Config, httpClient githubclient.HTTPClient, storage storage.MarkdownLoader) *PublisherServer {
-	return &PublisherServer{cfg: cfg, httpClient: httpClient, storage: storage}
+	return &PublisherServer{cfg: cfg, httpClient: httpClient, storage: storage, cache: newIdempotencyCache()}
 }
 
 // PublishMarkdown сохраняет Markdown в GitHub и, при необходимости, открывает Pull Request.
@@ -41,6 +44,13 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 	}
 
 	correlationID := s.pickCorrelationID(ctx, req.GetCorrelationId())
+
+	if cached, ok := s.cache.Get(strings.TrimSpace(req.GetIdempotencyKey())); ok {
+		log.Printf("correlation_id=%s publish request path=%s owner=%s repo=%s create_pr=%t idempotency_hit=true", correlationID, req.GetPath(), req.GetOwner(), req.GetRepository(), req.GetCreatePr())
+		resp := *cached
+		resp.IdempotencyHit = true
+		return &resp, nil
+	}
 
 	log.Printf("correlation_id=%s publish request path=%s owner=%s repo=%s create_pr=%t", correlationID, req.GetPath(), req.GetOwner(), req.GetRepository(), req.GetCreatePr())
 
@@ -108,7 +118,12 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 	if err != nil {
 		log.Printf("correlation_id=%s commit markdown error: %v", correlationID, err)
 		statusValue, code, message := classifyPublishError(err)
-		return &githubpublisherv1.PublishMarkdownResponse{Status: statusValue, ErrorCode: code, ErrorMessage: message}, nil
+		return &githubpublisherv1.PublishMarkdownResponse{
+			Status:       statusValue,
+			ErrorCode:    code,
+			ErrorMessage: message,
+			RetryAfter:   s.suggestRetryDelay(req.GetRetryPolicy(), req.GetAttempt()),
+		}, nil
 	}
 
 	var prNumber int64
@@ -118,7 +133,13 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		if err != nil {
 			log.Printf("correlation_id=%s create pr error: %v", correlationID, err)
 			statusValue, code, message := classifyPublishError(err)
-			return &githubpublisherv1.PublishMarkdownResponse{Status: statusValue, ErrorCode: code, ErrorMessage: message, CommitSha: commitSHA}, nil
+			return &githubpublisherv1.PublishMarkdownResponse{
+				Status:       statusValue,
+				ErrorCode:    code,
+				ErrorMessage: message,
+				CommitSha:    commitSHA,
+				RetryAfter:   s.suggestRetryDelay(req.GetRetryPolicy(), req.GetAttempt()),
+			}, nil
 		}
 	}
 
@@ -128,9 +149,38 @@ func (s *PublisherServer) PublishMarkdown(ctx context.Context, req *githubpublis
 		PullRequestNumber: prNumber,
 		PullRequestUrl:    prURL,
 	}
+	s.cache.Set(strings.TrimSpace(req.GetIdempotencyKey()), resp)
 	log.Printf("correlation_id=%s published commit=%s pr=%d", correlationID, commitSHA, prNumber)
 
 	return resp, nil
+}
+
+func (s *PublisherServer) suggestRetryDelay(policy *githubpublisherv1.RetryPolicy, attempt uint32) *durationpb.Duration {
+	if policy == nil {
+		return nil
+	}
+	initial := policy.GetInitialBackoff().AsDuration()
+	maxDelay := policy.GetMaxBackoff().AsDuration()
+	if initial <= 0 || maxDelay <= 0 {
+		return nil
+	}
+	if attempt == 0 {
+		attempt = 1
+	}
+
+	delay := initial
+	for i := uint32(1); i < attempt; i++ {
+		delay *= 2
+		if delay >= maxDelay {
+			delay = maxDelay
+			break
+		}
+	}
+
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+	return durationpb.New(delay)
 }
 
 func (s *PublisherServer) pickCorrelationID(ctx context.Context, explicit string) string {
@@ -198,4 +248,35 @@ func classifyPublishError(err error) (githubpublisherv1.PublishResultStatus, git
 	}
 
 	return githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_PERMANENT_FAILURE, githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_UNKNOWN, err.Error()
+}
+
+type idempotencyCache struct {
+	mu    sync.RWMutex
+	items map[string]*githubpublisherv1.PublishMarkdownResponse
+}
+
+func newIdempotencyCache() *idempotencyCache {
+	return &idempotencyCache{items: make(map[string]*githubpublisherv1.PublishMarkdownResponse)}
+}
+
+func (c *idempotencyCache) Get(key string) (*githubpublisherv1.PublishMarkdownResponse, bool) {
+	if key == "" {
+		return nil, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	resp, ok := c.items[key]
+	if !ok {
+		return nil, false
+	}
+	return resp, true
+}
+
+func (c *idempotencyCache) Set(key string, resp *githubpublisherv1.PublishMarkdownResponse) {
+	if key == "" || resp == nil || resp.GetStatus() != githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items[key] = resp
 }
