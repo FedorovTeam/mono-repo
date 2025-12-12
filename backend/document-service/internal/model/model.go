@@ -125,9 +125,11 @@ type ProcessingJob struct {
 	Status     JobStatus
 	Attempts   int
 	NextRunAt  time.Time
-	Payload    map[string]any
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Payload хранит ссылки для внешних gRPC исполнителей (bucket/object_key, queue_id,
+	// github_path/repository), а не бинарные данные документов.
+	Payload   map[string]any
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type JobEvent struct {
@@ -137,6 +139,8 @@ type JobEvent struct {
 	Status    JobStatus
 	EventType string
 	Message   string
+	// Payload события фиксирует входные/выходные ссылки шагов (например, object_key,
+	// queue_id или commit_sha) без размещения контента.
 	Payload   map[string]any
 	CreatedAt time.Time
 }

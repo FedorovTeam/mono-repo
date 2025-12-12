@@ -4,13 +4,16 @@
 
 ## Архитектура
 - PostgreSQL — хранение метаданных, версий и логов статусов.
-- Storage-service (gRPC) — запись и чтение оригиналов/Markdown через методы `UploadOriginal`/`UploadMarkdown`/`GetObject`, сервис хранит только ключи.
-- gRPC — внутренний API `proto/backend/document/document.proto`; публикация в GitHub выполняется через gRPC-клиент `github-publisher-service` с учётом идемпотентных ключей и расчётом `retry_after` для ретраев.
+- Storage-service (gRPC) — запись и чтение оригиналов/Markdown через методы `UploadOriginal`/`UploadMarkdown`/`GetObject`, сервис хранит только ключи и сам общается с MinIO.
+- Docling-transformer-service (gRPC) — конвертация исходника в Markdown, управление очередями и статусами конвертации.
+- Github-publisher-service (gRPC) — публикация Markdown в целевой репозиторий, расчёт идемпотентных ключей и временных `retry_after`.
+- Document-service не использует SDK MinIO/GitHub/Docling напрямую: вся работа с файлами и публикацией вынесена в соседние gRPC-сервисы, сам сервис оперирует статусами и ссылками.
+- gRPC — внутренний API `proto/backend/document/document.proto`.
 
-## База данных и очередь задач
 - `documents` — источник правды по статусу документа и метаданным публикации.
 - `processing_jobs` — очередь задач для крон-воркеров: `task_id` (UUID), `document_id`, `stage`, `status`, счётчик `attempts`, расписание `next_run_at`, произвольный `payload`.
 - `job_events` — аудит выполнения задач, фиксирует смену статуса, сообщение ошибки и полезную нагрузку.
+- `payload` в `processing_jobs` и `job_events` хранит только ссылки и параметры для gRPC-исполнителей (`bucket`/`object_key`, `queue_id`, `github_path`, `create_pr`), бинарные данные не пишутся в БД.
 - Индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run` поддерживают выборку готовых задач, `SELECT ... FOR UPDATE SKIP LOCKED` защищает от двойного захвата при нескольких воркерах.
 
 ## Статусы и повторная обработка
@@ -21,7 +24,7 @@
 - Повторная обработка доступна за счёт перевода документа в предыдущий статус и постановки новой задачи с той же парой `document_id + stage` (уникальный ключ в `processing_jobs` не даёт раздувать очередь дублями). Если документ застрял в `UPLOADED`, периодический reconciler перечитывает объект через `storage-service` и перезапускает цепочку.
 
 ## Формат ключей
-Ключи формируются на стороне `storage-service` по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` (оригинал) и `.../<document_id>.md` (Markdown). Document-service хранит только возвращённые бакеты и ключи, не работая напрямую с MinIO.
+Ключи формируются на стороне `storage-service` по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` (оригинал) и `.../<document_id>.md` (Markdown). Document-service хранит только возвращённые бакеты и ключи, взаимодействуя со Storage-service по gRPC.
 
 ## Конфигурация
 Все обязательные параметры находятся в `config.yaml` (путь передается через `CONFIG_PATH`). Значения по умолчанию настроены под инфраструктурные домены и DNS-шаблон `<context>.backend.svc.cluster.local`:
@@ -41,7 +44,7 @@
 Периодические воркеры публикуют метрики очереди и ошибок: gauge `document_service_upload_reconciler_queue_size`/`document_service_publish_retrier_queue_size`/`document_service_job_follower_queue_size`, гистограммы размеров пачек (`document_service_*_batch_size`) и длительности (`document_service_*_duration_ms`), счётчики ошибок (`document_service_*_errors_total`). В логах фиксируются некорректные выборки, пропуски объектов и ошибки публикации/маршрутизации, чтобы отслеживать частоту сбоев на каждой стадии.
 
 ## Быстрый старт
-1. Запустите PostgreSQL, `storage-service` и MinIO (см. `infrastructure.md`).
+1. Запустите PostgreSQL, `storage-service` (подключенный к MinIO), `docling-transformer-service` и `github-publisher-service` (см. `infrastructure.md`).
 2. Выполните миграции: `go run ./cmd/server --migrate`.
 3. Сгенерируйте gRPC код: `./proto/generate.sh`.
 4. Соберите и запустите сервер: `go run ./cmd/server`.
