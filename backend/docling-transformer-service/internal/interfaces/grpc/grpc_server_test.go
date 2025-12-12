@@ -2,16 +2,15 @@ package grpcapi
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
-	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/usecase"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
 	"go.uber.org/zap"
@@ -26,10 +25,23 @@ import (
 const bufSize = 1024 * 1024
 
 func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
-	repo := &fakeQueueRepo{queueID: uuid.New()}
-	conv := &fakeConverter{}
+	queueID := uuid.New()
+	uc := &mockTransformerUseCase{}
+	uc.submitFunc = func(_ context.Context, req usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error) {
+		uc.lastSubmit = req
+		return usecase.SubmitConversionResult{
+			Task: &transformations.TransformationTask{
+				ID:                queueID,
+				Status:            transformations.StatusPending,
+				MarkdownBucket:    "markdown-bucket",
+				MarkdownObjectKey: "md/file.md",
+			},
+			MarkdownBucket:    "markdown-bucket",
+			MarkdownObjectKey: "md/file.md",
+		}, nil
+	}
 
-	client, cleanup := startTestClient(t, repo, conv, usecase.TransformationConfig{MarkdownBucket: "markdown-bucket", PollInterval: time.Millisecond, PollMaxInterval: time.Millisecond, PollAttempts: 3})
+	client, cleanup := startTestClient(t, uc)
 	t.Cleanup(cleanup)
 
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-123"))
@@ -43,7 +55,7 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resp.GetQueueId() != repo.queueID.String() {
+	if resp.GetQueueId() != queueID.String() {
 		t.Fatalf("unexpected queue id: %s", resp.GetQueueId())
 	}
 
@@ -51,32 +63,37 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 		t.Fatalf("unexpected status: %s", resp.GetStatus())
 	}
 
-	if len(repo.enqueueCalls) != 1 {
-		t.Fatalf("expected enqueue to be called once, got %d", len(repo.enqueueCalls))
+	if resp.GetMarkdownBucket() != "markdown-bucket" || resp.GetMarkdownObjectKey() != "md/file.md" {
+		t.Fatalf("unexpected markdown location: %s/%s", resp.GetMarkdownBucket(), resp.GetMarkdownObjectKey())
 	}
 
-	enqueued := repo.enqueueCalls[0]
-	if enqueued.MarkdownBucket != "markdown-bucket" {
-		t.Fatalf("markdown bucket fallback not applied: %s", enqueued.MarkdownBucket)
-	}
-	if enqueued.MarkdownObjectKey != "md/file.md" {
-		t.Fatalf("markdown key mismatch: %s", enqueued.MarkdownObjectKey)
-	}
-	if enqueued.CorrelationID != "corr-123" {
-		t.Fatalf("correlation id not propagated: %s", enqueued.CorrelationID)
+	if uc.lastSubmit.CorrelationID != "corr-123" {
+		t.Fatalf("correlation id not propagated: %s", uc.lastSubmit.CorrelationID)
 	}
 }
 
 func TestConvertDocumentToMarkdownWaitsForResult(t *testing.T) {
-	doneID := uuid.New()
-	repo := &fakeQueueRepo{
-		latestTask: &transformations.TransformationTask{ID: doneID, Status: transformations.StatusProcessing, MarkdownBucket: "md-bucket"},
-		byID: map[uuid.UUID]*transformations.TransformationTask{
-			doneID: {ID: doneID, Status: transformations.StatusDone, MarkdownBucket: "md-bucket", MarkdownObjectKey: "ready.md"},
-		},
+	queueID := uuid.New()
+	doneTask := &transformations.TransformationTask{ID: queueID, Status: transformations.StatusDone, MarkdownBucket: "md-bucket", MarkdownObjectKey: "ready.md"}
+
+	uc := &mockTransformerUseCase{}
+	uc.submitFunc = func(_ context.Context, req usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error) {
+		uc.lastSubmit = req
+		return usecase.SubmitConversionResult{
+			Task:              &transformations.TransformationTask{ID: queueID, Status: transformations.StatusProcessing, MarkdownBucket: "md-bucket"},
+			MarkdownBucket:    "fallback-md",
+			MarkdownObjectKey: "generated.md",
+		}, nil
+	}
+	uc.waitFunc = func(_ context.Context, id uuid.UUID) (*transformations.TransformationTask, error) {
+		uc.waitCalls++
+		if id != queueID {
+			t.Fatalf("unexpected wait id: %s", id)
+		}
+		return doneTask, nil
 	}
 
-	client, cleanup := startTestClient(t, repo, &fakeConverter{}, usecase.TransformationConfig{MarkdownBucket: "fallback-md", PollInterval: time.Millisecond, PollMaxInterval: time.Millisecond, PollAttempts: 2})
+	client, cleanup := startTestClient(t, uc)
 	t.Cleanup(cleanup)
 
 	resp, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
@@ -95,11 +112,27 @@ func TestConvertDocumentToMarkdownWaitsForResult(t *testing.T) {
 	if resp.GetMarkdownObjectKey() != "ready.md" {
 		t.Fatalf("expected ready key, got %s", resp.GetMarkdownObjectKey())
 	}
+	if uc.waitCalls != 1 {
+		t.Fatalf("expected wait to be called once, got %d", uc.waitCalls)
+	}
 }
 
 func TestConvertDocumentToMarkdownValidation(t *testing.T) {
-	repo := &fakeQueueRepo{}
-	client, cleanup := startTestClient(t, repo, &fakeConverter{}, usecase.TransformationConfig{MarkdownBucket: "md", QueueLimit: 1, PollInterval: time.Millisecond, PollMaxInterval: time.Millisecond, PollAttempts: 1})
+	queueID := uuid.New()
+	uc := &mockTransformerUseCase{}
+	uc.submitFunc = func(_ context.Context, req usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error) {
+		uc.lastSubmit = req
+		switch {
+		case req.DocumentID == "" || req.OriginalBucket == "" || req.OriginalObjectKey == "":
+			return usecase.SubmitConversionResult{}, usecase.ErrInvalidArgument
+		case req.DocumentID == "doc-queue-limit":
+			return usecase.SubmitConversionResult{}, usecase.ErrQueueLimitReached
+		default:
+			return usecase.SubmitConversionResult{Task: &transformations.TransformationTask{ID: queueID, Status: transformations.StatusPending}}, nil
+		}
+	}
+
+	client, cleanup := startTestClient(t, uc)
 	t.Cleanup(cleanup)
 
 	_, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{})
@@ -107,9 +140,8 @@ func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 		t.Fatalf("expected invalid argument, got %v", err)
 	}
 
-	repo.pending = 1
 	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
-		DocumentId:        "doc-123",
+		DocumentId:        "doc-queue-limit",
 		OriginalBucket:    "bucket",
 		OriginalObjectKey: "file.docx",
 	})
@@ -126,14 +158,20 @@ func TestConvertDocxToMarkdownFromURL(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 
-	conv := &fakeConverter{
-		statusResults: []domain.StatusCheckResult{
-			{},
-			{Result: &domain.ConvertResult{Content: []byte("# title"), MediaType: "text/markdown", Charset: "utf-8"}},
-		},
+	var receivedFilename string
+	var receivedContent []byte
+
+	uc := &mockTransformerUseCase{}
+	uc.fetchFunc = func(_ context.Context, url string) ([]byte, error) {
+		return docxContent, nil
+	}
+	uc.convertFunc = func(_ context.Context, filename string, content []byte) (domain.ConvertResult, error) {
+		receivedFilename = filename
+		receivedContent = content
+		return domain.ConvertResult{Content: []byte("# title"), MediaType: "text/markdown", Charset: "utf-8"}, nil
 	}
 
-	client, cleanup := startTestClient(t, &fakeQueueRepo{}, conv, usecase.TransformationConfig{MarkdownBucket: "md", PollInterval: time.Millisecond, PollMaxInterval: time.Millisecond, PollAttempts: 3})
+	client, cleanup := startTestClient(t, uc)
 	t.Cleanup(cleanup)
 
 	resp, err := client.ConvertDocxToMarkdown(context.Background(), &transformerv1.ConvertDocxToMarkdownRequest{Source: &transformerv1.ConvertDocxToMarkdownRequest_DocxUrl{DocxUrl: ts.URL + "/file.docx"}})
@@ -144,18 +182,17 @@ func TestConvertDocxToMarkdownFromURL(t *testing.T) {
 	if resp.GetMarkdown() != "# title" {
 		t.Fatalf("unexpected markdown: %s", resp.GetMarkdown())
 	}
-	if string(conv.lastRequest.Content) != string(docxContent) {
+	if string(receivedContent) != string(docxContent) {
 		t.Fatalf("converter did not receive docx content")
 	}
-	if conv.lastRequest.FileName != "file.docx" {
-		t.Fatalf("filename not derived from url: %s", conv.lastRequest.FileName)
+	if receivedFilename != "file.docx" {
+		t.Fatalf("filename not derived from url: %s", receivedFilename)
 	}
 }
 
-func startTestClient(t *testing.T, repo *fakeQueueRepo, conv *fakeConverter, cfg usecase.TransformationConfig) (transformerv1.TransformerServiceClient, func()) {
+func startTestClient(t *testing.T, uc TransformerUseCase) (transformerv1.TransformerServiceClient, func()) {
 	t.Helper()
 
-	uc := usecase.NewTransformationUseCase(repo, conv, cfg, zap.NewNop(), &http.Client{Timeout: time.Second})
 	server := grpc.NewServer()
 	transformerv1.RegisterTransformerServiceServer(server, NewTransformerAPI(uc, zap.NewNop()))
 
@@ -183,109 +220,40 @@ func startTestClient(t *testing.T, repo *fakeQueueRepo, conv *fakeConverter, cfg
 	return client, cleanup
 }
 
-type fakeConverter struct {
-	submitErr     error
-	checkErr      error
-	statusResults []domain.StatusCheckResult
-	lastRequest   domain.ConvertRequest
+type mockTransformerUseCase struct {
+	submitFunc  func(ctx context.Context, req usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error)
+	waitFunc    func(ctx context.Context, queueID uuid.UUID) (*transformations.TransformationTask, error)
+	convertFunc func(ctx context.Context, filename string, content []byte) (domain.ConvertResult, error)
+	fetchFunc   func(ctx context.Context, rawURL string) ([]byte, error)
+
+	lastSubmit usecase.SubmitConversionRequest
+	waitCalls  int
 }
 
-func (f *fakeConverter) Submit(_ context.Context, req domain.ConvertRequest) (string, error) {
-	f.lastRequest = req
-	if f.submitErr != nil {
-		return "", f.submitErr
+func (m *mockTransformerUseCase) SubmitConversion(ctx context.Context, req usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error) {
+	if m.submitFunc == nil {
+		return usecase.SubmitConversionResult{}, errors.New("submitFunc not set")
 	}
-	return "job-1", nil
+	return m.submitFunc(ctx, req)
 }
 
-func (f *fakeConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
-	if f.checkErr != nil {
-		return domain.StatusCheckResult{}, f.checkErr
+func (m *mockTransformerUseCase) WaitForResult(ctx context.Context, queueID uuid.UUID) (*transformations.TransformationTask, error) {
+	if m.waitFunc == nil {
+		return nil, errors.New("waitFunc not set")
 	}
-	if len(f.statusResults) == 0 {
-		return domain.StatusCheckResult{}, nil
-	}
-	result := f.statusResults[0]
-	if len(f.statusResults) > 1 {
-		f.statusResults = f.statusResults[1:]
-	}
-	return result, nil
+	return m.waitFunc(ctx, queueID)
 }
 
-type fakeQueueRepo struct {
-	enqueueCalls []transformations.EnqueueParams
-	pending      int
-	processing   int
-	waiting      int
-	enqueueErr   error
-	countErr     error
-	queueID      uuid.UUID
-	latestTask   *transformations.TransformationTask
-	byID         map[uuid.UUID]*transformations.TransformationTask
+func (m *mockTransformerUseCase) ConvertDocxContent(ctx context.Context, filename string, content []byte) (domain.ConvertResult, error) {
+	if m.convertFunc == nil {
+		return domain.ConvertResult{}, errors.New("convertFunc not set")
+	}
+	return m.convertFunc(ctx, filename, content)
 }
 
-var _ repo.QueueRepository = (*fakeQueueRepo)(nil)
-
-func (f *fakeQueueRepo) Enqueue(_ context.Context, params transformations.EnqueueParams) (uuid.UUID, error) {
-	f.enqueueCalls = append(f.enqueueCalls, params)
-	if f.enqueueErr != nil {
-		return uuid.Nil, f.enqueueErr
+func (m *mockTransformerUseCase) FetchContentByURL(ctx context.Context, rawURL string) ([]byte, error) {
+	if m.fetchFunc == nil {
+		return nil, errors.New("fetchFunc not set")
 	}
-	if f.queueID == uuid.Nil {
-		f.queueID = uuid.New()
-	}
-	if f.byID != nil {
-		f.byID[f.queueID] = &transformations.TransformationTask{ID: f.queueID, Status: transformations.StatusPending, MarkdownBucket: params.MarkdownBucket, MarkdownObjectKey: params.MarkdownObjectKey}
-	}
-	return f.queueID, nil
+	return m.fetchFunc(ctx, rawURL)
 }
-
-func (f *fakeQueueRepo) CountActive(context.Context) (int, error) {
-	if f.countErr != nil {
-		return 0, f.countErr
-	}
-	return f.pending + f.processing + f.waiting, nil
-}
-
-func (f *fakeQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
-	if f.countErr != nil {
-		return 0, 0, 0, f.countErr
-	}
-
-	return f.pending, f.processing, f.waiting, nil
-}
-
-func (*fakeQueueRepo) AcquireNext(context.Context) (*transformations.TransformationTask, error) {
-	return nil, nil
-}
-func (*fakeQueueRepo) AcquireBatch(context.Context, int) ([]*transformations.TransformationTask, error) {
-	return nil, nil
-}
-func (f *fakeQueueRepo) GetLatestByDocument(context.Context, string) (*transformations.TransformationTask, error) {
-	return f.latestTask, nil
-}
-func (f *fakeQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*transformations.TransformationTask, error) {
-	if f.byID == nil {
-		return nil, nil
-	}
-	if task, ok := f.byID[id]; ok {
-		return task, nil
-	}
-	return nil, nil
-}
-func (*fakeQueueRepo) MarkDone(context.Context, uuid.UUID, string, string) error { return nil }
-func (*fakeQueueRepo) MarkFailed(context.Context, uuid.UUID, string) error       { return nil }
-func (*fakeQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
-	return nil
-}
-func (*fakeQueueRepo) MarkDoclingWaiting(context.Context, uuid.UUID, string, int, time.Time) error {
-	return nil
-}
-func (*fakeQueueRepo) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
-	return 0, 0, nil
-}
-func (*fakeQueueRepo) RestoreProcessing(context.Context) (int, error) { return 0, nil }
-func (*fakeQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
-	return 0, 0, nil
-}
-func (*fakeQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) { return 0, nil }

@@ -34,24 +34,23 @@ type TransformationConfig struct {
 	PollAttempts    int
 }
 
-type ConvertDocumentParams struct {
+type SubmitConversionRequest struct {
 	DocumentID        string
 	OriginalBucket    string
 	OriginalObjectKey string
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
-	WaitForResult     bool
 	CorrelationID     string
 }
 
-type ConvertDocumentResult struct {
+type SubmitConversionResult struct {
 	Task              *transformations.TransformationTask
 	MarkdownBucket    string
 	MarkdownObjectKey string
 }
 
-type TransformationUseCase struct {
+type TransformerService struct {
 	repo   repo.QueueRepository
 	conv   domain.Converter
 	cfg    TransformationConfig
@@ -63,20 +62,20 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-func NewTransformationUseCase(repo repo.QueueRepository, conv domain.Converter, cfg TransformationConfig, logger *zap.Logger, client HTTPClient) *TransformationUseCase {
+func NewTransformerService(repo repo.QueueRepository, conv domain.Converter, cfg TransformationConfig, logger *zap.Logger, client HTTPClient) *TransformerService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 
-	return &TransformationUseCase{repo: repo, conv: conv, cfg: cfg, logger: logger, client: client}
+	return &TransformerService{repo: repo, conv: conv, cfg: cfg, logger: logger, client: client}
 }
 
-func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params ConvertDocumentParams) (ConvertDocumentResult, error) {
+func (uc *TransformerService) SubmitConversion(ctx context.Context, params SubmitConversionRequest) (SubmitConversionResult, error) {
 	if params.DocumentID == "" {
-		return ConvertDocumentResult{}, fmt.Errorf("%w: document_id is required", ErrInvalidArgument)
+		return SubmitConversionResult{}, fmt.Errorf("%w: document_id is required", ErrInvalidArgument)
 	}
 	if params.OriginalBucket == "" || params.OriginalObjectKey == "" {
-		return ConvertDocumentResult{}, fmt.Errorf("%w: original bucket and key are required", ErrInvalidArgument)
+		return SubmitConversionResult{}, fmt.Errorf("%w: original bucket and key are required", ErrInvalidArgument)
 	}
 
 	markdownBucket := params.MarkdownBucket
@@ -84,7 +83,7 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 		markdownBucket = uc.cfg.MarkdownBucket
 	}
 	if markdownBucket == "" {
-		return ConvertDocumentResult{}, fmt.Errorf("%w: markdown bucket is required", ErrInvalidArgument)
+		return SubmitConversionResult{}, fmt.Errorf("%w: markdown bucket is required", ErrInvalidArgument)
 	}
 
 	fileExt := domain.NormalizeExtension(params.FilenameExtension)
@@ -92,10 +91,10 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 		fileExt = domain.NormalizeExtension(filepath.Ext(params.OriginalObjectKey))
 	}
 	if fileExt == "" {
-		return ConvertDocumentResult{}, fmt.Errorf("%w: file extension is required", ErrInvalidArgument)
+		return SubmitConversionResult{}, fmt.Errorf("%w: file extension is required", ErrInvalidArgument)
 	}
 	if _, err := domain.ResolveContentTypeByExtension(fileExt); err != nil {
-		return ConvertDocumentResult{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
+		return SubmitConversionResult{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 	}
 
 	markdownKey := params.MarkdownObjectKey
@@ -105,22 +104,12 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 
 	existingTask, err := uc.repo.GetLatestByDocument(ctx, params.DocumentID)
 	if err != nil {
-		return ConvertDocumentResult{}, fmt.Errorf("fetch latest task: %w", err)
+		return SubmitConversionResult{}, fmt.Errorf("fetch latest task: %w", err)
 	}
 
 	if existingTask != nil && existingTask.Status != transformations.StatusFailed {
-		result := ConvertDocumentResult{Task: existingTask, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}
-		result.MarkdownBucket, result.MarkdownObjectKey = resolveOutput(existingTask, markdownBucket, markdownKey)
-
-		if params.WaitForResult {
-			task, waitErr := uc.WaitForTask(ctx, existingTask.ID)
-			if waitErr != nil {
-				return ConvertDocumentResult{}, waitErr
-			}
-
-			result.Task = task
-			result.MarkdownBucket, result.MarkdownObjectKey = resolveOutput(task, markdownBucket, markdownKey)
-		}
+		result := SubmitConversionResult{Task: existingTask, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}
+		result.MarkdownBucket, result.MarkdownObjectKey = ResolveOutput(existingTask, markdownBucket, markdownKey)
 
 		return result, nil
 	}
@@ -128,11 +117,11 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 	if uc.cfg.QueueLimit > 0 {
 		pending, processing, waiting, err := uc.repo.CountByStatus(ctx)
 		if err != nil {
-			return ConvertDocumentResult{}, fmt.Errorf("count queue tasks: %w", err)
+			return SubmitConversionResult{}, fmt.Errorf("count queue tasks: %w", err)
 		}
 
 		if pending+processing+waiting >= uc.cfg.QueueLimit {
-			return ConvertDocumentResult{}, ErrQueueLimitReached
+			return SubmitConversionResult{}, ErrQueueLimitReached
 		}
 	}
 
@@ -146,29 +135,19 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 		CorrelationID:     params.CorrelationID,
 	})
 	if err != nil {
-		return ConvertDocumentResult{}, fmt.Errorf("enqueue transformation: %w", err)
+		return SubmitConversionResult{}, fmt.Errorf("enqueue transformation: %w", err)
 	}
 
-	result := ConvertDocumentResult{
+	result := SubmitConversionResult{
 		Task:              &transformations.TransformationTask{ID: queueID, Status: transformations.StatusPending, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey},
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 	}
 
-	if params.WaitForResult {
-		task, waitErr := uc.WaitForTask(ctx, queueID)
-		if waitErr != nil {
-			return ConvertDocumentResult{}, waitErr
-		}
-
-		result.Task = task
-		result.MarkdownBucket, result.MarkdownObjectKey = resolveOutput(task, markdownBucket, markdownKey)
-	}
-
 	return result, nil
 }
 
-func (uc *TransformationUseCase) WaitForTask(ctx context.Context, queueID uuid.UUID) (*transformations.TransformationTask, error) {
+func (uc *TransformerService) WaitForResult(ctx context.Context, queueID uuid.UUID) (*transformations.TransformationTask, error) {
 	backoff := uc.cfg.PollInterval
 	if backoff <= 0 {
 		backoff = 2 * time.Second
@@ -223,7 +202,7 @@ func (uc *TransformationUseCase) WaitForTask(ctx context.Context, queueID uuid.U
 	return nil, ErrResultNotReady
 }
 
-func (uc *TransformationUseCase) ConvertDocxContent(ctx context.Context, filename string, content []byte) (domain.ConvertResult, error) {
+func (uc *TransformerService) ConvertDocxContent(ctx context.Context, filename string, content []byte) (domain.ConvertResult, error) {
 	if uc.conv == nil {
 		return domain.ConvertResult{}, fmt.Errorf("%w: converter is not configured", ErrInvalidArgument)
 	}
@@ -250,7 +229,7 @@ func (uc *TransformationUseCase) ConvertDocxContent(ctx context.Context, filenam
 	return uc.pollUntilReady(ctx, jobID)
 }
 
-func (uc *TransformationUseCase) FetchContentByURL(ctx context.Context, rawURL string) ([]byte, error) {
+func (uc *TransformerService) FetchContentByURL(ctx context.Context, rawURL string) ([]byte, error) {
 	if rawURL == "" {
 		return nil, fmt.Errorf("%w: docx_url is required when content is empty", ErrInvalidArgument)
 	}
@@ -287,7 +266,7 @@ func (uc *TransformationUseCase) FetchContentByURL(ctx context.Context, rawURL s
 	return data, nil
 }
 
-func (uc *TransformationUseCase) pollUntilReady(ctx context.Context, jobID string) (domain.ConvertResult, error) {
+func (uc *TransformerService) pollUntilReady(ctx context.Context, jobID string) (domain.ConvertResult, error) {
 	backoff := uc.cfg.PollInterval
 
 	for attempt := 1; attempt <= uc.cfg.PollAttempts; attempt++ {
@@ -318,7 +297,7 @@ func (uc *TransformationUseCase) pollUntilReady(ctx context.Context, jobID strin
 	return domain.ConvertResult{}, ErrResultNotReady
 }
 
-func resolveOutput(task *transformations.TransformationTask, fallbackBucket, fallbackKey string) (string, string) {
+func ResolveOutput(task *transformations.TransformationTask, fallbackBucket, fallbackKey string) (string, string) {
 	bucket := fallbackBucket
 	key := fallbackKey
 

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net"
 
-transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	"github.com/google/uuid"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 	"github.com/mono-repo/docling-transformer-service/internal/usecase"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
@@ -18,13 +20,20 @@ transformations "github.com/mono-repo/docling-transformer-service/internal/domai
 	"google.golang.org/grpc/status"
 )
 
+type TransformerUseCase interface {
+	SubmitConversion(ctx context.Context, params usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error)
+	WaitForResult(ctx context.Context, queueID uuid.UUID) (*transformations.TransformationTask, error)
+	ConvertDocxContent(ctx context.Context, filename string, content []byte) (domain.ConvertResult, error)
+	FetchContentByURL(ctx context.Context, rawURL string) ([]byte, error)
+}
+
 type TransformerAPI struct {
 	transformerv1.UnimplementedTransformerServiceServer
-	usecase *usecase.TransformationUseCase
+	usecase TransformerUseCase
 	logger  *zap.Logger
 }
 
-func NewTransformerAPI(uc *usecase.TransformationUseCase, logger *zap.Logger) *TransformerAPI {
+func NewTransformerAPI(uc TransformerUseCase, logger *zap.Logger) *TransformerAPI {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -41,14 +50,13 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		zap.String("original_object_key", req.GetOriginalObjectKey()),
 		zap.String("filename_extension", req.GetFilenameExtension()))
 
-	result, err := s.usecase.ConvertDocument(ctx, usecase.ConvertDocumentParams{
+	result, err := s.usecase.SubmitConversion(ctx, usecase.SubmitConversionRequest{
 		DocumentID:        req.GetDocumentId(),
 		OriginalBucket:    req.GetOriginalBucket(),
 		OriginalObjectKey: req.GetOriginalObjectKey(),
 		MarkdownBucket:    req.GetMarkdownBucket(),
 		MarkdownObjectKey: req.GetMarkdownObjectKey(),
 		FilenameExtension: req.GetFilenameExtension(),
-		WaitForResult:     req.GetWaitForResult(),
 		CorrelationID:     correlationID,
 	})
 	if err != nil {
@@ -60,11 +68,22 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		return nil, status.Error(codes.Internal, "task is not available")
 	}
 
+	markdownBucket := result.MarkdownBucket
+	markdownKey := result.MarkdownObjectKey
+
+	if req.GetWaitForResult() {
+		task, err = s.usecase.WaitForResult(ctx, task.ID)
+		if err != nil {
+			return nil, s.handleError(err)
+		}
+		markdownBucket, markdownKey = usecase.ResolveOutput(task, markdownBucket, markdownKey)
+	}
+
 	return &transformerv1.ConvertDocumentToMarkdownResponse{
 		QueueId:           task.ID.String(),
 		Status:            string(task.Status),
-		MarkdownBucket:    result.MarkdownBucket,
-		MarkdownObjectKey: result.MarkdownObjectKey,
+		MarkdownBucket:    markdownBucket,
+		MarkdownObjectKey: markdownKey,
 	}, nil
 }
 
@@ -116,7 +135,7 @@ func (s *TransformerAPI) handleError(err error) error {
 	}
 }
 
-func Run(ctx context.Context, logger *zap.Logger, uc *usecase.TransformationUseCase, port int) error {
+func Run(ctx context.Context, logger *zap.Logger, uc TransformerUseCase, port int) error {
 	address := fmt.Sprintf(":%d", port)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
