@@ -1,8 +1,7 @@
 # tasks
 
-- Добавить метрики GraphQL-методов и gRPC-вызовов.
-- Подключить полноценный tracing (OpenTelemetry exporter в config).
-- Реализовать загрузку файлов в MinIO напрямую через signed URL.
-- Расширить валидацию входных данных (размер файла, допустимые расширения).
+- Вынести список разрешённых CORS origin из кода в конфигурацию.
+- Добавить сквозные тесты цепочки upload → webhook → ConfirmUpload (mock storage/document-service).
+- Реализовать rate limiting/quotas по `X-API-Key` для GraphQL ручек.
 - Добавить интеграцию с GitHub Webhook для уведомлений о публикации.
 
