@@ -10,8 +10,6 @@ type Query {
 type Mutation {
   """Инициирует загрузку DOC/DOCX/PDF: выдаёт signed URL и создаёт запись в document-service."""
   uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!
-  """Перезапускает обработку документа в Temporal workflow по его идентификатору."""
-  retryProcessing(documentId: ID!): KnowledgeDocument!
 }
 
 type UploadKnowledgeDocumentPayload {

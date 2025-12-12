@@ -39,9 +39,6 @@ func (s *stubDocumentClient) GetDocument(context.Context, *documentpb.GetDocumen
 func (s *stubDocumentClient) ListDocuments(context.Context, *documentpb.ListDocumentsRequest, ...grpc.CallOption) (*documentpb.ListDocumentsResponse, error) {
 	return nil, errors.New("not implemented")
 }
-func (s *stubDocumentClient) RetryProcessing(context.Context, *documentpb.RetryProcessingRequest, ...grpc.CallOption) (*documentpb.Document, error) {
-	return nil, errors.New("not implemented")
-}
 func (s *stubDocumentClient) Close() error { return nil }
 
 func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {

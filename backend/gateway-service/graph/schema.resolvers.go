@@ -78,24 +78,6 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	return &model.UploadKnowledgeDocumentPayload{Document: mapDocument(created), UploadURL: uploadURL.GetUploadUrl(), UploadMethod: http.MethodPut}, nil
 }
 
-// RetryProcessing is the resolver for the retryProcessing field.
-func (r *mutationResolver) RetryProcessing(ctx context.Context, documentID string) (*model.KnowledgeDocument, error) {
-	if _, err := requireAPIKey(ctx); err != nil {
-		return nil, err
-	}
-	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("document_id", documentID), zap.String("api_key", ctxutils.APIKey(ctx)))
-
-	doc, err := r.DocumentClient.RetryProcessing(ctx, &pb.RetryProcessingRequest{Id: documentID, CorrelationId: correlationID})
-	if err != nil {
-		logger.Error("failed to retry processing", zap.Error(err))
-		return nil, fmt.Errorf("cannot retry processing: %w", err)
-	}
-
-	logger.Info("retry initiated")
-	return mapDocument(doc), nil
-}
-
 // KnowledgeDocument is the resolver for the knowledgeDocument field.
 func (r *queryResolver) KnowledgeDocument(ctx context.Context, id string) (*model.KnowledgeDocument, error) {
 	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)

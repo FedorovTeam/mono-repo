@@ -15,7 +15,6 @@ type Client interface {
 	CreateDocument(ctx context.Context, in *pb.CreateDocumentRequest, opts ...grpc.CallOption) (*pb.Document, error)
 	GetDocument(ctx context.Context, in *pb.GetDocumentRequest, opts ...grpc.CallOption) (*pb.Document, error)
 	ListDocuments(ctx context.Context, in *pb.ListDocumentsRequest, opts ...grpc.CallOption) (*pb.ListDocumentsResponse, error)
-	RetryProcessing(ctx context.Context, in *pb.RetryProcessingRequest, opts ...grpc.CallOption) (*pb.Document, error)
 	ConfirmUpload(ctx context.Context, in *pb.ConfirmUploadRequest, opts ...grpc.CallOption) (*pb.Document, error)
 	Close() error
 }
@@ -64,10 +63,6 @@ func (c *GRPCClient) GetDocument(ctx context.Context, in *pb.GetDocumentRequest,
 
 func (c *GRPCClient) ListDocuments(ctx context.Context, in *pb.ListDocumentsRequest, opts ...grpc.CallOption) (*pb.ListDocumentsResponse, error) {
 	return c.DocumentServiceClient.ListDocuments(withMetadata(ctx), in, opts...)
-}
-
-func (c *GRPCClient) RetryProcessing(ctx context.Context, in *pb.RetryProcessingRequest, opts ...grpc.CallOption) (*pb.Document, error) {
-	return c.DocumentServiceClient.RetryProcessing(withMetadata(ctx), in, opts...)
 }
 
 func (c *GRPCClient) ConfirmUpload(ctx context.Context, in *pb.ConfirmUploadRequest, opts ...grpc.CallOption) (*pb.Document, error) {

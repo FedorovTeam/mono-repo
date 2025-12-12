@@ -19,11 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	DocumentService_CreateDocument_FullMethodName  = "/backend.document.v1.DocumentService/CreateDocument"
-	DocumentService_GetDocument_FullMethodName     = "/backend.document.v1.DocumentService/GetDocument"
-	DocumentService_ListDocuments_FullMethodName   = "/backend.document.v1.DocumentService/ListDocuments"
-	DocumentService_RetryProcessing_FullMethodName = "/backend.document.v1.DocumentService/RetryProcessing"
-	DocumentService_ConfirmUpload_FullMethodName   = "/backend.document.v1.DocumentService/ConfirmUpload"
+	DocumentService_CreateDocument_FullMethodName = "/backend.document.v1.DocumentService/CreateDocument"
+	DocumentService_GetDocument_FullMethodName    = "/backend.document.v1.DocumentService/GetDocument"
+	DocumentService_ListDocuments_FullMethodName  = "/backend.document.v1.DocumentService/ListDocuments"
+	DocumentService_ConfirmUpload_FullMethodName  = "/backend.document.v1.DocumentService/ConfirmUpload"
 )
 
 // DocumentServiceClient is the client API for DocumentService service.
@@ -33,7 +32,6 @@ type DocumentServiceClient interface {
 	CreateDocument(ctx context.Context, in *CreateDocumentRequest, opts ...grpc.CallOption) (*Document, error)
 	GetDocument(ctx context.Context, in *GetDocumentRequest, opts ...grpc.CallOption) (*Document, error)
 	ListDocuments(ctx context.Context, in *ListDocumentsRequest, opts ...grpc.CallOption) (*ListDocumentsResponse, error)
-	RetryProcessing(ctx context.Context, in *RetryProcessingRequest, opts ...grpc.CallOption) (*Document, error)
 	ConfirmUpload(ctx context.Context, in *ConfirmUploadRequest, opts ...grpc.CallOption) (*Document, error)
 }
 
@@ -75,16 +73,6 @@ func (c *documentServiceClient) ListDocuments(ctx context.Context, in *ListDocum
 	return out, nil
 }
 
-func (c *documentServiceClient) RetryProcessing(ctx context.Context, in *RetryProcessingRequest, opts ...grpc.CallOption) (*Document, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Document)
-	err := c.cc.Invoke(ctx, DocumentService_RetryProcessing_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *documentServiceClient) ConfirmUpload(ctx context.Context, in *ConfirmUploadRequest, opts ...grpc.CallOption) (*Document, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Document)
@@ -102,7 +90,6 @@ type DocumentServiceServer interface {
 	CreateDocument(context.Context, *CreateDocumentRequest) (*Document, error)
 	GetDocument(context.Context, *GetDocumentRequest) (*Document, error)
 	ListDocuments(context.Context, *ListDocumentsRequest) (*ListDocumentsResponse, error)
-	RetryProcessing(context.Context, *RetryProcessingRequest) (*Document, error)
 	ConfirmUpload(context.Context, *ConfirmUploadRequest) (*Document, error)
 	mustEmbedUnimplementedDocumentServiceServer()
 }
@@ -119,9 +106,6 @@ func (UnimplementedDocumentServiceServer) GetDocument(context.Context, *GetDocum
 }
 func (UnimplementedDocumentServiceServer) ListDocuments(context.Context, *ListDocumentsRequest) (*ListDocumentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListDocuments not implemented")
-}
-func (UnimplementedDocumentServiceServer) RetryProcessing(context.Context, *RetryProcessingRequest) (*Document, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RetryProcessing not implemented")
 }
 func (UnimplementedDocumentServiceServer) ConfirmUpload(context.Context, *ConfirmUploadRequest) (*Document, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConfirmUpload not implemented")
@@ -193,24 +177,6 @@ func _DocumentService_ListDocuments_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DocumentService_RetryProcessing_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RetryProcessingRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DocumentServiceServer).RetryProcessing(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DocumentService_RetryProcessing_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DocumentServiceServer).RetryProcessing(ctx, req.(*RetryProcessingRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _DocumentService_ConfirmUpload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ConfirmUploadRequest)
 	if err := dec(in); err != nil {
@@ -247,10 +213,6 @@ var DocumentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListDocuments",
 			Handler:    _DocumentService_ListDocuments_Handler,
-		},
-		{
-			MethodName: "RetryProcessing",
-			Handler:    _DocumentService_RetryProcessing_Handler,
 		},
 		{
 			MethodName: "ConfirmUpload",

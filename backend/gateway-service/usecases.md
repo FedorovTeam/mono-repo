@@ -10,7 +10,3 @@
 1. С авторизацией по `X-API-Key` выполняется запрос `knowledgeDocument(id)` или `knowledgeDocuments(filter, pagination)`.
 2. gateway пробрасывает `correlation-id` в gRPC-запросы `document-service`, мапит статусы (`UPLOADED/ STORED_ORIGINAL/ CONVERTED_TO_MARKDOWN/ PUBLISHED_TO_GITHUB/ FAILED`) и возвращает найденный документ или список с `totalCount` (pagination по `limit/offset`, по умолчанию 10/0, фильтр по статусу и репозиторию).
 
-## Повторная обработка после ошибки
-1. При получении статуса `FAILED` клиент вызывает мутацию `retryProcessing(documentId)` с `X-API-Key`.
-2. gateway прокидывает вызов в `document-service.RetryProcessing`, обеспечивая `correlation-id`, и возвращает обновлённый объект документа.
-

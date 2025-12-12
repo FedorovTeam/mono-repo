@@ -27,7 +27,6 @@ classDiagram
     }
     class GraphQLResolver {
         +UploadKnowledgeDocument()
-        +RetryProcessing()
         +KnowledgeDocument()
         +KnowledgeDocuments()
     }
@@ -40,7 +39,6 @@ classDiagram
         +CreateDocument()
         +GetDocument()
         +ListDocuments()
-        +RetryProcessing()
         +ConfirmUpload()
         +Close()
     }

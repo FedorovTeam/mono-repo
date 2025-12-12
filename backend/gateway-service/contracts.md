@@ -2,7 +2,6 @@
 
 ## GraphQL
 - `mutation uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!`
-- `mutation retryProcessing(documentId: ID!): KnowledgeDocument!`
 - `query knowledgeDocument(id: ID!): KnowledgeDocument`
 - `query knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!`
 
@@ -17,7 +16,6 @@
 - `CreateDocument` — регистрация документа и ключей в MinIO.
 - `GetDocument` — получение состояния по ID.
 - `ListDocuments` — пагинированный список.
-- `RetryProcessing` — повторный запуск обработки.
 - `ConfirmUpload` — подтверждение факта загрузки объекта в хранилище.
 
 Все вызовы получают `x-correlation-id` в metadata.
