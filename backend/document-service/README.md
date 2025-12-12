@@ -5,7 +5,7 @@
 ## Архитектура
 - PostgreSQL — хранение метаданных, версий и логов статусов.
 - Storage-service (gRPC) — запись и чтение оригиналов/Markdown через методы `UploadOriginal`/`UploadMarkdown`/`GetObject`, сервис хранит только ключи.
-- gRPC — внутренний API `proto/backend/document/document.proto`.
+- gRPC — внутренний API `proto/backend/document/document.proto`; публикация в GitHub выполняется через gRPC-клиент `github-publisher-service` с учётом идемпотентных ключей и расчётом `retry_after` для ретраев.
 
 ## База данных и очередь задач
 - `documents` — источник правды по статусу документа и метаданным публикации.
@@ -31,7 +31,7 @@
 - `reconciler.interval` / `reconciler.batch_size` / `reconciler.min_uploaded_age` — периодичность и размер выборки задач для подтверждения загрузок, минимальный возраст загруженного объекта перед повторной проверкой (проверка выполняется через `storage-service.GetObject`).
 - `github_retryer.interval` / `github_retryer.batch_size` / `github_retryer.max_attempts` / `github_retryer.initial_backoff` / `github_retryer.max_backoff` — параметры крон-ретраев публикации в GitHub.
 - `job_follower.interval` / `job_follower.batch_size` / `job_follower.reschedule_after` — периодичность чтения завершённых задач и задержка перед повторным запуском следующей стадии.
-- `services.storage_service` — `storage.backend.svc.cluster.local:50052`, `services.transformer_service` — `docling-transformer-service.docling-transformer-service.svc.cluster.local:9090` (gRPC `ConvertDocumentToMarkdown`/`ConvertDocxToMarkdown`), `services.github_publisher_service` — `github-publisher.backend.svc.cluster.local:9097`.
+ - `services.storage_service` — `storage.backend.svc.cluster.local:50052`, `services.transformer_service` — `docling-transformer-service.docling-transformer-service.svc.cluster.local:9090` (gRPC `ConvertDocumentToMarkdown`/`ConvertDocxToMarkdown`), `services.github_publisher_service` — `github-publisher.backend.svc.cluster.local:9090`.
 - `services.grpc` — общие параметры подключения к gRPC клиентам: `dial_timeout` для `grpc.WithBlock`, `min_connect_timeout` и `backoff` для `grpc.WithConnectParams`, `keepalive` для `grpc.WithKeepaliveParams` (все значения задаются в формате `time.Duration`).
 - `github.repository` — целевой репозиторий (по умолчанию `FedorovTeam/knowledge-base`), `github.branch` — рабочая ветка. На входе сервис ожидает раздельные `owner` и `repository`; если в `repository` передан формат `owner/repo`, владелец выделяется автоматически, а в базе сохраняется только имя репозитория без префикса владельца.
 - `observability.logs.enabled` — включает вывод стандартных логов; при `false` логгер работает в no-op режиме.

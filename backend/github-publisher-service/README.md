@@ -1,6 +1,6 @@
 # Github Publisher Service
 
-Сервис публикует Markdown-файлы в GitHub-репозиторий через gRPC-метод `PublishMarkdown`. Он коммитит содержимое в указанную ветку, при необходимости открывает Pull Request и прокидывает `correlation-id` во все запросы к GitHub API.
+Сервис публикует Markdown-файлы в GitHub-репозиторий через gRPC-метод `PublishMarkdown`. Он коммитит содержимое в указанную ветку, при необходимости открывает Pull Request, прокидывает `correlation-id` во все запросы к GitHub API и поддерживает идемпотентные повторы с рекомендациями по бэкоффу (`retry_after`).
 
 ## Быстрый старт
 1. Сформируйте конфигурацию `config/config.yaml` с токеном GitHub, параметрами репозитория и доступом к MinIO.

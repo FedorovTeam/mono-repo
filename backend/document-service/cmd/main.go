@@ -102,6 +102,11 @@ func main() {
 		cfg.Github.Repository,
 		cfg.Github.Branch,
 		cfg.Github.BaseBranch,
+		docservice.RetryPolicy{
+			InitialBackoff: cfg.GithubRetryer.InitialBackoff,
+			MaxBackoff:     cfg.GithubRetryer.MaxBackoff,
+			MaxAttempts:    cfg.GithubRetryer.MaxAttempts,
+		},
 	)
 
 	service := docservice.New(
@@ -115,6 +120,11 @@ func main() {
 		cfg.Github.BaseBranch,
 	)
 
+	publishRetryCfg := &docservice.PublishRetryConfig{
+		InitialBackoff: cfg.GithubRetryer.InitialBackoff,
+		MaxBackoff:     cfg.GithubRetryer.MaxBackoff,
+	}
+
 	reconciler := docservice.NewUploadReconciler(
 		repo,
 		storageClient,
@@ -125,9 +135,9 @@ func main() {
 
 	go reconciler.Run(ctx, cfg.Reconciler.Interval)
 
-	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false)
-	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, cfg.StageWorker.WaitMarkdown)
-	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false)
+	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false, nil)
+	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, cfg.StageWorker.WaitMarkdown, nil)
+	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, false, publishRetryCfg)
 
 	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
 	go convertWorker.Run(ctx, cfg.StageWorker.Interval)

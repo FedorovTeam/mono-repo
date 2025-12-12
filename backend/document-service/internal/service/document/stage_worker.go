@@ -26,12 +26,35 @@ type StageWorker struct {
 	stage        model.JobStage
 	batchSize    int
 	retryDelay   time.Duration
+	publishRetry *PublishRetryConfig
 	metrics      *workerMetrics
 	logf         func(format string, args ...interface{})
 	waitMarkdown bool
 }
 
-func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration, waitMarkdown bool) *StageWorker {
+type PublishRetryConfig struct {
+	InitialBackoff time.Duration
+	MaxBackoff     time.Duration
+}
+
+func (c PublishRetryConfig) backoff(attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	delay := c.InitialBackoff
+	for i := 1; i < attempts; i++ {
+		delay *= 2
+		if delay >= c.MaxBackoff {
+			return c.MaxBackoff
+		}
+	}
+	if delay > c.MaxBackoff {
+		return c.MaxBackoff
+	}
+	return delay
+}
+
+func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration, waitMarkdown bool, publishRetry *PublishRetryConfig) *StageWorker {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -45,6 +68,7 @@ func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.Job
 		stage:        stage,
 		batchSize:    batchSize,
 		retryDelay:   retryDelay,
+		publishRetry: publishRetry,
 		metrics:      newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
 		logf:         log.Printf,
 		waitMarkdown: waitMarkdown,
@@ -223,6 +247,8 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 		repository = repoField
 	}
 
+	markdownKey := stringFromPayload(job.Payload, "markdown_object_key", resolvedMarkdownKey(doc))
+
 	input := publishInput{
 		DocumentID:        job.DocumentID,
 		DocumentName:      doc.Name,
@@ -233,8 +259,12 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 		Path:              stringFromPayload(job.Payload, "github_path", doc.Path),
 		CreatePR:          boolFromPayload(job.Payload, "create_pr", doc.CreatePR),
 		MarkdownBucket:    stringFromPayload(job.Payload, "markdown_bucket", doc.MarkdownBucket),
-		MarkdownObjectKey: stringFromPayload(job.Payload, "markdown_object_key", resolvedMarkdownKey(doc)),
+		MarkdownObjectKey: markdownKey,
 		CorrelationID:     stringFromPayload(job.Payload, "correlation_id", correlationFromDoc(doc)),
+		Attempt:           job.Attempts,
+	}
+	if input.MarkdownObjectKey != "" {
+		input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", job.DocumentID, input.Branch, input.MarkdownObjectKey)
 	}
 
 	if err := w.activities.PublishMarkdown(w.jobContext(ctx, job), input); err != nil {
@@ -249,13 +279,19 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 }
 
 func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reason string) {
+	corr := stringFromPayload(job.Payload, "correlation_id", correlationIDFromContext(ctx))
 	nextRun := time.Now().Add(w.retryDelay)
+	if w.stage == model.JobStagePublishToGitHub && w.publishRetry != nil {
+		if backoff := w.publishRetry.backoff(job.Attempts); backoff > 0 {
+			nextRun = time.Now().Add(backoff)
+		}
+	}
 	if job.Payload == nil {
 		job.Payload = map[string]any{}
 	}
 	job.Payload["last_error"] = reason
 	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusFailed, &nextRun, false, job.Payload, &model.JobEvent{EventType: "failed", Message: reason}); err != nil {
-		w.logf("stage-worker[%s]: fail job %s: %v (original reason: %s)", w.stage, job.TaskID, err, reason)
+		w.logf("stage-worker[%s]: fail job %s correlation_id=%s: %v (original reason: %s)", w.stage, job.TaskID, corr, err, reason)
 		w.metrics.recordError(ctx)
 	}
 }

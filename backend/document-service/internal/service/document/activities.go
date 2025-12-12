@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
@@ -82,6 +83,8 @@ type publishInput struct {
 	Path              string
 	CreatePR          bool
 	CorrelationID     string
+	Attempt           int
+	IdempotencyKey    string
 }
 
 type awaitMarkdownInput struct {
@@ -101,6 +104,26 @@ type convertResult struct {
 	Ready       bool
 }
 
+type RetryPolicy struct {
+	InitialBackoff time.Duration
+	MaxBackoff     time.Duration
+	MaxAttempts    int
+}
+
+func (p RetryPolicy) toProto() *githubpublisherv1.RetryPolicy {
+	if p.InitialBackoff <= 0 || p.MaxBackoff <= 0 {
+		return nil
+	}
+	policy := &githubpublisherv1.RetryPolicy{
+		InitialBackoff: durationpb.New(p.InitialBackoff),
+		MaxBackoff:     durationpb.New(p.MaxBackoff),
+	}
+	if p.MaxAttempts > 0 {
+		policy.MaxAttempts = uint32(p.MaxAttempts)
+	}
+	return policy
+}
+
 type Activities struct {
 	repo        Repository
 	storage     storagev1.StorageServiceClient
@@ -110,9 +133,10 @@ type Activities struct {
 	repoName    string
 	branch      string
 	baseBranch  string
+	retryPolicy RetryPolicy
 }
 
-func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string) *Activities {
+func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string, retryPolicy RetryPolicy) *Activities {
 	return &Activities{
 		repo:        repo,
 		storage:     storageClient,
@@ -122,6 +146,7 @@ func NewActivities(repo Repository, storageClient storagev1.StorageServiceClient
 		repoName:    repoName,
 		branch:      branch,
 		baseBranch:  baseBranch,
+		retryPolicy: retryPolicy,
 	}
 }
 
@@ -435,16 +460,19 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	}
 
 	req := &githubpublisherv1.PublishMarkdownRequest{
-		Owner:         owner,
-		Repository:    repository,
-		Branch:        branch,
-		BaseBranch:    baseBranch,
-		Path:          repoPath,
-		CommitMessage: commitMessage,
-		Bucket:        markdownBucket,
-		ObjectKey:     markdownObjectKey,
-		CreatePr:      input.CreatePR,
-		CorrelationId: correlationID,
+		Owner:          owner,
+		Repository:     repository,
+		Branch:         branch,
+		BaseBranch:     baseBranch,
+		Path:           repoPath,
+		CommitMessage:  commitMessage,
+		Bucket:         markdownBucket,
+		ObjectKey:      markdownObjectKey,
+		CreatePr:       input.CreatePR,
+		CorrelationId:  correlationID,
+		Attempt:        uint32(input.Attempt),
+		IdempotencyKey: input.IdempotencyKey,
+		RetryPolicy:    a.retryPolicy.toProto(),
 	}
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)
@@ -462,6 +490,9 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 			correlation = correlationIDFromContext(ctx)
 		}
 		log.Printf("publish markdown failed: document_id=%s correlation_id=%s reason=%s status=%v", input.DocumentID, correlation, reason, resp.GetStatus())
+		if retryAfter := resp.GetRetryAfter(); retryAfter != nil {
+			log.Printf("publish markdown retry hint: document_id=%s correlation_id=%s retry_after=%s", input.DocumentID, correlation, retryAfter.AsDuration())
+		}
 		if _, updErr := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusFailed, reason, reason, nil); updErr != nil {
 			log.Printf("update status after publish error: %v", updErr)
 		}

@@ -24,7 +24,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		repo := &integrationRepo{}
 		storage := &stubStorageClient{}
 		publisher := &recordingPublisher{}
-		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main")
+		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-1",
@@ -67,7 +67,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		repo := &integrationRepo{}
 		storage := &stubStorageClient{err: status.Error(codes.NotFound, "not found")}
 		publisher := &recordingPublisher{}
-		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main")
+		activities := NewActivities(repo, storage, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
 		err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-missing",
