@@ -1,11 +1,9 @@
 # test.md
 
 ## Требуемые сервисы из `infra`
-- Temporal (namespace `knowledge`, task queue `knowledge-documents`).
-- MinIO (bucket для исходников и markdown, используется storage-service).
-- PostgreSQL (хранение статусов в backend-document-service).
-- storage-service (gRPC endpoint для выдачи signed URL).
-- OTLP collector (принимает метрики/трейсинг от gateway).
+- storage-service (gRPC endpoint для выдачи signed URL; сам использует MinIO).
+- backend-document-service (gRPC API состояний документов).
+- OTLP collector (принимает метрики/трейсинг от gateway, опционально — по `observability.enabled`).
 
 ## Готовые переменные
 ```
@@ -14,7 +12,7 @@ HOST=http://localhost:8080/query
 DOC_ID=<заполнить после загрузки>
 ```
 
-Все публичные мутации требуют заголовок `X-API-Key`. Необязательный `X-Correlation-ID` будет возвращён в ответе и попадёт в gRPC-метаданные downstream-сервисов.
+Все GraphQL запросы и мутации требуют заголовок `X-API-Key`. Необязательный `X-Correlation-ID` будет возвращён в ответе и попадёт в gRPC-метаданные downstream-сервисов.
 
 ## Запросы GraphQL (curl)
 ### Загрузка документа и получение signed URL
@@ -24,7 +22,7 @@ curl -X POST "$HOST" \
   -H "X-API-Key: $API_KEY" \
   -H "X-Correlation-ID: demo-corr-id" \
   -d '{
-    "query": "mutation Upload($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document { id status workflowId } } }",
+    "query": "mutation Upload($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document { id status jobId } } }",
     "variables": {
       "input": {
         "fileName": "demo.docx",
@@ -45,7 +43,7 @@ curl -X PUT "<uploadUrl из ответа>" \
   --data-binary @./demo.docx
 ```
 
-storage-service возвращает `bucket`, `objectKey` и `expiresInSeconds`, которые gateway прокидывает в Temporal workflow. Заголовок `X-Correlation-ID` автоматически попадает в presigned URL через метаданные `x-amz-meta-correlation-id`.
+storage-service возвращает `bucket`, `objectKey` и `expiresInSeconds`, которые gateway прокидывает в `document-service.CreateDocument`. Заголовок `X-Correlation-ID` автоматически попадает в presigned URL через метаданные `x-amz-meta-correlation-id`.
 
 ### Получение одного документа
 ```
@@ -71,26 +69,24 @@ curl -X POST "$HOST" \
   -d '{"query": "mutation { retryProcessing(documentId: \"'$DOC_ID'\"){ id status } }"}'
 ```
 
-Все вызовы возвращают заголовок `X-Correlation-ID`, который прокидывается в gRPC и Temporal и попадает в OTLP трейсы.
+Все вызовы возвращают заголовок `X-Correlation-ID`, который прокидывается в gRPC и попадает в OTLP трейсы.
 
 ### Восстановление после пропущенного webhook MinIO
-Если объект уже лежит в bucket, но статус документа остаётся `Uploaded` (webhook не дошёл до gateway), есть два варианта восстановления:
+Если объект уже лежит в bucket, но статус документа остаётся `Uploaded` (webhook не дошёл до gateway), можно повторно отправить уведомление вручную — обработчик `/internal/storage/uploaded` идемпотентен и спокойно примет дубликат:
 
-1. Повторно отправить webhook вручную — обработчик `/internal/storage/uploaded` идемпотентен и спокойно примет дубликат:
-   ```
-   curl -X POST "http://localhost:8080/internal/storage/uploaded" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "Records": [{
-         "s3": {
-           "bucket": {"name": "knowledge-original"},
-           "object": {
-             "key": "<objectKey из storage-service>",
-             "userMetadata": {"x-amz-meta-correlation-id": "manual-retry"}
-           }
-         }
-       }]
-     }'
-   ```
-2. Дождаться фонового reconciler в document-service: он периодически ищет документы в статусе `Uploaded` старше заданного порога и вызывает `ConfirmUpload`, если объект найден в MinIO.
+```
+curl -X POST "http://localhost:8080/internal/storage/uploaded" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Records": [{
+      "s3": {
+        "bucket": {"name": "knowledge-original"},
+        "object": {
+          "key": "<objectKey из storage-service>",
+          "userMetadata": {"x-amz-meta-correlation-id": "manual-retry"}
+        }
+      }
+    }]
+  }'
+```
 
