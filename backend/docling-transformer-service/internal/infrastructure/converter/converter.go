@@ -16,7 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 	"go.uber.org/zap"
 )
 
@@ -40,18 +41,6 @@ const (
 
 	maxResponseSnippetLen = 1024
 )
-
-var extensionToContentType = map[string]string{
-	"doc":  "application/msword",
-	"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-	"pdf":  "application/pdf",
-}
-
-var contentTypeToExtension = map[string]string{
-	"application/msword": "doc",
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-	"application/pdf": "pdf",
-}
 
 var successStatuses = map[string]struct{}{
 	"success":         {},
@@ -86,7 +75,7 @@ func isPendingStatus(status string) bool {
 	return ok
 }
 
-var ErrDoclingPollingAttemptsExceeded = errors.New("docling polling attempts exceeded")
+var ErrDoclingPollingAttemptsExceeded = domain.ErrPollingAttemptsExceeded
 
 type temporaryDoclingError struct {
 	statusCode int
@@ -111,35 +100,6 @@ func responseSnippet(body []byte) string {
 	}
 
 	return snippet
-}
-
-// ResolveContentTypeByExtension возвращает content-type для заданного расширения.
-func ResolveContentTypeByExtension(fileExt string) (string, error) {
-	normalized := strings.TrimPrefix(strings.ToLower(fileExt), ".")
-	if normalized == "" {
-		normalized = defaultExtension
-	}
-
-	contentType, ok := extensionToContentType[normalized]
-	if !ok {
-		return "", fmt.Errorf("unsupported file extension: %s", normalized)
-	}
-
-	return contentType, nil
-}
-
-// DoclingConvertRequest описывает входные данные для конвертации.
-type DoclingConvertRequest struct {
-	FileName    string
-	Content     []byte
-	ContentType string
-}
-
-// DoclingConvertResult описывает результат преобразования Docling.
-type DoclingConvertResult struct {
-	Content   []byte
-	MediaType string
-	Charset   string
 }
 
 // Config описывает параметры HTTP-клиента Docling.
@@ -203,18 +163,6 @@ type doclingSubmitResponse struct {
 	TaskID string `json:"task_id"`
 }
 
-// StatusCheckResult содержит статус задачи Docling и, при завершении, результат конвертации.
-type StatusCheckResult struct {
-	Status string
-	Result *DoclingConvertResult
-}
-
-// Converter определяет поведение конвертера документов.
-type Converter interface {
-	Submit(ctx context.Context, req DoclingConvertRequest) (string, error)
-	CheckStatus(ctx context.Context, jobID string) (StatusCheckResult, error)
-}
-
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
 type DoclingConverter struct {
 	endpoint           string
@@ -247,23 +195,29 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 
 func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, error) {
 	normalizedContentType := strings.ToLower(reqContentType)
-	if ext, ok := contentTypeToExtension[normalizedContentType]; ok {
+	if ext, ok := domain.ResolveExtensionByContentType(normalizedContentType); ok {
 		return normalizedContentType, ext, nil
 	}
 
 	fileExt := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
 	if fileExt != "" {
-		if contentType, ok := extensionToContentType[fileExt]; ok {
-			return contentType, fileExt, nil
+		contentType, err := domain.ResolveContentTypeByExtension(fileExt)
+		if err != nil {
+			return "", "", err
 		}
-		return "", "", fmt.Errorf("unsupported file extension: %s", fileExt)
+		return contentType, fileExt, nil
 	}
 
 	if normalizedContentType != "" {
 		return "", "", fmt.Errorf("unsupported content type: %s", reqContentType)
 	}
 
-	return extensionToContentType[defaultExtension], defaultExtension, nil
+	contentType, err := domain.ResolveContentTypeByExtension("")
+	if err != nil {
+		return "", "", err
+	}
+
+	return contentType, "docx", nil
 }
 
 func (c *DoclingConverter) shouldEnableOCR(contentType string) bool {
@@ -278,7 +232,7 @@ func (c *DoclingConverter) selectLanguage(contentType string) string {
 }
 
 // Submit отправляет документ в Docling и возвращает идентификатор задачи.
-func (c *DoclingConverter) Submit(ctx context.Context, req DoclingConvertRequest) (string, error) {
+func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest) (string, error) {
 	if len(req.Content) == 0 {
 		return "", errors.New("empty document")
 	}
@@ -311,16 +265,16 @@ func (c *DoclingConverter) Submit(ctx context.Context, req DoclingConvertRequest
 }
 
 // CheckStatus делает одиночный запрос статуса Docling и возвращает результат при готовности.
-func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (StatusCheckResult, error) {
+func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (domain.StatusCheckResult, error) {
 	if jobID == "" {
-		return StatusCheckResult{}, errors.New("empty job id")
+		return domain.StatusCheckResult{}, errors.New("empty job id")
 	}
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
 	statusResp, body, err := c.fetchStatus(ctx, correlationID, jobID)
 	if err != nil {
-		return StatusCheckResult{}, err
+		return domain.StatusCheckResult{}, err
 	}
 
 	rawStatus := strings.TrimSpace(statusResp.TaskStatus)
@@ -338,12 +292,12 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 	case isSuccessStatus(normalizedStatus):
 		resultResp, resultBody, err := c.fetchResult(ctx, correlationID, jobID)
 		if err != nil {
-			return StatusCheckResult{}, fmt.Errorf("docling result fetch failed: %w (body=%s)", err, responseSnippet(resultBody))
+			return domain.StatusCheckResult{}, fmt.Errorf("docling result fetch failed: %w (body=%s)", err, responseSnippet(resultBody))
 		}
 
 		result, buildErr := buildConvertResult(resultResp)
 		if buildErr != nil {
-			return StatusCheckResult{}, fmt.Errorf("docling result: %w", buildErr)
+			return domain.StatusCheckResult{}, fmt.Errorf("docling result: %w", buildErr)
 		}
 
 		c.logger.Info("docling conversion completed",
@@ -351,7 +305,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 			zap.String("correlation_id", correlationID),
 		)
 
-		return StatusCheckResult{
+		return domain.StatusCheckResult{
 			Status: normalizedStatus,
 			Result: &result,
 		}, nil
@@ -362,7 +316,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 			zap.String("correlation_id", correlationID),
 			zap.String("status", normalizedStatus),
 		)
-		return StatusCheckResult{
+		return domain.StatusCheckResult{
 			Status: normalizedStatus,
 			Result: nil,
 		}, nil
@@ -401,7 +355,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (Statu
 			)
 		}
 
-		return StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
+		return domain.StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
 	}
 }
 
@@ -696,11 +650,11 @@ func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, jobID
 	return resultResp, body, nil
 }
 
-// buildConvertResult собирает DoclingConvertResult из ConvertDocumentResponse.
-func buildConvertResult(resp convertDocumentResponse) (DoclingConvertResult, error) {
+// buildConvertResult собирает domain.ConvertResult из ConvertDocumentResponse.
+func buildConvertResult(resp convertDocumentResponse) (domain.ConvertResult, error) {
 	normalizedStatus := normalizeStatus(resp.Status)
 	if !isSuccessStatus(normalizedStatus) {
-		return DoclingConvertResult{}, fmt.Errorf("docling response status=%s", resp.Status)
+		return domain.ConvertResult{}, fmt.Errorf("docling response status=%s", resp.Status)
 	}
 
 	doc := resp.Document
@@ -711,16 +665,16 @@ func buildConvertResult(resp convertDocumentResponse) (DoclingConvertResult, err
 	}
 
 	if md := firstNonEmpty(doc.MdContent); md != "" {
-		return DoclingConvertResult{Content: []byte(md), MediaType: "text/markdown", Charset: charset}, nil
+		return domain.ConvertResult{Content: []byte(md), MediaType: "text/markdown", Charset: charset}, nil
 	}
 	if html := firstNonEmpty(doc.HtmlContent); html != "" {
-		return DoclingConvertResult{Content: []byte(html), MediaType: "text/html", Charset: charset}, nil
+		return domain.ConvertResult{Content: []byte(html), MediaType: "text/html", Charset: charset}, nil
 	}
 	if text := firstNonEmpty(doc.TextContent); text != "" {
-		return DoclingConvertResult{Content: []byte(text), MediaType: "text/plain", Charset: charset}, nil
+		return domain.ConvertResult{Content: []byte(text), MediaType: "text/plain", Charset: charset}, nil
 	}
 
-	return DoclingConvertResult{}, errors.New("docling response has empty content")
+	return domain.ConvertResult{}, errors.New("docling response has empty content")
 }
 
 func firstNonEmpty(values ...*string) string {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,12 +17,12 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/mono-repo/docling-transformer-service/db/migrations"
 	"github.com/mono-repo/docling-transformer-service/internal/config"
-	"github.com/mono-repo/docling-transformer-service/internal/converter"
-	"github.com/mono-repo/docling-transformer-service/internal/repository"
-	"github.com/mono-repo/docling-transformer-service/internal/server"
-	"github.com/mono-repo/docling-transformer-service/internal/storage"
-	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
-	"github.com/mono-repo/docling-transformer-service/internal/worker"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/repository"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/storage"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
+	grpcapi "github.com/mono-repo/docling-transformer-service/internal/interfaces/grpc"
+	"github.com/mono-repo/docling-transformer-service/internal/usecase"
 	"go.uber.org/zap"
 )
 
@@ -98,7 +99,15 @@ func main() {
 		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
 	}, logger)
 
-	workerProcessor := worker.NewProcessor(queueRepo, conv, storageClient, logger, worker.Config{
+	transformUC := usecase.NewTransformationUseCase(queueRepo, conv, usecase.TransformationConfig{
+		MarkdownBucket:  cfg.Minio.Bucket,
+		QueueLimit:      cfg.Service.QueueLimit,
+		PollInterval:    cfg.Docling.StatusInitialInterval,
+		PollMaxInterval: cfg.Docling.StatusMaxInterval,
+		PollAttempts:    cfg.Docling.StatusMaxAttempts,
+	}, logger, &http.Client{Timeout: 30 * time.Second})
+
+	workerProcessor := usecase.NewProcessor(queueRepo, conv, storageClient, logger, usecase.Config{
 		MarkdownBucket:         cfg.Minio.Bucket,
 		MaxWorkers:             cfg.Service.MaxWorkers,
 		PollInterval:           cfg.Scheduler.PollInterval,
@@ -117,7 +126,7 @@ func main() {
 	})
 	workerProcessor.Run(ctx)
 
-	if err := server.Run(ctx, logger, queueRepo, cfg.Minio.Bucket, cfg.Service.QueueLimit, conv, cfg.Docling, cfg.Service.GRPCPort, cfg.Observability); err != nil {
+	if err := grpcapi.Run(ctx, logger, transformUC, cfg.Service.GRPCPort); err != nil {
 		logger.Fatal("server failed", zap.Error(err))
 	}
 }

@@ -61,12 +61,12 @@ go test ./...
 ## Структура проекта
 - `cmd/main.go` — точка входа, загрузка конфига, инициализация MinIO/PostgreSQL, запуск gRPC и воркера очереди.
 - `internal/config` — чтение `config.yaml`.
-- `internal/converter` — HTTP-клиент Docling с прокидыванием correlation-id.
+- `internal/infrastructure/converter` — HTTP-клиент Docling с прокидыванием correlation-id.
 - `internal/server` — gRPC сервер и интерсептор логирования; постановка задач в очередь и лимитирование слотов.
 - `internal/repository` — DAO для таблицы `transformations_queue` (enqueue, `SELECT ... FOR UPDATE SKIP LOCKED`, обновления статусов).
 - `internal/worker` — фоновые воркеры, которые забирают pending-задачи, выполняют Docling-конвертацию и отмечают результат.
 - `internal/transformations` — утилиты по формированию ключей и нормализации расширений.
-- `internal/telemetry` — утилиты correlation-id.
+- `internal/infrastructure/telemetry` — утилиты correlation-id.
 - `proto/backend/transformer/v1` — контракт и сгенерированные gRPC артефакты.
 
 ## Логи и наблюдаемость

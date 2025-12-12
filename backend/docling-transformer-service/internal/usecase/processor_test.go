@@ -1,4 +1,4 @@
-package worker
+package usecase
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mono-repo/docling-transformer-service/internal/converter"
-	"github.com/mono-repo/docling-transformer-service/internal/repository"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -31,20 +31,20 @@ type pollingRepoStub struct {
 	restoreStuckCalls int
 }
 
-func (p *pollingRepoStub) Enqueue(context.Context, repository.EnqueueParams) (uuid.UUID, error) {
+func (p *pollingRepoStub) Enqueue(context.Context, domain.EnqueueParams) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
 func (p *pollingRepoStub) CountActive(context.Context) (int, error) { return 0, nil }
-func (p *pollingRepoStub) AcquireNext(context.Context) (*repository.TransformationTask, error) {
+func (p *pollingRepoStub) AcquireNext(context.Context) (*domain.TransformationTask, error) {
 	return nil, nil
 }
-func (p *pollingRepoStub) AcquireBatch(context.Context, int) ([]*repository.TransformationTask, error) {
+func (p *pollingRepoStub) AcquireBatch(context.Context, int) ([]*domain.TransformationTask, error) {
 	return nil, nil
 }
-func (p *pollingRepoStub) GetLatestByDocument(context.Context, string) (*repository.TransformationTask, error) {
+func (p *pollingRepoStub) GetLatestByDocument(context.Context, string) (*domain.TransformationTask, error) {
 	return nil, nil
 }
-func (p *pollingRepoStub) GetByID(context.Context, uuid.UUID) (*repository.TransformationTask, error) {
+func (p *pollingRepoStub) GetByID(context.Context, uuid.UUID) (*domain.TransformationTask, error) {
 	return nil, nil
 }
 func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) error {
@@ -81,25 +81,25 @@ type statusOnlyConverter struct {
 	submitCalled bool
 }
 
-func (c *statusOnlyConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+func (c *statusOnlyConverter) Submit(context.Context, domain.ConvertRequest) (string, error) {
 	c.submitCalled = true
 	return "", nil
 }
 
-func (c *statusOnlyConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
-	return converter.StatusCheckResult{Status: "success", Result: &converter.DoclingConvertResult{Content: []byte("markdown"), MediaType: "text/markdown"}}, nil
+func (c *statusOnlyConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+	return domain.StatusCheckResult{Status: "success", Result: &domain.ConvertResult{Content: []byte("markdown"), MediaType: "text/markdown"}}, nil
 }
 
 type staticResultConverter struct {
-	result converter.DoclingConvertResult
+	result domain.ConvertResult
 }
 
-func (c *staticResultConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+func (c *staticResultConverter) Submit(context.Context, domain.ConvertRequest) (string, error) {
 	return "", nil
 }
 
-func (c *staticResultConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
-	return converter.StatusCheckResult{Status: "success", Result: &c.result}, nil
+func (c *staticResultConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+	return domain.StatusCheckResult{Status: "success", Result: &c.result}, nil
 }
 
 type trackingStorage struct {
@@ -125,7 +125,7 @@ type submitOnlyConverter struct {
 	checkCalled  bool
 }
 
-func (c *submitOnlyConverter) Submit(_ context.Context, req converter.DoclingConvertRequest) (string, error) {
+func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertRequest) (string, error) {
 	c.submitCalled = true
 	if c.jobID == "" {
 		c.jobID = "job-from-submit"
@@ -137,9 +137,9 @@ func (c *submitOnlyConverter) Submit(_ context.Context, req converter.DoclingCon
 	return c.jobID, nil
 }
 
-func (c *submitOnlyConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
+func (c *submitOnlyConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	c.checkCalled = true
-	return converter.StatusCheckResult{}, errors.New("status should not be called")
+	return domain.StatusCheckResult{}, errors.New("status should not be called")
 }
 
 type recordingStorage struct {
@@ -165,7 +165,7 @@ func TestHandleTaskPollsWithoutRedownloading(t *testing.T) {
 	conv := &statusOnlyConverter{}
 	processor := NewProcessor(repo, conv, storage, nil, Config{})
 
-	task := &repository.TransformationTask{
+	task := &domain.TransformationTask{
 		ID:                uuid.New(),
 		DoclingJobID:      "job-123",
 		DoclingPollCount:  2,
@@ -236,7 +236,7 @@ func TestPollDoclingJobLogsStatusError(t *testing.T) {
 	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingMaxAttempts: 1})
 
 	jobID := "job-log-error"
-	task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: jobID, CreatedAt: time.Now()}
+	task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: jobID, CreatedAt: time.Now()}
 
 	err := processor.pollDoclingJob(context.Background(), task, jobID, 0)
 	if err == nil {
@@ -276,7 +276,7 @@ func TestPollDoclingJobRetriesOnTemporaryError(t *testing.T) {
 	logCore, logs := observer.New(zap.InfoLevel)
 	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingInitialInterval: time.Second})
 
-	task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: "job-temp", CreatedAt: time.Now()}
+	task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: "job-temp", CreatedAt: time.Now()}
 
 	err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0)
 	if !errors.Is(err, errDoclingWaiting) {
@@ -314,10 +314,10 @@ func TestPollDoclingJobNormalizesMediaType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &pollingRepoStub{}
 			storage := &trackingStorage{}
-			conv := &staticResultConverter{result: converter.DoclingConvertResult{Content: []byte("body"), MediaType: tc.mediaType, Charset: tc.charset}}
+			conv := &staticResultConverter{result: domain.ConvertResult{Content: []byte("body"), MediaType: tc.mediaType, Charset: tc.charset}}
 			processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
 
-			task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
+			task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
 
 			if err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -333,10 +333,10 @@ func TestPollDoclingJobNormalizesMediaType(t *testing.T) {
 func TestPollDoclingJobStoresUtf8ForCyrillicMarkdown(t *testing.T) {
 	repo := &pollingRepoStub{}
 	storage := &trackingStorage{}
-	conv := &staticResultConverter{result: converter.DoclingConvertResult{Content: []byte("# Заголовок\nТекст"), MediaType: "text/markdown"}}
+	conv := &staticResultConverter{result: domain.ConvertResult{Content: []byte("# Заголовок\nТекст"), MediaType: "text/markdown"}}
 	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
 
-	task := &repository.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
+	task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
 
 	if err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -353,7 +353,7 @@ func TestHandleTaskUsesConfiguredMarkdownBucket(t *testing.T) {
 	conv := &submitOnlyConverter{jobID: "job-configured-bucket"}
 	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{MarkdownBucket: "markdown-output"})
 
-	task := &repository.TransformationTask{
+	task := &domain.TransformationTask{
 		ID:                uuid.New(),
 		OriginalBucket:    "source-bucket",
 		OriginalObjectKey: "uploads/file.DOCX",
@@ -395,7 +395,7 @@ func TestHandleTaskFailsWithoutMarkdownBucket(t *testing.T) {
 	conv := &submitOnlyConverter{}
 	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
 
-	task := &repository.TransformationTask{
+	task := &domain.TransformationTask{
 		ID:                uuid.New(),
 		OriginalBucket:    "source-bucket",
 		OriginalObjectKey: "uploads/file.DOCX",
