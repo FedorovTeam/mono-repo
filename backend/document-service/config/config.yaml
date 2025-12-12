@@ -33,16 +33,16 @@ github:
   author_name: "Document Service"
   author_email: "document-service@example.com"
 reconciler:
-  interval: 1m
+  interval: 2m
   min_uploaded_age: 1m
-  batch_size: 100
+  batch_size: 5
 job_follower:
-  interval: 30s
-  batch_size: 100
+  interval: 5s
+  batch_size: 5
   reschedule_after: 5m
 stage_worker:
-  interval: 30s
-  batch_size: 100
+  interval: 5s
+  batch_size: 5
   retry_delay: 1m
   grace_period: 15s
   wait_markdown: true
