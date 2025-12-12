@@ -1,14 +1,14 @@
 package grpc
 
 import (
+	"backend-document-service/pkg/config"
+	"backend-document-service/pkg/grpcdial"
 	"context"
 	"net"
 	"testing"
 	"time"
 
-	"backend-document-service/internal/config"
 	"backend-document-service/internal/domain"
-	"backend-document-service/internal/grpcdial"
 	document "backend-document-service/internal/usecase/document"
 	documentv1 "backend-document-service/proto/backend/document/v1"
 

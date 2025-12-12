@@ -1,13 +1,12 @@
 package grpcdial
 
 import (
+	"backend-document-service/pkg/config"
 	"context"
 	"errors"
 	"net"
 	"testing"
 	"time"
-
-	"backend-document-service/internal/config"
 
 	"google.golang.org/grpc"
 )

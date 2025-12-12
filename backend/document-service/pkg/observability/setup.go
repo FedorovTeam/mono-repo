@@ -1,14 +1,13 @@
 package observability
 
 import (
+	"backend-document-service/pkg/config"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"time"
-
-	"backend-document-service/internal/config"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"

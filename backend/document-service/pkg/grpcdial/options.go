@@ -1,9 +1,8 @@
 package grpcdial
 
 import (
+	"backend-document-service/pkg/config"
 	"context"
-
-	"backend-document-service/internal/config"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"

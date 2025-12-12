@@ -1,6 +1,10 @@
 package main
 
 import (
+	"backend-document-service/internal/infrastructure/postgres"
+	"backend-document-service/pkg/config"
+	"backend-document-service/pkg/grpcdial"
+	"backend-document-service/pkg/observability"
 	"context"
 	"database/sql"
 	"flag"
@@ -11,13 +15,9 @@ import (
 	"time"
 
 	"backend-document-service/db/migrations"
-	"backend-document-service/internal/config"
 	"backend-document-service/internal/domain"
-	"backend-document-service/internal/grpcdial"
-	"backend-document-service/internal/infra/postgres"
 	storagestore "backend-document-service/internal/infrastructure/storage"
 	transport "backend-document-service/internal/interfaces/grpc"
-	"backend-document-service/internal/observability"
 	docservice "backend-document-service/internal/service/document"
 	docusecase "backend-document-service/internal/usecase/document"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
