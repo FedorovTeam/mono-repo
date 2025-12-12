@@ -12,7 +12,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o storage-service cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o storage-service ./cmd
 
 # Шаг 2: минимальный образ
 FROM alpine:latest

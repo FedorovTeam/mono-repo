@@ -490,6 +490,87 @@ FOR UPDATE SKIP LOCKED
 	return jobs, nil
 }
 
+// RequeueStaleProcessingJobs возвращает зависшие in_progress задачи в pending и фиксирует причину восстановления.
+func (r *Repository) RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
+SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE status=$1 AND updated_at <= $2
+ORDER BY updated_at
+LIMIT $3
+FOR UPDATE SKIP LOCKED
+`, model.JobStatusInProgress, staleBefore.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	now := time.Now().UTC()
+	var jobs []model.ProcessingJob
+	for rows.Next() {
+		var job model.ProcessingJob
+		var payloadRaw json.RawMessage
+		if err := rows.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(payloadRaw, &job.Payload)
+
+		job.Status = model.JobStatusPending
+		job.Attempts++
+		job.NextRunAt = nextRunAt
+		job.UpdatedAt = now
+		if job.Payload == nil {
+			job.Payload = map[string]any{}
+		}
+
+		payloadBytes, err := json.Marshal(job.Payload)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := tx.ExecContext(ctx, `
+        UPDATE processing_jobs SET status=$1, attempts=$2, next_run_at=$3, payload=$4, updated_at=$5 WHERE task_id=$6
+    `, job.Status, job.Attempts, job.NextRunAt, payloadBytes, job.UpdatedAt, job.TaskID); err != nil {
+			return nil, err
+		}
+
+		eventPayload := map[string]any{"reason": reason, "previous_status": string(model.JobStatusInProgress)}
+		payloadEventBytes, err := json.Marshal(eventPayload)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := tx.ExecContext(ctx, `
+        INSERT INTO job_events (id, job_id, stage, status, event_type, message, payload, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `, uuid.NewString(), job.TaskID, job.Stage, job.Status, "recovered", reason, payloadEventBytes, now); err != nil {
+			return nil, err
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
+}
+
 func (r *Repository) attachActiveJob(ctx context.Context, doc *model.Document) error {
 	if doc == nil {
 		return nil

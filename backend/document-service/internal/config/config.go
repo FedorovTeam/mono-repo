@@ -86,6 +86,7 @@ type StageWorker struct {
 	BatchSize    int           `yaml:"batch_size"`
 	RetryDelay   time.Duration `yaml:"retry_delay"`
 	WaitMarkdown bool          `yaml:"wait_markdown"`
+	GracePeriod  time.Duration `yaml:"grace_period"`
 }
 
 func Load(path string) (*Config, error) {
@@ -126,6 +127,9 @@ func (c *Config) Validate() error {
 	}
 	if c.StageWorker.Interval <= 0 || c.StageWorker.BatchSize <= 0 || c.StageWorker.RetryDelay <= 0 {
 		return fmt.Errorf("stage_worker interval, batch_size and retry_delay must be positive")
+	}
+	if c.StageWorker.GracePeriod < 0 {
+		return fmt.Errorf("stage_worker.grace_period cannot be negative")
 	}
 	return nil
 }

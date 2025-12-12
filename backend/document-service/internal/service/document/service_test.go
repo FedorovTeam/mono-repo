@@ -111,6 +111,10 @@ func (r *repoMock) UpdateProcessingJob(ctx context.Context, taskID string, statu
 	return &model.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
 }
 
+func (r *repoMock) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+	return nil, r.err
+}
+
 func (r *repoMock) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
 	if r.job != nil && r.job.DocumentID == documentID {
 		return r.job, nil
