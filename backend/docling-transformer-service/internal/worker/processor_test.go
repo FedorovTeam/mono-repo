@@ -44,6 +44,9 @@ func (p *pollingRepoStub) AcquireBatch(context.Context, int) ([]*repository.Tran
 func (p *pollingRepoStub) GetLatestByDocument(context.Context, string) (*repository.TransformationTask, error) {
 	return nil, nil
 }
+func (p *pollingRepoStub) GetByID(context.Context, uuid.UUID) (*repository.TransformationTask, error) {
+	return nil, nil
+}
 func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) error {
 	p.markDoneCalls++
 	return nil

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -178,7 +177,6 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 		MarkdownBucket:    markdownBucket,
 		OriginalObjectKey: originalKey,
 		MarkdownObjectKey: markdownKey,
-		FilenameExtension: strings.TrimPrefix(strings.ToLower(filepath.Ext(originalKey)), "."),
 		Version:           latestVersion(doc).Version + 1,
 	}
 
@@ -190,16 +188,9 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 	}
 
 	job.Payload["markdown_object_key"] = result.MarkdownKey
-	if result.QueueID != "" {
-		job.Payload["queue_id"] = result.QueueID
-	}
 
 	if !result.Ready {
-		nextRun := time.Now().Add(w.retryDelay)
-		if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusPending, &nextRun, false, job.Payload, &model.JobEvent{EventType: "rescheduled", Message: "awaiting converter result"}); err != nil {
-			w.logf("stage-worker[%s]: reschedule convert job %s: %v", w.stage, job.TaskID, err)
-			w.metrics.recordError(ctx)
-		}
+		w.failJob(ctx, job, "conversion did not finish", nil, nil)
 		return
 	}
 

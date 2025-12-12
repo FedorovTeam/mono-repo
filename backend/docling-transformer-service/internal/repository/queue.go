@@ -59,6 +59,7 @@ type QueueRepository interface {
 	AcquireNext(ctx context.Context) (*TransformationTask, error)
 	AcquireBatch(ctx context.Context, limit int) ([]*TransformationTask, error)
 	GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*TransformationTask, error)
 	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
@@ -96,6 +97,26 @@ LIMIT 1`
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get latest by document: %w", err)
+	}
+
+	return task, nil
+}
+
+// GetByID возвращает задачу очереди по идентификатору.
+func (r *PostgresQueueRepository) GetByID(ctx context.Context, id uuid.UUID) (*TransformationTask, error) {
+	const query = `
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+FROM transformations_queue
+WHERE id = $1`
+
+	row := r.pool.QueryRow(ctx, query, id)
+
+	task, err := scanTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get task by id: %w", err)
 	}
 
 	return task, nil
