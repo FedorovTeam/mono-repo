@@ -4,7 +4,7 @@
 
 ## Назначение и ответственность
 - Приём GraphQL-мутаций `uploadKnowledgeDocument` (выдача signed URL) и `retryProcessing`, а также запросов `knowledgeDocument` и `knowledgeDocuments` **с обязательным заголовком `X-API-Key` для всех операций (включая `/playground`)**.
-- Валидация размера/расширения и прокладка `correlation-id` в логи и метаданные gRPC/MinIO.
+- Минимальная валидация входа (пустые поля, размер файла) и прокладка `correlation-id` в логи и метаданные gRPC/MinIO; все семантические проверки (`owner/repo`, ветка, путь, ключи объектов) выполняет document-service.
 - Подключение метрик и трейсинга (OTLP exporter), отдача `X-Correlation-ID` в ответах.
 - Проверка API-ключа, заданного в конфигурации (GraphQL и playground требуют `X-API-Key`).
 - Приём webhook уведомлений MinIO (`/internal/storage/uploaded`) и передача `ConfirmUpload` в document-service.
@@ -25,6 +25,10 @@ gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `doc
 - `query knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!` — список документов с фильтрами.
 
 Все GraphQL запросы и мутации требуют заголовок `X-API-Key`; `X-Correlation-ID` (необязательный) прокидывается в gRPC-метаданные `document-service`/`storage-service` и возвращается в ответе.
+
+### Валидация
+- Gateway проверяет только пустые строки (`fileName`, `repository`, `branch`, `path`) и то, что `fileSizeBytes` положителен и не превышает `uploads.maxSizeBytes`.
+- Проверка формата репозитория (`owner/repo`), нормализация владельца, обязательность ключей/бакетов и прочая бизнес-валидация выполняются в document-service. Ошибки gRPC из document-service возвращаются клиенту без повторной интерпретации.
 
 ### Примеры запросов
 ```bash

@@ -6,41 +6,42 @@ import (
 	"backend-gateway-service/graph/model"
 )
 
-func strPtr(value string) *string { return &value }
-
-func TestValidateUploadInputRepositoryFormats(t *testing.T) {
+func TestValidateUploadInputBasicChecks(t *testing.T) {
 	baseInput := model.UploadKnowledgeDocumentInput{
 		FileName:      "doc.pdf",
 		FileSizeBytes: 10,
 		Branch:        "main",
 		Path:          "docs/doc.pdf",
+		Repository:    "owner/repo",
 	}
-	cfg := UploadValidationConfig{MaxSizeBytes: 100, AllowedExtensions: []string{"pdf"}}
+	cfg := UploadValidationConfig{MaxSizeBytes: 100}
 
 	cases := []struct {
-		name          string
-		repository    string
-		expectedRepo  string
-		expectedOwner *string
-		expectError   bool
+		name        string
+		modify      func(input *model.UploadKnowledgeDocumentInput)
+		expectError bool
 	}{
-		{name: "repo only", repository: "docs", expectedRepo: "docs"},
-		{name: "owner and repo", repository: "owner/docs", expectedRepo: "docs", expectedOwner: strPtr("owner")},
-		{name: "invalid with extra slash", repository: "owner/docs/extra", expectError: true},
-		{name: "missing repo after slash", repository: "owner/", expectError: true},
-		{name: "empty repository", repository: "  ", expectError: true},
+		{name: "missing file name", modify: func(input *model.UploadKnowledgeDocumentInput) { input.FileName = "  " }, expectError: true},
+		{name: "missing repository", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Repository = "" }, expectError: true},
+		{name: "missing branch", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Branch = "  " }, expectError: true},
+		{name: "missing path", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Path = "" }, expectError: true},
+		{name: "non-positive size", modify: func(input *model.UploadKnowledgeDocumentInput) { input.FileSizeBytes = 0 }, expectError: true},
+		{name: "exceeds size limit", modify: func(input *model.UploadKnowledgeDocumentInput) { input.FileSizeBytes = 101 }, expectError: true},
+		{name: "passes without normalization", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Repository = " org/repo " }},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			input := baseInput
-			input.Repository = tc.repository
+			if tc.modify != nil {
+				tc.modify(&input)
+			}
 
 			repo, owner, err := validateUploadInput(input, cfg)
 
 			if tc.expectError {
 				if err == nil {
-					t.Fatalf("expected error for repository %q", tc.repository)
+					t.Fatalf("expected error for case %s", tc.name)
 				}
 				return
 			}
@@ -48,17 +49,11 @@ func TestValidateUploadInputRepositoryFormats(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
-			if repo != tc.expectedRepo {
-				t.Fatalf("expected repo %q, got %q", tc.expectedRepo, repo)
+			if repo != "org/repo" {
+				t.Fatalf("repository should be trimmed without normalization, got %q", repo)
 			}
-
-			if (owner == nil) != (tc.expectedOwner == nil) {
-				t.Fatalf("owner expectation mismatch: expected %v, got %v", tc.expectedOwner, owner)
-			}
-
-			if owner != nil && *owner != *tc.expectedOwner {
-				t.Fatalf("expected owner %q, got %q", *tc.expectedOwner, *owner)
+			if owner != nil {
+				t.Fatalf("owner should not be derived in gateway: %v", owner)
 			}
 		})
 	}
