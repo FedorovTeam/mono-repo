@@ -23,7 +23,9 @@ sequenceDiagram
                 Publisher-->>Publisher: correlation_id = ""
             end
             alt repository содержит слэш
-                alt owner в префиксе не совпадает с request.owner
+                alt repository не разделяется на owner/repo
+                    Publisher-->>Client: gRPC InvalidArgument
+                else owner в префиксе не совпадает с request.owner
                     Publisher-->>Client: gRPC InvalidArgument
                 else извлечение owner из repository
                     Publisher-->>Publisher: owner = prefix(repository)
@@ -69,8 +71,10 @@ sequenceDiagram
                 Publisher->>GitHub: POST /repos/{owner}/{repo}/pulls\n(head=branch, base=base_branch, title/body, correlation header)
                 GitHub-->>Publisher: pull_request number + html_url или ошибка FailedPrecondition
             end
-            alt ошибка коммита или PR
+            alt ошибка коммита
                 Publisher-->>Client: status=TEMPORARY/PERMANENT_FAILURE, error_code, retry_after (по retry_policy+attempt)
+            else ошибка PR после успешного коммита
+                Publisher-->>Client: status=TEMPORARY/PERMANENT_FAILURE, error_code, retry_after (по retry_policy+attempt), commit_sha
             else успех
                 Publisher-->>Client: commit_sha, pull_request_number?, pull_request_url?, status=SUCCESS
             end
