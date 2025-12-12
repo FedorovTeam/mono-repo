@@ -17,7 +17,6 @@ import (
 	"backend-document-service/internal/observability"
 	"backend-document-service/internal/repository"
 	docservice "backend-document-service/internal/service/document"
-	"backend-document-service/internal/storage"
 	transport "backend-document-service/internal/transport/grpc"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
@@ -83,13 +82,6 @@ func main() {
 	}
 
 	repo := repository.New(db)
-	keyManager := storage.NewMinioKeyManager(
-		minioClient,
-		cfg.Minio.BucketPrefix,
-		cfg.Minio.OriginalBucket,
-		cfg.Minio.MarkdownBucket,
-	)
-
 	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)
@@ -124,7 +116,6 @@ func main() {
 
 	service := docservice.New(
 		repo,
-		keyManager,
 		activities,
 		cfg.Minio.OriginalBucket,
 		cfg.Minio.MarkdownBucket,

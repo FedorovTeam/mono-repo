@@ -13,7 +13,6 @@ import (
 	"backend-document-service/internal/grpcdial"
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/service/document"
-	"backend-document-service/internal/storage"
 	documentv1 "backend-document-service/proto/backend/document/v1"
 
 	"github.com/google/uuid"
@@ -65,12 +64,6 @@ func grpcClientConfig() config.GRPCClient {
 			PermitWithoutStream: true,
 		},
 	}
-}
-
-type staticKey struct{}
-
-func (staticKey) GenerateKeys(ctx context.Context, data storage.KeyGenerationData) (storage.KeyPair, error) {
-	return storage.KeyPair{OriginalObjectKey: "orig/key", MarkdownObjectKey: "md/key"}, nil
 }
 
 type memoryRepo struct {
@@ -225,7 +218,7 @@ func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.
 
 func TestGRPCWorkflow(t *testing.T) {
 	repo := &memoryRepo{}
-	svc := document.New(repo, staticKey{}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := document.New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
 	srv := NewServer(svc)
 	grpcServer := grpc.NewServer()
 	documentv1.RegisterDocumentServiceServer(grpcServer, srv)
@@ -237,7 +230,7 @@ func TestGRPCWorkflow(t *testing.T) {
 	client := documentv1.NewDocumentServiceClient(conn)
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("x-correlation-id", "test-corr"))
 
-	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{FileName: "doc", Repository: "owner/repo", Branch: "main", BaseBranch: "main", Path: "docs/doc.md", UploadBucket: "orig", MarkdownBucket: "md", Owner: "owner"})
+	created, err := client.CreateDocument(ctx, &documentv1.CreateDocumentRequest{FileName: "doc", Repository: "owner/repo", Branch: "main", BaseBranch: "main", Path: "docs/doc.md", UploadBucket: "orig", UploadObjectKey: "docs/doc.docx", MarkdownBucket: "md", MarkdownObjectKey: "docs/doc.md", Owner: "owner"})
 	require.NoError(t, err)
 	require.Equal(t, documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED, created.Status)
 	require.Equal(t, "repo", created.Repository)

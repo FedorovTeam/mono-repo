@@ -26,7 +26,7 @@ import (
 func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 	client := &mockPresignClient{bucketExists: true}
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
-	server := New(client, generator, "knowledge-original", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
+	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
 
 	resp, err := server.GenerateUploadURL(context.Background(), &storagev1.GenerateUploadURLRequest{
 		DocumentId:       "doc-123",
@@ -60,7 +60,7 @@ func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
 	client := &mockPresignClient{bucketExists: true}
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2024, time.December, 31, 0, 0, 0, 0, time.UTC) })
-	server := New(client, generator, "knowledge-original", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
+	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-meta"))
 	resp, err := server.GenerateUploadURL(ctx, &storagev1.GenerateUploadURLRequest{
@@ -84,7 +84,7 @@ func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
 func TestGenerateUploadURL_ValidatesLengthAndExtension(t *testing.T) {
 	client := &mockPresignClient{bucketExists: true}
 	generator := storage.NewObjectKeyGenerator(time.Now)
-	server := New(client, generator, "knowledge-original", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
+	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md"))
 
 	_, err := server.GenerateUploadURL(context.Background(), &storagev1.GenerateUploadURLRequest{
 		DocumentId:       "doc-1",
@@ -109,7 +109,7 @@ func TestUploadOriginalStoresContent(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
 	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
-	server := New(client, generator, "knowledge-original", service)
+	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-correlation-id", "corr-123"))
 	resp, err := server.UploadOriginal(ctx, &storagev1.UploadOriginalRequest{
@@ -129,7 +129,7 @@ func TestUploadMarkdownUsesDefaultsFromServer(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2024, time.November, 5, 0, 0, 0, 0, time.UTC) })
 	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
-	server := New(client, generator, "knowledge-original", service)
+	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	resp, err := server.UploadMarkdown(context.Background(), &storagev1.UploadMarkdownRequest{
 		DocumentId: "doc-md",
@@ -145,7 +145,7 @@ func TestGetObjectReturnsStoredData(t *testing.T) {
 	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2024, time.March, 10, 0, 0, 0, 0, time.UTC) })
 	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md")
-	server := New(client, generator, "knowledge-original", service)
+	server := New(client, generator, "knowledge-original", "knowledge-md", service)
 
 	location, err := service.UploadMarkdown(context.Background(), "org", "project", "doc-get", []byte("content"))
 	require.NoError(t, err)

@@ -158,7 +158,7 @@ func TestService_ErrorsOnMissingBucket(t *testing.T) {
 }
 
 func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
-	client := newMockClient("knowledge-original")
+	client := newMockClient("knowledge-original", "knowledge-md")
 	generator := NewObjectKeyGenerator(func() time.Time { return time.Date(2025, time.January, 2, 0, 0, 0, 0, time.UTC) })
 	svc := NewService(client, generator, "knowledge-original", "knowledge-md")
 

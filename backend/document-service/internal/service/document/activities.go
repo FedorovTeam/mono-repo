@@ -59,13 +59,6 @@ type documentSnapshot struct {
 	CreatePR          bool
 }
 
-type uploadOriginalInput struct {
-	DocumentID      string
-	FilenameExt     string
-	OriginalContent []byte
-	Version         int32
-}
-
 type convertInput struct {
 	DocumentID        string
 	OriginalBucket    string
@@ -193,24 +186,6 @@ func (a *Activities) AwaitOriginal(ctx context.Context, documentID string) (docu
 		Version:           version,
 		CreatePR:          doc.CreatePR,
 	}, nil
-}
-
-func (a *Activities) UploadOriginal(ctx context.Context, input uploadOriginalInput) error {
-	ctx = a.withCorrelationID(ctx, "")
-	if a.storage == nil {
-		return fmt.Errorf("storage client is not configured")
-	}
-	_, err := a.storage.UploadOriginal(ctx, &storagev1.UploadOriginalRequest{
-		DocumentId:        input.DocumentID,
-		FilenameExtension: input.FilenameExt,
-		Content:           input.OriginalContent,
-	})
-	if err != nil {
-		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("upload original: %v", err))
-		return err
-	}
-	_, err = a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: input.Version})
-	return err
 }
 
 func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) (convertResult, error) {

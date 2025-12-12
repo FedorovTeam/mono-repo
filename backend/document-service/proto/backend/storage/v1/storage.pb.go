@@ -423,13 +423,15 @@ func (x *GenerateUploadURLRequest) GetExpiresInSeconds() int64 {
 }
 
 type GenerateUploadURLResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	UploadUrl        string                 `protobuf:"bytes,1,opt,name=upload_url,json=uploadUrl,proto3" json:"upload_url,omitempty"`
-	Bucket           string                 `protobuf:"bytes,2,opt,name=bucket,proto3" json:"bucket,omitempty"`
-	ObjectKey        string                 `protobuf:"bytes,3,opt,name=object_key,json=objectKey,proto3" json:"object_key,omitempty"`
-	ExpiresInSeconds int64                  `protobuf:"varint,4,opt,name=expires_in_seconds,json=expiresInSeconds,proto3" json:"expires_in_seconds,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	UploadUrl         string                 `protobuf:"bytes,1,opt,name=upload_url,json=uploadUrl,proto3" json:"upload_url,omitempty"`
+	Bucket            string                 `protobuf:"bytes,2,opt,name=bucket,proto3" json:"bucket,omitempty"`
+	ObjectKey         string                 `protobuf:"bytes,3,opt,name=object_key,json=objectKey,proto3" json:"object_key,omitempty"`
+	ExpiresInSeconds  int64                  `protobuf:"varint,4,opt,name=expires_in_seconds,json=expiresInSeconds,proto3" json:"expires_in_seconds,omitempty"`
+	MarkdownBucket    string                 `protobuf:"bytes,5,opt,name=markdown_bucket,json=markdownBucket,proto3" json:"markdown_bucket,omitempty"`
+	MarkdownObjectKey string                 `protobuf:"bytes,6,opt,name=markdown_object_key,json=markdownObjectKey,proto3" json:"markdown_object_key,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GenerateUploadURLResponse) Reset() {
@@ -490,6 +492,20 @@ func (x *GenerateUploadURLResponse) GetExpiresInSeconds() int64 {
 	return 0
 }
 
+func (x *GenerateUploadURLResponse) GetMarkdownBucket() string {
+	if x != nil {
+		return x.MarkdownBucket
+	}
+	return ""
+}
+
+func (x *GenerateUploadURLResponse) GetMarkdownObjectKey() string {
+	if x != nil {
+		return x.MarkdownObjectKey
+	}
+	return ""
+}
+
 var File_backend_storage_v1_storage_proto protoreflect.FileDescriptor
 
 const file_backend_storage_v1_storage_proto_rawDesc = "" +
@@ -531,14 +547,16 @@ const file_backend_storage_v1_storage_proto_rawDesc = "" +
 	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12%\n" +
 	"\x0econtent_length\x18\x03 \x01(\x03R\rcontentLength\x12%\n" +
 	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId\x12,\n" +
-	"\x12expires_in_seconds\x18\x05 \x01(\x03R\x10expiresInSeconds\"\x9f\x01\n" +
+	"\x12expires_in_seconds\x18\x05 \x01(\x03R\x10expiresInSeconds\"\xf8\x01\n" +
 	"\x19GenerateUploadURLResponse\x12\x1d\n" +
 	"\n" +
 	"upload_url\x18\x01 \x01(\tR\tuploadUrl\x12\x16\n" +
 	"\x06bucket\x18\x02 \x01(\tR\x06bucket\x12\x1d\n" +
 	"\n" +
 	"object_key\x18\x03 \x01(\tR\tobjectKey\x12,\n" +
-	"\x12expires_in_seconds\x18\x04 \x01(\x03R\x10expiresInSeconds2\xaa\x03\n" +
+	"\x12expires_in_seconds\x18\x04 \x01(\x03R\x10expiresInSeconds\x12'\n" +
+	"\x0fmarkdown_bucket\x18\x05 \x01(\tR\x0emarkdownBucket\x12.\n" +
+	"\x13markdown_object_key\x18\x06 \x01(\tR\x11markdownObjectKey2\xaa\x03\n" +
 	"\x0eStorageService\x12e\n" +
 	"\x0eUploadOriginal\x12).backend.storage.v1.UploadOriginalRequest\x1a(.backend.storage.v1.UploadObjectResponse\x12e\n" +
 	"\x0eUploadMarkdown\x12).backend.storage.v1.UploadMarkdownRequest\x1a(.backend.storage.v1.UploadObjectResponse\x12X\n" +

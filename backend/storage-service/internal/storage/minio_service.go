@@ -110,10 +110,12 @@ type GenerateUploadURLParams struct {
 
 // PresignedUpload содержит ссылку и ключ объекта для загрузки.
 type PresignedUpload struct {
-	UploadURL        *url.URL
-	Bucket           string
-	ObjectKey        string
-	ExpiresInSeconds int64
+	UploadURL         *url.URL
+	Bucket            string
+	ObjectKey         string
+	ExpiresInSeconds  int64
+	MarkdownBucket    string
+	MarkdownObjectKey string
 }
 
 // ObjectLocation описывает размещение объекта в хранилище.
@@ -248,11 +250,16 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 	if err := s.ensureBucket(ctx, bucket); err != nil {
 		return PresignedUpload{}, err
 	}
+	if err := s.ensureBucket(ctx, s.markdownBucket); err != nil {
+		return PresignedUpload{}, err
+	}
 
 	key, err := s.keyGenerator.BuildKey(params.OrgSlug, params.ProjectSlug, params.DocumentID, extension)
 	if err != nil {
 		return PresignedUpload{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 	}
+
+	markdownKey := strings.TrimSuffix(key, filepath.Ext(key)) + ".md"
 
 	headers := http.Header{}
 	if params.CorrelationID != "" {
@@ -266,10 +273,12 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 	}
 
 	return PresignedUpload{
-		UploadURL:        url,
-		Bucket:           bucket,
-		ObjectKey:        key,
-		ExpiresInSeconds: params.ExpiresInSeconds,
+		UploadURL:         url,
+		Bucket:            bucket,
+		ObjectKey:         key,
+		MarkdownBucket:    s.markdownBucket,
+		MarkdownObjectKey: markdownKey,
+		ExpiresInSeconds:  params.ExpiresInSeconds,
 	}, nil
 }
 

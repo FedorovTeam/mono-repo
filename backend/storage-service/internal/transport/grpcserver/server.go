@@ -25,26 +25,28 @@ const (
 type Server struct {
 	storagev1.UnimplementedStorageServiceServer
 
-	client       storage.Client
-	service      *storage.Service
-	keyGenerator *storage.ObjectKeyGenerator
-	uploadBucket string
-	orgSlug      string
-	projectSlug  string
+	client         storage.Client
+	service        *storage.Service
+	keyGenerator   *storage.ObjectKeyGenerator
+	uploadBucket   string
+	markdownBucket string
+	orgSlug        string
+	projectSlug    string
 }
 
 // New создаёт сервер с зависимостями для генерации presigned URL.
-func New(client storage.Client, keyGenerator *storage.ObjectKeyGenerator, uploadBucket string, service *storage.Service) *Server {
+func New(client storage.Client, keyGenerator *storage.ObjectKeyGenerator, uploadBucket, markdownBucket string, service *storage.Service) *Server {
 	orgSlug := defaultOrgSlug
 	projectSlug := defaultProjectSlug
 
 	return &Server{
-		client:       client,
-		service:      service,
-		keyGenerator: keyGenerator,
-		uploadBucket: uploadBucket,
-		orgSlug:      orgSlug,
-		projectSlug:  projectSlug,
+		client:         client,
+		service:        service,
+		keyGenerator:   keyGenerator,
+		uploadBucket:   uploadBucket,
+		markdownBucket: markdownBucket,
+		orgSlug:        orgSlug,
+		projectSlug:    projectSlug,
 	}
 }
 
@@ -168,10 +170,12 @@ func (s *Server) GenerateUploadURL(ctx context.Context, req *storagev1.GenerateU
 	s.attachResponseMetadata(ctx, correlationID, s.orgSlug, s.projectSlug)
 
 	return &storagev1.GenerateUploadURLResponse{
-		UploadUrl:        upload.UploadURL.String(),
-		Bucket:           upload.Bucket,
-		ObjectKey:        upload.ObjectKey,
-		ExpiresInSeconds: upload.ExpiresInSeconds,
+		UploadUrl:         upload.UploadURL.String(),
+		Bucket:            upload.Bucket,
+		ObjectKey:         upload.ObjectKey,
+		ExpiresInSeconds:  upload.ExpiresInSeconds,
+		MarkdownBucket:    upload.MarkdownBucket,
+		MarkdownObjectKey: upload.MarkdownObjectKey,
 	}, nil
 }
 
