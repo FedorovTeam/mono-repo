@@ -14,6 +14,8 @@ import (
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -80,12 +82,12 @@ func TestUploadDelegatesValidationToDocumentService(t *testing.T) {
 	ctx := ctxutils.WithAPIKey(ctxutils.WithCorrelationID(context.Background(), "corr-validate"), "secret")
 
 	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
-		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://upload", Bucket: "docs", ObjectKey: "docs/file.docx", ExpiresInSeconds: 600}, nil
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://upload", Bucket: "docs", ObjectKey: "docs/file.docx", MarkdownBucket: "markdown", MarkdownObjectKey: "markdown/file.md", ExpiresInSeconds: 600}, nil
 	}}
 
 	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
 		return nil, fmt.Errorf("document-service rejected input: repository must be in owner/repo format")
-	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
+	}, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
 		return nil, nil
 	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
@@ -127,7 +129,7 @@ func TestUploadHappyPath(t *testing.T) {
 		if storageDocID == "" {
 			t.Fatalf("document id is empty in storage request")
 		}
-		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: fmt.Sprintf("docs/%s.docx", storageDocID), ExpiresInSeconds: 900}, nil
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: fmt.Sprintf("docs/%s.docx", storageDocID), MarkdownBucket: "markdown", MarkdownObjectKey: fmt.Sprintf("markdown/%s.md", storageDocID), ExpiresInSeconds: 900}, nil
 	}}
 
 	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
@@ -185,6 +187,99 @@ func TestUploadHappyPath(t *testing.T) {
 	}
 }
 
+func TestUploadFailsOnIncompleteStorageResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		resp    *storagepb.GenerateUploadURLResponse
+		missing []string
+	}{
+		{
+			name: "missing upload bucket",
+			resp: &storagepb.GenerateUploadURLResponse{
+				UploadUrl:         "http://minio/upload",
+				ObjectKey:         "docs/file.docx",
+				MarkdownBucket:    "md",
+				MarkdownObjectKey: "md/file.md",
+				ExpiresInSeconds:  600,
+			},
+			missing: []string{"bucket"},
+		},
+		{
+			name: "missing markdown paths",
+			resp: &storagepb.GenerateUploadURLResponse{
+				UploadUrl:        "http://minio/upload",
+				Bucket:           "docs",
+				ObjectKey:        "docs/file.docx",
+				ExpiresInSeconds: 600,
+			},
+			missing: []string{"markdown_bucket", "markdown_object_key"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storageCalled := false
+			docCalled := false
+			core, logs := observer.New(zapcore.DebugLevel)
+			logger := zap.New(core)
+
+			storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
+				storageCalled = true
+				return tt.resp, nil
+			}}
+
+			docClient := &mockDocumentClient{
+				createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
+					docCalled = true
+					t.Fatalf("CreateDocument should not be called when storage response is incomplete")
+					return nil, nil
+				},
+				getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
+					return nil, nil
+				},
+				listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
+					return nil, nil
+				},
+			}
+
+			resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 600}, Logger: logger}
+			mr := &mutationResolver{resolver}
+
+			_, err := mr.UploadKnowledgeDocument(ctxutils.WithAPIKey(context.Background(), "secret"), model.UploadKnowledgeDocumentInput{
+				FileName:      "demo.docx",
+				FileSizeBytes: 512,
+				Repository:    "org/repo",
+				Branch:        "main",
+				Path:          "docs/demo.md",
+			})
+			if err == nil {
+				t.Fatalf("expected error for incomplete storage response")
+			}
+			for _, field := range tt.missing {
+				if !strings.Contains(err.Error(), field) {
+					t.Fatalf("expected error to mention missing %s: %v", field, err)
+				}
+			}
+			if !storageCalled {
+				t.Fatalf("storage service should be called")
+			}
+			if docCalled {
+				t.Fatalf("document service should not be called")
+			}
+			foundLog := false
+			for _, entry := range logs.All() {
+				if entry.Message == "storage service returned incomplete upload data" {
+					foundLog = true
+					break
+				}
+			}
+			if !foundLog {
+				t.Fatalf("expected log entry for incomplete storage response")
+			}
+		})
+	}
+}
+
 func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 	var capturedCorrelation string
 	var capturedDocID string
@@ -195,7 +290,7 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 		}
 		capturedCorrelation = in.CorrelationId
 		capturedDocID = in.GetDocumentId()
-		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: fmt.Sprintf("docs/%s.docx", capturedDocID), ExpiresInSeconds: 600}, nil
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/upload", Bucket: "docs", ObjectKey: fmt.Sprintf("docs/%s.docx", capturedDocID), MarkdownBucket: "markdown", MarkdownObjectKey: fmt.Sprintf("markdown/%s.md", capturedDocID), ExpiresInSeconds: 600}, nil
 	}}
 
 	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
@@ -295,7 +390,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 			t.Fatalf("unexpected expires ttl: %d", in.ExpiresInSeconds)
 		}
 		capturedDocID = in.GetDocumentId()
-		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/signed", Bucket: "docx", ObjectKey: fmt.Sprintf("docx/%s.docx", capturedDocID), ExpiresInSeconds: 600}, nil
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://minio/signed", Bucket: "docx", ObjectKey: fmt.Sprintf("docx/%s.docx", capturedDocID), MarkdownBucket: "markdown", MarkdownObjectKey: fmt.Sprintf("markdown/%s.md", capturedDocID), ExpiresInSeconds: 600}, nil
 	}}
 
 	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}
@@ -491,9 +586,11 @@ func (s *storageServiceStub) GenerateUploadURL(ctx context.Context, req *storage
 	s.lastAPIKey = md.Get("x-api-key")[0]
 
 	return &storagepb.GenerateUploadURLResponse{
-		UploadUrl:        "http://minio/presigned",
-		Bucket:           "docx",
-		ObjectKey:        "docx/" + req.GetDocumentId() + ".docx",
-		ExpiresInSeconds: req.GetExpiresInSeconds(),
+		UploadUrl:         "http://minio/presigned",
+		Bucket:            "docx",
+		ObjectKey:         "docx/" + req.GetDocumentId() + ".docx",
+		MarkdownBucket:    "markdown",
+		MarkdownObjectKey: "markdown/" + req.GetDocumentId() + ".md",
+		ExpiresInSeconds:  req.GetExpiresInSeconds(),
 	}, nil
 }

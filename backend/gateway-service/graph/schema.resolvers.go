@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -47,6 +48,25 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	if err != nil {
 		logger.Error("failed to issue upload url", zap.Error(err))
 		return nil, fmt.Errorf("cannot generate upload url: %w", err)
+	}
+
+	missingFields := make([]string, 0, 4)
+	if uploadURL.GetBucket() == "" {
+		missingFields = append(missingFields, "bucket")
+	}
+	if uploadURL.GetObjectKey() == "" {
+		missingFields = append(missingFields, "object_key")
+	}
+	if uploadURL.GetMarkdownBucket() == "" {
+		missingFields = append(missingFields, "markdown_bucket")
+	}
+	if uploadURL.GetMarkdownObjectKey() == "" {
+		missingFields = append(missingFields, "markdown_object_key")
+	}
+
+	if len(missingFields) > 0 {
+		logger.Error("storage service returned incomplete upload data", zap.Strings("missing_fields", missingFields))
+		return nil, fmt.Errorf("cannot generate upload url: storage service returned empty %s", strings.Join(missingFields, ", "))
 	}
 
 	req := &pb.CreateDocumentRequest{
