@@ -14,6 +14,8 @@ type workerMetrics struct {
 	batchHist    metric.Int64Histogram
 	durationHist metric.Float64Histogram
 	errorCount   metric.Int64Counter
+	retryCount   metric.Int64Counter
+	finalError   metric.Int64Counter
 
 	mu        sync.Mutex
 	lastQueue int64
@@ -43,6 +45,8 @@ func newWorkerMetrics(name string) *workerMetrics {
 	m.batchHist, _ = meter.Int64Histogram("document_service_" + name + "_batch_size")
 	m.durationHist, _ = meter.Float64Histogram("document_service_" + name + "_duration_ms")
 	m.errorCount, _ = meter.Int64Counter("document_service_" + name + "_errors_total")
+	m.retryCount, _ = meter.Int64Counter("document_service_" + name + "_retries_total")
+	m.finalError, _ = meter.Int64Counter("document_service_" + name + "_final_errors_total")
 
 	return m
 }
@@ -71,4 +75,20 @@ func (m *workerMetrics) recordError(ctx context.Context) {
 		return
 	}
 	m.errorCount.Add(ctx, 1)
+}
+
+func (m *workerMetrics) recordRetries(ctx context.Context, count int) {
+	if m == nil || m.retryCount == nil || count <= 0 {
+		return
+	}
+
+	m.retryCount.Add(ctx, int64(count))
+}
+
+func (m *workerMetrics) recordFinalError(ctx context.Context) {
+	if m == nil || m.finalError == nil {
+		return
+	}
+
+	m.finalError.Add(ctx, 1)
 }
