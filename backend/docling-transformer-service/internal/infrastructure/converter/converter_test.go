@@ -14,10 +14,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 )
 
 func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
@@ -96,7 +97,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "corr-submit")
 
-	jobID, err := conv.Submit(ctx, DoclingConvertRequest{
+	jobID, err := conv.Submit(ctx, domain.ConvertRequest{
 		FileName:    "sample.docx",
 		Content:     []byte("docx-bytes"),
 		ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -183,7 +184,7 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "retry-corr")
 
-	jobID, err := conv.Submit(ctx, DoclingConvertRequest{Content: []byte("doc")})
+	jobID, err := conv.Submit(ctx, domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error after retry: %v", err)
 	}
@@ -221,7 +222,7 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "pending-corr")
 
-	jobID, err := conv.Submit(ctx, DoclingConvertRequest{Content: []byte("doc")})
+	jobID, err := conv.Submit(ctx, domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
@@ -295,7 +296,7 @@ func TestDoclingConverterCheckStatusTaskStatusField(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	jobID, err := conv.Submit(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
+	jobID, err := conv.Submit(context.Background(), domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
@@ -334,7 +335,7 @@ func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T)
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, logger)
 
-	jobID, err := conv.Submit(context.Background(), DoclingConvertRequest{Content: []byte("doc")})
+	jobID, err := conv.Submit(context.Background(), domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
@@ -430,7 +431,7 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 	}, zap.NewNop())
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "pdf-corr")
-	jobID, err := conv.Submit(ctx, DoclingConvertRequest{
+	jobID, err := conv.Submit(ctx, domain.ConvertRequest{
 		FileName:    "scan.pdf",
 		Content:     []byte("pdf content"),
 		ContentType: "application/pdf",

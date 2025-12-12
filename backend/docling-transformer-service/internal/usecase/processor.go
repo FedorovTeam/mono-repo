@@ -1,4 +1,4 @@
-package worker
+package usecase
 
 import (
 	"context"
@@ -10,11 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mono-repo/docling-transformer-service/internal/converter"
-	"github.com/mono-repo/docling-transformer-service/internal/repository"
-	"github.com/mono-repo/docling-transformer-service/internal/storage"
-	"github.com/mono-repo/docling-transformer-service/internal/telemetry"
-	"github.com/mono-repo/docling-transformer-service/internal/transformations"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
@@ -60,9 +57,9 @@ type workerMetrics struct {
 }
 
 type Processor struct {
-	repo    repository.QueueRepository
-	conv    converter.Converter
-	storage storage.ObjectStorage
+	repo    domain.QueueRepository
+	conv    domain.Converter
+	storage domain.ObjectStorage
 	logger  *zap.Logger
 	cfg     Config
 	metrics *workerMetrics
@@ -88,7 +85,7 @@ func isTemporaryDoclingError(err error) (bool, int) {
 	return false, 0
 }
 
-func NewProcessor(repo repository.QueueRepository, conv converter.Converter, storage storage.ObjectStorage, logger *zap.Logger, cfg Config) *Processor {
+func NewProcessor(repo domain.QueueRepository, conv domain.Converter, storage domain.ObjectStorage, logger *zap.Logger, cfg Config) *Processor {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -335,7 +332,7 @@ func (p *Processor) workerLoop(ctx context.Context, interval, retryBackoff time.
 	}
 }
 
-func (p *Processor) processSingleTask(ctx context.Context, task *repository.TransformationTask) {
+func (p *Processor) processSingleTask(ctx context.Context, task *domain.TransformationTask) {
 	start := time.Now()
 	if task.StartedAt != nil {
 		start = *task.StartedAt
@@ -356,7 +353,7 @@ func (p *Processor) processSingleTask(ctx context.Context, task *repository.Tran
 		}
 
 		doclingWaiting := task.DoclingJobID != ""
-		doclingLimit := errors.Is(err, converter.ErrDoclingPollingAttemptsExceeded)
+		doclingLimit := errors.Is(err, domain.ErrPollingAttemptsExceeded)
 		p.logger.Error("transformation failed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", time.Since(start)), zap.Bool("docling_waiting", doclingWaiting), zap.Bool("docling_limit", doclingLimit), zap.String("docling_job_id", task.DoclingJobID), zap.Int("docling_poll_count", task.DoclingPollCount), zap.Error(err))
 		p.metrics.recordOutcome(taskCtx, false)
 		if markErr := p.repo.MarkFailed(ctx, task.ID, buildFailureMessage(err, task)); markErr != nil {
@@ -371,7 +368,7 @@ func (p *Processor) processSingleTask(ctx context.Context, task *repository.Tran
 	p.logger.Info("transformation completed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", duration))
 }
 
-func (p *Processor) handleTask(ctx context.Context, task *repository.TransformationTask) error {
+func (p *Processor) handleTask(ctx context.Context, task *domain.TransformationTask) error {
 	correlationID := telemetry.CorrelationIDFromContext(ctx)
 
 	if task.MarkdownBucket == "" {
@@ -382,7 +379,7 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 	}
 
 	if task.MarkdownObjectKey == "" {
-		task.MarkdownObjectKey = transformations.BuildMarkdownKey(task.OriginalObjectKey)
+		task.MarkdownObjectKey = domain.BuildMarkdownKey(task.OriginalObjectKey)
 	}
 
 	jobID := task.DoclingJobID
@@ -394,10 +391,10 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 
 	fileExt := task.FilenameExtension
 	if fileExt == "" {
-		fileExt = transformations.NormalizeExtension(filepath.Ext(task.OriginalObjectKey))
+		fileExt = domain.NormalizeExtension(filepath.Ext(task.OriginalObjectKey))
 	}
 
-	contentType, err := converter.ResolveContentTypeByExtension(fileExt)
+	contentType, err := domain.ResolveContentTypeByExtension(fileExt)
 	if err != nil {
 		return err
 	}
@@ -418,7 +415,7 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 	submitCtx, cancelSubmit := p.fastPhaseContext(ctx)
 	defer cancelSubmit()
 
-	jobID, err = p.conv.Submit(submitCtx, converter.DoclingConvertRequest{
+	jobID, err = p.conv.Submit(submitCtx, domain.ConvertRequest{
 		FileName:    originalFileName,
 		Content:     originalContent,
 		ContentType: contentType,
@@ -441,9 +438,9 @@ func (p *Processor) handleTask(ctx context.Context, task *repository.Transformat
 	return errDoclingWaiting
 }
 
-func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.TransformationTask, jobID string, pollOffset int) error {
+func (p *Processor) pollDoclingJob(ctx context.Context, task *domain.TransformationTask, jobID string, pollOffset int) error {
 	if p.cfg.DoclingMaxAttempts > 0 && pollOffset >= p.cfg.DoclingMaxAttempts {
-		return fmt.Errorf("%w: job %s has no remaining attempts after %d polls", converter.ErrDoclingPollingAttemptsExceeded, jobID, pollOffset)
+		return fmt.Errorf("%w: job %s has no remaining attempts after %d polls", domain.ErrPollingAttemptsExceeded, jobID, pollOffset)
 	}
 
 	statusResult, err := p.conv.CheckStatus(ctx, jobID)
@@ -494,7 +491,7 @@ func (p *Processor) pollDoclingJob(ctx context.Context, task *repository.Transfo
 
 	if statusResult.Result == nil {
 		if p.cfg.DoclingMaxAttempts > 0 && newPollCount >= p.cfg.DoclingMaxAttempts {
-			return fmt.Errorf("%w: job %s exceeded maximum polls (%d)", converter.ErrDoclingPollingAttemptsExceeded, jobID, newPollCount)
+			return fmt.Errorf("%w: job %s exceeded maximum polls (%d)", domain.ErrPollingAttemptsExceeded, jobID, newPollCount)
 		}
 
 		nextPoll := p.nextPollTime(time.Now(), newPollCount)
@@ -634,7 +631,7 @@ func (p *Processor) wait(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func buildFailureMessage(err error, task *repository.TransformationTask) string {
+func buildFailureMessage(err error, task *domain.TransformationTask) string {
 	if task == nil {
 		return err.Error()
 	}
@@ -643,7 +640,7 @@ func buildFailureMessage(err error, task *repository.TransformationTask) string 
 	pollCount := task.DoclingPollCount
 
 	switch {
-	case errors.Is(err, converter.ErrDoclingPollingAttemptsExceeded):
+	case errors.Is(err, domain.ErrPollingAttemptsExceeded):
 		return fmt.Sprintf("docling polling attempts exceeded for job %s after %d attempts", jobID, pollCount)
 	case jobID != "":
 		return fmt.Sprintf("docling job %s failed: %v", jobID, err)

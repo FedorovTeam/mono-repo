@@ -1,20 +1,17 @@
 package storage
 
 import (
-	"bytes"
-	"context"
-	"fmt"
-	"io"
-	"time"
+        "bytes"
+        "context"
+        "fmt"
+        "io"
+        "time"
 
-	"github.com/minio/minio-go/v7"
+        "github.com/minio/minio-go/v7"
+        "github.com/mono-repo/docling-transformer-service/internal/domain"
 )
 
-// ObjectStorage описывает операции чтения/записи объектов в MinIO.
-type ObjectStorage interface {
-	Download(ctx context.Context, bucket, objectKey string) ([]byte, error)
-	Upload(ctx context.Context, bucket, objectKey, contentType string, content []byte) error
-}
+type ObjectStorage = domain.ObjectStorage
 
 type minioClient interface {
 	GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (*minio.Object, error)

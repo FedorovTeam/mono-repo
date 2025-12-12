@@ -1,0 +1,143 @@
+package grpcapi
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
+	"github.com/mono-repo/docling-transformer-service/internal/usecase"
+	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+type TransformerAPI struct {
+	transformerv1.UnimplementedTransformerServiceServer
+	usecase *usecase.TransformationUseCase
+	logger  *zap.Logger
+}
+
+func NewTransformerAPI(uc *usecase.TransformationUseCase, logger *zap.Logger) *TransformerAPI {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	return &TransformerAPI{usecase: uc, logger: logger}
+}
+
+func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *transformerv1.ConvertDocumentToMarkdownRequest) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
+	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+
+	s.logger.Info("ConvertDocumentToMarkdown started", zap.String("correlation_id", correlationID),
+		zap.String("document_id", req.GetDocumentId()),
+		zap.String("original_bucket", req.GetOriginalBucket()),
+		zap.String("original_object_key", req.GetOriginalObjectKey()),
+		zap.String("filename_extension", req.GetFilenameExtension()))
+
+	result, err := s.usecase.ConvertDocument(ctx, usecase.ConvertDocumentParams{
+		DocumentID:        req.GetDocumentId(),
+		OriginalBucket:    req.GetOriginalBucket(),
+		OriginalObjectKey: req.GetOriginalObjectKey(),
+		MarkdownBucket:    req.GetMarkdownBucket(),
+		MarkdownObjectKey: req.GetMarkdownObjectKey(),
+		FilenameExtension: req.GetFilenameExtension(),
+		WaitForResult:     req.GetWaitForResult(),
+		CorrelationID:     correlationID,
+	})
+	if err != nil {
+		return nil, s.handleError(err)
+	}
+
+	task := result.Task
+	if task == nil {
+		return nil, status.Error(codes.Internal, "task is not available")
+	}
+
+	return &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           task.ID.String(),
+		Status:            string(task.Status),
+		MarkdownBucket:    result.MarkdownBucket,
+		MarkdownObjectKey: result.MarkdownObjectKey,
+	}, nil
+}
+
+func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+	ctx, _ = telemetry.EnsureCorrelationID(ctx)
+
+	if (len(req.GetDocxContent()) == 0 && req.GetDocxUrl() == "") || (len(req.GetDocxContent()) > 0 && req.GetDocxUrl() != "") {
+		return nil, status.Error(codes.InvalidArgument, "provide either docx_content or docx_url")
+	}
+
+	filename := usecase.ResolveFilenameFromURL(req.GetDocxUrl(), req.GetFilename())
+	content := req.GetDocxContent()
+	if len(content) == 0 {
+		data, err := s.usecase.FetchContentByURL(ctx, req.GetDocxUrl())
+		if err != nil {
+			return nil, s.handleError(err)
+		}
+		content = data
+	}
+
+	result, err := s.usecase.ConvertDocxContent(ctx, filename, content)
+	if err != nil {
+		return nil, s.handleError(err)
+	}
+
+	return &transformerv1.ConvertDocxToMarkdownResponse{
+		Markdown:  string(result.Content),
+		MediaType: result.MediaType,
+		Charset:   result.Charset,
+	}, nil
+}
+
+func (s *TransformerAPI) handleError(err error) error {
+	switch {
+	case errors.Is(err, usecase.ErrInvalidArgument):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, usecase.ErrQueueLimitReached):
+		return status.Error(codes.ResourceExhausted, "queue limit reached")
+	case errors.Is(err, usecase.ErrNotFound):
+		return status.Error(codes.NotFound, "queue task not found")
+	case errors.Is(err, usecase.ErrResultNotReady), errors.Is(err, domain.ErrPollingAttemptsExceeded):
+		return status.Error(codes.DeadlineExceeded, err.Error())
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, err.Error())
+	default:
+		return status.Error(codes.Internal, err.Error())
+	}
+}
+
+func Run(ctx context.Context, logger *zap.Logger, uc *usecase.TransformationUseCase, port int) error {
+	address := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+
+	handler := otelgrpc.NewServerHandler(otelgrpc.WithTracerProvider(otel.GetTracerProvider()))
+	srv := grpc.NewServer(grpc.StatsHandler(handler))
+
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(uc, logger))
+
+	go func() {
+		<-ctx.Done()
+		srv.GracefulStop()
+	}()
+
+	logger.Info("starting gRPC server", zap.String("address", address))
+
+	if err := srv.Serve(listener); err != nil {
+		return fmt.Errorf("serve: %w", err)
+	}
+
+	return nil
+}

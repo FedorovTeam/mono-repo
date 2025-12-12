@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package integration
 
 import (
@@ -8,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mono-repo/docling-transformer-service/internal/converter"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/server"
 	"github.com/mono-repo/docling-transformer-service/internal/storage"
