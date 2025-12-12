@@ -20,6 +20,7 @@ import (
 	"backend-gateway-service/internal/grpcdial"
 	docclient "backend-gateway-service/internal/infrastructure/clients/document"
 	storageclient "backend-gateway-service/internal/infrastructure/clients/storage"
+	"backend-gateway-service/internal/infrastructure/webhook"
 	"backend-gateway-service/internal/logging"
 	"backend-gateway-service/internal/middleware"
 	"backend-gateway-service/internal/observability"
@@ -28,14 +29,15 @@ import (
 
 // Server отвечает за запуск HTTP GraphQL API.
 type Server struct {
-	cfg            config.Config
-	logger         *zap.Logger
-	documentClient domain.DocumentClient
-	storageClient  domain.StorageClient
-	uploadUseCase  usecase.DocumentUploader
-	docUseCase     usecase.DocumentProvider
-	otelProviders  observability.Providers
-	shutdownOTEL   func(context.Context) error
+	cfg                  config.Config
+	logger               *zap.Logger
+	documentClient       domain.DocumentClient
+	storageClient        domain.StorageClient
+	uploadUseCase        usecase.DocumentUploader
+	docUseCase           usecase.DocumentProvider
+	uploadConfirmationUC usecase.UploadConfirmationHandler
+	otelProviders        observability.Providers
+	shutdownOTEL         func(context.Context) error
 }
 
 // New создаёт сервер и подключает клиентов.
@@ -73,16 +75,19 @@ func New(cfg config.Config) (*Server, error) {
 		SignedURLTTLSeconds: cfg.Uploads.SignedURLTTLSecond,
 	})
 	docUseCase := usecase.NewDocumentService(docClient)
+	webhookParser := webhook.NewMinIOWebhookParser()
+	uploadConfirmationUseCase := usecase.NewUploadConfirmationService(webhookParser, docClient)
 
 	return &Server{
-		cfg:            cfg,
-		logger:         logger,
-		documentClient: docClient,
-		storageClient:  storageClient,
-		uploadUseCase:  uploadUseCase,
-		docUseCase:     docUseCase,
-		otelProviders:  providers,
-		shutdownOTEL:   shutdown,
+		cfg:                  cfg,
+		logger:               logger,
+		documentClient:       docClient,
+		storageClient:        storageClient,
+		uploadUseCase:        uploadUseCase,
+		docUseCase:           docUseCase,
+		uploadConfirmationUC: uploadConfirmationUseCase,
+		otelProviders:        providers,
+		shutdownOTEL:         shutdown,
 	}, nil
 }
 
