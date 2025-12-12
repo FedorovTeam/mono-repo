@@ -116,6 +116,46 @@ func (s *trackingStorage) Upload(_ context.Context, _, _ string, contentType str
 	return nil
 }
 
+type submitOnlyConverter struct {
+	jobID        string
+	submitCalled bool
+	checkCalled  bool
+}
+
+func (c *submitOnlyConverter) Submit(_ context.Context, req converter.DoclingConvertRequest) (string, error) {
+	c.submitCalled = true
+	if c.jobID == "" {
+		c.jobID = "job-from-submit"
+	}
+	if req.ContentType == "" {
+		return "", fmt.Errorf("content type is empty")
+	}
+
+	return c.jobID, nil
+}
+
+func (c *submitOnlyConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
+	c.checkCalled = true
+	return converter.StatusCheckResult{}, errors.New("status should not be called")
+}
+
+type recordingStorage struct {
+	downloadBucket string
+	downloadKey    string
+	uploadCalls    int
+}
+
+func (s *recordingStorage) Download(_ context.Context, bucket, key string) ([]byte, error) {
+	s.downloadBucket = bucket
+	s.downloadKey = key
+	return []byte("doc"), nil
+}
+
+func (s *recordingStorage) Upload(context.Context, string, string, string, []byte) error {
+	s.uploadCalls++
+	return nil
+}
+
 func TestHandleTaskPollsWithoutRedownloading(t *testing.T) {
 	repo := &pollingRepoStub{}
 	storage := &trackingStorage{}
@@ -301,5 +341,77 @@ func TestPollDoclingJobStoresUtf8ForCyrillicMarkdown(t *testing.T) {
 
 	if storage.contentType != "text/markdown; charset=utf-8" {
 		t.Fatalf("expected utf-8 charset for cyrillic markdown, got %q", storage.contentType)
+	}
+}
+
+func TestHandleTaskUsesConfiguredMarkdownBucket(t *testing.T) {
+	repo := &pollingRepoStub{}
+	storage := &recordingStorage{}
+	conv := &submitOnlyConverter{jobID: "job-configured-bucket"}
+	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{MarkdownBucket: "markdown-output"})
+
+	task := &repository.TransformationTask{
+		ID:                uuid.New(),
+		OriginalBucket:    "source-bucket",
+		OriginalObjectKey: "uploads/file.DOCX",
+	}
+
+	err := processor.handleTask(context.Background(), task)
+	if !errors.Is(err, errDoclingWaiting) {
+		t.Fatalf("expected errDoclingWaiting, got: %v", err)
+	}
+
+	if task.MarkdownBucket != "markdown-output" {
+		t.Fatalf("expected markdown bucket from config, got %q", task.MarkdownBucket)
+	}
+
+	if task.MarkdownObjectKey != "uploads/file.md" {
+		t.Fatalf("expected markdown object key to be derived from original, got %q", task.MarkdownObjectKey)
+	}
+
+	if repo.markWaitingCalls != 1 {
+		t.Fatalf("expected docling job to be stored once, got %d", repo.markWaitingCalls)
+	}
+
+	if repo.lastJobID != "job-configured-bucket" {
+		t.Fatalf("expected job id to be saved, got %q", repo.lastJobID)
+	}
+
+	if storage.downloadBucket != "source-bucket" || storage.downloadKey != "uploads/file.DOCX" {
+		t.Fatalf("unexpected download parameters: bucket=%q key=%q", storage.downloadBucket, storage.downloadKey)
+	}
+
+	if conv.checkCalled {
+		t.Fatal("status check should not be called during submission phase")
+	}
+}
+
+func TestHandleTaskFailsWithoutMarkdownBucket(t *testing.T) {
+	repo := &pollingRepoStub{}
+	storage := &recordingStorage{}
+	conv := &submitOnlyConverter{}
+	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
+
+	task := &repository.TransformationTask{
+		ID:                uuid.New(),
+		OriginalBucket:    "source-bucket",
+		OriginalObjectKey: "uploads/file.DOCX",
+	}
+
+	err := processor.handleTask(context.Background(), task)
+	if err == nil || !strings.Contains(err.Error(), "markdown bucket is empty") {
+		t.Fatalf("expected empty bucket error, got: %v", err)
+	}
+
+	if repo.markWaitingCalls != 0 {
+		t.Fatalf("expected docling job not to be stored, got %d calls", repo.markWaitingCalls)
+	}
+
+	if conv.submitCalled {
+		t.Fatal("submit should not be called when markdown bucket is missing")
+	}
+
+	if storage.downloadBucket != "" || storage.downloadKey != "" {
+		t.Fatalf("expected no downloads without bucket, got bucket=%q key=%q", storage.downloadBucket, storage.downloadKey)
 	}
 }
