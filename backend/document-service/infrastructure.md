@@ -17,10 +17,10 @@ sequenceDiagram
 
     Client->>GRPC: Create/List/Get/UpdateStatus/ConfirmUpload
     GRPC->>Service: валидация, дефолты, маршрутизация
-    Service-->>MinIO: проверка наличия bucket'ов и генерация ключей
+    Service->>Storage: UploadOriginal/UploadMarkdown или GenerateUploadURL
     Service-->>DB: миграции и запись документов/версий/логов статусов
     UploadJob-->>DB: ищет документы в статусе Uploaded
-    UploadJob-->>MinIO: StatObject для найденных ключей
+    UploadJob->>Storage: GetObject для найденных ключей
     UploadJob->>Service: ConfirmUpload при наличии объекта
     ConvertJob-->>DB: выбирает StoredOriginal для конвертации
     ConvertJob->>Storage: GetObject для оригинала
@@ -34,7 +34,7 @@ sequenceDiagram
 ```
 
 - PostgreSQL хранит таблицы `documents`, `document_versions`, `document_status_logs`.
-- MinIO используется для проверки существования bucket'ов, генерации ключей и статусов загрузки: файлы кладёт `storage-service`/`transformer-service`, а `UploadReconciler` проверяет наличие объектов напрямую через MinIO.
+- MinIO обслуживается `storage-service`: загрузка/выдача объектов выполняется через gRPC (`UploadOriginal`/`UploadMarkdown`/`GetObject`), а `UploadReconciler` использует этот API для проверки наличия исходников.
 - Цепочка cron-воркеров (UploadReconciler → MarkdownConverter → GithubPublisher) читает статусы из PostgreSQL и двигает документ по шагам без Temporal.
 - PublishMarkdown выполняется через gRPC вызов `github-publisher-service`; прямой вызов GitHub API в `document-service` не используется.
 - Корреляционный идентификатор передаётся через метаданные gRPC `x-correlation-id`, прокидывается в цепочку cron-задач и логирование.

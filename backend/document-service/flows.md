@@ -3,15 +3,14 @@
 1. **Создание документа**
    - Клиент вызывает `CreateDocument` с именем файла; `id` может быть передан, при отсутствии генерируется UUID.
    - Если не заданы владелец, репозиторий, ветка или base-branch, подставляются значения из конфигурации; пустой `base_branch` дополнительно заменяется на текущую ветку.
-   - Загружаемый и markdown-бакеты берутся из запроса либо из конфигурации; при отсутствии любого из них возвращается ошибка. Путь для публикации (`publish_path`) и `path` по умолчанию равны имени файла.
+   - Загружаемый и markdown-бакеты/ключи приходят из `storage-service` (через GenerateUploadURL или прямые `Upload*` вызовы) или из запроса; при отсутствии любого обязательного значения возвращается ошибка. Путь для публикации (`publish_path`) и `path` по умолчанию равны имени файла.
    - Репозиторий можно передать в виде `owner/repo` — в этом случае владелец подтягивается из префикса. Наличие лишних слэшей или несовпадение owner/repo приводит к ошибке валидации.
-   - Генератор ключей MinIO проверяет существование бакетов и строит базовый путь `<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<uuid>[.<ext>]`, где `uuid` генерируется случайно, а расширение берется из исходного имени файла (если оно передано). Итоговые ключи — `<base>/original` для исходника и сам `<base>` для Markdown; переданные `upload_object_key`/`markdown_object_key` могут их переопределить.
    - В PostgreSQL создаётся запись с `status=Uploaded`, `workflow_id=document_id`, флагом `create_pr`, версия `1` фиксируется в `document_versions`, в `document_status_logs` добавляется переход в `Uploaded`.
 
 2. **Подтверждение загрузки**
-   - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после уведомления от MinIO.
+   - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после успешного `UploadOriginal`/webhook-а из MinIO.
    - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями. При успехе заводится задача `processing_jobs` со стадией `store_original` в статусе `pending`; при ошибке документ переводится в `Failed`.
-   - Периодический cron-воркер `UploadReconciler` опрашивает таблицу `documents` в статусе `Uploaded`, проверяет наличие исходника в MinIO и при необходимости сам вызывает `ConfirmUpload`, чтобы не зависеть только от вебхуков.
+   - Периодический cron-воркер `UploadReconciler` опрашивает таблицу `documents` в статусе `Uploaded`, проверяет наличие исходника через `storage-service.GetObject` и при необходимости сам вызывает `ConfirmUpload`, чтобы не зависеть только от вебхуков.
 
 3. **Обработка по статусам**
    - Цепочка построена на таблице `processing_jobs`. Исполнители стадий (`storage-service`, `docling-transformer-service`, `github-publisher-service`) меняют статус задачи (`pending` → `in_progress` → `completed|failed`).

@@ -5,7 +5,7 @@ sequenceDiagram
     participant C as Клиент
     participant G as gRPC сервер DocumentService
     participant S as Бизнес-логика DocumentService
-    participant K as KeyManager (MinIO)
+    participant ST as StorageService (gRPC)
     participant R as PostgreSQL (documents + processing_jobs)
     participant UR as UploadReconciler
     participant F as JobFollower (cron)
@@ -15,12 +15,12 @@ sequenceDiagram
 
     C->>G: CreateDocument(id?, fileName, repo?, path?)
     G->>S: Валидация + defaults
-    S->>K: GenerateKeys
-    K-->>S: originalKey + markdownKey
-    S->>R: INSERT document{status=Uploaded}, версии, status_logs
+    S->>ST: (опционально) UploadOriginal/GenerateUploadURL → bucket/object_key
+    ST-->>S: bucket/object_key
+    S->>R: INSERT document{status=Uploaded}, версии, status_logs с ключами из storage-service
     S-->>C: Document c upload/markdown ключами
 
-    Note over UR,R: UploadReconciler проверяет наличие исходника в MinIO
+    Note over UR,ST: UploadReconciler проверяет наличие исходника через storage-service.GetObject
     UR->>G: ConfirmUpload(document_id, bucket, object_key)
     G->>S: Валидация bucket/object_key
     S->>R: UPDATE document -> Uploaded/Failed, CREATE job store_original (pending)

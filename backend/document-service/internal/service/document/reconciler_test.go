@@ -6,21 +6,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
 )
-
-type statObjectMock struct {
-	calls int
-	err   error
-}
-
-func (s *statObjectMock) StatObject(ctx context.Context, bucketName, objectName string, opts minio.StatObjectOptions) (minio.ObjectInfo, error) {
-	s.calls++
-	return minio.ObjectInfo{}, s.err
-}
 
 type confirmUploadMock struct {
 	calls     int
@@ -43,14 +34,14 @@ func TestUploadReconcilerConfirmsExistingObjects(t *testing.T) {
 		UpdatedAt:         fixed.Add(-2 * time.Minute),
 	}
 	repo := &repoMock{doc: &doc, docs: []model.Document{doc}}
-	stat := &statObjectMock{}
+	storage := &stubStorageClient{}
 	confirm := &confirmUploadMock{}
-	reconciler := NewUploadReconciler(repo, stat, confirm, 10, time.Minute)
+	reconciler := NewUploadReconciler(repo, storage, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
 	reconciler.reconcile(context.Background())
 
-	require.Equal(t, 1, stat.calls)
+	require.Equal(t, 1, storage.attempts)
 	require.Equal(t, 1, confirm.calls)
 	require.Equal(t, doc.ID, confirm.lastInput.DocumentID)
 }
@@ -65,14 +56,14 @@ func TestUploadReconcilerSkipsRecentDocuments(t *testing.T) {
 		UpdatedAt:         fixed.Add(-30 * time.Second),
 	}
 	repo := &repoMock{doc: &doc, docs: []model.Document{doc}}
-	stat := &statObjectMock{}
+	storage := &stubStorageClient{}
 	confirm := &confirmUploadMock{}
-	reconciler := NewUploadReconciler(repo, stat, confirm, 10, time.Minute)
+	reconciler := NewUploadReconciler(repo, storage, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
 	reconciler.reconcile(context.Background())
 
-	require.Zero(t, stat.calls)
+	require.Zero(t, storage.attempts)
 	require.Zero(t, confirm.calls)
 }
 
@@ -86,13 +77,13 @@ func TestUploadReconcilerSkipsMissingObjects(t *testing.T) {
 		UpdatedAt:         fixed.Add(-2 * time.Minute),
 	}
 	repo := &repoMock{doc: &doc, docs: []model.Document{doc}}
-	stat := &statObjectMock{err: minio.ErrorResponse{Code: "NoSuchKey"}}
+	storage := &stubStorageClient{err: status.Errorf(codes.NotFound, "not found")}
 	confirm := &confirmUploadMock{}
-	reconciler := NewUploadReconciler(repo, stat, confirm, 10, time.Minute)
+	reconciler := NewUploadReconciler(repo, storage, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
 	reconciler.reconcile(context.Background())
 
-	require.Equal(t, 1, stat.calls)
+	require.Equal(t, 1, storage.attempts)
 	require.Zero(t, confirm.calls)
 }

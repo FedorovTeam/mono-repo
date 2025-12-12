@@ -1,10 +1,10 @@
 # Document Service
 
-Сервис управляет метаданными документов, версиями и статусами на пути загрузки DOCX → Markdown → GitHub. Хранит ссылки на объекты MinIO и предоставляет gRPC API для создания, чтения, перечисления и обновления статуса документа.
+Сервис управляет метаданными документов, версиями и статусами на пути загрузки DOCX → Markdown → GitHub. Хранит ссылки на объекты, загруженные через gRPC API `storage-service`, и предоставляет собственный gRPC API для создания, чтения, перечисления и обновления статуса документа.
 
 ## Архитектура
 - PostgreSQL — хранение метаданных, версий и логов статусов.
-- MinIO — хранение оригинала и конвертированного Markdown (только ключи на стороне сервиса).
+- Storage-service (gRPC) — запись и чтение оригиналов/Markdown через методы `UploadOriginal`/`UploadMarkdown`/`GetObject`, сервис хранит только ключи.
 - gRPC — внутренний API `proto/backend/document/document.proto`.
 
 ## База данных и очередь задач
@@ -18,23 +18,17 @@
 - Каждая стадия обработки («сохранить оригинал», «конвертировать», «опубликовать в GitHub») заводится в очереди `processing_jobs` со стадией (`job_stage`) и статусом (`job_status`), а все попытки фиксируются в `job_events`.
 - Крон-воркеры выбирают готовые к исполнению задачи через `SELECT ... FOR UPDATE SKIP LOCKED` с фильтром по `status = 'pending'` и `next_run_at <= now()`, опираясь на индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run`.
 - При успешном завершении задача переводится в `status = 'completed'`, документ в `documents` переключается на следующий статус. При ошибках увеличивается `attempts`, назначается новый `next_run_at`, а деталь ошибки пишется в `job_events` и `documents.error_reason`.
-- Повторная обработка доступна за счёт перевода документа в предыдущий статус и постановки новой задачи с той же парой `document_id + stage` (уникальный ключ в `processing_jobs` не даёт раздувать очередь дублями). Если документ застрял в `UPLOADED`, периодический reconciler перечитывает MinIO и перезапускает цепочку.
+- Повторная обработка доступна за счёт перевода документа в предыдущий статус и постановки новой задачи с той же парой `document_id + stage` (уникальный ключ в `processing_jobs` не даёт раздувать очередь дублями). Если документ застрял в `UPLOADED`, периодический reconciler перечитывает объект через `storage-service` и перезапускает цепочку.
 
-## Формат ключей в MinIO
-Сервис формирует ключи по шаблону `<prefix>/year=YYYY/month=MM/day=DD/<document_id>/<uuid>[.<ext>]/{original|markdown}`. Если `document_id` отсутствует, используется только сгенерированный UUID. Расширение сохраняется из исходного имени файла (если оно передано), но сам путь публикации или имя не влияют на итоговый ключ. Пример итогового ключа:
-
-```
-documents/year=2024/month=05/day=09/6c0c24a8-4c83-4e5b-8ab5-21f0db363e51/9b902e58-6c9e-4f05-b7e6-2a0d6617d063.md/original
-```
-
-Группировка по дате (`year=`/`month=`/`day=`) позволяет на уровне lifecycle policy назначать разные правила хранения для старых объектов, а доменный путь внутри сохраняет стабильную привязку к `document_id` при случайном имени файла.
+## Формат ключей
+Ключи формируются на стороне `storage-service` по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>` (оригинал) и `.../<document_id>.md` (Markdown). Document-service хранит только возвращённые бакеты и ключи, не работая напрямую с MinIO.
 
 ## Конфигурация
 Все обязательные параметры находятся в `config.yaml` (путь передается через `CONFIG_PATH`). Значения по умолчанию настроены под инфраструктурные домены и DNS-шаблон `<context>.backend.svc.cluster.local`:
 - `server.addr` — адрес gRPC сервера (по умолчанию `:50051`).
 - `postgres.dsn` — строка подключения к PostgreSQL.
-- `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — креденшелы, `minio.use_ssl=true`, `minio.original_bucket` / `minio.markdown_bucket` / `minio.bucket_prefix` — обязательные имена бакетов/префикса.
-- `reconciler.interval` / `reconciler.batch_size` / `reconciler.min_uploaded_age` — периодичность и размер выборки задач для подтверждения загрузок, минимальный возраст загруженного объекта перед повторной проверкой.
+- `storage.original_bucket` / `storage.markdown_bucket` — бакеты, которые возвращает `storage-service` при загрузке оригинала и Markdown.
+- `reconciler.interval` / `reconciler.batch_size` / `reconciler.min_uploaded_age` — периодичность и размер выборки задач для подтверждения загрузок, минимальный возраст загруженного объекта перед повторной проверкой (проверка выполняется через `storage-service.GetObject`).
 - `github_retryer.interval` / `github_retryer.batch_size` / `github_retryer.max_attempts` / `github_retryer.initial_backoff` / `github_retryer.max_backoff` — параметры крон-ретраев публикации в GitHub.
 - `job_follower.interval` / `job_follower.batch_size` / `job_follower.reschedule_after` — периодичность чтения завершённых задач и задержка перед повторным запуском следующей стадии.
 - `services.storage_service` — `storage.backend.svc.cluster.local:50052`, `services.transformer_service` — `transformer.backend.svc.cluster.local:9092`, `services.github_publisher_service` — `github-publisher.backend.svc.cluster.local:9097`.
@@ -47,7 +41,7 @@ documents/year=2024/month=05/day=09/6c0c24a8-4c83-4e5b-8ab5-21f0db363e51/9b902e5
 Периодические воркеры публикуют метрики очереди и ошибок: gauge `document_service_upload_reconciler_queue_size`/`document_service_publish_retrier_queue_size`/`document_service_job_follower_queue_size`, гистограммы размеров пачек (`document_service_*_batch_size`) и длительности (`document_service_*_duration_ms`), счётчики ошибок (`document_service_*_errors_total`). В логах фиксируются некорректные выборки, пропуски объектов и ошибки публикации/маршрутизации, чтобы отслеживать частоту сбоев на каждой стадии.
 
 ## Быстрый старт
-1. Запустите PostgreSQL и MinIO (см. `infrastructure.md`).
+1. Запустите PostgreSQL, `storage-service` и MinIO (см. `infrastructure.md`).
 2. Выполните миграции: `go run ./cmd/server --migrate`.
 3. Сгенерируйте gRPC код: `./proto/generate.sh`.
 4. Соберите и запустите сервер: `go run ./cmd/server`.

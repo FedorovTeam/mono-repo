@@ -14,15 +14,10 @@ type Config struct {
 	Postgres struct {
 		DSN string `yaml:"dsn"`
 	} `yaml:"postgres"`
-	Minio struct {
-		Endpoint       string `yaml:"endpoint"`
-		AccessKey      string `yaml:"access_key"`
-		SecretKey      string `yaml:"secret_key"`
-		UseSSL         bool   `yaml:"use_ssl"`
+	Storage struct {
 		OriginalBucket string `yaml:"original_bucket"`
 		MarkdownBucket string `yaml:"markdown_bucket"`
-		BucketPrefix   string `yaml:"bucket_prefix"`
-	} `yaml:"minio"`
+	} `yaml:"storage"`
 	Services struct {
 		StorageService         string     `yaml:"storage_service"`
 		TransformerService     string     `yaml:"transformer_service"`
@@ -125,8 +120,8 @@ func (c *Config) Validate() error {
 	if c.Postgres.DSN == "" {
 		return fmt.Errorf("postgres.dsn is required")
 	}
-	if c.Minio.Endpoint == "" || c.Minio.AccessKey == "" || c.Minio.SecretKey == "" || c.Minio.OriginalBucket == "" || c.Minio.MarkdownBucket == "" {
-		return fmt.Errorf("minio configuration is incomplete")
+	if c.Storage.OriginalBucket == "" || c.Storage.MarkdownBucket == "" {
+		return fmt.Errorf("storage buckets configuration is incomplete")
 	}
 	if c.Services.StorageService == "" || c.Services.TransformerService == "" || c.Services.GithubPublisherService == "" {
 		return fmt.Errorf("services endpoints must be provided")

@@ -3,17 +3,14 @@ package document
 import (
 	"context"
 	"log"
-	"net/http"
 	"time"
 
-	"github.com/minio/minio-go/v7"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
+	storagev1 "backend-document-service/proto/backend/storage/v1"
 )
-
-type objectStatClient interface {
-	StatObject(ctx context.Context, bucketName, objectName string, opts minio.StatObjectOptions) (minio.ObjectInfo, error)
-}
 
 type confirmUploadCaller interface {
 	ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*model.Document, error)
@@ -21,7 +18,7 @@ type confirmUploadCaller interface {
 
 type UploadReconciler struct {
 	repo          Repository
-	storage       objectStatClient
+	storage       storagev1.StorageServiceClient
 	confirmUpload confirmUploadCaller
 	batchSize     int
 	minAge        time.Duration
@@ -95,10 +92,9 @@ func (r *UploadReconciler) reconcile(ctx context.Context) {
 				continue
 			}
 
-			if _, err := r.storage.StatObject(ctx, doc.OriginalBucket, doc.OriginalObjectKey, minio.StatObjectOptions{}); err != nil {
-				resp := minio.ToErrorResponse(err)
-				if resp.Code != "NoSuchKey" && resp.StatusCode != http.StatusNotFound {
-					log.Printf("reconciler: stat object %s/%s: %v", doc.OriginalBucket, doc.OriginalObjectKey, err)
+			if _, err := r.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: doc.OriginalBucket, ObjectKey: doc.OriginalObjectKey}); err != nil {
+				if status.Code(err) != codes.NotFound {
+					log.Printf("reconciler: get object %s/%s: %v", doc.OriginalBucket, doc.OriginalObjectKey, err)
 					r.metrics.recordError(ctx)
 				}
 				continue

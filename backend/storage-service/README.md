@@ -1,12 +1,12 @@
 # storage-service
 
-Сервис отвечает за хранение исходных документов и их Markdown-версий в приватных бакетах MinIO. Публичный контракт описан в `proto/backend/storage/v1/storage.proto`.
+Сервис отвечает за хранение исходных документов и их Markdown-версий в приватных бакетах MinIO. Публичный контракт описан в `proto/backend/storage/v1/storage.proto` и включает gRPC-методы `UploadOriginal`, `UploadMarkdown`, `GetObject` и `GenerateUploadURL`.
 
 ## Назначение
-- Прием исходных файлов (knowledge-original) и Markdown (knowledge-md).
+- Прием исходных файлов (knowledge-original) и Markdown (knowledge-md) через gRPC (`UploadOriginal`, `UploadMarkdown`).
 - Генерация ключей по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>`.
 - Для выдачи presigned ссылок используются дефолтные `org_slug=knowledge` и `project_slug=documents`, чтобы сохранять единый путь размещения объектов.
-- Выдача сохраненных объектов по ключу.
+- Выдача сохраненных объектов по ключу через RPC `GetObject`.
 - Выдача presigned PUT ссылки через RPC `GenerateUploadURL` (получает `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds`) с установкой `x-amz-meta-correlation-id` в MinIO.
 
 ## Конфигурация
@@ -27,4 +27,4 @@
    В логах появится инициализация MinIO и бакетов, а при gRPC-запросах — correlation-id из поля запроса или метаданных `x-correlation-id`. Завершение по `Ctrl+C` останавливает сервер graceful shutdown'ом.
 
 ## Тесты
-В модуле предусмотрены unit-тесты для генерации ключей и взаимодействия с MinIO через mock-клиент: `go test ./...`.
+В модуле предусмотрены unit-тесты для генерации ключей и gRPC-обработчиков; выполнить их можно командой `go test ./...`.
