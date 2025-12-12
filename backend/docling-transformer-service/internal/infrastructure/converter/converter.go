@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 	"go.uber.org/zap"
 )
@@ -75,7 +76,7 @@ func isPendingStatus(status string) bool {
 	return ok
 }
 
-var ErrDoclingPollingAttemptsExceeded = domain.ErrPollingAttemptsExceeded
+var ErrDoclingPollingAttemptsExceeded = transformations.ErrPollingAttemptsExceeded
 
 type temporaryDoclingError struct {
 	statusCode int

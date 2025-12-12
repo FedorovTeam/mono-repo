@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/mono-repo/docling-transformer-service/internal/domain"
+transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 	"github.com/mono-repo/docling-transformer-service/internal/usecase"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
@@ -105,7 +105,7 @@ func (s *TransformerAPI) handleError(err error) error {
 		return status.Error(codes.ResourceExhausted, "queue limit reached")
 	case errors.Is(err, usecase.ErrNotFound):
 		return status.Error(codes.NotFound, "queue task not found")
-	case errors.Is(err, usecase.ErrResultNotReady), errors.Is(err, domain.ErrPollingAttemptsExceeded):
+	case errors.Is(err, usecase.ErrResultNotReady), errors.Is(err, transformations.ErrPollingAttemptsExceeded):
 		return status.Error(codes.DeadlineExceeded, err.Error())
 	case errors.Is(err, context.Canceled):
 		return status.Error(codes.Canceled, err.Error())

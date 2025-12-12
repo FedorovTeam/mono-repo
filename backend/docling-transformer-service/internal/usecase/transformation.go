@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"go.uber.org/zap"
 )
 
@@ -44,13 +46,13 @@ type ConvertDocumentParams struct {
 }
 
 type ConvertDocumentResult struct {
-	Task              *domain.TransformationTask
+	Task              *transformations.TransformationTask
 	MarkdownBucket    string
 	MarkdownObjectKey string
 }
 
 type TransformationUseCase struct {
-	repo   domain.QueueRepository
+	repo   repo.QueueRepository
 	conv   domain.Converter
 	cfg    TransformationConfig
 	logger *zap.Logger
@@ -61,7 +63,7 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-func NewTransformationUseCase(repo domain.QueueRepository, conv domain.Converter, cfg TransformationConfig, logger *zap.Logger, client HTTPClient) *TransformationUseCase {
+func NewTransformationUseCase(repo repo.QueueRepository, conv domain.Converter, cfg TransformationConfig, logger *zap.Logger, client HTTPClient) *TransformationUseCase {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -106,7 +108,7 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 		return ConvertDocumentResult{}, fmt.Errorf("fetch latest task: %w", err)
 	}
 
-	if existingTask != nil && existingTask.Status != domain.StatusFailed {
+	if existingTask != nil && existingTask.Status != transformations.StatusFailed {
 		result := ConvertDocumentResult{Task: existingTask, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey}
 		result.MarkdownBucket, result.MarkdownObjectKey = resolveOutput(existingTask, markdownBucket, markdownKey)
 
@@ -134,7 +136,7 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 		}
 	}
 
-	queueID, err := uc.repo.Enqueue(ctx, domain.EnqueueParams{
+	queueID, err := uc.repo.Enqueue(ctx, transformations.EnqueueParams{
 		DocumentID:        params.DocumentID,
 		OriginalBucket:    params.OriginalBucket,
 		OriginalObjectKey: params.OriginalObjectKey,
@@ -148,7 +150,7 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 	}
 
 	result := ConvertDocumentResult{
-		Task:              &domain.TransformationTask{ID: queueID, Status: domain.StatusPending, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey},
+		Task:              &transformations.TransformationTask{ID: queueID, Status: transformations.StatusPending, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey},
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 	}
@@ -166,7 +168,7 @@ func (uc *TransformationUseCase) ConvertDocument(ctx context.Context, params Con
 	return result, nil
 }
 
-func (uc *TransformationUseCase) WaitForTask(ctx context.Context, queueID uuid.UUID) (*domain.TransformationTask, error) {
+func (uc *TransformationUseCase) WaitForTask(ctx context.Context, queueID uuid.UUID) (*transformations.TransformationTask, error) {
 	backoff := uc.cfg.PollInterval
 	if backoff <= 0 {
 		backoff = 2 * time.Second
@@ -190,7 +192,7 @@ func (uc *TransformationUseCase) WaitForTask(ctx context.Context, queueID uuid.U
 			return nil, ErrNotFound
 		}
 
-		if task.Status == domain.StatusDone || task.Status == domain.StatusFailed {
+		if task.Status == transformations.StatusDone || task.Status == transformations.StatusFailed {
 			return task, nil
 		}
 
@@ -316,7 +318,7 @@ func (uc *TransformationUseCase) pollUntilReady(ctx context.Context, jobID strin
 	return domain.ConvertResult{}, ErrResultNotReady
 }
 
-func resolveOutput(task *domain.TransformationTask, fallbackBucket, fallbackKey string) (string, string) {
+func resolveOutput(task *transformations.TransformationTask, fallbackBucket, fallbackKey string) (string, string) {
 	bucket := fallbackBucket
 	key := fallbackKey
 

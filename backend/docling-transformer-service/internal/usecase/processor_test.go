@@ -12,7 +12,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
+	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -31,20 +33,22 @@ type pollingRepoStub struct {
 	restoreStuckCalls int
 }
 
-func (p *pollingRepoStub) Enqueue(context.Context, domain.EnqueueParams) (uuid.UUID, error) {
+var _ repo.QueueRepository = (*pollingRepoStub)(nil)
+
+func (p *pollingRepoStub) Enqueue(context.Context, transformations.EnqueueParams) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
 func (p *pollingRepoStub) CountActive(context.Context) (int, error) { return 0, nil }
-func (p *pollingRepoStub) AcquireNext(context.Context) (*domain.TransformationTask, error) {
+func (p *pollingRepoStub) AcquireNext(context.Context) (*transformations.TransformationTask, error) {
 	return nil, nil
 }
-func (p *pollingRepoStub) AcquireBatch(context.Context, int) ([]*domain.TransformationTask, error) {
+func (p *pollingRepoStub) AcquireBatch(context.Context, int) ([]*transformations.TransformationTask, error) {
 	return nil, nil
 }
-func (p *pollingRepoStub) GetLatestByDocument(context.Context, string) (*domain.TransformationTask, error) {
+func (p *pollingRepoStub) GetLatestByDocument(context.Context, string) (*transformations.TransformationTask, error) {
 	return nil, nil
 }
-func (p *pollingRepoStub) GetByID(context.Context, uuid.UUID) (*domain.TransformationTask, error) {
+func (p *pollingRepoStub) GetByID(context.Context, uuid.UUID) (*transformations.TransformationTask, error) {
 	return nil, nil
 }
 func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) error {
@@ -165,7 +169,7 @@ func TestHandleTaskPollsWithoutRedownloading(t *testing.T) {
 	conv := &statusOnlyConverter{}
 	processor := NewProcessor(repo, conv, storage, nil, Config{})
 
-	task := &domain.TransformationTask{
+	task := &transformations.TransformationTask{
 		ID:                uuid.New(),
 		DoclingJobID:      "job-123",
 		DoclingPollCount:  2,
@@ -236,7 +240,7 @@ func TestPollDoclingJobLogsStatusError(t *testing.T) {
 	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingMaxAttempts: 1})
 
 	jobID := "job-log-error"
-	task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: jobID, CreatedAt: time.Now()}
+	task := &transformations.TransformationTask{ID: uuid.New(), DoclingJobID: jobID, CreatedAt: time.Now()}
 
 	err := processor.pollDoclingJob(context.Background(), task, jobID, 0)
 	if err == nil {
@@ -276,7 +280,7 @@ func TestPollDoclingJobRetriesOnTemporaryError(t *testing.T) {
 	logCore, logs := observer.New(zap.InfoLevel)
 	processor := NewProcessor(repo, conv, storage, zap.New(logCore), Config{DoclingInitialInterval: time.Second})
 
-	task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: "job-temp", CreatedAt: time.Now()}
+	task := &transformations.TransformationTask{ID: uuid.New(), DoclingJobID: "job-temp", CreatedAt: time.Now()}
 
 	err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0)
 	if !errors.Is(err, errDoclingWaiting) {
@@ -317,7 +321,7 @@ func TestPollDoclingJobNormalizesMediaType(t *testing.T) {
 			conv := &staticResultConverter{result: domain.ConvertResult{Content: []byte("body"), MediaType: tc.mediaType, Charset: tc.charset}}
 			processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
 
-			task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
+			task := &transformations.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
 
 			if err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -336,7 +340,7 @@ func TestPollDoclingJobStoresUtf8ForCyrillicMarkdown(t *testing.T) {
 	conv := &staticResultConverter{result: domain.ConvertResult{Content: []byte("# Заголовок\nТекст"), MediaType: "text/markdown"}}
 	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
 
-	task := &domain.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
+	task := &transformations.TransformationTask{ID: uuid.New(), DoclingJobID: "job", MarkdownBucket: "bucket", MarkdownObjectKey: "object", CreatedAt: time.Now()}
 
 	if err := processor.pollDoclingJob(context.Background(), task, task.DoclingJobID, 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -353,7 +357,7 @@ func TestHandleTaskUsesConfiguredMarkdownBucket(t *testing.T) {
 	conv := &submitOnlyConverter{jobID: "job-configured-bucket"}
 	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{MarkdownBucket: "markdown-output"})
 
-	task := &domain.TransformationTask{
+	task := &transformations.TransformationTask{
 		ID:                uuid.New(),
 		OriginalBucket:    "source-bucket",
 		OriginalObjectKey: "uploads/file.DOCX",
@@ -395,7 +399,7 @@ func TestHandleTaskFailsWithoutMarkdownBucket(t *testing.T) {
 	conv := &submitOnlyConverter{}
 	processor := NewProcessor(repo, conv, storage, zap.NewNop(), Config{})
 
-	task := &domain.TransformationTask{
+	task := &transformations.TransformationTask{
 		ID:                uuid.New(),
 		OriginalBucket:    "source-bucket",
 		OriginalObjectKey: "uploads/file.DOCX",

@@ -11,21 +11,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 )
-
-type TransformationTask = domain.TransformationTask
-type TransformationStatus = domain.TransformationStatus
-type EnqueueParams = domain.EnqueueParams
-type QueueRepository = domain.QueueRepository
 
 const (
-	StatusPending    = domain.StatusPending
-	StatusProcessing = domain.StatusProcessing
-	StatusDocling    = domain.StatusDocling
-	StatusDone       = domain.StatusDone
-	StatusFailed     = domain.StatusFailed
+	StatusPending    = transformations.StatusPending
+	StatusProcessing = transformations.StatusProcessing
+	StatusDocling    = transformations.StatusDocling
+	StatusDone       = transformations.StatusDone
+	StatusFailed     = transformations.StatusFailed
 )
+
+type TransformationTask = transformations.TransformationTask
+type EnqueueParams = transformations.EnqueueParams
+
+var _ repo.QueueRepository = (*PostgresQueueRepository)(nil)
 
 type PostgresQueueRepository struct {
 	pool *pgxpool.Pool
@@ -460,28 +461,28 @@ func countRows(rows pgx.Rows) (int, error) {
 
 func scanTask(row pgx.Row) (*TransformationTask, error) {
 	var (
-		task         TransformationTask
+		dto          repo.TransformationDTO
 		doclingJobID sql.NullString
 	)
 
 	if err := row.Scan(
-		&task.ID,
-		&task.Status,
-		&task.RetryCount,
+		&dto.ID,
+		&dto.Status,
+		&dto.RetryCount,
 		&doclingJobID,
-		&task.DoclingPollCount,
-		&task.NextPollAt,
-		&task.DocumentID,
-		&task.OriginalBucket,
-		&task.OriginalObjectKey,
-		&task.MarkdownBucket,
-		&task.MarkdownObjectKey,
-		&task.FilenameExtension,
-		&task.CreatedAt,
-		&task.StartedAt,
-		&task.FinishedAt,
-		&task.Error,
-		&task.CorrelationID,
+		&dto.DoclingPollCount,
+		&dto.NextPollAt,
+		&dto.DocumentID,
+		&dto.OriginalBucket,
+		&dto.OriginalObjectKey,
+		&dto.MarkdownBucket,
+		&dto.MarkdownObjectKey,
+		&dto.FilenameExtension,
+		&dto.CreatedAt,
+		&dto.StartedAt,
+		&dto.FinishedAt,
+		&dto.Error,
+		&dto.CorrelationID,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, pgx.ErrNoRows
@@ -490,7 +491,7 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 
-	task.DoclingJobID = doclingJobID.String
+	dto.DoclingJobID = doclingJobID.String
 
-	return &task, nil
+	return dto.ToDomain(), nil
 }

@@ -10,10 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mono-repo/docling-transformer-service/db/migrations"
+	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
+
+type TransformationStatus = transformations.TransformationStatus
 
 func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
 	ctx := context.Background()
