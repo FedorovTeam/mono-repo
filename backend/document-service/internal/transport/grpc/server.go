@@ -4,8 +4,6 @@ import (
 	"context"
 	"log"
 	"net"
-	"path/filepath"
-	"strings"
 
 	"backend-document-service/internal/model"
 	svc "backend-document-service/internal/service/document"
@@ -43,8 +41,6 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocumentRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "CreateDocument")
 
-	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(req.GetFileName())), ".")
-
 	doc, err := s.service.CreateDocument(ctx, svc.CreateInput{
 		ID:                 req.GetId(),
 		FileName:           req.GetFileName(),
@@ -57,7 +53,6 @@ func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocum
 		UploadObjectKey:    req.GetUploadObjectKey(),
 		MarkdownBucket:     req.GetMarkdownBucket(),
 		MarkdownObjectKey:  req.GetMarkdownObjectKey(),
-		FilenameExt:        ext,
 		PublishPath:        req.GetPath(), // можно собрать сложнее, если надо
 		EntitySpecificPath: req.GetEntitySpecificPath(),
 		CreatePR:           req.GetCreatePr(),

@@ -12,7 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
-	"backend-document-service/internal/storage"
 )
 
 type Repository interface {
@@ -29,7 +28,6 @@ type Repository interface {
 
 type Service struct {
 	repo                  Repository
-	keyManager            storage.KeyManager
 	defaultOriginalBucket string
 	defaultMarkdownBucket string
 	defaultOwner          string
@@ -38,10 +36,9 @@ type Service struct {
 	defaultBaseBranch     string
 }
 
-func New(repo Repository, keyManager storage.KeyManager, _ *Activities, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
+func New(repo Repository, _ *Activities, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
 	return &Service{
 		repo:                  repo,
-		keyManager:            keyManager,
 		defaultOriginalBucket: defaultOriginalBucket,
 		defaultMarkdownBucket: defaultMarkdownBucket,
 		defaultOwner:          defaultOwner,
@@ -63,8 +60,6 @@ type CreateInput struct {
 	UploadObjectKey    string
 	MarkdownBucket     string
 	MarkdownObjectKey  string
-	OriginalContent    []byte
-	FilenameExt        string
 	PublishPath        string
 	EntitySpecificPath string
 	CreatePR           bool
@@ -130,11 +125,11 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 		baseBranch = branch
 	}
 
-	originalBucket := in.UploadBucket
+	originalBucket := strings.TrimSpace(in.UploadBucket)
 	if originalBucket == "" {
 		originalBucket = s.defaultOriginalBucket
 	}
-	markdownBucket := in.MarkdownBucket
+	markdownBucket := strings.TrimSpace(in.MarkdownBucket)
 	if markdownBucket == "" {
 		markdownBucket = s.defaultMarkdownBucket
 	}
@@ -151,23 +146,10 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 		publishPath = path
 	}
 
-	pair, err := s.keyManager.GenerateKeys(ctx, storage.KeyGenerationData{
-		DocumentID:         in.ID,
-		FileName:           in.FileName,
-		Path:               path,
-		PublishPath:        publishPath,
-		EntitySpecificPath: strings.TrimSpace(in.EntitySpecificPath),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("generate keys: %w", err)
-	}
-	originalKey := in.UploadObjectKey
-	if originalKey == "" {
-		originalKey = pair.OriginalObjectKey
-	}
-	markdownKey := in.MarkdownObjectKey
-	if markdownKey == "" {
-		markdownKey = pair.MarkdownObjectKey
+	originalKey := strings.TrimSpace(in.UploadObjectKey)
+	markdownKey := strings.TrimSpace(in.MarkdownObjectKey)
+	if originalKey == "" || markdownKey == "" {
+		return nil, errors.New("object keys are required")
 	}
 
 	doc := &model.Document{

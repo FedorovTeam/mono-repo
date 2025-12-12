@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v3.21.12
-// source: proto/backend/storage/v1/storage.proto
+// source: backend/storage/v1/storage.proto
 
 package storagepb
 
@@ -34,7 +34,7 @@ type GenerateUploadURLRequest struct {
 
 func (x *GenerateUploadURLRequest) Reset() {
 	*x = GenerateUploadURLRequest{}
-	mi := &file_proto_backend_storage_v1_storage_proto_msgTypes[0]
+	mi := &file_backend_storage_v1_storage_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +46,7 @@ func (x *GenerateUploadURLRequest) String() string {
 func (*GenerateUploadURLRequest) ProtoMessage() {}
 
 func (x *GenerateUploadURLRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_backend_storage_v1_storage_proto_msgTypes[0]
+	mi := &file_backend_storage_v1_storage_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +59,7 @@ func (x *GenerateUploadURLRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateUploadURLRequest.ProtoReflect.Descriptor instead.
 func (*GenerateUploadURLRequest) Descriptor() ([]byte, []int) {
-	return file_proto_backend_storage_v1_storage_proto_rawDescGZIP(), []int{0}
+	return file_backend_storage_v1_storage_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *GenerateUploadURLRequest) GetDocumentId() string {
@@ -98,18 +98,20 @@ func (x *GenerateUploadURLRequest) GetExpiresInSeconds() int64 {
 }
 
 type GenerateUploadURLResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	UploadUrl        string                 `protobuf:"bytes,1,opt,name=upload_url,json=uploadUrl,proto3" json:"upload_url,omitempty"`
-	Bucket           string                 `protobuf:"bytes,2,opt,name=bucket,proto3" json:"bucket,omitempty"`
-	ObjectKey        string                 `protobuf:"bytes,3,opt,name=object_key,json=objectKey,proto3" json:"object_key,omitempty"`
-	ExpiresInSeconds int64                  `protobuf:"varint,4,opt,name=expires_in_seconds,json=expiresInSeconds,proto3" json:"expires_in_seconds,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	UploadUrl         string                 `protobuf:"bytes,1,opt,name=upload_url,json=uploadUrl,proto3" json:"upload_url,omitempty"`
+	Bucket            string                 `protobuf:"bytes,2,opt,name=bucket,proto3" json:"bucket,omitempty"`
+	ObjectKey         string                 `protobuf:"bytes,3,opt,name=object_key,json=objectKey,proto3" json:"object_key,omitempty"`
+	ExpiresInSeconds  int64                  `protobuf:"varint,4,opt,name=expires_in_seconds,json=expiresInSeconds,proto3" json:"expires_in_seconds,omitempty"`
+	MarkdownBucket    string                 `protobuf:"bytes,5,opt,name=markdown_bucket,json=markdownBucket,proto3" json:"markdown_bucket,omitempty"`
+	MarkdownObjectKey string                 `protobuf:"bytes,6,opt,name=markdown_object_key,json=markdownObjectKey,proto3" json:"markdown_object_key,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GenerateUploadURLResponse) Reset() {
 	*x = GenerateUploadURLResponse{}
-	mi := &file_proto_backend_storage_v1_storage_proto_msgTypes[1]
+	mi := &file_backend_storage_v1_storage_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -121,7 +123,7 @@ func (x *GenerateUploadURLResponse) String() string {
 func (*GenerateUploadURLResponse) ProtoMessage() {}
 
 func (x *GenerateUploadURLResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_backend_storage_v1_storage_proto_msgTypes[1]
+	mi := &file_backend_storage_v1_storage_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -134,7 +136,7 @@ func (x *GenerateUploadURLResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateUploadURLResponse.ProtoReflect.Descriptor instead.
 func (*GenerateUploadURLResponse) Descriptor() ([]byte, []int) {
-	return file_proto_backend_storage_v1_storage_proto_rawDescGZIP(), []int{1}
+	return file_backend_storage_v1_storage_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *GenerateUploadURLResponse) GetUploadUrl() string {
@@ -165,46 +167,62 @@ func (x *GenerateUploadURLResponse) GetExpiresInSeconds() int64 {
 	return 0
 }
 
-var File_proto_backend_storage_v1_storage_proto protoreflect.FileDescriptor
+func (x *GenerateUploadURLResponse) GetMarkdownBucket() string {
+	if x != nil {
+		return x.MarkdownBucket
+	}
+	return ""
+}
 
-const file_proto_backend_storage_v1_storage_proto_rawDesc = "" +
+func (x *GenerateUploadURLResponse) GetMarkdownObjectKey() string {
+	if x != nil {
+		return x.MarkdownObjectKey
+	}
+	return ""
+}
+
+var File_backend_storage_v1_storage_proto protoreflect.FileDescriptor
+
+const file_backend_storage_v1_storage_proto_rawDesc = "" +
 	"\n" +
-	"&proto/backend/storage/v1/storage.proto\x12\x12backend.storage.v1\"\xd4\x01\n" +
+	" backend/storage/v1/storage.proto\x12\x12backend.storage.v1\"\xd4\x01\n" +
 	"\x18GenerateUploadURLRequest\x12\x1f\n" +
 	"\vdocument_id\x18\x01 \x01(\tR\n" +
 	"documentId\x12\x1b\n" +
 	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12%\n" +
 	"\x0econtent_length\x18\x03 \x01(\x03R\rcontentLength\x12%\n" +
 	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId\x12,\n" +
-	"\x12expires_in_seconds\x18\x05 \x01(\x03R\x10expiresInSeconds\"\x9f\x01\n" +
+	"\x12expires_in_seconds\x18\x05 \x01(\x03R\x10expiresInSeconds\"\xf8\x01\n" +
 	"\x19GenerateUploadURLResponse\x12\x1d\n" +
 	"\n" +
 	"upload_url\x18\x01 \x01(\tR\tuploadUrl\x12\x16\n" +
 	"\x06bucket\x18\x02 \x01(\tR\x06bucket\x12\x1d\n" +
 	"\n" +
 	"object_key\x18\x03 \x01(\tR\tobjectKey\x12,\n" +
-	"\x12expires_in_seconds\x18\x04 \x01(\x03R\x10expiresInSeconds2\x82\x01\n" +
+	"\x12expires_in_seconds\x18\x04 \x01(\x03R\x10expiresInSeconds\x12'\n" +
+	"\x0fmarkdown_bucket\x18\x05 \x01(\tR\x0emarkdownBucket\x12.\n" +
+	"\x13markdown_object_key\x18\x06 \x01(\tR\x11markdownObjectKey2\x82\x01\n" +
 	"\x0eStorageService\x12p\n" +
 	"\x11GenerateUploadURL\x12,.backend.storage.v1.GenerateUploadURLRequest\x1a-.backend.storage.v1.GenerateUploadURLResponseB<Z:backend-gateway-service/proto/backend/storage/v1;storagepbb\x06proto3"
 
 var (
-	file_proto_backend_storage_v1_storage_proto_rawDescOnce sync.Once
-	file_proto_backend_storage_v1_storage_proto_rawDescData []byte
+	file_backend_storage_v1_storage_proto_rawDescOnce sync.Once
+	file_backend_storage_v1_storage_proto_rawDescData []byte
 )
 
-func file_proto_backend_storage_v1_storage_proto_rawDescGZIP() []byte {
-	file_proto_backend_storage_v1_storage_proto_rawDescOnce.Do(func() {
-		file_proto_backend_storage_v1_storage_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_backend_storage_v1_storage_proto_rawDesc), len(file_proto_backend_storage_v1_storage_proto_rawDesc)))
+func file_backend_storage_v1_storage_proto_rawDescGZIP() []byte {
+	file_backend_storage_v1_storage_proto_rawDescOnce.Do(func() {
+		file_backend_storage_v1_storage_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_backend_storage_v1_storage_proto_rawDesc), len(file_backend_storage_v1_storage_proto_rawDesc)))
 	})
-	return file_proto_backend_storage_v1_storage_proto_rawDescData
+	return file_backend_storage_v1_storage_proto_rawDescData
 }
 
-var file_proto_backend_storage_v1_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_proto_backend_storage_v1_storage_proto_goTypes = []any{
+var file_backend_storage_v1_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_backend_storage_v1_storage_proto_goTypes = []any{
 	(*GenerateUploadURLRequest)(nil),  // 0: backend.storage.v1.GenerateUploadURLRequest
 	(*GenerateUploadURLResponse)(nil), // 1: backend.storage.v1.GenerateUploadURLResponse
 }
-var file_proto_backend_storage_v1_storage_proto_depIdxs = []int32{
+var file_backend_storage_v1_storage_proto_depIdxs = []int32{
 	0, // 0: backend.storage.v1.StorageService.GenerateUploadURL:input_type -> backend.storage.v1.GenerateUploadURLRequest
 	1, // 1: backend.storage.v1.StorageService.GenerateUploadURL:output_type -> backend.storage.v1.GenerateUploadURLResponse
 	1, // [1:2] is the sub-list for method output_type
@@ -214,26 +232,26 @@ var file_proto_backend_storage_v1_storage_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_proto_backend_storage_v1_storage_proto_init() }
-func file_proto_backend_storage_v1_storage_proto_init() {
-	if File_proto_backend_storage_v1_storage_proto != nil {
+func init() { file_backend_storage_v1_storage_proto_init() }
+func file_backend_storage_v1_storage_proto_init() {
+	if File_backend_storage_v1_storage_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_backend_storage_v1_storage_proto_rawDesc), len(file_proto_backend_storage_v1_storage_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_backend_storage_v1_storage_proto_rawDesc), len(file_backend_storage_v1_storage_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_backend_storage_v1_storage_proto_goTypes,
-		DependencyIndexes: file_proto_backend_storage_v1_storage_proto_depIdxs,
-		MessageInfos:      file_proto_backend_storage_v1_storage_proto_msgTypes,
+		GoTypes:           file_backend_storage_v1_storage_proto_goTypes,
+		DependencyIndexes: file_backend_storage_v1_storage_proto_depIdxs,
+		MessageInfos:      file_backend_storage_v1_storage_proto_msgTypes,
 	}.Build()
-	File_proto_backend_storage_v1_storage_proto = out.File
-	file_proto_backend_storage_v1_storage_proto_goTypes = nil
-	file_proto_backend_storage_v1_storage_proto_depIdxs = nil
+	File_backend_storage_v1_storage_proto = out.File
+	file_backend_storage_v1_storage_proto_goTypes = nil
+	file_backend_storage_v1_storage_proto_depIdxs = nil
 }

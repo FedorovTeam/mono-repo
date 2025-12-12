@@ -3,7 +3,6 @@ package document
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
-	"backend-document-service/internal/storage"
 )
 
 type repoMock struct {
@@ -120,38 +118,18 @@ func (r *repoMock) ActiveJob(ctx context.Context, documentID string) (*model.Pro
 	return nil, nil
 }
 
-type keyMock struct {
-	lastData storage.KeyGenerationData
-}
-
-func (k *keyMock) GenerateKeys(ctx context.Context, data storage.KeyGenerationData) (storage.KeyPair, error) {
-	k.lastData = data
-	entityPath := strings.Trim(data.EntitySpecificPath, "/")
-	if entityPath == "" {
-		entityPath = "key"
-	}
-	base := entityPath
-	return storage.KeyPair{OriginalObjectKey: base + "/original", MarkdownObjectKey: base}, nil
-}
-
-type failingKey struct{}
-
-func (failingKey) GenerateKeys(ctx context.Context, data storage.KeyGenerationData) (storage.KeyPair, error) {
-	return storage.KeyPair{}, errors.New("failed")
-}
-
 func TestCreateDocumentValidation(t *testing.T) {
-	svc := New(&repoMock{}, &keyMock{}, nil, "", "", "", "", "", "")
+	svc := New(&repoMock{}, nil, "orig", "md", "", "", "", "")
 	_, err := svc.CreateDocument(context.Background(), CreateInput{})
 	require.Error(t, err)
 
-	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a"})
+	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a", UploadObjectKey: "orig/key"})
 	require.Error(t, err)
 
-	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a", ID: "bad-uuid"})
+	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a", ID: "bad-uuid", UploadObjectKey: "orig/key", MarkdownObjectKey: "md/key"})
 	require.Error(t, err)
 
-	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a", Repository: "owner/repo/extra"})
+	_, err = svc.CreateDocument(context.Background(), CreateInput{FileName: "a", Repository: "owner/repo/extra", UploadObjectKey: "orig/key", MarkdownObjectKey: "md/key"})
 	require.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
@@ -160,9 +138,8 @@ func TestCreateDocumentValidation(t *testing.T) {
 
 func TestCreateDocumentSuccess(t *testing.T) {
 	repo := &repoMock{}
-	keys := &keyMock{}
-	svc := New(repo, keys, nil, "orig", "md", "owner", "repo", "main", "main")
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", FilenameExt: "docx", Repository: "owner/repo", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", EntitySpecificPath: "docs/articles/name", BaseBranch: "main"})
+	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "owner/repo", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", EntitySpecificPath: "docs/articles/name", BaseBranch: "main", UploadObjectKey: "docs/articles/name.docx", MarkdownObjectKey: "docs/articles/name.md"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
 	require.Equal(t, doc.ID, doc.WorkflowID)
@@ -171,32 +148,27 @@ func TestCreateDocumentSuccess(t *testing.T) {
 	require.Equal(t, "docs/name.md", doc.Path)
 	require.Equal(t, "orig", doc.OriginalBucket)
 	require.Equal(t, "md", doc.MarkdownBucket)
-	require.Contains(t, doc.OriginalObjectKey, "docs/articles/name")
-	require.Contains(t, doc.MarkdownObjectKey, "docs/articles/name")
+	require.Equal(t, "docs/articles/name.docx", doc.OriginalObjectKey)
+	require.Equal(t, "docs/articles/name.md", doc.MarkdownObjectKey)
 	require.Equal(t, model.StatusUploaded, doc.Status)
 	require.Len(t, doc.Versions, 1)
-	require.Equal(t, doc.ID, keys.lastData.DocumentID)
-	require.Equal(t, "docs/name.md", keys.lastData.Path)
-	require.Equal(t, "docs/publish/name.md", keys.lastData.PublishPath)
-	require.Equal(t, "docs/articles/name", keys.lastData.EntitySpecificPath)
 	require.Equal(t, "owner", doc.Owner)
 }
 
 func TestCreateDocumentSplitsOwnerFromRepository(t *testing.T) {
 	repo := &repoMock{}
-	keys := &keyMock{}
-	svc := New(repo, keys, nil, "orig", "md", "", "", "main", "main")
+	svc := New(repo, nil, "orig", "md", "", "", "main", "main")
 
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "team/docs", Branch: "dev"})
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "team/docs", Branch: "dev", UploadObjectKey: "team/docs/name.docx", MarkdownObjectKey: "team/docs/name.md"})
 	require.NoError(t, err)
 	require.Equal(t, "team", doc.Owner)
 	require.Equal(t, "docs", doc.Repository)
 }
 
 func TestCreateDocumentRejectsConflictingOwner(t *testing.T) {
-	svc := New(&repoMock{}, &keyMock{}, nil, "orig", "md", "default-owner", "repo", "main", "main")
+	svc := New(&repoMock{}, nil, "orig", "md", "default-owner", "repo", "main", "main")
 
-	_, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Owner: "other", Repository: "owner/repo"})
+	_, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Owner: "other", Repository: "owner/repo", UploadObjectKey: "orig/name.docx", MarkdownObjectKey: "md/name.md"})
 	require.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok)
@@ -205,10 +177,10 @@ func TestCreateDocumentRejectsConflictingOwner(t *testing.T) {
 
 func TestCreateDocumentRespectsProvidedID(t *testing.T) {
 	repo := &repoMock{}
-	svc := New(repo, &keyMock{}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
 	existingID := uuid.NewString()
 
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{ID: existingID, FileName: "name", FilenameExt: "docx", Owner: "owner"})
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{ID: existingID, FileName: "name", Owner: "owner", UploadObjectKey: "orig/doc.docx", MarkdownObjectKey: "orig/doc.md"})
 	require.NoError(t, err)
 	require.Equal(t, existingID, doc.ID)
 	require.Equal(t, existingID, doc.WorkflowID)
@@ -216,7 +188,7 @@ func TestCreateDocumentRespectsProvidedID(t *testing.T) {
 
 func TestConfirmUploadEnqueuesStoreOriginalJob(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
-	svc := New(repo, &keyMock{}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
 
 	_, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
@@ -230,7 +202,7 @@ func TestConfirmUploadEnqueuesStoreOriginalJob(t *testing.T) {
 func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
 	doc := &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded}
 	repo := &repoMock{doc: doc}
-	svc := New(repo, &keyMock{}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
 
 	returned, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
@@ -239,14 +211,14 @@ func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
 }
 
 func TestUpdateStatusValidation(t *testing.T) {
-	svc := New(&repoMock{doc: &model.Document{ID: uuid.NewString()}}, &keyMock{}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(&repoMock{doc: &model.Document{ID: uuid.NewString()}}, nil, "orig", "md", "owner", "repo", "main", "main")
 	_, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: "bad", Status: model.StatusFailed})
 	require.Error(t, err)
 }
 
 func TestUpdateStatusDelegates(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
-	svc := New(repo, &keyMock{}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
 	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusStoredOriginal})
 	require.NoError(t, err)
 	require.Equal(t, model.StatusStoredOriginal, doc.Status)
@@ -255,16 +227,10 @@ func TestUpdateStatusDelegates(t *testing.T) {
 
 func TestUpdateStatusSavesErrorReason(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
-	svc := New(repo, &keyMock{}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
 
 	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusFailed, Reason: "boom"})
 	require.NoError(t, err)
 	require.Equal(t, "boom", repo.savedError)
 	require.Equal(t, "boom", doc.ErrorReason)
-}
-
-func TestCreateDocumentKeyFailure(t *testing.T) {
-	svc := New(&repoMock{}, failingKey{}, nil, "a", "b", "owner", "repo", "main", "main")
-	_, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name"})
-	require.Error(t, err)
 }

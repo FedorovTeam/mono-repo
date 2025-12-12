@@ -47,16 +47,18 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	}
 
 	req := &pb.CreateDocumentRequest{
-		Id:              documentID,
-		FileName:        input.FileName,
-		Repository:      repo,
-		RepositoryOwner: "",
-		Branch:          input.Branch,
-		Path:            input.Path,
-		CorrelationId:   correlationID,
-		ContentLength:   int64(input.FileSizeBytes),
-		UploadBucket:    uploadURL.GetBucket(),
-		UploadObjectKey: uploadURL.GetObjectKey(),
+		Id:                documentID,
+		FileName:          input.FileName,
+		Repository:        repo,
+		RepositoryOwner:   "",
+		Branch:            input.Branch,
+		Path:              input.Path,
+		CorrelationId:     correlationID,
+		ContentLength:     int64(input.FileSizeBytes),
+		UploadBucket:      uploadURL.GetBucket(),
+		UploadObjectKey:   uploadURL.GetObjectKey(),
+		MarkdownBucket:    uploadURL.GetMarkdownBucket(),
+		MarkdownObjectKey: uploadURL.GetMarkdownObjectKey(),
 	}
 
 	if owner != nil {

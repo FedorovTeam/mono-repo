@@ -72,7 +72,7 @@ func main() {
 	observability.ConfigureProviders(observabilityCfg)
 	serverOptions := observability.GRPCServerOptions(observabilityCfg, correlationLoggingInterceptor())
 	grpcServer := grpc.NewServer(serverOptions...)
-	storagev1.RegisterStorageServiceServer(grpcServer, grpcserver.New(minioAPI, keyGenerator, cfg.Minio.Buckets.KnowledgeDocx, storageService))
+	storagev1.RegisterStorageServiceServer(grpcServer, grpcserver.New(minioAPI, keyGenerator, cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD, storageService))
 
 	listener, err := net.Listen("tcp", cfg.Service.GRPCPort)
 	if err != nil {
