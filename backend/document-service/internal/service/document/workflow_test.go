@@ -100,6 +100,8 @@ func (f *fakeRepo) ActiveJob(ctx context.Context, documentID string) (*domain.Pr
 	return nil, nil
 }
 
+func (f *fakeRepo) AddJobEvent(context.Context, *domain.JobEvent) error { return nil }
+
 func (f *fakeRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]domain.ProcessingJob, error) {
 	return nil, nil
 }

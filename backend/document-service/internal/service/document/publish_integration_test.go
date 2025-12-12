@@ -157,6 +157,8 @@ func (r *integrationRepo) ActiveJob(ctx context.Context, documentID string) (*do
 	return nil, nil
 }
 
+func (r *integrationRepo) AddJobEvent(context.Context, *domain.JobEvent) error { return nil }
+
 func (r *integrationRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]domain.ProcessingJob, error) {
 	return nil, nil
 }

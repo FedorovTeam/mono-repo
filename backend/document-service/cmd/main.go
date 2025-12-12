@@ -14,7 +14,7 @@ import (
 	"backend-document-service/internal/config"
 	"backend-document-service/internal/domain"
 	"backend-document-service/internal/grpcdial"
-	"backend-document-service/internal/infrastructure/persistence"
+	"backend-document-service/internal/infra/postgres"
 	storagestore "backend-document-service/internal/infrastructure/storage"
 	"backend-document-service/internal/observability"
 	docservice "backend-document-service/internal/service/document"
@@ -73,7 +73,7 @@ func main() {
 		return
 	}
 
-	repo := persistence.NewDocumentRepository(db)
+	repo := postgres.New(db)
 	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)

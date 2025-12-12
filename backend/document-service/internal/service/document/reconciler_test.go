@@ -52,6 +52,8 @@ func (r *repoStub) CountStatusLogsWithReasonPrefix(context.Context, string, doma
 	return 0, nil
 }
 
+func (r *repoStub) AddJobEvent(context.Context, *domain.JobEvent) error { return nil }
+
 func (r *repoStub) LastNonFailedStatus(context.Context, string) (domain.DocumentStatus, error) {
 	return domain.DocumentStatus(""), nil
 }

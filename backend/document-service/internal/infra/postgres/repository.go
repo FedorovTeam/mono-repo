@@ -1,4 +1,4 @@
-package repository
+package postgres
 
 import (
 	"context"
@@ -16,6 +16,33 @@ import (
 
 type Repository struct {
 	db *sql.DB
+}
+
+// AddJobEvent добавляет запись о событии фоновой задачи.
+func (r *Repository) AddJobEvent(ctx context.Context, event *domain.JobEvent) error {
+	if event == nil {
+		return errors.New("event is required")
+	}
+	if event.ID == "" {
+		event.ID = uuid.NewString()
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	if event.Payload == nil {
+		event.Payload = map[string]any{}
+	}
+
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return err
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+        INSERT INTO job_events (id, job_id, stage, status, event_type, message, payload, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `, event.ID, event.JobID, event.Stage, event.Status, event.EventType, event.Message, payload, event.CreatedAt)
+	return err
 }
 
 func New(db *sql.DB) *Repository {
