@@ -6,6 +6,13 @@ events:
   upload_bucket: "knowledge-original"
   webhook_arn: "arn:minio:sqs::storage-webhook:webhook"
 
+processing:
+  dsn: "postgres://user:pass@postgres:5432/processing"
+  stage: "store_original"
+  poll_interval_seconds: 5
+  max_attempts: 5
+  backoff_seconds: 10
+
 observability:
   enable_metrics: false
   enable_traces: false

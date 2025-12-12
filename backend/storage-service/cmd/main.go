@@ -24,6 +24,9 @@ func main() {
 		log.Fatal("не удалось загрузить конфигурацию storage-service")
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	uploadBucket := cfg.Events.UploadBucket
 	if uploadBucket == "" {
 		uploadBucket = cfg.Minio.Buckets.KnowledgeDocx
@@ -37,7 +40,6 @@ func main() {
 		buckets = append(buckets, uploadBucket)
 	}
 
-	ctx := context.Background()
 	minioAPI, err := storage.NewMinioClient(ctx, storage.MinioClientConfig{
 		Endpoint:  cfg.Minio.Endpoint,
 		AccessKey: cfg.Minio.AccessKey,
@@ -52,6 +54,12 @@ func main() {
 	if err := storage.ConfigureUploadNotification(ctx, minioAPI, uploadBucket, cfg.Events.WebhookArn); err != nil {
 		log.Fatalf("не удалось настроить webhook уведомления: %v", err)
 	}
+
+	workerPool, err := startProcessingWorker(ctx, cfg.Processing)
+	if err != nil {
+		log.Fatalf("не удалось запустить воркер обработки задач: %v", err)
+	}
+	defer workerPool.Close()
 
 	keyGenerator := storage.NewObjectKeyGenerator(nil)
 	storageService := storage.NewService(
@@ -78,9 +86,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("не удалось открыть порт %s: %v", cfg.Service.GRPCPort, err)
 	}
-
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		<-ctx.Done()

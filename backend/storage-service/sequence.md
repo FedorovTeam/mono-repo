@@ -3,11 +3,13 @@
 ```mermaid
 sequenceDiagram
     participant Client as Клиент / Gateway
-    participant Storage as StorageService (gRPC)
+    participant Storage as StorageService (gRPC + worker)
+    participant Postgres as PostgreSQL
     participant MinIO
     participant Events as Webhook/Queue Target
 
     Note over Storage,MinIO: При старте: загрузка config.yaml → NewMinioClient(инициализация knowledge-original, knowledge-md, uploadBucket)
+    Note over Storage,Postgres: Запуск in-process воркера: подключение processing.dsn, poll processing_jobs(stage)
     Storage->>MinIO: Проверка/создание обязательных бакетов
     MinIO-->>Storage: OK
     Note over Storage,MinIO: ConfigureUploadNotification(UploadBucket, WebhookArn)
