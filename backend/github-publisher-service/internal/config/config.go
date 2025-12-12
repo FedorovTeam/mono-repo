@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,6 +16,7 @@ type Config struct {
 	GitHub        GitHubConfig        `yaml:"github"`
 	Minio         MinioConfig         `yaml:"minio"`
 	Observability ObservabilityConfig `yaml:"observability"`
+	Processing    ProcessingConfig    `yaml:"processing"`
 }
 
 // ServiceConfig содержит основные параметры запуска.
@@ -41,6 +43,15 @@ type MinioConfig struct {
 	AccessKey string `yaml:"access_key"`
 	SecretKey string `yaml:"secret_key"`
 	Secure    bool   `yaml:"secure"`
+}
+
+// ProcessingConfig описывает подключение и параметры воркера, который двигает задачи публикации.
+type ProcessingConfig struct {
+	DSN          string        `yaml:"dsn"`
+	Stage        string        `yaml:"stage"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+	MaxAttempts  int           `yaml:"max_attempts"`
+	Backoff      time.Duration `yaml:"backoff"`
 }
 
 // ObservabilityConfig описывает настройки телеметрии.
@@ -84,6 +95,19 @@ func Load() (*Config, error) {
 		cfg.Observability.MetricsEnabled = true
 		cfg.Observability.TracesEnabled = true
 		cfg.Observability.LogsEnabled = true
+	}
+
+	if cfg.Processing.Stage == "" {
+		cfg.Processing.Stage = "publish_to_github"
+	}
+	if cfg.Processing.PollInterval <= 0 {
+		cfg.Processing.PollInterval = 5 * time.Second
+	}
+	if cfg.Processing.MaxAttempts <= 0 {
+		cfg.Processing.MaxAttempts = 3
+	}
+	if cfg.Processing.Backoff <= 0 {
+		cfg.Processing.Backoff = 5 * time.Second
 	}
 
 	return &cfg, nil

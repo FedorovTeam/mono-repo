@@ -1,15 +1,24 @@
-package main
+package worker
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
-	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Config описывает параметры фонового воркера публикации.
+type Config struct {
+	DSN          string        `yaml:"dsn"`
+	Stage        string        `yaml:"stage"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+	MaxAttempts  int           `yaml:"max_attempts"`
+	Backoff      time.Duration `yaml:"backoff"`
+}
 
 type job struct {
 	TaskID     string
@@ -21,7 +30,8 @@ type job struct {
 	Payload    map[string]any
 }
 
-type worker struct {
+// Worker обрабатывает задания публикации документов в GitHub.
+type Worker struct {
 	pool         *pgxpool.Pool
 	pollInterval time.Duration
 	maxAttempts  int
@@ -29,20 +39,55 @@ type worker struct {
 	stage        string
 }
 
-func newWorker(pool *pgxpool.Pool, stage string, poll time.Duration, maxAttempts int, backoff time.Duration) *worker {
+// New создаёт воркер и соединение с БД.
+func New(ctx context.Context, cfg Config) (*Worker, error) {
+	if cfg.DSN == "" {
+		return nil, errors.New("processing.dsn is required")
+	}
+
+	stage := cfg.Stage
+	if stage == "" {
+		stage = "publish_to_github"
+	}
+
+	poll := cfg.PollInterval
 	if poll <= 0 {
 		poll = 5 * time.Second
 	}
+
+	maxAttempts := cfg.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 3
 	}
+
+	backoff := cfg.Backoff
 	if backoff <= 0 {
 		backoff = 5 * time.Second
 	}
-	return &worker{pool: pool, pollInterval: poll, maxAttempts: maxAttempts, backoff: backoff, stage: stage}
+
+	pool, err := pgxpool.New(ctx, cfg.DSN)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Worker{
+		pool:         pool,
+		pollInterval: poll,
+		maxAttempts:  maxAttempts,
+		backoff:      backoff,
+		stage:        stage,
+	}, nil
 }
 
-func (w *worker) run(ctx context.Context) {
+// Close освобождает ресурсы пула соединений.
+func (w *Worker) Close() {
+	if w.pool != nil {
+		w.pool.Close()
+	}
+}
+
+// Run запускает бесконечный цикл обработки заданий.
+func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 
@@ -58,8 +103,14 @@ func (w *worker) run(ctx context.Context) {
 	}
 }
 
-func (w *worker) processLoop(ctx context.Context) {
+func (w *Worker) processLoop(ctx context.Context) {
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 		if err != nil {
 			log.Printf("worker: begin tx: %v", err)
@@ -69,7 +120,7 @@ func (w *worker) processLoop(ctx context.Context) {
 		job, err := w.selectJob(ctx, tx)
 		if err != nil {
 			tx.Rollback(ctx)
-			if err == pgx.ErrNoRows {
+			if errors.Is(err, pgx.ErrNoRows) {
 				return
 			}
 			log.Printf("worker: select job: %v", err)
@@ -88,7 +139,7 @@ func (w *worker) processLoop(ctx context.Context) {
 	}
 }
 
-func (w *worker) selectJob(ctx context.Context, tx pgx.Tx) (*job, error) {
+func (w *Worker) selectJob(ctx context.Context, tx pgx.Tx) (*job, error) {
 	row := tx.QueryRow(ctx, `
         SELECT task_id, document_id, stage, status, attempts, next_run_at, payload
         FROM processing_jobs
@@ -108,7 +159,7 @@ func (w *worker) selectJob(ctx context.Context, tx pgx.Tx) (*job, error) {
 	return j, nil
 }
 
-func (w *worker) handleJob(ctx context.Context, tx pgx.Tx, j *job) error {
+func (w *Worker) handleJob(ctx context.Context, tx pgx.Tx, j *job) error {
 	if _, err := tx.Exec(ctx, `UPDATE processing_jobs SET status='in_progress', updated_at=now() WHERE task_id=$1`, j.TaskID); err != nil {
 		return err
 	}
@@ -127,7 +178,7 @@ func (w *worker) handleJob(ctx context.Context, tx pgx.Tx, j *job) error {
 	return w.insertEvent(ctx, tx, j.TaskID, "completed", "completed", "published to github")
 }
 
-func (w *worker) failJob(ctx context.Context, tx pgx.Tx, j *job, reason error) error {
+func (w *Worker) failJob(ctx context.Context, tx pgx.Tx, j *job, reason error) error {
 	j.Attempts++
 	status := "pending"
 	nextRun := time.Now().Add(time.Duration(j.Attempts) * w.backoff)
@@ -157,7 +208,7 @@ func (w *worker) failJob(ctx context.Context, tx pgx.Tx, j *job, reason error) e
 	return nil
 }
 
-func (w *worker) markDocument(ctx context.Context, tx pgx.Tx, documentID, status string, payload map[string]any) error {
+func (w *Worker) markDocument(ctx context.Context, tx pgx.Tx, documentID, status string, payload map[string]any) error {
 	_, err := tx.Exec(ctx, `
         UPDATE documents
         SET status=$1, actual_status=$1, error_reason='', updated_at=now()
@@ -175,35 +226,10 @@ func (w *worker) markDocument(ctx context.Context, tx pgx.Tx, documentID, status
 	return err
 }
 
-func (w *worker) insertEvent(ctx context.Context, tx pgx.Tx, jobID, status, eventType, message string) error {
+func (w *Worker) insertEvent(ctx context.Context, tx pgx.Tx, jobID, status, eventType, message string) error {
 	_, err := tx.Exec(ctx, `
         INSERT INTO job_events (id, job_id, stage, status, event_type, message, payload, created_at)
         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, '{}'::jsonb, now())
     `, jobID, w.stage, status, eventType, message)
 	return err
-}
-
-func main() {
-	dsn := os.Getenv("PROCESSING_DSN")
-	if dsn == "" {
-		log.Fatal("PROCESSING_DSN is required")
-	}
-
-	stage := os.Getenv("PROCESSING_STAGE")
-	if stage == "" {
-		stage = "publish_to_github"
-	}
-
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		log.Fatalf("connect db: %v", err)
-	}
-	defer pool.Close()
-
-	w := newWorker(pool, stage, 5*time.Second, 5, 10*time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	log.Printf("starting processing worker for stage=%s", stage)
-	w.run(ctx)
 }
