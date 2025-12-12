@@ -1,11 +1,11 @@
 package graph
 
 import (
+	"backend-gateway-service/pkg/ctxutils"
 	"context"
 	"errors"
 
 	"backend-gateway-service/graph/model"
-	"backend-gateway-service/internal/ctxutils"
 	"backend-gateway-service/internal/domain"
 )
 

@@ -1,12 +1,12 @@
 package document
 
 import (
+	"backend-gateway-service/pkg/ctxutils"
 	"context"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"backend-gateway-service/internal/ctxutils"
 	pb "backend-gateway-service/proto/backend/document/v1"
 )
 

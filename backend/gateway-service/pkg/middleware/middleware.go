@@ -1,12 +1,11 @@
 package middleware
 
 import (
+	"backend-gateway-service/pkg/ctxutils"
 	"net/http"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
-
-	"backend-gateway-service/internal/ctxutils"
 )
 
 // CorrelationIDMiddleware добавляет correlation-id в контекст и логи.

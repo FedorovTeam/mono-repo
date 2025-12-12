@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"backend-gateway-service/pkg/ctxutils"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"path"
 	"strings"
 
-	"backend-gateway-service/internal/ctxutils"
 	"backend-gateway-service/internal/domain"
 )
 

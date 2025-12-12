@@ -1,6 +1,10 @@
 package server
 
 import (
+	"backend-gateway-service/pkg/grpcdial"
+	"backend-gateway-service/pkg/logging"
+	"backend-gateway-service/pkg/middleware"
+	"backend-gateway-service/pkg/observability"
 	"context"
 	"fmt"
 	"net/http"
@@ -17,13 +21,9 @@ import (
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/internal/config"
 	"backend-gateway-service/internal/domain"
-	"backend-gateway-service/internal/grpcdial"
 	docclient "backend-gateway-service/internal/infrastructure/clients/document"
 	storageclient "backend-gateway-service/internal/infrastructure/clients/storage"
 	"backend-gateway-service/internal/infrastructure/webhook"
-	"backend-gateway-service/internal/logging"
-	"backend-gateway-service/internal/middleware"
-	"backend-gateway-service/internal/observability"
 	"backend-gateway-service/internal/usecase"
 )
 

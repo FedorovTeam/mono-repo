@@ -1,11 +1,11 @@
 package middleware
 
 import (
+	"backend-gateway-service/pkg/ctxutils"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"backend-gateway-service/internal/ctxutils"
 	"go.uber.org/zap"
 )
 

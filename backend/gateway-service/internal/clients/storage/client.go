@@ -1,12 +1,12 @@
 package storage
 
 import (
+	"backend-gateway-service/pkg/ctxutils"
 	"context"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
-	"backend-gateway-service/internal/ctxutils"
 	storagepb "backend-gateway-service/proto/backend/storage/v1"
 )
 

@@ -8,9 +8,9 @@ package graph
 import (
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/graph/model"
-	"backend-gateway-service/internal/ctxutils"
 	"backend-gateway-service/internal/domain"
 	"backend-gateway-service/internal/usecase"
+	"backend-gateway-service/pkg/ctxutils"
 	"context"
 )
 

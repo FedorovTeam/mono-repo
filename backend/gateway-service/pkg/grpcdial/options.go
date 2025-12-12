@@ -1,6 +1,7 @@
 package grpcdial
 
 import (
+	"backend-gateway-service/pkg/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
@@ -8,7 +9,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"backend-gateway-service/internal/config"
-	"backend-gateway-service/internal/observability"
 )
 
 // DefaultOptions подготавливает общий набор опций для gRPC Dial с учётом конфигурации.

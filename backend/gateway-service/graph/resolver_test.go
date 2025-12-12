@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"backend-gateway-service/pkg/ctxutils"
 	"context"
 	"errors"
 	"testing"
@@ -8,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"backend-gateway-service/graph/model"
-	"backend-gateway-service/internal/ctxutils"
 	"backend-gateway-service/internal/domain"
 	"backend-gateway-service/internal/usecase"
 )

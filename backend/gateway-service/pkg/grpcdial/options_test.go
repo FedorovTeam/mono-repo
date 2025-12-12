@@ -1,6 +1,7 @@
 package grpcdial
 
 import (
+	"backend-gateway-service/pkg/observability"
 	"context"
 	"net"
 	"reflect"
@@ -12,7 +13,6 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"backend-gateway-service/internal/config"
-	"backend-gateway-service/internal/observability"
 )
 
 func TestDefaultOptionsIncludesConnectionSettings(t *testing.T) {
