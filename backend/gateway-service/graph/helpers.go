@@ -1,12 +1,14 @@
 package graph
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"backend-gateway-service/graph/model"
+	"backend-gateway-service/internal/ctxutils"
 	pb "backend-gateway-service/proto/backend/document/v1"
 )
 
@@ -152,4 +154,12 @@ func paginationParams(p *model.Pagination) (limit int, offset int) {
 		}
 	}
 	return
+}
+
+func requireAPIKey(ctx context.Context) (string, error) {
+	apiKey := ctxutils.APIKey(ctx)
+	if apiKey == "" {
+		return "", errors.New("missing api key for public mutation")
+	}
+	return apiKey, nil
 }

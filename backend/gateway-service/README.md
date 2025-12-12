@@ -7,7 +7,7 @@
 - Чтение статусов через запросы `knowledgeDocument` и `knowledgeDocuments`.
 - Валидация размера/расширения и прокладка `correlation-id` в логи и метаданные gRPC/Temporal/MinIO.
 - Подключение метрик и трейсинга (OTLP exporter), отдача `X-Correlation-ID` в ответах.
-- Проверка API-ключа, заданного в конфигурации.
+- Проверка API-ключа, заданного в конфигурации (мутации требуют `X-API-Key`).
 - Приём webhook уведомлений MinIO (`/internal/storage/uploaded`) и передача `ConfirmUpload` в document-service для запуска Workflow.
 
 ## Внешние зависимости
@@ -19,6 +19,40 @@
 - **OTLP endpoint/collector** — приём трассировок и метрик от gateway.
 
 gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds` и возвращает bucket/object_key/TTL + presigned PUT URL. Корреляционный идентификатор пробрасывается в заголовок `x-amz-meta-correlation-id`, чтобы MinIO сохранил его в метаданных объекта.
+
+## GraphQL API
+### Схема (фрагмент)
+- `mutation uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!` — выдаёт `uploadUrl`/`uploadMethod` и создаёт запись в document-service.
+- `mutation retryProcessing(documentId: ID!): KnowledgeDocument!` — повторно инициирует цепочку обработки документа.
+- `query knowledgeDocument(id: ID!): KnowledgeDocument` — возвращает статус по идентификатору.
+- `query knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!` — список документов с фильтрами.
+
+Все публичные мутации требуют заголовок `X-API-Key`, а `X-Correlation-ID` (необязательный) прокидывается в gRPC-метаданные `document-service`/`storage-service` и возвращается в ответе.
+
+### Примеры запросов
+```bash
+API_KEY=secret
+ENDPOINT=http://localhost:8080/query
+
+curl -X POST "$ENDPOINT" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-Correlation-ID: demo-corr" \
+  -d '{
+    "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
+    "variables": {"input": {"fileName":"demo.docx","fileSizeBytes":1024,"repository":"org/repo","branch":"main","path":"docs/demo.md"}}
+  }'
+
+curl -X POST "$ENDPOINT" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"query": "mutation { retryProcessing(documentId: \"<id>\"){ id status } }"}'
+
+curl -X POST "$ENDPOINT" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"query": "{ knowledgeDocuments(pagination:{limit:5,offset:0}){ nodes { id status fileName } totalCount } }"}'
+```
 
 ## Конфигурация
 Файл `config/config.yaml` обязателен к заполнению (читается по `CONFIG_PATH`). Ключевые поля по умолчанию используют DNS-имена в формате `<context>.backend.svc.cluster.local`:
