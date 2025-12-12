@@ -97,15 +97,6 @@ func main() {
 		repo,
 		transformerClient,
 		publisherClient,
-		cfg.Github.Owner,
-		cfg.Github.Repository,
-		cfg.Github.Branch,
-		cfg.Github.BaseBranch,
-		docservice.RetryPolicy{
-			InitialBackoff: cfg.GithubRetryer.InitialBackoff,
-			MaxBackoff:     cfg.GithubRetryer.MaxBackoff,
-			MaxAttempts:    cfg.GithubRetryer.MaxAttempts,
-		},
 	)
 
 	service := docservice.New(
@@ -120,11 +111,6 @@ func main() {
 		cfg.Github.BaseBranch,
 	)
 
-	publishRetryCfg := &docservice.PublishRetryConfig{
-		InitialBackoff: cfg.GithubRetryer.InitialBackoff,
-		MaxBackoff:     cfg.GithubRetryer.MaxBackoff,
-	}
-
 	reconciler := docservice.NewUploadReconciler(
 		repo,
 		service,
@@ -134,24 +120,13 @@ func main() {
 
 	go reconciler.Run(ctx, cfg.Reconciler.Interval)
 
-	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, nil)
-	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, nil)
-	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, publishRetryCfg)
+	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 
 	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
 	go convertWorker.Run(ctx, cfg.StageWorker.Interval)
 	go publishWorker.Run(ctx, cfg.StageWorker.Interval)
-
-	githubRetrier := docservice.NewPublishRetrier(
-		repo,
-		activities,
-		cfg.GithubRetryer.BatchSize,
-		cfg.GithubRetryer.MaxAttempts,
-		cfg.GithubRetryer.InitialBackoff,
-		cfg.GithubRetryer.MaxBackoff,
-	)
-
-	go githubRetrier.Run(ctx, cfg.GithubRetryer.Interval)
 
 	jobFollower := docservice.NewJobFollower(
 		repo,

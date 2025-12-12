@@ -35,7 +35,7 @@ Document-service сам не генерирует ключи и не вызыв�
 - `postgres.dsn` — строка подключения к PostgreSQL.
 - `storage.original_bucket` / `storage.markdown_bucket` — бакеты, которые возвращает `storage-service` при загрузке оригинала и Markdown.
 - `reconciler.interval` / `reconciler.batch_size` / `reconciler.min_uploaded_age` — периодичность и размер выборки задач для подтверждения загрузок, минимальный возраст загруженного объекта перед повторной проверкой (проверка выполняется через `storage-service.GetObject`).
-- `github_retryer.interval` / `github_retryer.batch_size` / `github_retryer.max_attempts` / `github_retryer.initial_backoff` / `github_retryer.max_backoff` — параметры крон-ретраев публикации в GitHub.
+- Повторы публикации и backoff на стороне GitHub выполняет сам `github-publisher-service` согласно переданному `retry_policy` или собственной конфигурации; document-service лишь фиксирует статусы и `retry_after`, не рассчитывая задержки самостоятельно.
 - `job_follower.interval` / `job_follower.batch_size` / `job_follower.reschedule_after` — периодичность чтения завершённых задач и задержка перед повторным запуском следующей стадии.
  - `services.storage_service` — `storage.backend.svc.cluster.local:50052`, `services.transformer_service` — `docling-transformer-service.docling-transformer-service.svc.cluster.local:9090` (gRPC `ConvertDocumentToMarkdown`/`ConvertDocxToMarkdown`), `services.github_publisher_service` — `github-publisher.backend.svc.cluster.local:9090`.
 - `services.grpc` — общие параметры подключения к gRPC клиентам: `dial_timeout` для `grpc.WithBlock`, `min_connect_timeout` и `backoff` для `grpc.WithConnectParams`, `keepalive` для `grpc.WithKeepaliveParams` (все значения задаются в формате `time.Duration`).

@@ -33,7 +33,6 @@ type Config struct {
 	} `yaml:"github"`
 	Observability Observability `yaml:"observability"`
 	Reconciler    Reconciler    `yaml:"reconciler"`
-	GithubRetryer GithubRetryer `yaml:"github_retryer"`
 	JobFollower   JobFollower   `yaml:"job_follower"`
 	StageWorker   StageWorker   `yaml:"stage_worker"`
 }
@@ -74,14 +73,6 @@ type Reconciler struct {
 	Interval       time.Duration `yaml:"interval"`
 	MinUploadedAge time.Duration `yaml:"min_uploaded_age"`
 	BatchSize      int           `yaml:"batch_size"`
-}
-
-type GithubRetryer struct {
-	Interval       time.Duration `yaml:"interval"`
-	BatchSize      int           `yaml:"batch_size"`
-	MaxAttempts    int           `yaml:"max_attempts"`
-	InitialBackoff time.Duration `yaml:"initial_backoff"`
-	MaxBackoff     time.Duration `yaml:"max_backoff"`
 }
 
 type JobFollower struct {
@@ -129,12 +120,6 @@ func (c *Config) Validate() error {
 
 	if c.Reconciler.Interval <= 0 || c.Reconciler.BatchSize <= 0 {
 		return fmt.Errorf("reconciler.interval and batch_size must be positive")
-	}
-	if c.GithubRetryer.Interval <= 0 || c.GithubRetryer.BatchSize <= 0 {
-		return fmt.Errorf("github_retryer.interval and batch_size must be positive")
-	}
-	if c.GithubRetryer.MaxAttempts <= 0 {
-		return fmt.Errorf("github_retryer.max_attempts must be positive")
 	}
 	if c.JobFollower.Interval <= 0 || c.JobFollower.BatchSize <= 0 {
 		return fmt.Errorf("job_follower.interval and batch_size must be positive")

@@ -25,6 +25,11 @@ processing:
   max_attempts: 5
   backoff: 10s
 
+retry:
+  initial_backoff: 5s
+  max_backoff: 30s
+  max_attempts: 3
+
 observability:
   otlp_endpoint: otel-collector:4317
   service_name: github-publisher-service

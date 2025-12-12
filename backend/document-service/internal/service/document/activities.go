@@ -7,16 +7,13 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"backend-document-service/internal/model"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -54,7 +51,6 @@ type publishInput struct {
 	Path              string
 	CreatePR          bool
 	CorrelationID     string
-	Attempt           int
 	IdempotencyKey    string
 }
 
@@ -66,47 +62,17 @@ type convertResult struct {
 	Ready       bool
 }
 
-type RetryPolicy struct {
-	InitialBackoff time.Duration
-	MaxBackoff     time.Duration
-	MaxAttempts    int
-}
-
-func (p RetryPolicy) toProto() *githubpublisherv1.RetryPolicy {
-	if p.InitialBackoff <= 0 || p.MaxBackoff <= 0 {
-		return nil
-	}
-	policy := &githubpublisherv1.RetryPolicy{
-		InitialBackoff: durationpb.New(p.InitialBackoff),
-		MaxBackoff:     durationpb.New(p.MaxBackoff),
-	}
-	if p.MaxAttempts > 0 {
-		policy.MaxAttempts = uint32(p.MaxAttempts)
-	}
-	return policy
-}
-
 type Activities struct {
 	repo        Repository
 	transformer transformerv1.TransformerServiceClient
 	publisher   githubpublisherv1.GithubPublisherServiceClient
-	repoOwner   string
-	repoName    string
-	branch      string
-	baseBranch  string
-	retryPolicy RetryPolicy
 }
 
-func NewActivities(repo Repository, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, repoOwner, repoName, branch, baseBranch string, retryPolicy RetryPolicy) *Activities {
+func NewActivities(repo Repository, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient) *Activities {
 	return &Activities{
 		repo:        repo,
 		transformer: transformerClient,
 		publisher:   publisherClient,
-		repoOwner:   repoOwner,
-		repoName:    repoName,
-		branch:      branch,
-		baseBranch:  baseBranch,
-		retryPolicy: retryPolicy,
 	}
 }
 
@@ -243,30 +209,18 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 	owner := strings.TrimSpace(input.Owner)
 	if owner == "" {
 		owner = doc.Owner
-		if owner == "" {
-			owner = a.repoOwner
-		}
 	}
 	repository := strings.TrimSpace(input.Repository)
 	if repository == "" {
 		repository = doc.Repository
-		if repository == "" {
-			repository = a.repoName
-		}
 	}
 	branch := input.Branch
 	if branch == "" {
 		branch = doc.Branch
-		if branch == "" {
-			branch = a.branch
-		}
 	}
 	baseBranch := input.BaseBranch
 	if baseBranch == "" {
 		baseBranch = doc.BaseBranch
-		if baseBranch == "" {
-			baseBranch = a.baseBranch
-		}
 	}
 	if baseBranch == "" {
 		baseBranch = branch
@@ -281,16 +235,6 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		correlationID = correlationIDFromContext(ctx)
 	}
 
-	commitMessage := input.DocumentName
-	if commitMessage == "" {
-		commitMessage = path
-	}
-
-	if owner == "" || repository == "" {
-		reason := "owner and repository are required"
-		_ = a.fail(ctx, input.DocumentID, reason)
-		return nil, fmt.Errorf("%s", reason)
-	}
 	markdownBucket := input.MarkdownBucket
 	if markdownBucket == "" {
 		markdownBucket = doc.MarkdownBucket
@@ -318,14 +262,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		Branch:         branch,
 		BaseBranch:     baseBranch,
 		Path:           repoPath,
-		CommitMessage:  commitMessage,
 		Bucket:         markdownBucket,
 		ObjectKey:      markdownObjectKey,
 		CreatePr:       input.CreatePR,
 		CorrelationId:  correlationID,
-		Attempt:        uint32(input.Attempt),
 		IdempotencyKey: input.IdempotencyKey,
-		RetryPolicy:    a.retryPolicy.toProto(),
 	}
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)

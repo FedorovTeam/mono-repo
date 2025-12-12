@@ -112,8 +112,8 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	publisher := staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc123"}}
-	activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
-	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second, &PublishRetryConfig{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, nil, publisher)
+	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second)
 
 	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub})
 
@@ -151,8 +151,8 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 		ErrorMessage: "timeout",
 		RetryAfter:   retryAfter,
 	}}
-	activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
-	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second, &PublishRetryConfig{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, nil, publisher)
+	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second)
 
 	start := time.Now()
 	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub})

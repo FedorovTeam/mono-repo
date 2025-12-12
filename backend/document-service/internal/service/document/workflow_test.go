@@ -159,7 +159,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{doc: &model.Document{ID: "doc-1", Status: model.StatusStoredOriginal, Versions: []model.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: string(model.StatusConvertedToMarkdown), MarkdownObjectKey: "md-key"}}
 
-	activities := NewActivities(repo, transformer, fakePublisher{}, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, transformer, fakePublisher{})
 
 	result, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        "doc-1",
@@ -227,7 +227,7 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 		Versions:          []model.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/doc-1.docx", MarkdownObjectKey: "md/doc-1.md"}},
 	}
 	repo := &fakeRepo{doc: doc}
-	activities := NewActivities(repo, nil, nil, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, nil, nil)
 
 	if err := activities.MarkStoredOriginal(context.Background(), doc.ID); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -242,7 +242,7 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	repo := &fakeRepo{doc: &model.Document{ID: "doc-2", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: model.StatusStoredOriginal}}
 	publisher := &trackingPublisher{}
 
-	activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
+	activities := NewActivities(repo, nil, publisher)
 
 	_, err := activities.PublishMarkdown(context.Background(), publishInput{
 		DocumentID:        "doc-2",
