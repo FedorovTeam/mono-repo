@@ -54,7 +54,7 @@ sequenceDiagram
     end
 
     Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service с idempotency_key и correlation-id
-    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, branch/base_branch, path, create_pr, idempotency_key, correlation-id)
+    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, branch/base_branch, path, commit_message, author_*, pr_*, create_pr, idempotency_key, correlation-id)
     GP-->>SW: status + commit_sha/pr + retry_after + idempotency_hit
     alt success
         SW->>S: Activities.PublishMarkdown -> UPDATE document status=PublishedToGitHub (+commit_sha)

@@ -204,6 +204,11 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 	}
 
 	markdownKey := stringFromPayload(job.Payload, "markdown_object_key", resolvedMarkdownKey(doc))
+	commitMessage := stringFromPayload(job.Payload, "commit_message", pickCommitMessage(doc, PublishDefaults{}))
+	authorName := stringFromPayload(job.Payload, "author_name", "")
+	authorEmail := stringFromPayload(job.Payload, "author_email", "")
+	prTitle := stringFromPayload(job.Payload, "pr_title", pickPRTitle(doc, PublishDefaults{}))
+	prBody := stringFromPayload(job.Payload, "pr_body", "")
 
 	input := publishInput{
 		DocumentID:        job.DocumentID,
@@ -217,6 +222,20 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 		MarkdownBucket:    stringFromPayload(job.Payload, "markdown_bucket", doc.MarkdownBucket),
 		MarkdownObjectKey: markdownKey,
 		CorrelationID:     stringFromPayload(job.Payload, "correlation_id", correlationFromDoc(doc)),
+		CommitMessage:     commitMessage,
+		AuthorName:        authorName,
+		AuthorEmail:       authorEmail,
+		PRTitle:           prTitle,
+		PRBody:            prBody,
+	}
+
+	if strings.TrimSpace(input.CommitMessage) == "" {
+		w.failJob(ctx, job, "commit_message is required for publish", nil, nil)
+		return
+	}
+	if strings.TrimSpace(input.AuthorName) == "" || strings.TrimSpace(input.AuthorEmail) == "" {
+		w.failJob(ctx, job, "author_name and author_email are required for publish", nil, nil)
+		return
 	}
 	if input.MarkdownObjectKey != "" {
 		input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", job.DocumentID, input.Branch, input.MarkdownObjectKey)
@@ -232,6 +251,11 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 	job.Payload["base_branch"] = input.BaseBranch
 	job.Payload["github_path"] = input.Path
 	job.Payload["create_pr"] = input.CreatePR
+	job.Payload["commit_message"] = input.CommitMessage
+	job.Payload["pr_title"] = input.PRTitle
+	job.Payload["pr_body"] = input.PRBody
+	job.Payload["author_name"] = input.AuthorName
+	job.Payload["author_email"] = input.AuthorEmail
 	job.Payload["correlation_id"] = input.CorrelationID
 
 	resp, err := w.activities.PublishMarkdown(w.jobContext(ctx, job), input)

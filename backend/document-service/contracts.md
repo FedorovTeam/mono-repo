@@ -61,9 +61,12 @@
   - `repository` — `owner/repo` или `documents.repository`.
   - `branch` — целевая ветка (`documents.branch`).
   - `github_path` — путь в репозитории, равный `documents.path`.
+  - `commit_message` — текст коммита (берётся из конфигурации GitHub блока или формируется из `document.name`).
+  - `author_name`, `author_email` — атрибуты автора коммита/PR (из конфигурации).
 - **Опциональные поля:**
   - `create_pr` — флаг авто‑PR (по умолчанию `documents.create_pr`).
   - `base_branch` — ветка для PR, если отличается от целевой.
+  - `pr_title`, `pr_body` — заголовок и тело PR (при наличии `create_pr=true`).
   - `correlation_id` — прокидывается в GitHub‑клиент и логи.
   - `idempotency_key` — уникальный ключ для идемпотентной публикации.
 - **Пример:**
@@ -76,6 +79,11 @@
     "base_branch": "main",
     "github_path": "knowledge/report.md",
     "create_pr": true,
+    "commit_message": "Обновление документации",
+    "pr_title": "Автообновление документа из document-service",
+    "pr_body": "Этот PR создан сервисом document-service",
+    "author_name": "Document Service",
+    "author_email": "document-service@example.com",
     "correlation_id": "7f3d7c8b-1c3f-4a4c-9f2e-8c6a1e8dbbaf"
   }
   ```

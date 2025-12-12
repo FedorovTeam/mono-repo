@@ -57,7 +57,13 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 		},
 	}
 
-	follower := NewJobFollower(repo, 10, time.Minute)
+	follower := NewJobFollower(repo, 10, time.Minute, PublishDefaults{
+		CommitMessage: "commit message",
+		PRTitle:       "PR title",
+		PRBody:        "PR body",
+		AuthorName:    "Author",
+		AuthorEmail:   "author@example.com",
+	})
 	follower.reconcile(context.Background())
 
 	if len(repo.createdJobs) != 2 {
@@ -77,6 +83,12 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 	if repo.createdJobs[1].Payload["repository"] != "org/repo" {
 		t.Fatalf("unexpected repository in payload: %+v", repo.createdJobs[1].Payload)
 	}
+	if repo.createdJobs[1].Payload["commit_message"] != "commit message" {
+		t.Fatalf("unexpected commit_message in payload: %+v", repo.createdJobs[1].Payload)
+	}
+	if repo.createdJobs[1].Payload["author_email"] != "author@example.com" {
+		t.Fatalf("author fields were not propagated: %+v", repo.createdJobs[1].Payload)
+	}
 }
 
 func TestJobFollowerMarksFailed(t *testing.T) {
@@ -90,7 +102,7 @@ func TestJobFollowerMarksFailed(t *testing.T) {
 		}},
 	}
 
-	follower := NewJobFollower(repo, 10, time.Minute)
+	follower := NewJobFollower(repo, 10, time.Minute, PublishDefaults{})
 	follower.reconcile(context.Background())
 
 	if len(repo.updatedStatus) != 1 || repo.updatedStatus[0] != model.StatusFailed {

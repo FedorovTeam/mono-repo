@@ -137,10 +137,19 @@ func main() {
 	go convertWorker.Run(ctx, cfg.StageWorker.Interval)
 	go publishWorker.Run(ctx, cfg.StageWorker.Interval)
 
+	publishDefaults := docservice.PublishDefaults{
+		CommitMessage: cfg.Github.CommitMessage,
+		PRTitle:       cfg.Github.PRTitle,
+		PRBody:        cfg.Github.PRBody,
+		AuthorName:    cfg.Github.AuthorName,
+		AuthorEmail:   cfg.Github.AuthorEmail,
+	}
+
 	jobFollower := docservice.NewJobFollower(
 		repo,
 		cfg.JobFollower.BatchSize,
 		cfg.JobFollower.RescheduleAfter,
+		publishDefaults,
 	)
 
 	go jobFollower.Run(ctx, cfg.JobFollower.Interval)

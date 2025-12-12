@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"backend-document-service/internal/model"
@@ -17,6 +18,14 @@ type jobFollowerRepo interface {
 	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
 }
 
+type PublishDefaults struct {
+	CommitMessage string
+	PRTitle       string
+	PRBody        string
+	AuthorName    string
+	AuthorEmail   string
+}
+
 // JobFollower читает завершённые задачи из processing_jobs и
 // запускает следующую стадию либо помечает документ как Failed.
 type JobFollower struct {
@@ -25,9 +34,10 @@ type JobFollower struct {
 	postpone  time.Duration
 	logf      func(format string, args ...interface{})
 	metrics   *workerMetrics
+	defaults  PublishDefaults
 }
 
-func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration) *JobFollower {
+func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration, defaults PublishDefaults) *JobFollower {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -41,6 +51,7 @@ func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration)
 		postpone:  postpone,
 		logf:      log.Printf,
 		metrics:   newWorkerMetrics("job_follower"),
+		defaults:  defaults,
 	}
 }
 
@@ -139,6 +150,11 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job model.ProcessingJob,
 			"base_branch":         doc.BaseBranch,
 			"github_path":         doc.Path,
 			"create_pr":           doc.CreatePR,
+			"commit_message":      pickCommitMessage(doc, f.defaults),
+			"pr_title":            pickPRTitle(doc, f.defaults),
+			"pr_body":             f.defaults.PRBody,
+			"author_name":         f.defaults.AuthorName,
+			"author_email":        f.defaults.AuthorEmail,
 			"correlation_id":      correlationFromDoc(doc),
 		}
 		event := &model.JobEvent{EventType: "scheduled", Message: "next stage: publish"}
@@ -160,6 +176,26 @@ func (f *JobFollower) markFailed(ctx context.Context, job model.ProcessingJob, d
 	}
 
 	_, _ = f.repo.UpdateProcessingJob(ctx, job.TaskID, job.Status, nil, false, job.Payload, &model.JobEvent{EventType: "handled", Message: "marked document failed"})
+}
+
+func pickCommitMessage(doc *model.Document, defaults PublishDefaults) string {
+	if defaults.CommitMessage != "" {
+		return defaults.CommitMessage
+	}
+	if doc != nil && strings.TrimSpace(doc.Name) != "" {
+		return fmt.Sprintf("Update %s", doc.Name)
+	}
+	return "Update document"
+}
+
+func pickPRTitle(doc *model.Document, defaults PublishDefaults) string {
+	if defaults.PRTitle != "" {
+		return defaults.PRTitle
+	}
+	if doc != nil {
+		return doc.Name
+	}
+	return ""
 }
 
 func correlationFromDoc(doc *model.Document) string {
