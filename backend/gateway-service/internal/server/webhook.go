@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"backend-gateway-service/internal/ctxutils"
-	documentpb "backend-gateway-service/proto/backend/document/v1"
+	"backend-gateway-service/internal/domain"
 )
 
 func (s *Server) handleStorageNotification(w http.ResponseWriter, r *http.Request) {
@@ -51,11 +51,11 @@ func (s *Server) handleStorageNotification(w http.ResponseWriter, r *http.Reques
 			zap.String("object_key", decodedKey),
 		)
 
-		_, err = s.documentClient.ConfirmUpload(ctx, &documentpb.ConfirmUploadRequest{
-			DocumentId:    documentID,
+		_, err = s.documentClient.ConfirmUpload(ctx, domain.ConfirmUploadRequest{
+			DocumentID:    documentID,
 			Bucket:        record.S3.Bucket.Name,
 			ObjectKey:     decodedKey,
-			CorrelationId: correlationID,
+			CorrelationID: correlationID,
 		})
 		if err != nil {
 			logger.Error("failed to confirm upload", zap.Error(err))

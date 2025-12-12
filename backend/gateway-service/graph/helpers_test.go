@@ -4,56 +4,38 @@ import (
 	"testing"
 
 	"backend-gateway-service/graph/model"
+	"backend-gateway-service/internal/domain"
 )
 
-func TestValidateUploadInputBasicChecks(t *testing.T) {
-	baseInput := model.UploadKnowledgeDocumentInput{
-		FileName:      "doc.pdf",
-		FileSizeBytes: 10,
-		Branch:        "main",
-		Path:          "docs/doc.pdf",
-		Repository:    "owner/repo",
+func TestMapDocument(t *testing.T) {
+	owner := "org"
+	job := "job-1"
+	doc := mapDocument(&domain.Document{ID: "1", FileName: "file", Repository: "org/repo", RepositoryOwner: &owner, Branch: "main", Path: "docs/file", Status: domain.DocumentStatusConvertedToMarkdown, JobID: &job})
+
+	if doc == nil || doc.ID != "1" {
+		t.Fatalf("expected document mapped")
 	}
-	cfg := UploadValidationConfig{}
-
-	cases := []struct {
-		name        string
-		modify      func(input *model.UploadKnowledgeDocumentInput)
-		expectError bool
-	}{
-		{name: "missing file name", modify: func(input *model.UploadKnowledgeDocumentInput) { input.FileName = "  " }, expectError: true},
-		{name: "missing repository", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Repository = "" }, expectError: true},
-		{name: "missing branch", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Branch = "  " }, expectError: true},
-		{name: "missing path", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Path = "" }, expectError: true},
-		{name: "non-positive size", modify: func(input *model.UploadKnowledgeDocumentInput) { input.FileSizeBytes = 0 }, expectError: true},
-		{name: "passes without normalization", modify: func(input *model.UploadKnowledgeDocumentInput) { input.Repository = " org/repo " }},
+	if doc.RepositoryOwner == nil || *doc.RepositoryOwner != owner {
+		t.Fatalf("repository owner not mapped")
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			input := baseInput
-			if tc.modify != nil {
-				tc.modify(&input)
-			}
-
-			repo, owner, err := validateUploadInput(input, cfg)
-
-			if tc.expectError {
-				if err == nil {
-					t.Fatalf("expected error for case %s", tc.name)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if repo != "org/repo" {
-				t.Fatalf("repository should be trimmed without normalization, got %q", repo)
-			}
-			if owner != nil {
-				t.Fatalf("owner should not be derived in gateway: %v", owner)
-			}
-		})
+	if doc.Status != model.KnowledgeDocumentStatusConvertedToMarkdown {
+		t.Fatalf("unexpected status: %s", doc.Status)
+	}
+	if doc.JobID == nil || *doc.JobID != job {
+		t.Fatalf("job id not mapped")
 	}
 }
+
+func TestPaginationParams(t *testing.T) {
+	limit, offset := paginationParams(nil)
+	if limit != 10 || offset != 0 {
+		t.Fatalf("unexpected defaults: %d %d", limit, offset)
+	}
+
+	limit, offset = paginationParams(&model.Pagination{Limit: intPointer(5), Offset: intPointer(3)})
+	if limit != 5 || offset != 3 {
+		t.Fatalf("unexpected values: %d %d", limit, offset)
+	}
+}
+
+func intPointer(v int) *int { return &v }

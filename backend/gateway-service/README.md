@@ -71,7 +71,7 @@ curl -X POST "$ENDPOINT" \
 ## Структура
 - `cmd/server` — точка входа.
 - `graph/` — схема и gqlgen-генерация.
-- `internal/clients` — адаптеры gRPC клиентов document-service и storage-service.
+- `internal/infrastructure/clients` — адаптеры gRPC клиентов document-service и storage-service.
 - `internal/server` — HTTP/GraphQL сервер и middleware.
 - `internal/config` — загрузка конфигурации.
 

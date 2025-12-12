@@ -15,21 +15,25 @@ import (
 
 	"backend-gateway-service/graph"
 	"backend-gateway-service/graph/generated"
-	"backend-gateway-service/internal/clients/document"
-	"backend-gateway-service/internal/clients/storage"
 	"backend-gateway-service/internal/config"
+	"backend-gateway-service/internal/domain"
 	"backend-gateway-service/internal/grpcdial"
+	docclient "backend-gateway-service/internal/infrastructure/clients/document"
+	storageclient "backend-gateway-service/internal/infrastructure/clients/storage"
 	"backend-gateway-service/internal/logging"
 	"backend-gateway-service/internal/middleware"
 	"backend-gateway-service/internal/observability"
+	"backend-gateway-service/internal/usecase"
 )
 
 // Server отвечает за запуск HTTP GraphQL API.
 type Server struct {
 	cfg            config.Config
 	logger         *zap.Logger
-	documentClient document.Client
-	storageClient  storage.Client
+	documentClient domain.DocumentClient
+	storageClient  domain.StorageClient
+	uploadUseCase  usecase.DocumentUploader
+	docUseCase     usecase.DocumentProvider
 	otelProviders  observability.Providers
 	shutdownOTEL   func(context.Context) error
 }
@@ -51,7 +55,7 @@ func New(cfg config.Config) (*Server, error) {
 	docDialCtx, cancelDocDial := context.WithTimeout(context.Background(), cfg.DocumentService.GRPC.DialTimeout)
 	defer cancelDocDial()
 
-	docClient, err := document.NewGRPCClient(docDialCtx, cfg.DocumentService.Address, dialOpts...)
+	docClient, err := docclient.NewGRPCClient(docDialCtx, cfg.DocumentService.Address, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init document client: %w", err)
 	}
@@ -60,16 +64,23 @@ func New(cfg config.Config) (*Server, error) {
 	storageDialCtx, cancelStorageDial := context.WithTimeout(context.Background(), cfg.StorageService.GRPC.DialTimeout)
 	defer cancelStorageDial()
 
-	storageClient, err := storage.NewGRPCClient(storageDialCtx, cfg.StorageService.Address, storageDialOpts...)
+	storageClient, err := storageclient.NewGRPCClient(storageDialCtx, cfg.StorageService.Address, storageDialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init storage client: %w", err)
 	}
+
+	uploadUseCase := usecase.NewUploadService(docClient, storageClient, usecase.UploadConfig{
+		SignedURLTTLSeconds: cfg.Uploads.SignedURLTTLSecond,
+	})
+	docUseCase := usecase.NewDocumentService(docClient)
 
 	return &Server{
 		cfg:            cfg,
 		logger:         logger,
 		documentClient: docClient,
 		storageClient:  storageClient,
+		uploadUseCase:  uploadUseCase,
+		docUseCase:     docUseCase,
 		otelProviders:  providers,
 		shutdownOTEL:   shutdown,
 	}, nil
@@ -83,9 +94,9 @@ func (s *Server) Run(ctx context.Context) error {
 	defer s.logger.Sync()
 
 	gqlHandler := handler.NewDefaultServer(generated.NewExecutableSchema(generated.Config{Resolvers: &graph.Resolver{
-		DocumentClient: s.documentClient,
-		StorageClient:  s.storageClient,
-		Logger:         s.logger,
+		DocumentUploader: s.uploadUseCase,
+		DocumentService:  s.docUseCase,
+		Logger:           s.logger,
 		UploadConfig: graph.UploadValidationConfig{
 			SignedURLTTLSeconds: s.cfg.Uploads.SignedURLTTLSecond,
 		},
