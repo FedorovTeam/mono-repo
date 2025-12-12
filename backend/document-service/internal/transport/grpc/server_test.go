@@ -195,6 +195,10 @@ func (m *memoryRepo) ActiveJob(ctx context.Context, documentID string) (*model.P
 	return nil, nil
 }
 
+func (m *memoryRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+	return nil, nil
+}
+
 func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

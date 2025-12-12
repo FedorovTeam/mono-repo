@@ -157,6 +157,10 @@ func (r *integrationRepo) ActiveJob(ctx context.Context, documentID string) (*mo
 	return nil, nil
 }
 
+func (r *integrationRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+	return nil, nil
+}
+
 type recordingPublisher struct {
 	called   bool
 	lastReq  *githubpublisherv1.PublishMarkdownRequest

@@ -39,6 +39,7 @@ stage_worker:
   interval: 30s
   batch_size: 100
   retry_delay: 1m
+  grace_period: 15s
   wait_markdown: true
 observability:
   logs:

@@ -120,6 +120,15 @@ func main() {
 
 	go reconciler.Run(ctx, cfg.Reconciler.Interval)
 
+	processingReconciler := docservice.NewProcessingReconciler(
+		repo,
+		cfg.StageWorker.BatchSize,
+		cfg.StageWorker.Interval,
+		cfg.StageWorker.GracePeriod,
+	)
+
+	go processingReconciler.Run(ctx, cfg.StageWorker.Interval)
+
 	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
