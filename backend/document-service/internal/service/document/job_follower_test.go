@@ -5,23 +5,23 @@ import (
 	"testing"
 	"time"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 )
 
 type followerRepo struct {
-	jobs          []model.ProcessingJob
-	createdJobs   []model.ProcessingJob
-	updatedStatus []model.Status
+	jobs          []domain.ProcessingJob
+	createdJobs   []domain.ProcessingJob
+	updatedStatus []domain.DocumentStatus
 }
 
-func (r *followerRepo) ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]model.ProcessingJob, error) {
+func (r *followerRepo) ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]domain.ProcessingJob, error) {
 	return r.jobs, nil
 }
 
-func (r *followerRepo) GetDocument(ctx context.Context, id string) (*model.Document, error) {
-	return &model.Document{
+func (r *followerRepo) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
+	return &domain.Document{
 		ID:                id,
-		Status:            model.StatusStoredOriginal,
+		Status:            domain.DocumentStatusStoredOriginal,
 		Owner:             "org",
 		Repository:        "repo",
 		Branch:            "main",
@@ -35,25 +35,25 @@ func (r *followerRepo) GetDocument(ctx context.Context, id string) (*model.Docum
 	}, nil
 }
 
-func (r *followerRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *followerRepo) CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	r.createdJobs = append(r.createdJobs, *job)
 	return job, nil
 }
 
-func (r *followerRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (r *followerRepo) UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	r.updatedStatus = append(r.updatedStatus, to)
-	return &model.Document{ID: id, Status: to}, nil
+	return &domain.Document{ID: id, Status: to}, nil
 }
 
-func (r *followerRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	return &model.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
+func (r *followerRepo) UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error) {
+	return &domain.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
 }
 
 func TestJobFollowerSchedulesNextStages(t *testing.T) {
 	repo := &followerRepo{
-		jobs: []model.ProcessingJob{
-			{TaskID: "job-1", DocumentID: "doc-1", Stage: model.JobStageStoreOriginal, Status: model.JobStatusCompleted},
-			{TaskID: "job-2", DocumentID: "doc-1", Stage: model.JobStageConvertToMarkdown, Status: model.JobStatusCompleted},
+		jobs: []domain.ProcessingJob{
+			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted},
+			{TaskID: "job-2", DocumentID: "doc-1", Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusCompleted},
 		},
 	}
 
@@ -70,14 +70,14 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 		t.Fatalf("expected 2 scheduled jobs, got %d", len(repo.createdJobs))
 	}
 
-	if repo.createdJobs[0].Stage != model.JobStageConvertToMarkdown {
+	if repo.createdJobs[0].Stage != domain.JobStageConvertToMarkdown {
 		t.Fatalf("expected convert stage, got %s", repo.createdJobs[0].Stage)
 	}
 	if repo.createdJobs[0].Payload["original_bucket"] != "orig-bucket" {
 		t.Fatalf("unexpected payload for convert: %+v", repo.createdJobs[0].Payload)
 	}
 
-	if repo.createdJobs[1].Stage != model.JobStagePublishToGitHub {
+	if repo.createdJobs[1].Stage != domain.JobStagePublishToGitHub {
 		t.Fatalf("expected publish stage, got %s", repo.createdJobs[1].Stage)
 	}
 	if repo.createdJobs[1].Payload["repository"] != "org/repo" {
@@ -93,11 +93,11 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 
 func TestJobFollowerMarksFailed(t *testing.T) {
 	repo := &followerRepo{
-		jobs: []model.ProcessingJob{{
+		jobs: []domain.ProcessingJob{{
 			TaskID:     "job-err",
 			DocumentID: "doc-1",
-			Stage:      model.JobStageConvertToMarkdown,
-			Status:     model.JobStatusFailed,
+			Stage:      domain.JobStageConvertToMarkdown,
+			Status:     domain.JobStatusFailed,
 			Payload:    map[string]any{"last_error": "boom"},
 		}},
 	}
@@ -105,7 +105,7 @@ func TestJobFollowerMarksFailed(t *testing.T) {
 	follower := NewJobFollower(repo, 10, time.Minute, PublishDefaults{})
 	follower.reconcile(context.Background())
 
-	if len(repo.updatedStatus) != 1 || repo.updatedStatus[0] != model.StatusFailed {
+	if len(repo.updatedStatus) != 1 || repo.updatedStatus[0] != domain.DocumentStatusFailed {
 		t.Fatalf("document status was not marked as failed: %+v", repo.updatedStatus)
 	}
 }

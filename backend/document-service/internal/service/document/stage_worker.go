@@ -10,28 +10,28 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 )
 
 type pendingJobRepo interface {
-	AcquirePendingJobs(ctx context.Context, stage model.JobStage, limit int) ([]model.ProcessingJob, error)
-	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
-	GetDocument(ctx context.Context, id string) (*model.Document, error)
+	AcquirePendingJobs(ctx context.Context, stage domain.JobStage, limit int) ([]domain.ProcessingJob, error)
+	UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error)
+	GetDocument(ctx context.Context, id string) (*domain.Document, error)
 }
 
 // StageWorker обрабатывает pending-задачи из processing_jobs.
 type StageWorker struct {
 	repo       pendingJobRepo
 	activities *Activities
-	stage      model.JobStage
+	stage      domain.JobStage
 	batchSize  int
 	retryDelay time.Duration
 	metrics    *workerMetrics
 	logf       func(format string, args ...interface{})
 }
 
-func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
+func NewStageWorker(repo pendingJobRepo, activities *Activities, stage domain.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -96,20 +96,20 @@ func (w *StageWorker) reconcile(ctx context.Context) {
 	}
 }
 
-func (w *StageWorker) handleJob(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handleJob(ctx context.Context, job domain.ProcessingJob) {
 	switch job.Stage {
-	case model.JobStageStoreOriginal:
+	case domain.JobStageStoreOriginal:
 		w.handleStoreOriginal(ctx, job)
-	case model.JobStageConvertToMarkdown:
+	case domain.JobStageConvertToMarkdown:
 		w.handleConvert(ctx, job)
-	case model.JobStagePublishToGitHub:
+	case domain.JobStagePublishToGitHub:
 		w.handlePublish(ctx, job)
 	default:
 		w.failJob(ctx, job, fmt.Sprintf("unsupported stage %s", job.Stage), nil, nil)
 	}
 }
 
-func (w *StageWorker) handleStoreOriginal(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handleStoreOriginal(ctx context.Context, job domain.ProcessingJob) {
 	if w.activities == nil {
 		w.failJob(ctx, job, "activities not configured", nil, nil)
 		return
@@ -120,13 +120,13 @@ func (w *StageWorker) handleStoreOriginal(ctx context.Context, job model.Process
 		return
 	}
 
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed"}); err != nil {
+	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusCompleted, nil, false, job.Payload, &domain.JobEvent{EventType: "completed"}); err != nil {
 		w.logf("stage-worker[%s]: update completed job %s: %v", w.stage, job.TaskID, err)
 		w.metrics.recordError(ctx)
 	}
 }
 
-func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJob) {
 	if w.activities == nil {
 		w.failJob(ctx, job, "activities not configured", nil, nil)
 		return
@@ -175,13 +175,13 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 		return
 	}
 
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed"}); err != nil {
+	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusCompleted, nil, false, job.Payload, &domain.JobEvent{EventType: "completed"}); err != nil {
 		w.logf("stage-worker[%s]: complete convert job %s: %v", w.stage, job.TaskID, err)
 		w.metrics.recordError(ctx)
 	}
 }
 
-func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handlePublish(ctx context.Context, job domain.ProcessingJob) {
 	if w.activities == nil {
 		w.failJob(ctx, job, "activities not configured", nil, nil)
 		return
@@ -265,13 +265,13 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 		return
 	}
 
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed", Payload: eventPayload}); err != nil {
+	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusCompleted, nil, false, job.Payload, &domain.JobEvent{EventType: "completed", Payload: eventPayload}); err != nil {
 		w.logf("stage-worker[%s]: complete publish job %s: %v", w.stage, job.TaskID, err)
 		w.metrics.recordError(ctx)
 	}
 }
 
-func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reason string, retryAfter *durationpb.Duration, eventPayload map[string]any) {
+func (w *StageWorker) failJob(ctx context.Context, job domain.ProcessingJob, reason string, retryAfter *durationpb.Duration, eventPayload map[string]any) {
 	corr := stringFromPayload(job.Payload, "correlation_id", correlationIDFromContext(ctx))
 	nextRun := time.Now().Add(w.retryDelay)
 	if retryAfter != nil && retryAfter.AsDuration() > 0 {
@@ -290,7 +290,7 @@ func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reas
 	if retryAfter != nil && retryAfter.AsDuration() > 0 {
 		eventPayload["retry_after"] = retryAfter.AsDuration().String()
 	}
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusFailed, &nextRun, false, job.Payload, &model.JobEvent{EventType: "failed", Message: reason, Payload: eventPayload}); err != nil {
+	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusFailed, &nextRun, false, job.Payload, &domain.JobEvent{EventType: "failed", Message: reason, Payload: eventPayload}); err != nil {
 		w.logf("stage-worker[%s]: fail job %s correlation_id=%s: %v (original reason: %s)", w.stage, job.TaskID, corr, err, reason)
 		w.metrics.recordError(ctx)
 	}
@@ -329,7 +329,7 @@ func pickRetryAfter(resp *githubpublisherv1.PublishMarkdownResponse) *durationpb
 	return resp.GetRetryAfter()
 }
 
-func (w *StageWorker) jobContext(ctx context.Context, job model.ProcessingJob) context.Context {
+func (w *StageWorker) jobContext(ctx context.Context, job domain.ProcessingJob) context.Context {
 	corr := stringFromPayload(job.Payload, "correlation_id", correlationIDFromContext(ctx))
 	if corr == "" {
 		return ctx

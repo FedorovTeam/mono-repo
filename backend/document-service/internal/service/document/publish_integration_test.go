@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	"google.golang.org/grpc"
 )
@@ -34,8 +34,8 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if repo.lastStatus != model.StatusPublishedToGitHub {
-			t.Fatalf("expected status %v, got %v", model.StatusPublishedToGitHub, repo.lastStatus)
+		if repo.lastStatus != domain.DocumentStatusPublishedToGitHub {
+			t.Fatalf("expected status %v, got %v", domain.DocumentStatusPublishedToGitHub, repo.lastStatus)
 		}
 		if repo.lastVersion == nil || repo.lastVersion.Version != 2 {
 			t.Fatalf("unexpected version saved: %+v", repo.lastVersion)
@@ -68,7 +68,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 
-		if repo.lastStatus != model.StatusFailed {
+		if repo.lastStatus != domain.DocumentStatusFailed {
 			t.Fatalf("expected failed status, got %v", repo.lastStatus)
 		}
 		if repo.lastError == "" || !strings.Contains(repo.lastError, "timeout") {
@@ -78,59 +78,59 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 }
 
 type integrationRepo struct {
-	lastStatus  model.Status
-	lastVersion *model.DocumentVersion
+	lastStatus  domain.DocumentStatus
+	lastVersion *domain.DocumentVersion
 	lastError   string
-	jobs        map[string]model.ProcessingJob
+	jobs        map[string]domain.ProcessingJob
 }
 
-func (r *integrationRepo) CreateDocument(context.Context, *model.Document, *model.DocumentVersion, *model.DocumentStatusLog) (*model.Document, error) {
+func (r *integrationRepo) CreateDocument(context.Context, *domain.Document, *domain.DocumentVersion, *domain.DocumentStatusLog) (*domain.Document, error) {
 	return nil, nil
 }
 
-func (r *integrationRepo) GetDocument(_ context.Context, id string) (*model.Document, error) {
-	return &model.Document{ID: id, Status: model.StatusConvertedToMarkdown, MarkdownBucket: "bucket", MarkdownObjectKey: "object-key", Versions: []model.DocumentVersion{{Version: 1, MarkdownObjectKey: "object-key"}}}, nil
+func (r *integrationRepo) GetDocument(_ context.Context, id string) (*domain.Document, error) {
+	return &domain.Document{ID: id, Status: domain.DocumentStatusConvertedToMarkdown, MarkdownBucket: "bucket", MarkdownObjectKey: "object-key", Versions: []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "object-key"}}}, nil
 }
 
-func (r *integrationRepo) ListDocuments(context.Context, int, int, *model.Status) ([]model.Document, error) {
+func (r *integrationRepo) ListDocuments(context.Context, int, int, *domain.DocumentStatus) ([]domain.Document, error) {
 	return nil, nil
 }
 
-func (r *integrationRepo) CountStatusLogsWithReasonPrefix(context.Context, string, model.Status, string) (int, error) {
+func (r *integrationRepo) CountStatusLogsWithReasonPrefix(context.Context, string, domain.DocumentStatus, string) (int, error) {
 	return 0, nil
 }
 
-func (r *integrationRepo) LastNonFailedStatus(context.Context, string) (model.Status, error) {
-	return model.Status(""), nil
+func (r *integrationRepo) LastNonFailedStatus(context.Context, string) (domain.DocumentStatus, error) {
+	return domain.DocumentStatus(""), nil
 }
 
-func (r *integrationRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (r *integrationRepo) UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	r.lastStatus = to
 	r.lastVersion = version
 	r.lastError = errorReason
-	return &model.Document{ID: id, Status: to}, nil
+	return &domain.Document{ID: id, Status: to}, nil
 }
 
-func (r *integrationRepo) UpdateWorkflowID(context.Context, string, string) (*model.Document, error) {
+func (r *integrationRepo) UpdateWorkflowID(context.Context, string, string) (*domain.Document, error) {
 	return nil, nil
 }
 
-func (r *integrationRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *integrationRepo) CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()
 	}
 	if r.jobs == nil {
-		r.jobs = make(map[string]model.ProcessingJob)
+		r.jobs = make(map[string]domain.ProcessingJob)
 	}
 	if job.Status == "" {
-		job.Status = model.JobStatusPending
+		job.Status = domain.JobStatusPending
 	}
 	r.jobs[job.TaskID] = *job
 	return job, nil
 }
 
-func (r *integrationRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	job := model.ProcessingJob{TaskID: taskID, Status: status}
+func (r *integrationRepo) UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error) {
+	job := domain.ProcessingJob{TaskID: taskID, Status: status}
 	if nextRunAt != nil {
 		job.NextRunAt = *nextRunAt
 	}
@@ -138,18 +138,18 @@ func (r *integrationRepo) UpdateProcessingJob(ctx context.Context, taskID string
 		job.Payload = payload
 	}
 	if r.jobs == nil {
-		r.jobs = make(map[string]model.ProcessingJob)
+		r.jobs = make(map[string]domain.ProcessingJob)
 	}
 	r.jobs[taskID] = job
 	return &job, nil
 }
 
-func (r *integrationRepo) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+func (r *integrationRepo) ActiveJob(ctx context.Context, documentID string) (*domain.ProcessingJob, error) {
 	for _, job := range r.jobs {
 		if job.DocumentID != documentID {
 			continue
 		}
-		if job.Status == model.JobStatusPending || job.Status == model.JobStatusInProgress {
+		if job.Status == domain.JobStatusPending || job.Status == domain.JobStatusInProgress {
 			copy := job
 			return &copy, nil
 		}
@@ -157,7 +157,11 @@ func (r *integrationRepo) ActiveJob(ctx context.Context, documentID string) (*mo
 	return nil, nil
 }
 
-func (r *integrationRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+func (r *integrationRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]domain.ProcessingJob, error) {
+	return nil, nil
+}
+
+func (r *integrationRepo) AcquirePendingJobs(context.Context, domain.JobStage, int) ([]domain.ProcessingJob, error) {
 	return nil, nil
 }
 
