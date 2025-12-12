@@ -16,7 +16,7 @@
 
 ## Фоновая обработка очереди
 - **Акторы:** Воркер сервиса (`internal/worker`).
-- **Подготовка:** при запуске восстанавливает задачи из статуса `processing` и продолжает поллинг ранее отправленных в Docling заявок (`waiting_docling`).
+- **Подготовка:** при запуске выполняет обслуживающий цикл: возвращает в работу задачи `waiting_docling` с наступившим `next_poll_at`, помечает просроченные по `docling.max_job_lifetime` как `failed` и обрабатывает зависшие `processing`, только если они превысили `service.processing_timeout` с учётом `scheduler.max_processing_retries` и `docling.status_max_attempts`.
 - **Шаги:**
   1. Забрать задачу из очереди (`pending` либо `waiting_docling` c наступившим `next_poll_at`) с блокировкой `FOR UPDATE SKIP LOCKED` и пометкой `processing`.
   2. Проставить отсутствующие значения: `markdown_bucket` из конфигурации, `markdown_object_key` из исходного пути, расширение и `Content-Type` через `ResolveContentTypeByExtension`.
@@ -36,6 +36,6 @@
 ## Возобновление после рестартов
 - **Акторы:** Воркер сервиса.
 - **Шаги:**
-  1. При старте перезаписывать зависшие `processing` задачи обратно в `pending`/`failed` в зависимости от лимита ретраев и `docling_max_attempts`.
-  2. Периодически активировать просроченные `waiting_docling` задачи (по `next_poll_at` или превышению `docling_max_lifetime`).
+  1. При старте и далее по расписанию обрабатывать зависшие `processing` задачи по `service.processing_timeout`: если превышены лимиты `scheduler.max_processing_retries` или `docling.status_max_attempts`, они получают статус `failed`, иначе возвращаются в `pending`.
+  2. Периодически активировать просроченные `waiting_docling` задачи (по `next_poll_at` или превышению `docling.max_job_lifetime`).
   3. Удалять завершённые задачи (`done`/`failed`) старше периода хранения (`cleanup_retention`).
