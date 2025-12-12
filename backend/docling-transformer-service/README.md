@@ -6,8 +6,8 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - gRPC метод `ConvertDocumentToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` принимает данные об исходном объекте и ставит задачу в очередь `transformations_queue`, возвращая `queue_id`, `status=pending` и итоговый путь для Markdown. Повторный вызов с тем же `document_id` возвращает статус и параметры существующей задачи без создания дублей.
 - gRPC метод `ConvertDocxToMarkdown` принимает байты или ссылку на DOCX/DOC/PDF, отправляет задачу напрямую в Docling и возвращает Markdown/charset без постановки в очередь.
 - Проверка на переполнение очереди (`service.queue_limit`): gRPC код `ResourceExhausted` возвращается только если суммарное число задач в статусах `pending`/`processing`/`waiting_docling` достигло установленного лимита; `service.max_workers` ограничивает только параллелизм фоновых воркеров.
-- HTTP-запрос к Docling-конвертеру выполняется воркером в фоне; результат сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
-- При старте воркеров сервис восстанавливает незавершённые задачи из статуса `processing` в `pending` (или продолжает опрос Docling по сохранённому `docling_job_id`), чтобы после рестартов очередь автоматически возобновлялась без ручных действий.
+- HTTP-запрос к Docling-конвертеру выполняется воркером в фоне через `POST /v1/convert/file/async`, затем по `docling_job_id` он поллит `GET /v1/status/poll/{job_id}` и забирает результат `GET /v1/result/{job_id}`; итог сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
+- При старте воркеров запускается сервисный цикл обслуживания очереди: он активирует задачи в `waiting_docling` с наступившим `next_poll_at` и помечает просроченные по `docling.max_job_lifetime` как `failed`; зависшие `processing` восстанавливаются или завершаются только при превышении `service.processing_timeout` с учётом лимитов `scheduler.max_processing_retries` и `docling.status_max_attempts`.
 - Проксирование correlation-id во все внешние вызовы (Docling, MinIO) из воркера.
 - Очередь хранится в PostgreSQL, схема создаётся через миграции `db/migrations/ и применяется автоматически при старте сервиса.
 - Настройки Docling, MinIO, PostgreSQL и наблюдаемости в одном конфигурационном файле.
@@ -16,7 +16,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 ### Политика retry/timeout конвертации
 - gRPC-слой не дублирует задачи: если в очереди уже есть запись для `document_id`, возвращается её `queue_id` и текущий статус (`pending`/`processing`/`waiting_docling`/`done`), что позволяет внешнему воркеру опрашивать готовность без раздувания очереди.
 - Лимит активных задач контролируется `service.queue_limit` (сумма `pending`/`processing`/`waiting_docling`); при превышении возвращается `ResourceExhausted`.
-- Фоновый воркер использует `scheduler.retry_backoff`, `scheduler.max_processing_retries` и `docling.status_*` для экспоненциального опроса Docling и восстановления зависших задач; `scheduler.processing_timeout` обрывает слишком долгие обработки, `scheduler.cleanup_retention` удаляет завершённые задачи.
+- Фоновый воркер использует `scheduler.retry_backoff`, `scheduler.max_processing_retries` и `docling.status_*` для экспоненциального опроса Docling и восстановления зависших задач; `service.processing_timeout` и `docling.status_max_attempts` ограничивают длительность/число попыток обработки, `scheduler.cleanup_retention` удаляет завершённые задачи.
 
 ## Конфигурация
 Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл). Обязательные поля и их рекомендованные значения:
@@ -55,7 +55,7 @@ go test ./...
 
 ## Интеграции и зависимости
 - **PostgreSQL**: таблица `transformations_queue` для хранения статусов заявок на конвертацию.
-- **Docling**: HTTP POST `/v1/convert/file` на `docling.endpoint`, тело — `multipart/form-data` с полем `files[]`, заголовки `X-Correlation-Id` и опционально `X-Api-Key`; в ответе JSON c `document.md_content`.
+- **Docling**: асинхронная отправка файла через `POST /v1/convert/file/async` (`multipart/form-data` c полем `files[]`, заголовками `X-Correlation-Id`, `X-Docling-Source-Filename`, `X-Docling-Endpoint`, опционально `X-Api-Key`), затем опрос `GET /v1/status/poll/{job_id}` и получение результата `GET /v1/result/{job_id}`.
 - **MinIO**: хранение исходников и Markdown результата (bucket задаётся в конфиге).
 
 ## Структура проекта
@@ -72,4 +72,4 @@ go test ./...
 ## Логи и наблюдаемость
 Каждый запрос логируется с `correlation_id` и входными метаданными, если разрешён `observability.loggingEnabled`. Заголовок `x-correlation-id` генерируется, если не пришёл снаружи. Трассировка и метрики отправляются через OTEL только при активных флагах `observability.tracingEnabled` и `observability.metricsEnabled`.
 
-Фоновый воркер отдаёт метрики загрузки очереди: gauge `docling_transformer_queue_pending`/`processing`/`waiting_docling`, гистограмму размеров выборки `docling_transformer_queue_batch_size`, счётчики успешных/ошибочных задач (`docling_transformer_tasks_acquired`/`docling_transformer_tasks_completed`/`docling_transformer_tasks_failed`) и длительности `docling_transformer_processing_duration_ms` вместе с ожиданием Docling (`docling_transformer_docling_wait_duration_ms`, `docling_transformer_docling_poll_attempts`). В логах фиксируются выборки пачек и ошибки Docling, чтобы отслеживать частоту сбоев.
+Фоновый воркер отдаёт метрики загрузки очереди: gauge `docling_transformer_queue_pending`/`docling_transformer_queue_processing`/`docling_transformer_queue_docling_waiting`, гистограмму размеров выборки `docling_transformer_queue_batch_size`, счётчики успешных/ошибочных задач (`docling_transformer_tasks_acquired`/`docling_transformer_tasks_completed`/`docling_transformer_tasks_failed`) и длительности `docling_transformer_processing_duration_ms` вместе с ожиданием Docling (`docling_transformer_docling_wait_duration_ms`, `docling_transformer_docling_poll_attempts`). В логах фиксируются выборки пачек и ошибки Docling, чтобы отслеживать частоту сбоев.
