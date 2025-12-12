@@ -6,7 +6,7 @@ import (
 	"net"
 
 	"backend-document-service/internal/domain"
-	usecase "backend-document-service/internal/usecase/document"
+	document "backend-document-service/internal/usecase/document"
 	documentv1 "backend-document-service/proto/backend/document/v1"
 
 	"google.golang.org/grpc"
@@ -16,18 +16,10 @@ import (
 
 type Server struct {
 	documentv1.UnimplementedDocumentServiceServer
-	service DocumentService
+	service document.DocumentService
 }
 
-type DocumentService interface {
-	CreateDocument(ctx context.Context, in usecase.CreateDocumentInput) (*domain.Document, error)
-	ConfirmUpload(ctx context.Context, in usecase.ConfirmUploadInput) (*domain.Document, error)
-	UpdateStatus(ctx context.Context, in usecase.UpdateStatusInput) (*domain.Document, error)
-	GetDocument(ctx context.Context, id string) (*domain.Document, error)
-	ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) ([]domain.Document, error)
-}
-
-func NewServer(service DocumentService) *Server {
+func NewServer(service document.DocumentService) *Server {
 	return &Server{service: service}
 }
 
@@ -49,20 +41,8 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocumentRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "CreateDocument")
 
-	doc, err := s.service.CreateDocument(ctx, usecase.CreateDocumentInput{
-		ID:                req.GetId(),
-		FileName:          req.GetFileName(),
-		Owner:             req.GetOwner(),
-		Repository:        req.GetRepository(),
-		Branch:            req.GetBranch(),
-		BaseBranch:        req.GetBaseBranch(),
-		Path:              req.GetPath(),
-		UploadBucket:      req.GetUploadBucket(),
-		UploadObjectKey:   req.GetUploadObjectKey(),
-		MarkdownBucket:    req.GetMarkdownBucket(),
-		MarkdownObjectKey: req.GetMarkdownObjectKey(),
-		CreatePR:          req.GetCreatePr(),
-	})
+	dto := fromCreateDocumentRequest(req)
+	doc, err := s.service.CreateDocument(ctx, toCreateDocumentCommand(dto))
 	if err != nil {
 		return nil, err
 	}
@@ -80,12 +60,8 @@ func (s *Server) GetDocument(ctx context.Context, req *documentv1.GetDocumentReq
 
 func (s *Server) ListDocuments(ctx context.Context, req *documentv1.ListDocumentsRequest) (*documentv1.ListDocumentsResponse, error) {
 	s.logWithCorrelation(ctx, "ListDocuments")
-	var status *domain.DocumentStatus
-	if req.GetStatusFilter() != documentv1.DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED {
-		mapped := fromProtoStatus(req.GetStatusFilter())
-		status = &mapped
-	}
-	items, err := s.service.ListDocuments(ctx, int(req.GetLimit()), int(req.GetOffset()), status)
+	dto := fromListDocumentsRequest(req)
+	items, err := s.service.ListDocuments(ctx, dto.Limit, dto.Offset, dto.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -99,15 +75,8 @@ func (s *Server) ListDocuments(ctx context.Context, req *documentv1.ListDocument
 
 func (s *Server) UpdateDocumentStatus(ctx context.Context, req *documentv1.UpdateDocumentStatusRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "UpdateDocumentStatus")
-	doc, err := s.service.UpdateStatus(ctx, usecase.UpdateStatusInput{
-		DocumentID:        req.GetId(),
-		Status:            string(fromProtoStatus(req.GetStatus())),
-		Reason:            req.GetReason(),
-		ErrorReason:       req.GetReason(),
-		MarkdownObjectKey: req.GetMarkdownObjectKey(),
-		OriginalObjectKey: req.GetOriginalObjectKey(),
-		Version:           req.GetVersion(),
-	})
+	dto := fromUpdateDocumentStatusRequest(req)
+	doc, err := s.service.UpdateStatus(ctx, toUpdateDocumentStatusCommand(dto))
 	if err != nil {
 		return nil, err
 	}
@@ -116,11 +85,8 @@ func (s *Server) UpdateDocumentStatus(ctx context.Context, req *documentv1.Updat
 
 func (s *Server) ConfirmUpload(ctx context.Context, req *documentv1.ConfirmUploadRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "ConfirmUpload")
-	doc, err := s.service.ConfirmUpload(ctx, usecase.ConfirmUploadInput{
-		DocumentID: req.GetDocumentId(),
-		Bucket:     req.GetBucket(),
-		ObjectKey:  req.GetObjectKey(),
-	})
+	dto := fromConfirmUploadRequest(req)
+	doc, err := s.service.ConfirmUpload(ctx, toConfirmUploadCommand(dto))
 	if err != nil {
 		return nil, err
 	}
