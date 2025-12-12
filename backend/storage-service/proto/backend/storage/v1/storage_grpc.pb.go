@@ -31,7 +31,7 @@ const (
 //
 // StorageService отвечает за прием и выдачу объектов MinIO.
 // Ключи формируются по шаблону
-// org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>.
+// org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>.
 type StorageServiceClient interface {
 	// UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-original.
 	UploadOriginal(ctx context.Context, in *UploadOriginalRequest, opts ...grpc.CallOption) (*UploadObjectResponse, error)
@@ -97,7 +97,7 @@ func (c *storageServiceClient) GenerateUploadURL(ctx context.Context, in *Genera
 //
 // StorageService отвечает за прием и выдачу объектов MinIO.
 // Ключи формируются по шаблону
-// org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<document_id>.<ext>.
+// org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>.
 type StorageServiceServer interface {
 	// UploadOriginal сохраняет исходный файл (обычно DOCX) в приватный бакет knowledge-original.
 	UploadOriginal(context.Context, *UploadOriginalRequest) (*UploadObjectResponse, error)

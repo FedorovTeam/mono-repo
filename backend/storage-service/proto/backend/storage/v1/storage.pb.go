@@ -30,6 +30,7 @@ type UploadOriginalRequest struct {
 	DocumentId        string                 `protobuf:"bytes,3,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
 	FilenameExtension string                 `protobuf:"bytes,4,opt,name=filename_extension,json=filenameExtension,proto3" json:"filename_extension,omitempty"` // Например: docx, pdf.
 	Content           []byte                 `protobuf:"bytes,5,opt,name=content,proto3" json:"content,omitempty"`
+	CorrelationId     string                 `protobuf:"bytes,6,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -99,6 +100,13 @@ func (x *UploadOriginalRequest) GetContent() []byte {
 	return nil
 }
 
+func (x *UploadOriginalRequest) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
+}
+
 // UploadMarkdownRequest описывает загрузку преобразованного Markdown.
 type UploadMarkdownRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -106,6 +114,7 @@ type UploadMarkdownRequest struct {
 	ProjectSlug   string                 `protobuf:"bytes,2,opt,name=project_slug,json=projectSlug,proto3" json:"project_slug,omitempty"`
 	DocumentId    string                 `protobuf:"bytes,3,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
 	Content       []byte                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	CorrelationId string                 `protobuf:"bytes,5,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -166,6 +175,13 @@ func (x *UploadMarkdownRequest) GetContent() []byte {
 		return x.Content
 	}
 	return nil
+}
+
+func (x *UploadMarkdownRequest) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
 }
 
 // UploadObjectResponse возвращает информацию о размещении файла.
@@ -516,20 +532,22 @@ var File_backend_storage_v1_storage_proto protoreflect.FileDescriptor
 
 const file_backend_storage_v1_storage_proto_rawDesc = "" +
 	"\n" +
-	" backend/storage/v1/storage.proto\x12\x12backend.storage.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbf\x01\n" +
+	" backend/storage/v1/storage.proto\x12\x12backend.storage.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe6\x01\n" +
 	"\x15UploadOriginalRequest\x12\x19\n" +
 	"\borg_slug\x18\x01 \x01(\tR\aorgSlug\x12!\n" +
 	"\fproject_slug\x18\x02 \x01(\tR\vprojectSlug\x12\x1f\n" +
 	"\vdocument_id\x18\x03 \x01(\tR\n" +
 	"documentId\x12-\n" +
 	"\x12filename_extension\x18\x04 \x01(\tR\x11filenameExtension\x12\x18\n" +
-	"\acontent\x18\x05 \x01(\fR\acontent\"\x90\x01\n" +
+	"\acontent\x18\x05 \x01(\fR\acontent\x12%\n" +
+	"\x0ecorrelation_id\x18\x06 \x01(\tR\rcorrelationId\"\xb7\x01\n" +
 	"\x15UploadMarkdownRequest\x12\x19\n" +
 	"\borg_slug\x18\x01 \x01(\tR\aorgSlug\x12!\n" +
 	"\fproject_slug\x18\x02 \x01(\tR\vprojectSlug\x12\x1f\n" +
 	"\vdocument_id\x18\x03 \x01(\tR\n" +
 	"documentId\x12\x18\n" +
-	"\acontent\x18\x04 \x01(\fR\acontent\"\x88\x01\n" +
+	"\acontent\x18\x04 \x01(\fR\acontent\x12%\n" +
+	"\x0ecorrelation_id\x18\x05 \x01(\tR\rcorrelationId\"\x88\x01\n" +
 	"\x14UploadObjectResponse\x12\x16\n" +
 	"\x06bucket\x18\x01 \x01(\tR\x06bucket\x12\x1d\n" +
 	"\n" +
