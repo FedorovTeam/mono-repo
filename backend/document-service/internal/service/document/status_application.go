@@ -8,12 +8,11 @@ import (
 	"log"
 
 	"backend-document-service/internal/domain"
-	"backend-document-service/internal/model"
 )
 
 type documentStatusRepo interface {
-	GetDocument(ctx context.Context, id string) (*model.Document, error)
-	UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
+	GetDocument(ctx context.Context, id string) (*domain.Document, error)
+	UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error)
 	LastNonFailedStatus(ctx context.Context, id string) (domain.DocumentStatus, error)
 }
 
@@ -28,7 +27,7 @@ func NewStatusApplication(repo documentStatusRepo) *StatusApplication {
 }
 
 // TransitionByID получает документ и выполняет переход с записью логов статуса.
-func (s *StatusApplication) TransitionByID(ctx context.Context, documentID string, to domain.DocumentStatus, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (s *StatusApplication) TransitionByID(ctx context.Context, documentID string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	doc, err := s.repo.GetDocument(ctx, documentID)
 	if err != nil {
 		return nil, err
@@ -40,7 +39,7 @@ func (s *StatusApplication) TransitionByID(ctx context.Context, documentID strin
 }
 
 // Transition выполняет переход статуса документа и единообразно пишет события.
-func (s *StatusApplication) Transition(ctx context.Context, doc *model.Document, to domain.DocumentStatus, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (s *StatusApplication) Transition(ctx context.Context, doc *domain.Document, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	if doc == nil {
 		return nil, errors.New("document is required")
 	}
@@ -66,7 +65,7 @@ func (s *StatusApplication) Fail(ctx context.Context, documentID, reason string)
 }
 
 // ResolveActualStatus возвращает актуальный статус, учитывая восстановление после Failed.
-func (s *StatusApplication) ResolveActualStatus(ctx context.Context, doc *model.Document) (domain.DocumentStatus, error) {
+func (s *StatusApplication) ResolveActualStatus(ctx context.Context, doc *domain.Document) (domain.DocumentStatus, error) {
 	if doc == nil {
 		return "", errors.New("document is required")
 	}

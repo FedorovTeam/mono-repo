@@ -8,28 +8,28 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 )
 
 type publishRepoStub struct {
-	doc            *model.Document
-	lastEvent      *model.JobEvent
+	doc            *domain.Document
+	lastEvent      *domain.JobEvent
 	lastPayload    map[string]any
-	lastStatus     model.JobStatus
+	lastStatus     domain.JobStatus
 	nextRun        *time.Time
-	statusUpdates  []model.Status
+	statusUpdates  []domain.DocumentStatus
 	lastError      string
 	lastUpdateArgs struct {
 		reason      string
 		errorReason string
 	}
-	jobs           map[string]model.ProcessingJob
+	jobs           map[string]domain.ProcessingJob
 	now            time.Time
-	recoveryEvents []model.JobEvent
+	recoveryEvents []domain.JobEvent
 }
 
-func (r *publishRepoStub) AcquirePendingJobs(ctx context.Context, _ model.JobStage, limit int) ([]model.ProcessingJob, error) {
+func (r *publishRepoStub) AcquirePendingJobs(ctx context.Context, _ domain.JobStage, limit int) ([]domain.ProcessingJob, error) {
 	if len(r.jobs) == 0 {
 		return nil, nil
 	}
@@ -40,9 +40,9 @@ func (r *publishRepoStub) AcquirePendingJobs(ctx context.Context, _ model.JobSta
 		now = time.Now()
 	}
 
-	var result []model.ProcessingJob
+	var result []domain.ProcessingJob
 	for _, job := range r.jobs {
-		if job.Status != model.JobStatusPending {
+		if job.Status != domain.JobStatusPending {
 			continue
 		}
 		if !job.NextRunAt.IsZero() && job.NextRunAt.After(now) {
@@ -56,7 +56,7 @@ func (r *publishRepoStub) AcquirePendingJobs(ctx context.Context, _ model.JobSta
 	return result, nil
 }
 
-func (r *publishRepoStub) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *publishRepoStub) UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	r.lastStatus = status
 	if payload != nil {
 		r.lastPayload = payload
@@ -77,26 +77,26 @@ func (r *publishRepoStub) UpdateProcessingJob(ctx context.Context, taskID string
 		job.Payload = payload
 		r.jobs[taskID] = job
 	}
-	return &model.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
+	return &domain.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
 }
 
-func (r *publishRepoStub) GetDocument(context.Context, string) (*model.Document, error) {
+func (r *publishRepoStub) GetDocument(context.Context, string) (*domain.Document, error) {
 	return r.doc, nil
 }
 
-func (r *publishRepoStub) CreateDocument(context.Context, *model.Document, *model.DocumentVersion, *model.DocumentStatusLog) (*model.Document, error) {
+func (r *publishRepoStub) CreateDocument(context.Context, *domain.Document, *domain.DocumentVersion, *domain.DocumentStatusLog) (*domain.Document, error) {
 	return nil, nil
 }
 
-func (r *publishRepoStub) ListDocuments(context.Context, int, int, *model.Status) ([]model.Document, error) {
+func (r *publishRepoStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) ([]domain.Document, error) {
 	return nil, nil
 }
 
-func (r *publishRepoStub) CountStatusLogsWithReasonPrefix(context.Context, string, model.Status, string) (int, error) {
+func (r *publishRepoStub) CountStatusLogsWithReasonPrefix(context.Context, string, domain.DocumentStatus, string) (int, error) {
 	return 0, nil
 }
 
-func (r *publishRepoStub) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (r *publishRepoStub) UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	if r.doc != nil {
 		r.doc.Status = to
 		r.doc.ErrorReason = errorReason
@@ -110,22 +110,22 @@ func (r *publishRepoStub) UpdateStatus(ctx context.Context, id string, to model.
 	return r.doc, nil
 }
 
-func (r *publishRepoStub) LastNonFailedStatus(context.Context, string) (model.Status, error) {
+func (r *publishRepoStub) LastNonFailedStatus(context.Context, string) (domain.DocumentStatus, error) {
 	if r.doc != nil {
 		return r.doc.Status, nil
 	}
-	return model.Status(""), nil
+	return domain.DocumentStatus(""), nil
 }
 
-func (r *publishRepoStub) ActiveJob(context.Context, string) (*model.ProcessingJob, error) {
+func (r *publishRepoStub) ActiveJob(context.Context, string) (*domain.ProcessingJob, error) {
 	return nil, nil
 }
 
-func (r *publishRepoStub) CreateProcessingJob(context.Context, *model.ProcessingJob, *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *publishRepoStub) CreateProcessingJob(context.Context, *domain.ProcessingJob, *domain.JobEvent) (*domain.ProcessingJob, error) {
 	return nil, nil
 }
 
-func (r *publishRepoStub) RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error) {
+func (r *publishRepoStub) RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]domain.ProcessingJob, error) {
 	if len(r.jobs) == 0 {
 		return nil, nil
 	}
@@ -133,18 +133,18 @@ func (r *publishRepoStub) RequeueStaleProcessingJobs(ctx context.Context, staleB
 	if now.IsZero() {
 		now = time.Now()
 	}
-	var restored []model.ProcessingJob
+	var restored []domain.ProcessingJob
 	for id, job := range r.jobs {
-		if job.Status != model.JobStatusInProgress || job.UpdatedAt.After(staleBefore) || len(restored) >= limit {
+		if job.Status != domain.JobStatusInProgress || job.UpdatedAt.After(staleBefore) || len(restored) >= limit {
 			continue
 		}
-		job.Status = model.JobStatusPending
+		job.Status = domain.JobStatusPending
 		job.Attempts++
 		job.NextRunAt = nextRunAt
 		job.UpdatedAt = now
 		r.jobs[id] = job
 		restored = append(restored, job)
-		r.recoveryEvents = append(r.recoveryEvents, model.JobEvent{EventType: "recovered", Message: reason})
+		r.recoveryEvents = append(r.recoveryEvents, domain.JobEvent{EventType: "recovered", Message: reason})
 	}
 	return restored, nil
 }
@@ -160,7 +160,7 @@ func (s *staticPublisher) PublishMarkdown(ctx context.Context, in *githubpublish
 }
 
 func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
-	doc := &model.Document{
+	doc := &domain.Document{
 		ID:                "doc-commit",
 		Name:              "Doc",
 		Owner:             "owner",
@@ -168,18 +168,18 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 		Branch:            "main",
 		BaseBranch:        "main",
 		Path:              "docs/doc.md",
-		Status:            model.StatusConvertedToMarkdown,
+		Status:            domain.DocumentStatusConvertedToMarkdown,
 		MarkdownBucket:    "bucket",
 		MarkdownObjectKey: "object.md",
-		Versions:          []model.DocumentVersion{{Version: 1, MarkdownObjectKey: "object.md"}},
+		Versions:          []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "object.md"}},
 	}
 
 	repo := &publishRepoStub{doc: doc}
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc123"}}
 	activities := NewActivities(repo, nil, publisher)
-	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
-	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub, Payload: map[string]any{
+	worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
 		"commit_message": "commit",
 		"author_name":    "Author",
 		"author_email":   "author@example.com",
@@ -200,7 +200,7 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 }
 
 func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
-	doc := &model.Document{
+	doc := &domain.Document{
 		ID:                "doc-retry",
 		Name:              "Doc",
 		Owner:             "owner",
@@ -208,10 +208,10 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 		Branch:            "main",
 		BaseBranch:        "main",
 		Path:              "docs/doc.md",
-		Status:            model.StatusConvertedToMarkdown,
+		Status:            domain.DocumentStatusConvertedToMarkdown,
 		MarkdownBucket:    "bucket",
 		MarkdownObjectKey: "object.md",
-		Versions:          []model.DocumentVersion{{Version: 1, MarkdownObjectKey: "object.md"}},
+		Versions:          []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "object.md"}},
 	}
 
 	repo := &publishRepoStub{doc: doc}
@@ -223,10 +223,10 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 		RetryAfter:   retryAfter,
 	}}
 	activities := NewActivities(repo, nil, publisher)
-	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
 	start := time.Now()
-	worker.handlePublish(context.Background(), model.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub, Payload: map[string]any{
+	worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
 		"commit_message": "commit",
 		"author_name":    "Author",
 		"author_email":   "author@example.com",
@@ -248,14 +248,14 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 	if delay < 2*time.Second || delay > 4*time.Second {
 		t.Fatalf("expected retry_after to be respected, got delay=%s", delay)
 	}
-	if doc.Status != model.StatusFailed {
+	if doc.Status != domain.DocumentStatusFailed {
 		t.Fatalf("expected document to be marked failed, got %s", doc.Status)
 	}
 }
 
 func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	fixed := time.Date(2024, 12, 1, 12, 0, 0, 0, time.UTC)
-	doc := &model.Document{
+	doc := &domain.Document{
 		ID:                "doc-recover",
 		Name:              "Doc",
 		Owner:             "owner",
@@ -263,21 +263,21 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 		Branch:            "main",
 		BaseBranch:        "main",
 		Path:              "docs/doc.md",
-		Status:            model.StatusConvertedToMarkdown,
+		Status:            domain.DocumentStatusConvertedToMarkdown,
 		MarkdownBucket:    "bucket",
 		MarkdownObjectKey: "object.md",
-		Versions:          []model.DocumentVersion{{Version: 1, MarkdownObjectKey: "object.md"}},
+		Versions:          []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "object.md"}},
 	}
 
 	repo := &publishRepoStub{
 		doc: doc,
 		now: fixed,
-		jobs: map[string]model.ProcessingJob{
+		jobs: map[string]domain.ProcessingJob{
 			"job-stuck": {
 				TaskID:     "job-stuck",
 				DocumentID: doc.ID,
-				Stage:      model.JobStagePublishToGitHub,
-				Status:     model.JobStatusInProgress,
+				Stage:      domain.JobStagePublishToGitHub,
+				Status:     domain.JobStatusInProgress,
 				Attempts:   1,
 				Payload: map[string]any{
 					"commit_message": "commit",
@@ -294,7 +294,7 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	reconciler.reconcile(context.Background())
 
 	recovered := repo.jobs["job-stuck"]
-	if recovered.Status != model.JobStatusPending {
+	if recovered.Status != domain.JobStatusPending {
 		t.Fatalf("expected job to be re-queued, got %s", recovered.Status)
 	}
 	if len(repo.recoveryEvents) == 0 {
@@ -304,15 +304,15 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	repo.now = fixed.Add(time.Minute)
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "commit-sha"}}
 	activities := NewActivities(repo, nil, publisher)
-	worker := NewStageWorker(repo, activities, model.JobStagePublishToGitHub, 2, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 2, time.Second)
 
 	worker.reconcile(context.Background())
 
 	completed := repo.jobs["job-stuck"]
-	if completed.Status != model.JobStatusCompleted {
+	if completed.Status != domain.JobStatusCompleted {
 		t.Fatalf("expected job to be completed after recovery, got %s", completed.Status)
 	}
-	if doc.Status != model.StatusPublishedToGitHub {
+	if doc.Status != domain.DocumentStatusPublishedToGitHub {
 		t.Fatalf("expected document to be published, got %s", doc.Status)
 	}
 }

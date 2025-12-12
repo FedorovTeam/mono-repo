@@ -12,12 +12,14 @@ import (
 
 	"backend-document-service/db/migrations"
 	"backend-document-service/internal/config"
+	"backend-document-service/internal/domain"
 	"backend-document-service/internal/grpcdial"
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/infrastructure/persistence"
+	storagestore "backend-document-service/internal/infrastructure/storage"
 	"backend-document-service/internal/observability"
-	"backend-document-service/internal/repository"
 	docservice "backend-document-service/internal/service/document"
 	transport "backend-document-service/internal/transport/grpc"
+	docusecase "backend-document-service/internal/usecase/document"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
@@ -71,7 +73,7 @@ func main() {
 		return
 	}
 
-	repo := repository.New(db)
+	repo := persistence.NewDocumentRepository(db)
 	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)
@@ -79,6 +81,7 @@ func main() {
 	defer storageConn.Close()
 
 	storageClient := storagev1.NewStorageServiceClient(storageConn)
+	storageAdapter := storagestore.New(storageClient)
 	transformerConn, err := grpcdial.DialContext(ctx, cfg.Services.TransformerService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("transformer client: %v", err)
@@ -93,27 +96,27 @@ func main() {
 
 	transformerClient := transformerv1.NewTransformerServiceClient(transformerConn)
 	publisherClient := githubpublisherv1.NewGithubPublisherServiceClient(publisherConn)
+
+	defaults := docusecase.Defaults{
+		OriginalBucket: cfg.Storage.OriginalBucket,
+		MarkdownBucket: cfg.Storage.MarkdownBucket,
+		Owner:          cfg.Github.Owner,
+		Repository:     cfg.Github.Repository,
+		Branch:         cfg.Github.Branch,
+		BaseBranch:     cfg.Github.BaseBranch,
+	}
+
+	usecase := docusecase.New(repo, storageAdapter, defaults)
+
 	activities := docservice.NewActivities(
 		repo,
 		transformerClient,
 		publisherClient,
 	)
 
-	service := docservice.New(
-		repo,
-		activities,
-		storageClient,
-		cfg.Storage.OriginalBucket,
-		cfg.Storage.MarkdownBucket,
-		cfg.Github.Owner,
-		cfg.Github.Repository,
-		cfg.Github.Branch,
-		cfg.Github.BaseBranch,
-	)
-
 	reconciler := docservice.NewUploadReconciler(
 		repo,
-		service,
+		usecase,
 		cfg.Reconciler.BatchSize,
 		cfg.Reconciler.MinUploadedAge,
 	)
@@ -129,9 +132,9 @@ func main() {
 
 	go processingReconciler.Run(ctx, cfg.StageWorker.Interval)
 
-	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 
 	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
 	go convertWorker.Run(ctx, cfg.StageWorker.Interval)
@@ -154,7 +157,7 @@ func main() {
 
 	go jobFollower.Run(ctx, cfg.JobFollower.Interval)
 
-	server := transport.NewServer(service)
+	server := transport.NewServer(usecase)
 	if err := server.ListenAndServe(ctx, cfg.Server.Addr); err != nil {
 		log.Printf("server stopped: %v", err)
 		os.Exit(1)

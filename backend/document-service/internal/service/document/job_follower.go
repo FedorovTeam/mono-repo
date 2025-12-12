@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 )
 
 type jobFollowerRepo interface {
-	ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]model.ProcessingJob, error)
-	GetDocument(ctx context.Context, id string) (*model.Document, error)
-	CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error)
-	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
-	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
+	ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]domain.ProcessingJob, error)
+	GetDocument(ctx context.Context, id string) (*domain.Document, error)
+	CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error)
+	UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error)
+	UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error)
 }
 
 type PublishDefaults struct {
@@ -99,7 +99,7 @@ func (f *JobFollower) reconcile(ctx context.Context) {
 	}
 }
 
-func (f *JobFollower) handleJob(ctx context.Context, job model.ProcessingJob) {
+func (f *JobFollower) handleJob(ctx context.Context, job domain.ProcessingJob) {
 	start := time.Now()
 	defer f.metrics.recordDuration(ctx, time.Since(start))
 
@@ -116,20 +116,20 @@ func (f *JobFollower) handleJob(ctx context.Context, job model.ProcessingJob) {
 	}
 
 	switch job.Status {
-	case model.JobStatusCompleted:
+	case domain.JobStatusCompleted:
 		f.scheduleNext(ctx, job, doc)
-	case model.JobStatusFailed:
+	case domain.JobStatusFailed:
 		f.markFailed(ctx, job, doc)
 	}
 }
 
-func (f *JobFollower) scheduleNext(ctx context.Context, job model.ProcessingJob, doc *model.Document) {
-	if doc.Status == model.StatusFailed {
+func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob, doc *domain.Document) {
+	if doc.Status == domain.DocumentStatusFailed {
 		return
 	}
 
 	switch job.Stage {
-	case model.JobStageStoreOriginal:
+	case domain.JobStageStoreOriginal:
 		payload := map[string]any{
 			"original_bucket":     doc.OriginalBucket,
 			"original_object_key": doc.OriginalObjectKey,
@@ -137,11 +137,11 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job model.ProcessingJob,
 			"markdown_object_key": doc.MarkdownObjectKey,
 			"correlation_id":      correlationFromDoc(doc),
 		}
-		event := &model.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
-		if _, err := f.repo.CreateProcessingJob(ctx, &model.ProcessingJob{DocumentID: doc.ID, Stage: model.JobStageConvertToMarkdown, Status: model.JobStatusPending, Payload: payload}, event); err != nil {
+		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
+		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 			f.logf("job-follower: enqueue convert for %s: %v", doc.ID, err)
 		}
-	case model.JobStageConvertToMarkdown:
+	case domain.JobStageConvertToMarkdown:
 		payload := map[string]any{
 			"markdown_bucket":     doc.MarkdownBucket,
 			"markdown_object_key": doc.MarkdownObjectKey,
@@ -157,28 +157,28 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job model.ProcessingJob,
 			"author_email":        f.defaults.AuthorEmail,
 			"correlation_id":      correlationFromDoc(doc),
 		}
-		event := &model.JobEvent{EventType: "scheduled", Message: "next stage: publish"}
-		if _, err := f.repo.CreateProcessingJob(ctx, &model.ProcessingJob{DocumentID: doc.ID, Stage: model.JobStagePublishToGitHub, Status: model.JobStatusPending, Payload: payload}, event); err != nil {
+		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: publish"}
+		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 			f.logf("job-follower: enqueue publish for %s: %v", doc.ID, err)
 		}
 	}
 }
 
-func (f *JobFollower) markFailed(ctx context.Context, job model.ProcessingJob, doc *model.Document) {
+func (f *JobFollower) markFailed(ctx context.Context, job domain.ProcessingJob, doc *domain.Document) {
 	reason := fmt.Sprintf("stage %s failed", job.Stage)
 	if lastError, ok := job.Payload["last_error"].(string); ok && lastError != "" {
 		reason = fmt.Sprintf("%s: %s", reason, lastError)
 	}
 
-	if _, err := f.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil); err != nil {
+	if _, err := f.repo.UpdateStatus(ctx, doc.ID, domain.DocumentStatusFailed, reason, reason, nil); err != nil {
 		f.logf("job-follower: mark failed document %s: %v", doc.ID, err)
 		return
 	}
 
-	_, _ = f.repo.UpdateProcessingJob(ctx, job.TaskID, job.Status, nil, false, job.Payload, &model.JobEvent{EventType: "handled", Message: "marked document failed"})
+	_, _ = f.repo.UpdateProcessingJob(ctx, job.TaskID, job.Status, nil, false, job.Payload, &domain.JobEvent{EventType: "handled", Message: "marked document failed"})
 }
 
-func pickCommitMessage(doc *model.Document, defaults PublishDefaults) string {
+func pickCommitMessage(doc *domain.Document, defaults PublishDefaults) string {
 	if defaults.CommitMessage != "" {
 		return defaults.CommitMessage
 	}
@@ -188,7 +188,7 @@ func pickCommitMessage(doc *model.Document, defaults PublishDefaults) string {
 	return "Update document"
 }
 
-func pickPRTitle(doc *model.Document, defaults PublishDefaults) string {
+func pickPRTitle(doc *domain.Document, defaults PublishDefaults) string {
 	if defaults.PRTitle != "" {
 		return defaults.PRTitle
 	}
@@ -198,7 +198,7 @@ func pickPRTitle(doc *model.Document, defaults PublishDefaults) string {
 	return ""
 }
 
-func correlationFromDoc(doc *model.Document) string {
+func correlationFromDoc(doc *domain.Document) string {
 	if doc.WorkflowID != "" {
 		return doc.WorkflowID
 	}

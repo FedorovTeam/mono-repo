@@ -5,8 +5,8 @@ import (
 	"log"
 	"net"
 
-	"backend-document-service/internal/model"
-	svc "backend-document-service/internal/service/document"
+	"backend-document-service/internal/domain"
+	usecase "backend-document-service/internal/usecase/document"
 	documentv1 "backend-document-service/proto/backend/document/v1"
 
 	"google.golang.org/grpc"
@@ -16,10 +16,18 @@ import (
 
 type Server struct {
 	documentv1.UnimplementedDocumentServiceServer
-	service *svc.Service
+	service DocumentService
 }
 
-func NewServer(service *svc.Service) *Server {
+type DocumentService interface {
+	CreateDocument(ctx context.Context, in usecase.CreateDocumentInput) (*domain.Document, error)
+	ConfirmUpload(ctx context.Context, in usecase.ConfirmUploadInput) (*domain.Document, error)
+	UpdateStatus(ctx context.Context, in usecase.UpdateStatusInput) (*domain.Document, error)
+	GetDocument(ctx context.Context, id string) (*domain.Document, error)
+	ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) ([]domain.Document, error)
+}
+
+func NewServer(service DocumentService) *Server {
 	return &Server{service: service}
 }
 
@@ -41,7 +49,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocumentRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "CreateDocument")
 
-	doc, err := s.service.CreateDocument(ctx, svc.CreateInput{
+	doc, err := s.service.CreateDocument(ctx, usecase.CreateDocumentInput{
 		ID:                req.GetId(),
 		FileName:          req.GetFileName(),
 		Owner:             req.GetOwner(),
@@ -72,7 +80,7 @@ func (s *Server) GetDocument(ctx context.Context, req *documentv1.GetDocumentReq
 
 func (s *Server) ListDocuments(ctx context.Context, req *documentv1.ListDocumentsRequest) (*documentv1.ListDocumentsResponse, error) {
 	s.logWithCorrelation(ctx, "ListDocuments")
-	var status *model.Status
+	var status *domain.DocumentStatus
 	if req.GetStatusFilter() != documentv1.DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED {
 		mapped := fromProtoStatus(req.GetStatusFilter())
 		status = &mapped
@@ -91,9 +99,9 @@ func (s *Server) ListDocuments(ctx context.Context, req *documentv1.ListDocument
 
 func (s *Server) UpdateDocumentStatus(ctx context.Context, req *documentv1.UpdateDocumentStatusRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "UpdateDocumentStatus")
-	doc, err := s.service.UpdateStatus(ctx, svc.UpdateStatusInput{
+	doc, err := s.service.UpdateStatus(ctx, usecase.UpdateStatusInput{
 		DocumentID:        req.GetId(),
-		Status:            fromProtoStatus(req.GetStatus()),
+		Status:            string(fromProtoStatus(req.GetStatus())),
 		Reason:            req.GetReason(),
 		ErrorReason:       req.GetReason(),
 		MarkdownObjectKey: req.GetMarkdownObjectKey(),
@@ -108,7 +116,7 @@ func (s *Server) UpdateDocumentStatus(ctx context.Context, req *documentv1.Updat
 
 func (s *Server) ConfirmUpload(ctx context.Context, req *documentv1.ConfirmUploadRequest) (*documentv1.Document, error) {
 	s.logWithCorrelation(ctx, "ConfirmUpload")
-	doc, err := s.service.ConfirmUpload(ctx, svc.ConfirmUploadInput{
+	doc, err := s.service.ConfirmUpload(ctx, usecase.ConfirmUploadInput{
 		DocumentID: req.GetDocumentId(),
 		Bucket:     req.GetBucket(),
 		ObjectKey:  req.GetObjectKey(),
@@ -119,7 +127,7 @@ func (s *Server) ConfirmUpload(ctx context.Context, req *documentv1.ConfirmUploa
 	return toProto(doc), nil
 }
 
-func toProto(doc *model.Document) *documentv1.Document {
+func toProto(doc *domain.Document) *documentv1.Document {
 	actualStatus := doc.ActualStatus
 	if actualStatus == "" {
 		actualStatus = doc.Status
@@ -148,37 +156,37 @@ func toProto(doc *model.Document) *documentv1.Document {
 	return p
 }
 
-func toProtoStatus(s model.Status) documentv1.DocumentStatus {
+func toProtoStatus(s domain.DocumentStatus) documentv1.DocumentStatus {
 	switch s {
-	case model.StatusUploaded:
+	case domain.DocumentStatusUploaded:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED
-	case model.StatusStoredOriginal:
+	case domain.DocumentStatusStoredOriginal:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL
-	case model.StatusConvertedToMarkdown:
+	case domain.DocumentStatusConvertedToMarkdown:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN
-	case model.StatusPublishedToGitHub:
+	case domain.DocumentStatusPublishedToGitHub:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_PUBLISHED_TO_GITHUB
-	case model.StatusFailed:
+	case domain.DocumentStatusFailed:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_FAILED
 	default:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED
 	}
 }
 
-func fromProtoStatus(s documentv1.DocumentStatus) model.Status {
+func fromProtoStatus(s documentv1.DocumentStatus) domain.DocumentStatus {
 	switch s {
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED:
-		return model.StatusUploaded
+		return domain.DocumentStatusUploaded
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL:
-		return model.StatusStoredOriginal
+		return domain.DocumentStatusStoredOriginal
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN:
-		return model.StatusConvertedToMarkdown
+		return domain.DocumentStatusConvertedToMarkdown
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_PUBLISHED_TO_GITHUB:
-		return model.StatusPublishedToGitHub
+		return domain.DocumentStatusPublishedToGitHub
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_FAILED:
-		return model.StatusFailed
+		return domain.DocumentStatusFailed
 	default:
-		return model.Status("")
+		return domain.DocumentStatus("")
 	}
 }
 
