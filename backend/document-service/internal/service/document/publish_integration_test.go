@@ -89,7 +89,7 @@ func (r *integrationRepo) CreateDocument(context.Context, *model.Document, *mode
 }
 
 func (r *integrationRepo) GetDocument(_ context.Context, id string) (*model.Document, error) {
-	return &model.Document{ID: id, Status: model.StatusStoredOriginal, MarkdownBucket: "bucket", MarkdownObjectKey: "object-key", Versions: []model.DocumentVersion{{Version: 1, MarkdownObjectKey: "object-key"}}}, nil
+	return &model.Document{ID: id, Status: model.StatusConvertedToMarkdown, MarkdownBucket: "bucket", MarkdownObjectKey: "object-key", Versions: []model.DocumentVersion{{Version: 1, MarkdownObjectKey: "object-key"}}}, nil
 }
 
 func (r *integrationRepo) ListDocuments(context.Context, int, int, *model.Status) ([]model.Document, error) {
