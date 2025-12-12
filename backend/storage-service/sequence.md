@@ -4,6 +4,7 @@
 sequenceDiagram
     participant Client as Клиент / Gateway
     participant Storage as StorageService (gRPC + worker)
+    participant Document as DocumentService (ConfirmUpload)
     participant Postgres as PostgreSQL
     participant MinIO
     participant Events as Webhook/Queue Target
@@ -15,6 +16,11 @@ sequenceDiagram
     Note over Storage,MinIO: ConfigureUploadNotification(UploadBucket, WebhookArn)
     Storage->>MinIO: Настроить уведомления ObjectCreated на targetArn
     MinIO-->>Storage: OK
+    opt UploadEventHandler запущен
+        Note over Storage,MinIO: ListenAndForward(uploadBucket, s3:ObjectCreated:*)
+        Storage->>MinIO: Подписка на события загрузки (ListenBucketNotification)
+        MinIO-->>Storage: Stream уведомлений
+    end
     Storage->>Postgres: FOR UPDATE SKIP LOCKED: выбрать pending processing_jobs(stage)
     Postgres-->>Storage: task_id, document_id, payload (correlation_id)
     Storage->>Postgres: UPDATE processing_jobs SET status='in_progress'
@@ -33,6 +39,12 @@ sequenceDiagram
     MinIO-->>Storage: OK
     Storage-->>Client: bucket/key, created_at (+ response metadata: correlation-id, org-slug, project-slug)
     MinIO-->>Events: Notification ObjectCreated (uploadBucket)
+    opt UploadEventHandler запущен
+        MinIO-->>Storage: Notification ObjectCreated (uploadBucket)
+        Storage->>Storage: extract document_id из object_key или пропустить
+        Storage->>Document: ConfirmUpload(document_id, bucket, object_key)
+        Document-->>Storage: OK (ошибка только логируется)
+    end
 
     %% UploadMarkdown
     Client->>Storage: UploadMarkdown(org_slug?, project_slug?, document_id, content)
