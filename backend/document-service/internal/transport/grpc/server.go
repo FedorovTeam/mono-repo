@@ -42,20 +42,18 @@ func (s *Server) CreateDocument(ctx context.Context, req *documentv1.CreateDocum
 	s.logWithCorrelation(ctx, "CreateDocument")
 
 	doc, err := s.service.CreateDocument(ctx, svc.CreateInput{
-		ID:                 req.GetId(),
-		FileName:           req.GetFileName(),
-		Owner:              req.GetOwner(),
-		Repository:         req.GetRepository(),
-		Branch:             req.GetBranch(),
-		BaseBranch:         req.GetBaseBranch(),
-		Path:               req.GetPath(),
-		UploadBucket:       req.GetUploadBucket(),
-		UploadObjectKey:    req.GetUploadObjectKey(),
-		MarkdownBucket:     req.GetMarkdownBucket(),
-		MarkdownObjectKey:  req.GetMarkdownObjectKey(),
-		PublishPath:        req.GetPath(), // можно собрать сложнее, если надо
-		EntitySpecificPath: req.GetEntitySpecificPath(),
-		CreatePR:           req.GetCreatePr(),
+		ID:                req.GetId(),
+		FileName:          req.GetFileName(),
+		Owner:             req.GetOwner(),
+		Repository:        req.GetRepository(),
+		Branch:            req.GetBranch(),
+		BaseBranch:        req.GetBaseBranch(),
+		Path:              req.GetPath(),
+		UploadBucket:      req.GetUploadBucket(),
+		UploadObjectKey:   req.GetUploadObjectKey(),
+		MarkdownBucket:    req.GetMarkdownBucket(),
+		MarkdownObjectKey: req.GetMarkdownObjectKey(),
+		CreatePR:          req.GetCreatePr(),
 	})
 	if err != nil {
 		return nil, err

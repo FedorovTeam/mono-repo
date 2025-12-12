@@ -60,7 +60,7 @@
   - `markdown_bucket`, `markdown_object_key` — что читать из MinIO (сверяется с `documents.markdown_*`).
   - `repository` — `owner/repo` или `documents.repository`.
   - `branch` — целевая ветка (`documents.branch`).
-  - `github_path` — путь в репозитории, обычно равен `documents.path` или `publish_path`.
+  - `github_path` — путь в репозитории, равный `documents.path`.
 - **Опциональные поля:**
   - `create_pr` — флаг авто‑PR (по умолчанию `documents.create_pr`).
   - `base_branch` — ветка для PR, если отличается от целевой.
