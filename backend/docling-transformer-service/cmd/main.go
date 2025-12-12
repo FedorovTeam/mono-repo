@@ -99,7 +99,7 @@ func main() {
 		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
 	}, logger)
 
-	transformUC := usecase.NewTransformationUseCase(queueRepo, conv, usecase.TransformationConfig{
+	transformUC := usecase.NewTransformerService(queueRepo, conv, usecase.TransformationConfig{
 		MarkdownBucket:  cfg.Minio.Bucket,
 		QueueLimit:      cfg.Service.QueueLimit,
 		PollInterval:    cfg.Docling.StatusInitialInterval,
