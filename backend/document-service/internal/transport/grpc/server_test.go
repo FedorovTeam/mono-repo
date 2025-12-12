@@ -14,6 +14,7 @@ import (
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/service/document"
 	documentv1 "backend-document-service/proto/backend/document/v1"
+	storagev1 "backend-document-service/proto/backend/storage/v1"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -218,7 +219,8 @@ func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.
 
 func TestGRPCWorkflow(t *testing.T) {
 	repo := &memoryRepo{}
-	svc := document.New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	storage := &noopStorageClient{}
+	svc := document.New(repo, nil, storage, "orig", "md", "owner", "repo", "main", "main")
 	srv := NewServer(svc)
 	grpcServer := grpc.NewServer()
 	documentv1.RegisterDocumentServiceServer(grpcServer, srv)
@@ -251,4 +253,22 @@ func TestGRPCWorkflow(t *testing.T) {
 	require.Equal(t, created.Id, fetched.Id)
 	require.Equal(t, created.Repository, fetched.Repository)
 	require.Equal(t, created.Path, fetched.Path)
+}
+
+type noopStorageClient struct{}
+
+func (noopStorageClient) UploadOriginal(context.Context, *storagev1.UploadOriginalRequest, ...grpc.CallOption) (*storagev1.UploadObjectResponse, error) {
+	return &storagev1.UploadObjectResponse{}, nil
+}
+
+func (noopStorageClient) UploadMarkdown(context.Context, *storagev1.UploadMarkdownRequest, ...grpc.CallOption) (*storagev1.UploadObjectResponse, error) {
+	return &storagev1.UploadObjectResponse{}, nil
+}
+
+func (noopStorageClient) GetObject(_ context.Context, in *storagev1.GetObjectRequest, _ ...grpc.CallOption) (*storagev1.GetObjectResponse, error) {
+	return &storagev1.GetObjectResponse{Bucket: in.GetBucket(), ObjectKey: in.GetObjectKey()}, nil
+}
+
+func (noopStorageClient) GenerateUploadURL(context.Context, *storagev1.GenerateUploadURLRequest, ...grpc.CallOption) (*storagev1.GenerateUploadURLResponse, error) {
+	return &storagev1.GenerateUploadURLResponse{}, nil
 }

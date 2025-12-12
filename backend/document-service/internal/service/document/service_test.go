@@ -119,7 +119,7 @@ func (r *repoMock) ActiveJob(ctx context.Context, documentID string) (*model.Pro
 }
 
 func TestCreateDocumentValidation(t *testing.T) {
-	svc := New(&repoMock{}, nil, "orig", "md", "", "", "", "")
+	svc := New(&repoMock{}, nil, &stubStorageClient{}, "orig", "md", "", "", "", "")
 	_, err := svc.CreateDocument(context.Background(), CreateInput{})
 	require.Error(t, err)
 
@@ -138,7 +138,7 @@ func TestCreateDocumentValidation(t *testing.T) {
 
 func TestCreateDocumentSuccess(t *testing.T) {
 	repo := &repoMock{}
-	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "owner/repo", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", EntitySpecificPath: "docs/articles/name", BaseBranch: "main", UploadObjectKey: "docs/articles/name.docx", MarkdownObjectKey: "docs/articles/name.md"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
@@ -157,7 +157,7 @@ func TestCreateDocumentSuccess(t *testing.T) {
 
 func TestCreateDocumentSplitsOwnerFromRepository(t *testing.T) {
 	repo := &repoMock{}
-	svc := New(repo, nil, "orig", "md", "", "", "main", "main")
+	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "", "", "main", "main")
 
 	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "team/docs", Branch: "dev", UploadObjectKey: "team/docs/name.docx", MarkdownObjectKey: "team/docs/name.md"})
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestCreateDocumentSplitsOwnerFromRepository(t *testing.T) {
 }
 
 func TestCreateDocumentRejectsConflictingOwner(t *testing.T) {
-	svc := New(&repoMock{}, nil, "orig", "md", "default-owner", "repo", "main", "main")
+	svc := New(&repoMock{}, nil, &stubStorageClient{}, "orig", "md", "default-owner", "repo", "main", "main")
 
 	_, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Owner: "other", Repository: "owner/repo", UploadObjectKey: "orig/name.docx", MarkdownObjectKey: "md/name.md"})
 	require.Error(t, err)
@@ -177,7 +177,7 @@ func TestCreateDocumentRejectsConflictingOwner(t *testing.T) {
 
 func TestCreateDocumentRespectsProvidedID(t *testing.T) {
 	repo := &repoMock{}
-	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 	existingID := uuid.NewString()
 
 	doc, err := svc.CreateDocument(context.Background(), CreateInput{ID: existingID, FileName: "name", Owner: "owner", UploadObjectKey: "orig/doc.docx", MarkdownObjectKey: "orig/doc.md"})
@@ -188,7 +188,7 @@ func TestCreateDocumentRespectsProvidedID(t *testing.T) {
 
 func TestConfirmUploadEnqueuesStoreOriginalJob(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
-	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 
 	_, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
@@ -199,10 +199,21 @@ func TestConfirmUploadEnqueuesStoreOriginalJob(t *testing.T) {
 	require.Equal(t, "org/p.docx", repo.job.Payload["object_key"])
 }
 
+func TestConfirmUploadFailsWhenStorageUnavailable(t *testing.T) {
+	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
+	storage := &stubStorageClient{err: errors.New("minio down")}
+	svc := New(repo, nil, storage, "orig", "md", "owner", "repo", "main", "main")
+
+	_, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "storage validation failed")
+	require.Equal(t, 1, storage.attempts)
+}
+
 func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
 	doc := &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded}
 	repo := &repoMock{doc: doc}
-	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 
 	returned, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
@@ -211,14 +222,14 @@ func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
 }
 
 func TestUpdateStatusValidation(t *testing.T) {
-	svc := New(&repoMock{doc: &model.Document{ID: uuid.NewString()}}, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(&repoMock{doc: &model.Document{ID: uuid.NewString()}}, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 	_, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: "bad", Status: model.StatusFailed})
 	require.Error(t, err)
 }
 
 func TestUpdateStatusDelegates(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
-	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusStoredOriginal})
 	require.NoError(t, err)
 	require.Equal(t, model.StatusStoredOriginal, doc.Status)
@@ -227,7 +238,7 @@ func TestUpdateStatusDelegates(t *testing.T) {
 
 func TestUpdateStatusSavesErrorReason(t *testing.T) {
 	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
-	svc := New(repo, nil, "orig", "md", "owner", "repo", "main", "main")
+	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 
 	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusFailed, Reason: "boom"})
 	require.NoError(t, err)

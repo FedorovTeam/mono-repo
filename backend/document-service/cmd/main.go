@@ -19,6 +19,7 @@ import (
 	docservice "backend-document-service/internal/service/document"
 	transport "backend-document-service/internal/transport/grpc"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
+	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -71,6 +72,13 @@ func main() {
 	}
 
 	repo := repository.New(db)
+	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
+	if err != nil {
+		log.Fatalf("storage client: %v", err)
+	}
+	defer storageConn.Close()
+
+	storageClient := storagev1.NewStorageServiceClient(storageConn)
 	transformerConn, err := grpcdial.DialContext(ctx, cfg.Services.TransformerService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("transformer client: %v", err)
@@ -103,6 +111,7 @@ func main() {
 	service := docservice.New(
 		repo,
 		activities,
+		storageClient,
 		cfg.Storage.OriginalBucket,
 		cfg.Storage.MarkdownBucket,
 		cfg.Github.Owner,

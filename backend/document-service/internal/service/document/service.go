@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"backend-document-service/internal/model"
+	storagev1 "backend-document-service/proto/backend/storage/v1"
 )
 
 type Repository interface {
@@ -28,6 +29,7 @@ type Repository interface {
 
 type Service struct {
 	repo                  Repository
+	storage               storagev1.StorageServiceClient
 	defaultOriginalBucket string
 	defaultMarkdownBucket string
 	defaultOwner          string
@@ -36,9 +38,10 @@ type Service struct {
 	defaultBaseBranch     string
 }
 
-func New(repo Repository, _ *Activities, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
+func New(repo Repository, _ *Activities, storage storagev1.StorageServiceClient, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
 	return &Service{
 		repo:                  repo,
+		storage:               storage,
 		defaultOriginalBucket: defaultOriginalBucket,
 		defaultMarkdownBucket: defaultMarkdownBucket,
 		defaultOwner:          defaultOwner,
@@ -204,6 +207,14 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 	}
 	if doc.OriginalObjectKey != "" && doc.OriginalObjectKey != in.ObjectKey {
 		return nil, fmt.Errorf("object key mismatch: expected %s, got %s", doc.OriginalObjectKey, in.ObjectKey)
+	}
+
+	if s.storage == nil {
+		return nil, errors.New("storage client is not configured")
+	}
+
+	if _, err := s.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: in.Bucket, ObjectKey: in.ObjectKey}); err != nil {
+		return nil, fmt.Errorf("storage validation failed: %w", err)
 	}
 
 	payload := map[string]any{
