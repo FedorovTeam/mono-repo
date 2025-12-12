@@ -1,4 +1,4 @@
-package repository
+package postgres
 
 import (
 	"context"
@@ -752,6 +752,31 @@ func (r *Repository) UpdateProcessingJob(ctx context.Context, taskID string, sta
 	}
 
 	return &job, nil
+}
+
+// AddJobEvent сохраняет произвольное событие задачи в журнале.
+func (r *Repository) AddJobEvent(ctx context.Context, event *model.JobEvent) error {
+	if event == nil {
+		return nil
+	}
+
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return err
+	}
+
+	if event.ID == "" {
+		event.ID = uuid.NewString()
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+        INSERT INTO job_events (id, job_id, stage, status, event_type, message, payload, created_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `, event.ID, event.JobID, event.Stage, event.Status, event.EventType, event.Message, payload, event.CreatedAt)
+	return err
 }
 
 func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]model.DocumentVersion, error) {

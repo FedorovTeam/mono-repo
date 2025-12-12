@@ -13,9 +13,9 @@ import (
 	"backend-document-service/db/migrations"
 	"backend-document-service/internal/config"
 	"backend-document-service/internal/grpcdial"
+	"backend-document-service/internal/infra/postgres"
 	"backend-document-service/internal/model"
 	"backend-document-service/internal/observability"
-	"backend-document-service/internal/repository"
 	docservice "backend-document-service/internal/service/document"
 	transport "backend-document-service/internal/transport/grpc"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
@@ -71,7 +71,7 @@ func main() {
 		return
 	}
 
-	repo := repository.New(db)
+	repo := postgres.New(db)
 	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)

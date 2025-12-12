@@ -84,7 +84,15 @@ func (r *publishRepoStub) GetDocument(context.Context, string) (*model.Document,
 	return r.doc, nil
 }
 
+func (r *publishRepoStub) UpdateWorkflowID(context.Context, string, string) (*model.Document, error) {
+	return r.doc, nil
+}
+
 func (r *publishRepoStub) CreateDocument(context.Context, *model.Document, *model.DocumentVersion, *model.DocumentStatusLog) (*model.Document, error) {
+	return nil, nil
+}
+
+func (r *publishRepoStub) ListFinishedJobs(context.Context, int, time.Duration) ([]model.ProcessingJob, error) {
 	return nil, nil
 }
 

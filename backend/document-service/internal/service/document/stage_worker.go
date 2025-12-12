@@ -10,20 +10,22 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"backend-document-service/internal/domain"
 	"backend-document-service/internal/model"
+	"backend-document-service/internal/usecase"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 )
 
-type pendingJobRepo interface {
-	AcquirePendingJobs(ctx context.Context, stage model.JobStage, limit int) ([]model.ProcessingJob, error)
-	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
-	GetDocument(ctx context.Context, id string) (*model.Document, error)
+type stageWorkerRepo interface {
+	domain.JobRepository
+	domain.DocumentRepository
 }
 
 // StageWorker обрабатывает pending-задачи из processing_jobs.
 type StageWorker struct {
-	repo       pendingJobRepo
+	repo       stageWorkerRepo
 	activities *Activities
+	worker     *usecase.WorkerService
 	stage      model.JobStage
 	batchSize  int
 	retryDelay time.Duration
@@ -31,7 +33,7 @@ type StageWorker struct {
 	logf       func(format string, args ...interface{})
 }
 
-func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
+func NewStageWorker(repo stageWorkerRepo, activities *Activities, stage model.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -39,107 +41,75 @@ func NewStageWorker(repo pendingJobRepo, activities *Activities, stage model.Job
 		retryDelay = time.Minute
 	}
 
+	metrics := newWorkerMetrics(fmt.Sprintf("stage_%s", stage))
+	hooks := usecase.WorkerHooks{
+		Batch: func(ctx context.Context, size int) { metrics.observeBatch(ctx, size) },
+		Error: func(ctx context.Context) { metrics.recordError(ctx) },
+	}
+
 	return &StageWorker{
 		repo:       repo,
 		activities: activities,
+		worker:     usecase.NewWorkerService(repo, batchSize, hooks),
 		stage:      stage,
 		batchSize:  batchSize,
 		retryDelay: retryDelay,
-		metrics:    newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
+		metrics:    metrics,
 		logf:       log.Printf,
 	}
 }
 
 func (w *StageWorker) Run(ctx context.Context, interval time.Duration) {
-	if interval <= 0 {
-		interval = time.Minute
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	w.reconcile(ctx)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			w.reconcile(ctx)
-		}
-	}
+	w.worker.Run(ctx, w.stage, interval, w.handleJobWithMetrics)
 }
 
 func (w *StageWorker) reconcile(ctx context.Context) {
-	for {
-		jobs, err := w.repo.AcquirePendingJobs(ctx, w.stage, w.batchSize)
-		if err != nil {
-			w.logf("stage-worker[%s]: acquire pending jobs: %v", w.stage, err)
-			w.metrics.recordError(ctx)
-			return
-		}
-		w.metrics.observeBatch(ctx, len(jobs))
-		if len(jobs) == 0 {
-			w.metrics.observeBatch(ctx, 0)
-			return
-		}
-
-		for _, job := range jobs {
-			start := time.Now()
-			w.handleJob(ctx, job)
-			w.metrics.recordDuration(ctx, time.Since(start))
-		}
-
-		if len(jobs) < w.batchSize {
-			return
-		}
-	}
+	w.worker.Process(ctx, w.stage, w.handleJobWithMetrics)
 }
 
-func (w *StageWorker) handleJob(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handleJobWithMetrics(ctx context.Context, job model.ProcessingJob) usecase.JobResult {
+	start := time.Now()
+	result := w.handleJob(ctx, job)
+	w.metrics.recordDuration(ctx, time.Since(start))
+	return result
+}
+
+func (w *StageWorker) handleJob(ctx context.Context, job model.ProcessingJob) usecase.JobResult {
 	switch job.Stage {
 	case model.JobStageStoreOriginal:
-		w.handleStoreOriginal(ctx, job)
+		return w.handleStoreOriginal(ctx, job)
 	case model.JobStageConvertToMarkdown:
-		w.handleConvert(ctx, job)
+		return w.handleConvert(ctx, job)
 	case model.JobStagePublishToGitHub:
-		w.handlePublish(ctx, job)
+		return w.handlePublish(ctx, job)
 	default:
-		w.failJob(ctx, job, fmt.Sprintf("unsupported stage %s", job.Stage), nil, nil)
+		return w.failJob(ctx, job, fmt.Sprintf("unsupported stage %s", job.Stage), nil, nil)
 	}
 }
 
-func (w *StageWorker) handleStoreOriginal(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handleStoreOriginal(ctx context.Context, job model.ProcessingJob) usecase.JobResult {
 	if w.activities == nil {
-		w.failJob(ctx, job, "activities not configured", nil, nil)
-		return
+		return w.failJob(ctx, job, "activities not configured", nil, nil)
 	}
 
 	if err := w.activities.MarkStoredOriginal(w.jobContext(ctx, job), job.DocumentID); err != nil {
-		w.failJob(ctx, job, err.Error(), nil, nil)
-		return
+		return w.failJob(ctx, job, err.Error(), nil, nil)
 	}
 
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed"}); err != nil {
-		w.logf("stage-worker[%s]: update completed job %s: %v", w.stage, job.TaskID, err)
-		w.metrics.recordError(ctx)
-	}
+	return usecase.JobResult{Status: model.JobStatusCompleted, Payload: job.Payload, Event: &model.JobEvent{EventType: "completed"}}
 }
 
-func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob) usecase.JobResult {
 	if w.activities == nil {
-		w.failJob(ctx, job, "activities not configured", nil, nil)
-		return
+		return w.failJob(ctx, job, "activities not configured", nil, nil)
 	}
 
 	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
-		w.failJob(ctx, job, fmt.Sprintf("load document: %v", err), nil, nil)
-		return
+		return w.failJob(ctx, job, fmt.Sprintf("load document: %v", err), nil, nil)
 	}
 	if doc == nil {
-		w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID), nil, nil)
-		return
+		return w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID), nil, nil)
 	}
 
 	originalBucket := stringFromPayload(job.Payload, "original_bucket", doc.OriginalBucket)
@@ -159,42 +129,36 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 	convCtx := w.jobContext(ctx, job)
 	result, err := w.activities.ConvertToMarkdown(convCtx, input)
 	if err != nil {
-		w.failJob(ctx, job, err.Error(), nil, nil)
-		return
+		return w.failJob(ctx, job, err.Error(), nil, nil)
 	}
 
+	if job.Payload == nil {
+		job.Payload = map[string]any{}
+	}
 	job.Payload["markdown_object_key"] = result.MarkdownKey
 
 	if !result.Ready {
-		w.failJob(ctx, job, "conversion did not finish", nil, nil)
-		return
+		return w.failJob(ctx, job, "conversion did not finish", nil, nil)
 	}
 
 	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
-		w.failJob(ctx, job, fmt.Sprintf("update status: %v", err), nil, nil)
-		return
+		return w.failJob(ctx, job, fmt.Sprintf("update status: %v", err), nil, nil)
 	}
 
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed"}); err != nil {
-		w.logf("stage-worker[%s]: complete convert job %s: %v", w.stage, job.TaskID, err)
-		w.metrics.recordError(ctx)
-	}
+	return usecase.JobResult{Status: model.JobStatusCompleted, Payload: job.Payload, Event: &model.JobEvent{EventType: "completed"}}
 }
 
-func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob) {
+func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob) usecase.JobResult {
 	if w.activities == nil {
-		w.failJob(ctx, job, "activities not configured", nil, nil)
-		return
+		return w.failJob(ctx, job, "activities not configured", nil, nil)
 	}
 
 	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
-		w.failJob(ctx, job, fmt.Sprintf("load document: %v", err), nil, nil)
-		return
+		return w.failJob(ctx, job, fmt.Sprintf("load document: %v", err), nil, nil)
 	}
 	if doc == nil {
-		w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID), nil, nil)
-		return
+		return w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID), nil, nil)
 	}
 
 	repoField := stringFromPayload(job.Payload, "repository", fmt.Sprintf("%s/%s", doc.Owner, doc.Repository))
@@ -230,12 +194,10 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 	}
 
 	if strings.TrimSpace(input.CommitMessage) == "" {
-		w.failJob(ctx, job, "commit_message is required for publish", nil, nil)
-		return
+		return w.failJob(ctx, job, "commit_message is required for publish", nil, nil)
 	}
 	if strings.TrimSpace(input.AuthorName) == "" || strings.TrimSpace(input.AuthorEmail) == "" {
-		w.failJob(ctx, job, "author_name and author_email are required for publish", nil, nil)
-		return
+		return w.failJob(ctx, job, "author_name and author_email are required for publish", nil, nil)
 	}
 	if input.MarkdownObjectKey != "" {
 		input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", job.DocumentID, input.Branch, input.MarkdownObjectKey)
@@ -261,38 +223,36 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 	resp, err := w.activities.PublishMarkdown(w.jobContext(ctx, job), input)
 	eventPayload := buildPublishEventPayload(resp)
 	if err != nil {
-		w.failJob(ctx, job, err.Error(), pickRetryAfter(resp), eventPayload)
-		return
+		return w.failJob(ctx, job, err.Error(), pickRetryAfter(resp), eventPayload)
 	}
 
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed", Payload: eventPayload}); err != nil {
-		w.logf("stage-worker[%s]: complete publish job %s: %v", w.stage, job.TaskID, err)
-		w.metrics.recordError(ctx)
-	}
+	return usecase.JobResult{Status: model.JobStatusCompleted, Payload: job.Payload, Event: &model.JobEvent{EventType: "completed", Payload: eventPayload}}
 }
 
-func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reason string, retryAfter *durationpb.Duration, eventPayload map[string]any) {
-	corr := stringFromPayload(job.Payload, "correlation_id", correlationIDFromContext(ctx))
-	nextRun := time.Now().Add(w.retryDelay)
-	if retryAfter != nil && retryAfter.AsDuration() > 0 {
-		nextRun = time.Now().Add(retryAfter.AsDuration())
-	}
+func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reason string, retryAfter *durationpb.Duration, eventPayload map[string]any) usecase.JobResult {
 	if job.Payload == nil {
 		job.Payload = map[string]any{}
 	}
-	job.Payload["last_error"] = reason
-	if retryAfter != nil {
+
+	nextRun := w.retryDelay
+	if retryAfter != nil && retryAfter.AsDuration() > 0 {
+		nextRun = retryAfter.AsDuration()
 		job.Payload["retry_after"] = retryAfter.AsDuration().String()
 	}
+	job.Payload["last_error"] = reason
+
 	if eventPayload == nil {
 		eventPayload = map[string]any{}
 	}
 	if retryAfter != nil && retryAfter.AsDuration() > 0 {
 		eventPayload["retry_after"] = retryAfter.AsDuration().String()
 	}
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusFailed, &nextRun, false, job.Payload, &model.JobEvent{EventType: "failed", Message: reason, Payload: eventPayload}); err != nil {
-		w.logf("stage-worker[%s]: fail job %s correlation_id=%s: %v (original reason: %s)", w.stage, job.TaskID, corr, err, reason)
-		w.metrics.recordError(ctx)
+
+	return usecase.JobResult{
+		Status:     model.JobStatusFailed,
+		Payload:    job.Payload,
+		RetryAfter: nextRun,
+		Event:      &model.JobEvent{EventType: "failed", Message: reason, Payload: eventPayload},
 	}
 }
 

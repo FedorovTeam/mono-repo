@@ -1,10 +1,6 @@
 package model
 
-import (
-	"time"
-
-	"backend-document-service/internal/domain"
-)
+import "backend-document-service/internal/domain"
 
 type Status = domain.DocumentStatus
 
@@ -41,76 +37,11 @@ func ValidateStatus(val Status) error {
 	return domain.ValidateDocumentStatus(domain.DocumentStatus(val))
 }
 
-type Document struct {
-	ID                string
-	Name              string
-	Owner             string
-	Repository        string
-	Branch            string
-	BaseBranch        string
-	Path              string
-	Status            Status
-	ActualStatus      Status
-	WorkflowID        string
-	ActiveJobID       string
-	ErrorReason       string
-	OriginalBucket    string
-	OriginalObjectKey string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	CreatePR          bool
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	Versions          []DocumentVersion
-}
-
-type DocumentVersion struct {
-	ID                string
-	DocumentID        string
-	Version           int32
-	OriginalObjectKey string
-	MarkdownObjectKey string
-	MarkdownQueueID   string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-}
-
-type DocumentStatusLog struct {
-	ID         string
-	DocumentID string
-	FromStatus Status
-	ToStatus   Status
-	WorkflowID string
-	Reason     string
-	CreatedAt  time.Time
-}
-
-type ProcessingJob struct {
-	TaskID     string
-	DocumentID string
-	Stage      JobStage
-	Status     JobStatus
-	Attempts   int
-	NextRunAt  time.Time
-	// Payload хранит ссылки для внешних gRPC исполнителей (bucket/object_key, queue_id,
-	// github_path/repository), а не бинарные данные документов.
-	Payload   map[string]any
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-type JobEvent struct {
-	ID        string
-	JobID     string
-	Stage     JobStage
-	Status    JobStatus
-	EventType string
-	Message   string
-	// Payload события фиксирует входные/выходные ссылки шагов (например, object_key,
-	// queue_id или commit_sha) без размещения контента.
-	Payload   map[string]any
-	CreatedAt time.Time
-}
+type Document = domain.Document
+type DocumentVersion = domain.DocumentVersion
+type DocumentStatusLog = domain.DocumentStatusLog
+type ProcessingJob = domain.ProcessingJob
+type JobEvent = domain.JobEvent
 
 func ValidateJobStage(stage JobStage) error {
 	return domain.ValidateJobStage(domain.JobStage(stage))
