@@ -19,7 +19,7 @@ sequenceDiagram
     Client->>Storage: GenerateUploadURL(document_id,<br/>file_name, content_length, correlation_id)
     Storage->>MinIO: Presign PUT для events.upload_bucket<br/>c заголовком x-amz-meta-correlation-id
     MinIO-->>Storage: upload_url + object_key
-    Storage-->>Client: upload_url, bucket, object_key<br/>+ метаданные x-correlation-id/org-slug/project-slug
+    Storage-->>Client: upload_url, bucket, object_key, markdown_bucket, markdown_object_key<br/>+ метаданные x-correlation-id/org-slug/project-slug
 
     Client->>MinIO: PUT объект по upload_url
     MinIO-->>Webhook: s3:ObjectCreated:* событие

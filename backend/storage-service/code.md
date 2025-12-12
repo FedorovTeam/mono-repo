@@ -52,9 +52,10 @@ classDiagram
         -Service service
         -ObjectKeyGenerator keyGenerator
         -string uploadBucket
+        -string markdownBucket
         -string orgSlug
         -string projectSlug
-        +New(client, keyGenerator, uploadBucket, service) Server
+        +New(client, keyGenerator, uploadBucket, markdownBucket, service) Server
         +UploadOriginal(ctx, req) UploadObjectResponse
         +UploadMarkdown(ctx, req) UploadObjectResponse
         +GetObject(ctx, req) GetObjectResponse
@@ -95,6 +96,8 @@ classDiagram
         +URL UploadURL
         +string Bucket
         +string ObjectKey
+        +string MarkdownBucket
+        +string MarkdownObjectKey
         +int64 ExpiresInSeconds
     }
 

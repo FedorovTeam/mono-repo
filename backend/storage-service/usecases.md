@@ -21,9 +21,9 @@
 ## 4. Предоставление presigned PUT для прямой загрузки
 - Для загрузки напрямую в MinIO вызывается `GenerateUploadURL`.
 - Разрешены только расширения `doc`, `docx`, `pdf`; `content_length` и `expires_in_seconds` обязаны быть больше нуля.
-- Ключ строится с сервисными значениями `org_slug=knowledge` и `project_slug=documents` и кладётся в бакет из конфигурации `events.upload_bucket` (по умолчанию `knowledge-original`).
+- Ключ строится с сервисными значениями `org_slug=knowledge` и `project_slug=documents` и кладётся в бакет из конфигурации `events.upload_bucket` (по умолчанию `knowledge-original`); дополнительно проверяется доступность markdown-бакета (`minio.buckets.knowledge_md`).
 - Если передан `correlation_id` (в теле запроса или в `x-correlation-id`), он добавляется в `x-amz-meta-correlation-id` для загрузки и дублируется в gRPC-хедерах ответа вместе с `org-slug`/`project-slug`.
-- В ответе возвращаются `upload_url`, `bucket`, `object_key` и `expires_in_seconds` для дальнейшей загрузки.
+- В ответе возвращаются `upload_url`, `bucket`, `object_key`, `markdown_bucket`, `markdown_object_key` и `expires_in_seconds` для дальнейшей загрузки и последующей привязки Markdown-файла.
 
 ## 5. Настройка уведомлений о загрузке
 - При старте сервис проверяет наличие бакетов (`knowledge-original`, `knowledge-md` и `events.upload_bucket`, если отличается) и настраивает MinIO webhook/queue (`events.webhook_arn`) для бакета `events.upload_bucket`; отсутствие ARN считается ошибкой и приводит к падению запуска.

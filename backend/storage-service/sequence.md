@@ -55,5 +55,5 @@ sequenceDiagram
     MinIO-->>Storage: exists
     Storage->>MinIO: PresignHeader(PUT, bucket=uploadBucket, key, expires, x-amz-meta-correlation-id из запроса/метаданных)
     MinIO-->>Storage: upload_url
-    Storage-->>Client: upload_url, bucket, object_key, expires_in_seconds (+ response metadata: correlation-id, org-slug, project-slug)
+    Storage-->>Client: upload_url, bucket, object_key, markdown_bucket, markdown_object_key, expires_in_seconds (+ response metadata: correlation-id, org-slug, project-slug)
 ```
