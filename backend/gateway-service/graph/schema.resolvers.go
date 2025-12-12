@@ -21,6 +21,9 @@ import (
 
 // UploadKnowledgeDocument is the resolver for the uploadKnowledgeDocument field.
 func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input model.UploadKnowledgeDocumentInput) (*model.UploadKnowledgeDocumentPayload, error) {
+	if _, err := requireAPIKey(ctx); err != nil {
+		return nil, err
+	}
 	repo, owner, err := validateUploadInput(input, r.UploadConfig)
 	if err != nil {
 		return nil, err
@@ -77,6 +80,9 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 
 // RetryProcessing is the resolver for the retryProcessing field.
 func (r *mutationResolver) RetryProcessing(ctx context.Context, documentID string) (*model.KnowledgeDocument, error) {
+	if _, err := requireAPIKey(ctx); err != nil {
+		return nil, err
+	}
 	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
 	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("document_id", documentID), zap.String("api_key", ctxutils.APIKey(ctx)))
 

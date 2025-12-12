@@ -74,14 +74,14 @@ func TestUploadValidation(t *testing.T) {
 	resolver := &Resolver{DocumentClient: &mockDocumentClient{}, StorageClient: &mockStorageClient{}, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024, AllowedExtensions: []string{"docx"}}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
-	_, err := mr.UploadKnowledgeDocument(context.Background(), model.UploadKnowledgeDocumentInput{})
+	_, err := mr.UploadKnowledgeDocument(ctxutils.WithAPIKey(context.Background(), "secret"), model.UploadKnowledgeDocumentInput{})
 	if err == nil {
 		t.Fatalf("expected validation error")
 	}
 }
 
 func TestUploadHappyPath(t *testing.T) {
-	ctx := ctxutils.WithCorrelationID(context.Background(), "corr-test")
+	ctx := ctxutils.WithAPIKey(ctxutils.WithCorrelationID(context.Background(), "corr-test"), "secret")
 	docCalled := false
 	storageDocID := ""
 	storageCalled := false
@@ -270,7 +270,7 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
 	reqBody := map[string]interface{}{
-            "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
+		"query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
 		"variables": map[string]interface{}{
 			"input": map[string]interface{}{
 				"fileName":      "demo.docx",
@@ -368,7 +368,7 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(logger)(middleware.APIKeyMiddleware("secret", logger)(gqlServer))
 
 	reqBody := map[string]interface{}{
-            "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
+		"query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
 		"variables": map[string]interface{}{
 			"input": map[string]interface{}{
 				"fileName":      "demo.docx",
