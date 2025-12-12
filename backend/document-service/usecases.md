@@ -11,6 +11,7 @@
 3. **Автоматическая обработка cron‑воркеров**
    - Воркеры читают `processing_jobs` со статусом `pending` и актуальным `next_run_at`, захватывают задачи `SELECT ... FOR UPDATE SKIP LOCKED`, обновляют статус в `job_events` и переводят документ в следующий этап (`StoredOriginal`, `ConvertedToMarkdown`, `PublishedToGitHub`).
    - При переходе `StoredOriginal → ConvertedToMarkdown → PublishedToGitHub` сервис создаёт новые задачи для последующей стадии, чтобы цепочка продолжалась без участия пользователя.
+   - Конвертация выполняется не внутри `document-service`, а через gRPC `TransformerService/ConvertDocumentToMarkdown` (`docling-transformer-service`). В ответе фиксируются `queue_id` и ожидаемый markdown-ключ; при включённом флаге ожидания воркер ждёт появления markdown-объекта в MinIO и только после этого переводит документ в `ConvertedToMarkdown`.
 
 4. **Ручное обновление статуса и резюмы после сбоя**
    - `UpdateDocumentStatus` принимает желаемый статус, причину, версии и новые ключи. Переходы валидируются: последовательность `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, перевод в `Failed` из любого состояния, а также возобновление после ошибки в `StoredOriginal`/`ConvertedToMarkdown`/`PublishedToGitHub`.

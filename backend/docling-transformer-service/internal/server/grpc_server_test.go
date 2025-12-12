@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/config"
+	"github.com/mono-repo/docling-transformer-service/internal/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/repository"
 	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
 	"go.uber.org/zap"
@@ -80,13 +83,42 @@ func (*fakeQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int
 }
 func (*fakeQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) { return 0, nil }
 
+type fakeConverter struct {
+	submitErr     error
+	checkErr      error
+	statusResults []converter.StatusCheckResult
+	lastRequest   converter.DoclingConvertRequest
+}
+
+func (f *fakeConverter) Submit(_ context.Context, req converter.DoclingConvertRequest) (string, error) {
+	f.lastRequest = req
+	if f.submitErr != nil {
+		return "", f.submitErr
+	}
+	return "job-1", nil
+}
+
+func (f *fakeConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
+	if f.checkErr != nil {
+		return converter.StatusCheckResult{}, f.checkErr
+	}
+	if len(f.statusResults) == 0 {
+		return converter.StatusCheckResult{}, nil
+	}
+	result := f.statusResults[0]
+	if len(f.statusResults) > 1 {
+		f.statusResults = f.statusResults[1:]
+	}
+	return result, nil
+}
+
 func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 	repo := &fakeQueueRepo{queueID: uuid.New()}
 	logger := zap.NewNop()
 
 	lis := bufconn.Listen(bufSize)
 	srv := newGRPCServer(logger, config.ObservabilityConfig{LoggingEnabled: true})
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "markdown-bucket", 0, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "markdown-bucket", 0, nil, 0, 0, 0, logger))
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
@@ -141,7 +173,7 @@ func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 
 	lis := bufconn.Listen(bufSize)
 	srv := newGRPCServer(logger, config.ObservabilityConfig{})
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 2, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 2, nil, 0, 0, 0, logger))
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
@@ -180,7 +212,7 @@ func TestConvertDocumentToMarkdownReturnsPendingWithQueueIDOnParallelRequests(t 
 
 	lis := bufconn.Listen(bufSize)
 	srv := newGRPCServer(logger, config.ObservabilityConfig{})
-	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 0, logger))
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(repo, "md", 0, nil, 0, 0, 0, logger))
 
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
@@ -232,5 +264,72 @@ func TestConvertDocumentToMarkdownReturnsPendingWithQueueIDOnParallelRequests(t 
 		if resp.GetQueueId() == "" {
 			t.Fatalf("queue id must be returned")
 		}
+	}
+}
+
+func TestConvertDocxToMarkdownFromURL(t *testing.T) {
+	docxContent := []byte("docx-bytes")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(docxContent)
+	}))
+	t.Cleanup(ts.Close)
+
+	conv := &fakeConverter{
+		statusResults: []converter.StatusCheckResult{
+			{},
+			{Result: &converter.DoclingConvertResult{Content: []byte("# title"), MediaType: "text/markdown", Charset: "utf-8"}},
+		},
+	}
+
+	lis := bufconn.Listen(bufSize)
+	srv := newGRPCServer(zap.NewNop(), config.ObservabilityConfig{})
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(&fakeQueueRepo{}, "md", 0, conv, time.Millisecond, time.Millisecond, 5, zap.NewNop()))
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+	resp, err := client.ConvertDocxToMarkdown(context.Background(), &transformerv1.ConvertDocxToMarkdownRequest{Source: &transformerv1.ConvertDocxToMarkdownRequest_DocxUrl{DocxUrl: ts.URL + "/file.docx"}})
+	if err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+
+	if resp.GetMarkdown() != "# title" {
+		t.Fatalf("unexpected markdown: %s", resp.GetMarkdown())
+	}
+	if string(conv.lastRequest.Content) != string(docxContent) {
+		t.Fatalf("converter did not receive docx content")
+	}
+	if conv.lastRequest.FileName != "file.docx" {
+		t.Fatalf("filename not derived from url: %s", conv.lastRequest.FileName)
+	}
+}
+
+func TestConvertDocxToMarkdownValidation(t *testing.T) {
+	lis := bufconn.Listen(bufSize)
+	srv := newGRPCServer(zap.NewNop(), config.ObservabilityConfig{})
+	transformerv1.RegisterTransformerServiceServer(srv, NewTransformerAPI(&fakeQueueRepo{}, "md", 0, &fakeConverter{}, time.Millisecond, time.Millisecond, 1, zap.NewNop()))
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
+		return lis.Dial()
+	}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transformerv1.NewTransformerServiceClient(conn)
+	_, err = client.ConvertDocxToMarkdown(context.Background(), &transformerv1.ConvertDocxToMarkdownRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected invalid argument, got %v", err)
 	}
 }

@@ -19,6 +19,7 @@
      - `convert_to_markdown` → создаёт `publish_to_github`.
      - Любая стадия в статусе `failed` → переводит документ в `Failed`, причина берётся из `payload.last_error`.
    - Стадии можно повторять: если исполнитель вернул задачу в `pending` (retry), `JobFollower` её не трогает до окончательного `completed`/`failed`.
+   - Воркеры `convert_to_markdown` вызывают gRPC `TransformerService/ConvertDocumentToMarkdown` в `docling-transformer-service`, сохраняют `queue_id` и, если включено ожидание (`stage_worker.wait_markdown=true`), ждут появления Markdown-файла в MinIO перед установкой статуса `ConvertedToMarkdown`.
 
 4. **Ручное обновление статуса**
    - Клиент вызывает `UpdateDocumentStatus`. Допустимы переходы `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, повторное выставление текущего статуса, либо перевод в `Failed` (если `error_reason` не задан, используется `reason`).

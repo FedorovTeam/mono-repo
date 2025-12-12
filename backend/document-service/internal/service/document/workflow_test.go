@@ -13,6 +13,8 @@ import (
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type fakeRepo struct {
@@ -109,6 +111,10 @@ func (f *fakeTransformerClient) ConvertDocumentToMarkdown(ctx context.Context, i
 	return f.resp, f.err
 }
 
+func (*fakeTransformerClient) ConvertDocxToMarkdown(ctx context.Context, in *transformerv1.ConvertDocxToMarkdownRequest, opts ...grpc.CallOption) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not implemented")
+}
+
 type fakeStorageClient struct {
 	markdownReq *storagev1.UploadMarkdownRequest
 	resp        *storagev1.UploadObjectResponse
@@ -191,6 +197,14 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 
 	if result.Status != "pending" {
 		t.Fatalf("unexpected status: %s", result.Status)
+	}
+
+	if repo.lastStatus != "" {
+		t.Fatalf("status should not be updated before markdown is ready, got %v", repo.lastStatus)
+	}
+
+	if err := activities.MarkConverted(context.Background(), repo.doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
+		t.Fatalf("mark converted failed: %v", err)
 	}
 
 	if repo.lastStatus != model.StatusConvertedToMarkdown {

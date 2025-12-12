@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -16,9 +17,13 @@ type confirmUploadCaller interface {
 	ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*model.Document, error)
 }
 
+type objectStatClient interface {
+	GetObject(ctx context.Context, in *storagev1.GetObjectRequest, opts ...grpc.CallOption) (*storagev1.GetObjectResponse, error)
+}
+
 type UploadReconciler struct {
 	repo          Repository
-	storage       storagev1.StorageServiceClient
+	storage       objectStatClient
 	confirmUpload confirmUploadCaller
 	batchSize     int
 	minAge        time.Duration
@@ -66,12 +71,12 @@ func (r *UploadReconciler) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (r *UploadReconciler) reconcile(ctx context.Context) {
-	status := model.StatusUploaded
+	docStatus := model.StatusUploaded
 	cutoff := r.now().Add(-r.minAge)
 	offset := 0
 
 	for {
-		docs, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &status)
+		docs, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &docStatus)
 		if err != nil {
 			log.Printf("reconciler: list documents: %v", err)
 			r.metrics.recordError(ctx)

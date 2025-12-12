@@ -4,6 +4,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 
 ## Возможности
 - gRPC метод `ConvertDocumentToMarkdown` по контракту `proto/backend/transformer/v1/transformer.proto` принимает данные об исходном объекте и ставит задачу в очередь `transformations_queue`, возвращая `queue_id`, `status=pending` и итоговый путь для Markdown.
+- gRPC метод `ConvertDocxToMarkdown` принимает байты или ссылку на DOCX/DOC/PDF, отправляет задачу напрямую в Docling и возвращает Markdown/charset без постановки в очередь.
 - Проверка на переполнение очереди (`service.queue_limit`): gRPC код `ResourceExhausted` возвращается только если суммарное число задач в статусах `pending`/`processing`/`waiting_docling` достигло установленного лимита; `service.max_workers` ограничивает только параллелизм фоновых воркеров.
 - HTTP-запрос к Docling-конвертеру выполняется воркером в фоне; результат сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
 - При старте воркеров сервис восстанавливает незавершённые задачи из статуса `processing` в `pending` (или продолжает опрос Docling по сохранённому `docling_job_id`), чтобы после рестартов очередь автоматически возобновлялась без ручных действий.
