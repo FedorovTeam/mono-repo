@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,6 +81,39 @@ func TestUploadValidation(t *testing.T) {
 	}
 }
 
+func TestUploadDelegatesValidationToDocumentService(t *testing.T) {
+	ctx := ctxutils.WithAPIKey(ctxutils.WithCorrelationID(context.Background(), "corr-validate"), "secret")
+
+	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
+		return &storagepb.GenerateUploadURLResponse{UploadUrl: "http://upload", Bucket: "docs", ObjectKey: "docs/file.docx", ExpiresInSeconds: 600}, nil
+	}}
+
+	docClient := &mockDocumentClient{createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) {
+		return nil, fmt.Errorf("document-service rejected input: repository must be in owner/repo format")
+	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
+		return nil, nil
+	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
+		return nil, nil
+	}}
+
+	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 2048}, Logger: zap.NewNop()}
+	mr := &mutationResolver{resolver}
+
+	_, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{
+		FileName:      "invalid.docx",
+		FileSizeBytes: 10,
+		Repository:    "owner/repo/extra",
+		Branch:        "main",
+		Path:          "docs/invalid.md",
+	})
+	if err == nil {
+		t.Fatalf("expected error from document-service")
+	}
+	if !strings.Contains(err.Error(), "document-service rejected input") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestUploadHappyPath(t *testing.T) {
 	ctx := ctxutils.WithAPIKey(ctxutils.WithCorrelationID(context.Background(), "corr-test"), "secret")
 	docCalled := false
@@ -106,8 +140,11 @@ func TestUploadHappyPath(t *testing.T) {
 		if in.CorrelationId != "corr-test" {
 			t.Fatalf("correlation id not propagated")
 		}
-		if in.Repository != "repo" || in.RepositoryOwner != "org" {
-			t.Fatalf("repository parsing failed: repo=%s owner=%s", in.Repository, in.RepositoryOwner)
+		if in.Repository != "org/repo" {
+			t.Fatalf("repository should be forwarded as-is: %s", in.Repository)
+		}
+		if in.RepositoryOwner != "" {
+			t.Fatalf("repository owner should be empty in gateway request")
 		}
 		if in.ContentLength != 1024 {
 			t.Fatalf("unexpected content length: %d", in.ContentLength)
@@ -145,11 +182,11 @@ func TestUploadHappyPath(t *testing.T) {
 	if payload.UploadURL == "" || payload.UploadMethod == "" {
 		t.Fatalf("payload missing upload info: %+v", payload)
 	}
-	if payload.Document.Repository != "repo" {
+	if payload.Document.Repository != "org/repo" {
 		t.Fatalf("unexpected repository in payload: %s", payload.Document.Repository)
 	}
-	if payload.Document.RepositoryOwner == nil || *payload.Document.RepositoryOwner != "org" {
-		t.Fatalf("missing repository owner in payload: %+v", payload.Document.RepositoryOwner)
+	if payload.Document.RepositoryOwner != nil {
+		t.Fatalf("repository owner should be absent when validation is delegated")
 	}
 }
 
@@ -173,8 +210,11 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 		if in.GetId() != capturedDocID {
 			t.Fatalf("document id mismatch: %s vs %s", in.GetId(), capturedDocID)
 		}
-		if in.RepositoryOwner != "org" || in.Repository != "repo" {
-			t.Fatalf("repository info not normalized: %s/%s", in.RepositoryOwner, in.Repository)
+		if in.Repository != "org/repo" {
+			t.Fatalf("repository should not be normalized: %s", in.Repository)
+		}
+		if in.RepositoryOwner != "" {
+			t.Fatalf("repository owner must remain empty: %s", in.RepositoryOwner)
 		}
 		return &pb.Document{Id: capturedDocID, WorkflowId: capturedDocID, JobId: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED, ActualStatus: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
 	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
