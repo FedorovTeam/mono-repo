@@ -8,6 +8,7 @@ flowchart LR
   StorageService --> MinIO[(MinIO)]
   MinIO --> Bucket1[[knowledge-original]]
   MinIO --> Bucket2[[knowledge-md]]
+  StorageService -->|GenerateUploadURL| MinIO
 ```
 
 ## Ключ
@@ -16,5 +17,6 @@ graph TD
   A[org/<org_slug>/project/<project_slug>] --> B[year=YYYY]
   B --> C[month=MM]
   C --> D[day=DD]
-  D --> E[<document_id>.<ext>]
+  D --> E[<uuid>]
+  E --> F[<document_id>.<ext>]
 ```
