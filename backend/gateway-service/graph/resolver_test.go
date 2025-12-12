@@ -31,7 +31,6 @@ type mockDocumentClient struct {
 	createFunc  func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error)
 	getFunc     func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error)
 	listFunc    func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error)
-	retryFunc   func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error)
 	confirmFunc func(ctx context.Context, in *pb.ConfirmUploadRequest) (*pb.Document, error)
 }
 
@@ -45,10 +44,6 @@ func (m *mockDocumentClient) GetDocument(ctx context.Context, in *pb.GetDocument
 
 func (m *mockDocumentClient) ListDocuments(ctx context.Context, in *pb.ListDocumentsRequest, _ ...grpc.CallOption) (*pb.ListDocumentsResponse, error) {
 	return m.listFunc(ctx, in)
-}
-
-func (m *mockDocumentClient) RetryProcessing(ctx context.Context, in *pb.RetryProcessingRequest, _ ...grpc.CallOption) (*pb.Document, error) {
-	return m.retryFunc(ctx, in)
 }
 
 func (m *mockDocumentClient) ConfirmUpload(ctx context.Context, in *pb.ConfirmUploadRequest, _ ...grpc.CallOption) (*pb.Document, error) {
@@ -119,7 +114,7 @@ func TestUploadHappyPath(t *testing.T) {
 			t.Fatalf("bucket info not forwarded")
 		}
 		return &pb.Document{Id: in.GetId(), WorkflowId: in.GetId(), JobId: in.GetId(), FileName: in.FileName, Repository: in.Repository, RepositoryOwner: in.RepositoryOwner, Branch: in.Branch, Path: in.Path, UploadBucket: in.UploadBucket, UploadObjectKey: in.UploadObjectKey, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED, ActualStatus: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
-	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil }, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
+	}, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil }, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
 	}}
 
@@ -177,7 +172,7 @@ func TestUploadGeneratesCorrelationIDWhenMissing(t *testing.T) {
 			t.Fatalf("repository info not normalized: %s/%s", in.RepositoryOwner, in.Repository)
 		}
 		return &pb.Document{Id: capturedDocID, WorkflowId: capturedDocID, JobId: capturedDocID, Status: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED, ActualStatus: pb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
-	}, retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil }, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
+	}, getFunc: func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) {
 		return nil, nil
 	}, listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 		return nil, nil
@@ -217,7 +212,6 @@ func TestKnowledgeDocumentsPaginationAndFilter(t *testing.T) {
 		},
 		getFunc:    func(ctx context.Context, in *pb.GetDocumentRequest) (*pb.Document, error) { return nil, nil },
 		createFunc: func(ctx context.Context, in *pb.CreateDocumentRequest) (*pb.Document, error) { return nil, nil },
-		retryFunc:  func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil },
 	}}}
 
 	limit := 5
@@ -252,7 +246,6 @@ func TestGraphQLUploadEndToEnd(t *testing.T) {
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 			return &pb.ListDocumentsResponse{}, nil
 		},
-		retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil },
 	}
 	storageClient := &mockStorageClient{generateFunc: func(ctx context.Context, in *storagepb.GenerateUploadURLRequest) (*storagepb.GenerateUploadURLResponse, error) {
 		if in.CorrelationId != "corr-integration" {
@@ -360,7 +353,6 @@ func TestGraphQLUploadWithStorageGRPC(t *testing.T) {
 		listFunc: func(ctx context.Context, in *pb.ListDocumentsRequest) (*pb.ListDocumentsResponse, error) {
 			return &pb.ListDocumentsResponse{}, nil
 		},
-		retryFunc: func(ctx context.Context, in *pb.RetryProcessingRequest) (*pb.Document, error) { return nil, nil },
 	}
 
 	resolver := &Resolver{DocumentClient: docClient, StorageClient: storageClient, UploadConfig: UploadValidationConfig{MaxSizeBytes: 1024 * 1024, AllowedExtensions: []string{"docx"}, SignedURLTTLSeconds: 900}, Logger: logger}

@@ -64,7 +64,6 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
-		RetryProcessing         func(childComplexity int, documentID string) int
 		UploadKnowledgeDocument func(childComplexity int, input model.UploadKnowledgeDocumentInput) int
 	}
 
@@ -82,7 +81,6 @@ type ComplexityRoot struct {
 
 type MutationResolver interface {
 	UploadKnowledgeDocument(ctx context.Context, input model.UploadKnowledgeDocumentInput) (*model.UploadKnowledgeDocumentPayload, error)
-	RetryProcessing(ctx context.Context, documentID string) (*model.KnowledgeDocument, error)
 }
 type QueryResolver interface {
 	KnowledgeDocument(ctx context.Context, id string) (*model.KnowledgeDocument, error)
@@ -176,17 +174,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.KnowledgeDocumentConnection.TotalCount(childComplexity), true
 
-	case "Mutation.retryProcessing":
-		if e.complexity.Mutation.RetryProcessing == nil {
-			break
-		}
-
-		args, err := ec.field_Mutation_retryProcessing_args(ctx, rawArgs)
-		if err != nil {
-			return 0, false
-		}
-
-		return e.complexity.Mutation.RetryProcessing(childComplexity, args["documentId"].(string)), true
 	case "Mutation.uploadKnowledgeDocument":
 		if e.complexity.Mutation.UploadKnowledgeDocument == nil {
 			break
@@ -351,7 +338,7 @@ func (ec *executionContext) introspectType(name string) (*introspection.Type, er
 var sources = []*ast.Source{
 	{Name: "../schema.graphqls", Input: `"""Запросы статуса и списка документов знаний."""
 type Query {
-  """Возвращает документ и его текущий статус по идентификатору БД."""
+  """Возвращает документ и его текущий статус по идентификатору Temporal/БД."""
   knowledgeDocument(id: ID!): KnowledgeDocument
   """Список документов с поддержкой фильтрации по статусу и репозиторию."""
   knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!
@@ -361,8 +348,6 @@ type Query {
 type Mutation {
   """Инициирует загрузку DOC/DOCX/PDF: выдаёт signed URL и создаёт запись в document-service."""
   uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!
-  """Перезапускает обработку документа в Temporal workflow по его идентификатору."""
-  retryProcessing(documentId: ID!): KnowledgeDocument!
 }
 
 type UploadKnowledgeDocumentPayload {
@@ -423,17 +408,6 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // endregion ************************** generated!.gotpl **************************
 
 // region    ***************************** args.gotpl *****************************
-
-func (ec *executionContext) field_Mutation_retryProcessing_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
-	var err error
-	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "documentId", ec.unmarshalNID2string)
-	if err != nil {
-		return nil, err
-	}
-	args["documentId"] = arg0
-	return args, nil
-}
 
 func (ec *executionContext) field_Mutation_uploadKnowledgeDocument_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
@@ -918,67 +892,6 @@ func (ec *executionContext) fieldContext_Mutation_uploadKnowledgeDocument(ctx co
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_uploadKnowledgeDocument_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
-		ec.Error(ctx, err)
-		return fc, err
-	}
-	return fc, nil
-}
-
-func (ec *executionContext) _Mutation_retryProcessing(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
-	return graphql.ResolveField(
-		ctx,
-		ec.OperationContext,
-		field,
-		ec.fieldContext_Mutation_retryProcessing,
-		func(ctx context.Context) (any, error) {
-			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().RetryProcessing(ctx, fc.Args["documentId"].(string))
-		},
-		nil,
-		ec.marshalNKnowledgeDocument2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐKnowledgeDocument,
-		true,
-		true,
-	)
-}
-
-func (ec *executionContext) fieldContext_Mutation_retryProcessing(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "Mutation",
-		Field:      field,
-		IsMethod:   true,
-		IsResolver: true,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			switch field.Name {
-			case "id":
-				return ec.fieldContext_KnowledgeDocument_id(ctx, field)
-			case "fileName":
-				return ec.fieldContext_KnowledgeDocument_fileName(ctx, field)
-			case "repository":
-				return ec.fieldContext_KnowledgeDocument_repository(ctx, field)
-			case "repositoryOwner":
-				return ec.fieldContext_KnowledgeDocument_repositoryOwner(ctx, field)
-			case "branch":
-				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
-			case "path":
-				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
-			case "status":
-				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
-			case "jobId":
-				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
-			case "error":
-				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
-			}
-			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
-		},
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			err = ec.Recover(ctx, r)
-			ec.Error(ctx, err)
-		}
-	}()
-	ctx = graphql.WithFieldContext(ctx, fc)
-	if fc.Args, err = ec.field_Mutation_retryProcessing_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -3032,13 +2945,6 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "retryProcessing":
-			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
-				return ec._Mutation_retryProcessing(ctx, field)
-			})
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3583,10 +3489,6 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 		}
 	}
 	return res
-}
-
-func (ec *executionContext) marshalNKnowledgeDocument2backendᚑgatewayᚑserviceᚋgraphᚋmodelᚐKnowledgeDocument(ctx context.Context, sel ast.SelectionSet, v model.KnowledgeDocument) graphql.Marshaler {
-	return ec._KnowledgeDocument(ctx, sel, &v)
 }
 
 func (ec *executionContext) marshalNKnowledgeDocument2ᚕᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐKnowledgeDocumentᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.KnowledgeDocument) graphql.Marshaler {

@@ -1,16 +1,16 @@
 # backend-gateway-service
 
-Публичный GraphQL-шлюз для сценариев загрузки и повторной обработки знаниевых документов. Сервис выдаёт подписанные ссылки для прямой загрузки DOCX в MinIO через `storage-service`, проверяет `X-API-Key`, проксирует обращения к `backend-document-service` по gRPC и снабжает запросы трассировками и корреляционными идентификаторами.
+Публичный GraphQL-шлюз для сценариев загрузки и отслеживания статуса знаниевых документов. Сервис выдаёт подписанные ссылки для прямой загрузки DOCX в MinIO через `storage-service`, проверяет `X-API-Key`, проксирует обращения к `backend-document-service` по gRPC и снабжает запросы трассировками и корреляционными идентификаторами.
 
 ## Назначение и ответственность
-- Приём GraphQL-мутаций `uploadKnowledgeDocument` (выдача signed URL) и `retryProcessing`, а также запросов `knowledgeDocument` и `knowledgeDocuments` **с обязательным заголовком `X-API-Key` для всех операций (включая `/playground`)**.
+- Приём GraphQL-мутации `uploadKnowledgeDocument` (выдача signed URL) и запросов `knowledgeDocument` и `knowledgeDocuments` **с обязательным заголовком `X-API-Key` для всех операций (включая `/playground`)**.
 - Валидация размера/расширения и прокладка `correlation-id` в логи и метаданные gRPC/MinIO.
 - Подключение метрик и трейсинга (OTLP exporter), отдача `X-Correlation-ID` в ответах.
 - Проверка API-ключа, заданного в конфигурации (GraphQL и playground требуют `X-API-Key`).
 - Приём webhook уведомлений MinIO (`/internal/storage/uploaded`) и передача `ConfirmUpload` в document-service.
 
 ## Внешние зависимости
-- **backend-document-service** — доменный gRPC API, принимает `CreateDocument`/`GetDocument`/`ListDocuments`/`RetryProcessing`/`ConfirmUpload`.
+- **backend-document-service** — доменный gRPC API, принимает `CreateDocument`/`GetDocument`/`ListDocuments`/`ConfirmUpload`.
 - **storage-service** — выдача signed URL для загрузки оригиналов.
 - **MinIO** — целевое хранилище для подписанных ссылок (через `storage-service`).
 - **OTLP endpoint/collector** — приём трассировок и метрик от gateway при включённой телеметрии.
@@ -20,7 +20,6 @@ gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `doc
 ## GraphQL API
 ### Схема (фрагмент)
 - `mutation uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!` — выдаёт `uploadUrl`/`uploadMethod` и создаёт запись в document-service.
-- `mutation retryProcessing(documentId: ID!): KnowledgeDocument!` — повторно инициирует цепочку обработки документа.
 - `query knowledgeDocument(id: ID!): KnowledgeDocument` — возвращает статус по идентификатору.
 - `query knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!` — список документов с фильтрами.
 
@@ -39,11 +38,6 @@ curl -X POST "$ENDPOINT" \
     "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
     "variables": {"input": {"fileName":"demo.docx","fileSizeBytes":1024,"repository":"org/repo","branch":"main","path":"docs/demo.md"}}
   }'
-
-curl -X POST "$ENDPOINT" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"query": "mutation { retryProcessing(documentId: \"<id>\"){ id status } }"}'
 
 curl -X POST "$ENDPOINT" \
   -H "Content-Type: application/json" \

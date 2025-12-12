@@ -61,14 +61,6 @@ curl -X POST "$HOST" \
   -d '{"query": "{ knowledgeDocuments(pagination:{limit:10,offset:0}){ nodes { id status fileName } totalCount } }"}'
 ```
 
-### Повторная обработка
-```
-curl -X POST "$HOST" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"query": "mutation { retryProcessing(documentId: \"'$DOC_ID'\"){ id status } }"}'
-```
-
 Все вызовы возвращают заголовок `X-Correlation-ID`, который прокидывается в gRPC и попадает в OTLP трейсы.
 
 ### Восстановление после пропущенного webhook MinIO
