@@ -9,15 +9,9 @@ import (
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/graph/model"
 	"backend-gateway-service/internal/ctxutils"
-	pb "backend-gateway-service/proto/backend/document/v1"
-	storagepb "backend-gateway-service/proto/backend/storage/v1"
+	"backend-gateway-service/internal/domain"
+	"backend-gateway-service/internal/usecase"
 	"context"
-	"fmt"
-	"net/http"
-	"strings"
-
-	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 // UploadKnowledgeDocument is the resolver for the uploadKnowledgeDocument field.
@@ -25,88 +19,31 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	if _, err := requireAPIKey(ctx); err != nil {
 		return nil, err
 	}
-	repo, owner, err := validateUploadInput(input, r.UploadConfig)
+
+	ctx, _ = ctxutils.EnsureCorrelationID(ctx)
+	uploadInput := usecase.UploadInput{
+		FileName:      input.FileName,
+		Repository:    input.Repository,
+		Branch:        input.Branch,
+		Path:          input.Path,
+		FileSizeBytes: int64(input.FileSizeBytes),
+	}
+
+	result, err := r.DocumentUploader.UploadKnowledgeDocument(ctx, uploadInput)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
-	documentID := uuid.NewString()
-	logger := r.Logger.With(
-		zap.String("correlation_id", correlationID),
-		zap.String("api_key", ctxutils.APIKey(ctx)),
-		zap.String("document_id", documentID),
-	)
-
-	uploadURL, err := r.StorageClient.GenerateUploadURL(ctx, &storagepb.GenerateUploadURLRequest{
-		DocumentId:       documentID,
-		FileName:         input.FileName,
-		ContentLength:    int64(input.FileSizeBytes),
-		CorrelationId:    correlationID,
-		ExpiresInSeconds: r.UploadConfig.SignedURLTTLSeconds,
-	})
-	if err != nil {
-		logger.Error("failed to issue upload url", zap.Error(err))
-		return nil, fmt.Errorf("cannot generate upload url: %w", err)
-	}
-
-	missingFields := make([]string, 0, 4)
-	if uploadURL.GetBucket() == "" {
-		missingFields = append(missingFields, "bucket")
-	}
-	if uploadURL.GetObjectKey() == "" {
-		missingFields = append(missingFields, "object_key")
-	}
-	if uploadURL.GetMarkdownBucket() == "" {
-		missingFields = append(missingFields, "markdown_bucket")
-	}
-	if uploadURL.GetMarkdownObjectKey() == "" {
-		missingFields = append(missingFields, "markdown_object_key")
-	}
-
-	if len(missingFields) > 0 {
-		logger.Error("storage service returned incomplete upload data", zap.Strings("missing_fields", missingFields))
-		return nil, fmt.Errorf("cannot generate upload url: storage service returned empty %s", strings.Join(missingFields, ", "))
-	}
-
-	req := &pb.CreateDocumentRequest{
-		Id:                documentID,
-		FileName:          input.FileName,
-		Repository:        repo,
-		RepositoryOwner:   "",
-		Branch:            input.Branch,
-		Path:              input.Path,
-		CorrelationId:     correlationID,
-		ContentLength:     int64(input.FileSizeBytes),
-		UploadBucket:      uploadURL.GetBucket(),
-		UploadObjectKey:   uploadURL.GetObjectKey(),
-		MarkdownBucket:    uploadURL.GetMarkdownBucket(),
-		MarkdownObjectKey: uploadURL.GetMarkdownObjectKey(),
-	}
-
-	if owner != nil {
-		req.RepositoryOwner = *owner
-	}
-
-	created, err := r.DocumentClient.CreateDocument(ctx, req)
-	if err != nil {
-		logger.Error("failed to create document", zap.Error(err))
-		return nil, fmt.Errorf("cannot create document: %w", err)
-	}
-
-	logger.Info("upload request handled", zap.String("document_id", created.GetId()), zap.String("job_id", created.GetJobId()), zap.String("upload_bucket", uploadURL.GetBucket()), zap.String("upload_object_key", uploadURL.GetObjectKey()))
-	return &model.UploadKnowledgeDocumentPayload{Document: mapDocument(created), UploadURL: uploadURL.GetUploadUrl(), UploadMethod: http.MethodPut}, nil
+	return &model.UploadKnowledgeDocumentPayload{Document: mapDocument(result.Document), UploadURL: result.UploadURL, UploadMethod: result.UploadMethod}, nil
 }
 
 // KnowledgeDocument is the resolver for the knowledgeDocument field.
 func (r *queryResolver) KnowledgeDocument(ctx context.Context, id string) (*model.KnowledgeDocument, error) {
-	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("document_id", id), zap.String("api_key", ctxutils.APIKey(ctx)))
+	ctx, _ = ctxutils.EnsureCorrelationID(ctx)
 
-	doc, err := r.DocumentClient.GetDocument(ctx, &pb.GetDocumentRequest{Id: id})
+	doc, err := r.DocumentService.GetDocument(ctx, id)
 	if err != nil {
-		logger.Error("failed to get document", zap.Error(err))
-		return nil, fmt.Errorf("cannot get document: %w", err)
+		return nil, err
 	}
 
 	return mapDocument(doc), nil
@@ -114,35 +51,32 @@ func (r *queryResolver) KnowledgeDocument(ctx context.Context, id string) (*mode
 
 // KnowledgeDocuments is the resolver for the knowledgeDocuments field.
 func (r *queryResolver) KnowledgeDocuments(ctx context.Context, filter *model.KnowledgeDocumentFilter, pagination *model.Pagination) (*model.KnowledgeDocumentConnection, error) {
-	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
-	logger := r.Logger.With(zap.String("correlation_id", correlationID), zap.String("api_key", ctxutils.APIKey(ctx)))
+	ctx, _ = ctxutils.EnsureCorrelationID(ctx)
 	limit, offset := paginationParams(pagination)
-	req := &pb.ListDocumentsRequest{Limit: int32(limit), Offset: int32(offset)}
 
+	domainFilter := domain.DocumentFilter{}
 	if filter != nil {
 		if filter.Status != nil {
-			req.FilterByStatus = true
-			req.StatusFilter = protoStatusFromModel(*filter.Status)
+			status := domainStatusFromModel(*filter.Status)
+			domainFilter.Status = &status
 		}
 		if filter.Repository != nil {
-			req.Repository = *filter.Repository
+			domainFilter.Repository = filter.Repository
 		}
 	}
 
-	resp, err := r.DocumentClient.ListDocuments(ctx, req)
+	resp, err := r.DocumentService.ListDocuments(ctx, domainFilter, domain.Pagination{Limit: limit, Offset: offset})
 	if err != nil {
-		logger.Error("failed to list documents", zap.Error(err))
-		return nil, fmt.Errorf("cannot list documents: %w", err)
+		return nil, err
 	}
 
-	nodes := make([]*model.KnowledgeDocument, 0, len(resp.GetDocuments()))
-	for _, doc := range resp.GetDocuments() {
-		nodes = append(nodes, mapDocument(doc))
+	nodes := make([]*model.KnowledgeDocument, 0, len(resp.Documents))
+	for i := range resp.Documents {
+		doc := resp.Documents[i]
+		nodes = append(nodes, mapDocument(&doc))
 	}
 
-	logger.Info("documents fetched", zap.Int("count", len(nodes)), zap.Int64("total", resp.GetTotalCount()))
-
-	return &model.KnowledgeDocumentConnection{Nodes: nodes, TotalCount: int(resp.GetTotalCount())}, nil
+	return &model.KnowledgeDocumentConnection{Nodes: nodes, TotalCount: int(resp.TotalCount)}, nil
 }
 
 // Mutation returns generated.MutationResolver implementation.

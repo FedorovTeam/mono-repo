@@ -11,34 +11,38 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 
-	documentpb "backend-gateway-service/proto/backend/document/v1"
+	"backend-gateway-service/internal/domain"
 )
 
 type stubDocumentClient struct {
-	lastRequest *documentpb.ConfirmUploadRequest
+	lastRequest domain.ConfirmUploadRequest
 	calls       int
 	err         error
 }
 
-func (s *stubDocumentClient) ConfirmUpload(ctx context.Context, in *documentpb.ConfirmUploadRequest, opts ...grpc.CallOption) (*documentpb.Document, error) {
-	s.lastRequest = in
+func (s *stubDocumentClient) ConfirmUpload(ctx context.Context, req domain.ConfirmUploadRequest) (*domain.Document, error) {
+	s.lastRequest = req
 	s.calls++
 	if s.err != nil {
 		return nil, s.err
 	}
-	return &documentpb.Document{Id: in.GetDocumentId(), WorkflowId: "wf", JobId: "wf", ActualStatus: documentpb.DocumentStatus_DOCUMENT_STATUS_UPLOADED}, nil
+	status := domain.DocumentStatusUploaded
+	return &domain.Document{ID: req.DocumentID, Status: status}, nil
 }
-func (s *stubDocumentClient) CreateDocument(context.Context, *documentpb.CreateDocumentRequest, ...grpc.CallOption) (*documentpb.Document, error) {
+
+func (s *stubDocumentClient) CreateDocument(context.Context, domain.CreateDocumentRequest) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }
-func (s *stubDocumentClient) GetDocument(context.Context, *documentpb.GetDocumentRequest, ...grpc.CallOption) (*documentpb.Document, error) {
+
+func (s *stubDocumentClient) GetDocument(context.Context, string) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }
-func (s *stubDocumentClient) ListDocuments(context.Context, *documentpb.ListDocumentsRequest, ...grpc.CallOption) (*documentpb.ListDocumentsResponse, error) {
+
+func (s *stubDocumentClient) ListDocuments(context.Context, domain.DocumentFilter, domain.Pagination) (*domain.DocumentList, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (s *stubDocumentClient) Close() error { return nil }
 
 func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {
@@ -71,11 +75,11 @@ func TestHandleStorageNotification_ConfirmUpload(t *testing.T) {
 	if docClient.calls != 1 {
 		t.Fatalf("expected 1 confirm call, got %d", docClient.calls)
 	}
-	if docClient.lastRequest.GetCorrelationId() == "" {
+	if docClient.lastRequest.CorrelationID == "" {
 		t.Fatal("expected correlation id to be propagated")
 	}
-	if docClient.lastRequest.GetDocumentId() != "1234" {
-		t.Fatalf("unexpected document id: %s", docClient.lastRequest.GetDocumentId())
+	if docClient.lastRequest.DocumentID != "1234" {
+		t.Fatalf("unexpected document id: %s", docClient.lastRequest.DocumentID)
 	}
 }
 
@@ -110,11 +114,11 @@ func TestHandleStorageNotification_ConfirmUpload_URLEncodedKey(t *testing.T) {
 	if docClient.calls != 1 {
 		t.Fatalf("expected 1 confirm call, got %d", docClient.calls)
 	}
-	if docClient.lastRequest.GetDocumentId() != "3fa85f64-5717-4562-b3fc-2c963f66afa6+v1" {
-		t.Fatalf("unexpected document id: %s", docClient.lastRequest.GetDocumentId())
+	if docClient.lastRequest.DocumentID != "3fa85f64-5717-4562-b3fc-2c963f66afa6+v1" {
+		t.Fatalf("unexpected document id: %s", docClient.lastRequest.DocumentID)
 	}
-	if docClient.lastRequest.GetObjectKey() != "org/project/3fa85f64-5717-4562-b3fc-2c963f66afa6+v1.docx" {
-		t.Fatalf("unexpected object key: %s", docClient.lastRequest.GetObjectKey())
+	if docClient.lastRequest.ObjectKey != "org/project/3fa85f64-5717-4562-b3fc-2c963f66afa6+v1.docx" {
+		t.Fatalf("unexpected object key: %s", docClient.lastRequest.ObjectKey)
 	}
 }
 
