@@ -28,7 +28,7 @@ func TestNewMinioClientInitializesBuckets(t *testing.T) {
 	generator := NewObjectKeyGenerator(func() time.Time {
 		return time.Date(2024, time.July, 1, 0, 0, 0, 0, time.UTC)
 	})
-	service := NewService(client, generator, "knowledge-original", "knowledge-md")
+	service := NewService(client, generator, "knowledge-original", "knowledge-md", UploadValidationConfig{})
 
 	location, err := service.UploadOriginal(ctx, "org", "proj", "doc-1", "docx", []byte("payload"))
 	require.NoError(t, err)

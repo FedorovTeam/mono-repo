@@ -15,6 +15,7 @@ type Config struct {
 	Events        EventsConfig        `yaml:"events"`
 	Observability ObservabilityConfig `yaml:"observability"`
 	Processing    ProcessingConfig    `yaml:"processing"`
+	Uploads       UploadConfig        `yaml:"uploads"`
 }
 
 // ServiceConfig содержит сетевые настройки сервисного слоя.
@@ -42,6 +43,13 @@ type MinioConfig struct {
 type BucketConfig struct {
 	KnowledgeDocx string `yaml:"knowledge_docx"`
 	KnowledgeMD   string `yaml:"knowledge_md"`
+}
+
+// UploadConfig описывает лимиты на загрузку и подписанные ссылки.
+type UploadConfig struct {
+	MaxSizeBytes       int64    `yaml:"max_size_bytes"`
+	AllowedExtensions  []string `yaml:"allowed_extensions"`
+	SignedURLTTLSecond int64    `yaml:"signed_url_ttl_seconds"`
 }
 
 // ObservabilityConfig управляет экспортом метрик, трейсов и логов.
@@ -103,6 +111,11 @@ func LoadConfig() *Config {
 			MaxAttempts:         3,
 			BackoffSeconds:      5,
 		},
+		Uploads: UploadConfig{
+			MaxSizeBytes:       10 * 1024 * 1024,
+			AllowedExtensions:  []string{"doc", "docx", "pdf"},
+			SignedURLTTLSecond: 900,
+		},
 	}
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -121,6 +134,16 @@ func LoadConfig() *Config {
 	}
 	if cfg.Processing.BackoffSeconds <= 0 {
 		cfg.Processing.BackoffSeconds = 5
+	}
+
+	if cfg.Uploads.MaxSizeBytes <= 0 {
+		cfg.Uploads.MaxSizeBytes = 10 * 1024 * 1024
+	}
+	if len(cfg.Uploads.AllowedExtensions) == 0 {
+		cfg.Uploads.AllowedExtensions = []string{"doc", "docx", "pdf"}
+	}
+	if cfg.Uploads.SignedURLTTLSecond <= 0 {
+		cfg.Uploads.SignedURLTTLSecond = 900
 	}
 
 	return &cfg

@@ -87,8 +87,6 @@ func (s *Server) Run(ctx context.Context) error {
 		StorageClient:  s.storageClient,
 		Logger:         s.logger,
 		UploadConfig: graph.UploadValidationConfig{
-			MaxSizeBytes:        s.cfg.Uploads.MaxSizeBytes,
-			AllowedExtensions:   s.cfg.Uploads.AllowedExtensions,
 			SignedURLTTLSeconds: s.cfg.Uploads.SignedURLTTLSecond,
 		},
 	}}))

@@ -75,21 +75,25 @@ func (m *MinioAPI) SetBucketNotification(ctx context.Context, bucketName string,
 
 // Service инкапсулирует работу с MinIO и генерацией ключей.
 type Service struct {
-	client         Client
-	keyGenerator   *ObjectKeyGenerator
-	docxBucket     string
-	markdownBucket string
+	client             Client
+	keyGenerator       *ObjectKeyGenerator
+	docxBucket         string
+	markdownBucket     string
+	allowedExtensions  map[string]struct{}
+	maxUploadSizeBytes int64
+	defaultUploadTTL   int64
 }
 
 var (
 	ErrInvalidArgument = errors.New("invalid argument")
-
-	allowedExtensions = map[string]struct{}{
-		"doc":  {},
-		"docx": {},
-		"pdf":  {},
-	}
 )
+
+// UploadValidationConfig задает ограничения на выдачу presigned URL.
+type UploadValidationConfig struct {
+	AllowedExtensions map[string]struct{}
+	MaxSizeBytes      int64
+	SignedURLTTL      int64
+}
 
 // GenerateUploadURLParams описывает данные для подготовки presigned PUT ссылки.
 type GenerateUploadURLParams struct {
@@ -147,12 +151,24 @@ func NewMinioClient(ctx context.Context, cfg MinioClientConfig) (*MinioAPI, erro
 }
 
 // NewService конструирует сервис работы с хранилищем.
-func NewService(client Client, keyGenerator *ObjectKeyGenerator, docxBucket, markdownBucket string) *Service {
+func NewService(client Client, keyGenerator *ObjectKeyGenerator, docxBucket, markdownBucket string, validation UploadValidationConfig) *Service {
+	allowed := validation.AllowedExtensions
+	if len(allowed) == 0 {
+		allowed = map[string]struct{}{
+			"doc":  {},
+			"docx": {},
+			"pdf":  {},
+		}
+	}
+
 	return &Service{
-		client:         client,
-		keyGenerator:   keyGenerator,
-		docxBucket:     docxBucket,
-		markdownBucket: markdownBucket,
+		client:             client,
+		keyGenerator:       keyGenerator,
+		docxBucket:         docxBucket,
+		markdownBucket:     markdownBucket,
+		allowedExtensions:  allowed,
+		maxUploadSizeBytes: validation.MaxSizeBytes,
+		defaultUploadTTL:   validation.SignedURLTTL,
 	}
 }
 
@@ -228,7 +244,12 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 		return PresignedUpload{}, fmt.Errorf("%w: content_length must be greater than zero", ErrInvalidArgument)
 	}
 
-	if params.ExpiresInSeconds <= 0 {
+	expiresInSeconds := params.ExpiresInSeconds
+	if expiresInSeconds <= 0 {
+		expiresInSeconds = s.defaultUploadTTL
+	}
+
+	if expiresInSeconds <= 0 {
 		return PresignedUpload{}, fmt.Errorf("%w: expires_in_seconds must be greater than zero", ErrInvalidArgument)
 	}
 
@@ -237,8 +258,12 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 		return PresignedUpload{}, fmt.Errorf("%w: invalid file extension", ErrInvalidArgument)
 	}
 
-	if _, ok := allowedExtensions[extension]; !ok {
+	if _, ok := s.allowedExtensions[extension]; !ok {
 		return PresignedUpload{}, fmt.Errorf("%w: unsupported file extension %s", ErrInvalidArgument, extension)
+	}
+
+	if s.maxUploadSizeBytes > 0 && params.ContentLength > s.maxUploadSizeBytes {
+		return PresignedUpload{}, fmt.Errorf("%w: content_length exceeds limit %d", ErrInvalidArgument, s.maxUploadSizeBytes)
 	}
 
 	if err := s.ensureBucket(ctx, bucket); err != nil {
@@ -260,7 +285,7 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 		headers.Set("x-amz-meta-correlation-id", params.CorrelationID)
 	}
 
-	expires := time.Duration(params.ExpiresInSeconds) * time.Second
+	expires := time.Duration(expiresInSeconds) * time.Second
 	url, err := s.client.PresignHeader(ctx, http.MethodPut, bucket, key, expires, nil, headers)
 	if err != nil {
 		return PresignedUpload{}, fmt.Errorf("cannot presign upload url: %w", err)
@@ -272,7 +297,7 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 		ObjectKey:         key,
 		MarkdownBucket:    s.markdownBucket,
 		MarkdownObjectKey: markdownKey,
-		ExpiresInSeconds:  params.ExpiresInSeconds,
+		ExpiresInSeconds:  expiresInSeconds,
 	}, nil
 }
 
