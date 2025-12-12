@@ -46,9 +46,9 @@ sequenceDiagram
     SW->>R: UPDATE document status=ConvertedToMarkdown (+markdown_queue_id/object_key)
     SW->>R: UPDATE processing_jobs status=completed/failed или reschedule
 
-    Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service без проверки содержимого
-    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, path, create_pr)
-    GP-->>SW: status + commit_sha/retry_after
+    Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service с idempotency_key, attempt и retry_policy
+    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, path, create_pr, idempotency_key, attempt, retry_policy)
+    GP-->>SW: status + commit_sha/pr + retry_after + idempotency_hit
     SW->>R: UPDATE document status=PublishedToGitHub/Failed
-    SW->>R: UPDATE processing_jobs status=completed/failed
+    SW->>R: UPDATE processing_jobs status=completed/failed + job_events{commit_sha,retry_after,idempotency_hit}
 ```

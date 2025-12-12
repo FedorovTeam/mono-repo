@@ -19,10 +19,11 @@
      - `convert_to_markdown` → создаёт `publish_to_github` с ссылками на Markdown-объект и параметрами публикации.
      - Любая стадия в статусе `failed` → переводит документ в `Failed`, причина берётся из `payload.last_error`.
    - Стадии можно повторять: если исполнитель вернул задачу в `pending` (retry), `JobFollower` её не трогает до окончательного `completed`/`failed`.
-   - Воркеры `convert_to_markdown` и `publish_to_github` больше не содержат бизнес-логики интеграций: они вызывают gRPC клиентов соседних сервисов, фиксируют `queue_id`/`commit_sha` и обновляют статусы в PostgreSQL, повторно планируя задачу, если внешний сервис ещё работает. Для `convert_to_markdown` действуют дополнительные правила:
+   - Воркеры `convert_to_markdown` и `publish_to_github` больше не содержат бизнес-логики интеграций: они вызывают gRPC клиентов соседних сервисов и фиксируют ссылки/результаты в БД и `job_events`, повторно планируя задачу, если внешний сервис ещё работает. Для `convert_to_markdown` действуют дополнительные правила:
      - первый вызов `ConvertDocumentToMarkdown` ставит заявку в очередь конвертера; повторные вызовы с тем же `document_id` получают `status`/`queue_id` существующей заявки и обновляют только `processing_jobs`/`documents`;
      - если статус конвертера `pending|processing|waiting_docling`, воркер сохраняет `queue_id` и `markdown_object_key` в payload и переносит `next_run_at` на `now()+retry_delay` без создания новых строк БД;
      - при `status=done` фиксируются `markdown_queue_id` и ключ итогового объекта в `document_versions`, статус документа переводится в `ConvertedToMarkdown`.
+   - Для `publish_to_github` воркер собирает payload из сохранённых в документе bucket/object_key, owner/repository, branch/base_branch и пути, добавляет `idempotency_key`, `attempt` и `retry_policy`, вызывает `github-publisher-service` и сохраняет в `job_events` `commit_sha`, `pull_request_*`, `retry_after` и флаг `idempotency_hit`. Если `retry_after` передан, следующий запуск ставится на указанную задержку; при успехе статус документа становится `PublishedToGitHub`.
 
 4. **Ручное обновление статуса**
    - Клиент вызывает `UpdateDocumentStatus`. Допустимы переходы `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, повторное выставление текущего статуса, либо перевод в `Failed` (если `error_reason` не задан, используется `reason`).

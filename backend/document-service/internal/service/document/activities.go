@@ -230,22 +230,22 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, mar
 	return err
 }
 
-func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) error {
+func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*githubpublisherv1.PublishMarkdownResponse, error) {
 	ctx = a.withCorrelationID(ctx, input.CorrelationID)
 	if a.publisher == nil {
-		return fmt.Errorf("publisher client is not configured")
+		return nil, fmt.Errorf("publisher client is not configured")
 	}
 	doc, err := a.repo.GetDocument(ctx, input.DocumentID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	statusVal, err := a.progressStatus(ctx, doc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if statusVal == model.StatusPublishedToGitHub {
-		return nil
+		return nil, nil
 	}
 	owner := strings.TrimSpace(input.Owner)
 	if owner == "" {
@@ -296,7 +296,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if owner == "" || repository == "" {
 		reason := "owner and repository are required"
 		_ = a.fail(ctx, input.DocumentID, reason)
-		return fmt.Errorf("%s", reason)
+		return nil, fmt.Errorf("%s", reason)
 	}
 	markdownBucket := input.MarkdownBucket
 	if markdownBucket == "" {
@@ -311,7 +311,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	if markdownBucket == "" || markdownObjectKey == "" {
 		reason := fmt.Sprintf("markdown content is empty (bucket=%q, object_key=%q)", markdownBucket, markdownObjectKey)
 		_ = a.fail(ctx, input.DocumentID, reason)
-		return status.Error(codes.FailedPrecondition, reason)
+		return nil, status.Error(codes.FailedPrecondition, reason)
 	}
 
 	repoPath := path
@@ -337,7 +337,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 
 	resp, err := a.publisher.PublishMarkdown(ctx, req)
 	if err != nil {
-		return fmt.Errorf("publish markdown rpc: %w", err)
+		return nil, fmt.Errorf("publish markdown rpc: %w", err)
 	}
 
 	if resp.GetStatus() != githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS {
@@ -357,9 +357,9 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 			log.Printf("update status after publish error: %v", updErr)
 		}
 		if resp.GetStatus() == githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
-			return fmt.Errorf("temporary github failure: %s", resp.GetErrorMessage())
+			return resp, fmt.Errorf("temporary github failure: %s", resp.GetErrorMessage())
 		}
-		return fmt.Errorf("permanent github failure: %s", resp.GetErrorMessage())
+		return resp, fmt.Errorf("permanent github failure: %s", resp.GetErrorMessage())
 	}
 
 	var version *model.DocumentVersion
@@ -368,10 +368,10 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) er
 	}
 
 	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), version); err != nil {
-		return err
+		return resp, err
 	}
 
-	return nil
+	return resp, nil
 }
 
 func mapPublishErrorCode(code githubpublisherv1.PublishErrorCode) string {
