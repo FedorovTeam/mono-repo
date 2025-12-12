@@ -52,7 +52,9 @@ message CreateDocumentRequest {
   string owner = 12;
   string base_branch = 13;
   bool create_pr = 14;
-  string entity_specific_path = 15;
+
+  reserved 15;
+  reserved "entity_specific_path";
 }
 
 message GetDocumentRequest {

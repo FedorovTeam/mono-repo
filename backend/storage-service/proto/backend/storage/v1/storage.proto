@@ -30,6 +30,7 @@ message UploadOriginalRequest {
   string document_id = 3;
   string filename_extension = 4; // Например: docx, pdf.
   bytes content = 5;
+  string correlation_id = 6;
 }
 
 // UploadMarkdownRequest описывает загрузку преобразованного Markdown.
@@ -38,6 +39,7 @@ message UploadMarkdownRequest {
   string project_slug = 2;
   string document_id = 3;
   bytes content = 4;
+  string correlation_id = 5;
 }
 
 // UploadObjectResponse возвращает информацию о размещении файла.

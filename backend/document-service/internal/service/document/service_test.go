@@ -143,7 +143,7 @@ func TestCreateDocumentValidation(t *testing.T) {
 func TestCreateDocumentSuccess(t *testing.T) {
 	repo := &repoMock{}
 	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
-	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "owner/repo", Branch: "main", Path: "docs/name.md", PublishPath: "docs/publish/name.md", EntitySpecificPath: "docs/articles/name", BaseBranch: "main", UploadObjectKey: "docs/articles/name.docx", MarkdownObjectKey: "docs/articles/name.md"})
+	doc, err := svc.CreateDocument(context.Background(), CreateInput{FileName: "name", Repository: "owner/repo", Branch: "main", Path: "docs/name.md", BaseBranch: "main", UploadObjectKey: "docs/articles/name.docx", MarkdownObjectKey: "docs/articles/name.md"})
 	require.NoError(t, err)
 	require.NotEmpty(t, doc.ID)
 	require.Equal(t, doc.ID, doc.WorkflowID)

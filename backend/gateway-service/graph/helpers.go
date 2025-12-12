@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"backend-gateway-service/graph/model"
@@ -29,17 +28,6 @@ func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadVal
 		return "", nil, errors.New("repository is required")
 	}
 
-	if strings.Contains(repository, "/") {
-		parts := strings.Split(repository, "/")
-		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-			return "", nil, errors.New("repository must be in format <owner>/<repo> or <repo>")
-		}
-		normalizedOwner := strings.TrimSpace(parts[0])
-		normalizedRepo := strings.TrimSpace(parts[1])
-		repository = normalizedRepo
-		owner = &normalizedOwner
-	}
-
 	if strings.TrimSpace(input.Branch) == "" {
 		return "", nil, errors.New("branch is required")
 	}
@@ -51,22 +39,6 @@ func validateUploadInput(input model.UploadKnowledgeDocumentInput, cfg UploadVal
 	}
 	if cfg.MaxSizeBytes > 0 && int64(input.FileSizeBytes) > cfg.MaxSizeBytes {
 		return "", nil, fmt.Errorf("fileSizeBytes exceeds limit %d", cfg.MaxSizeBytes)
-	}
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(input.FileName), "."))
-	if ext == "" {
-		return "", nil, errors.New("file extension is required")
-	}
-	if len(cfg.AllowedExtensions) > 0 {
-		allowed := false
-		for _, candidate := range cfg.AllowedExtensions {
-			if strings.EqualFold(candidate, ext) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return "", nil, fmt.Errorf("extension %s is not allowed", ext)
-		}
 	}
 	return repository, owner, nil
 }

@@ -14,6 +14,12 @@
 - `payload` в `processing_jobs` и `job_events` хранит только ссылки и параметры для gRPC-исполнителей (`bucket`/`object_key`, `queue_id`, `github_path`, `create_pr`), бинарные данные не пишутся в БД, а сами интеграции выполняют внешние сервисы (MinIO обслуживается через gRPC `storage-service`, без прямых клиентов внутри document-service).
 - Индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run` поддерживают выборку готовых задач, `SELECT ... FOR UPDATE SKIP LOCKED` защищает от двойного захвата при нескольких воркерах.
 
+## Валидация входных данных
+- `CreateDocument` принимает минимальный набор полей (имя файла, repository/owner, branch/baseBranch, path, бакеты и object_key) и сам нормализует `repository`: если передан формат `owner/repo`, владелец выделяется автоматически, а конфликт между `owner` и префиксом в `repository` приводит к `InvalidArgument`.
+- При пустых `branch`/`base_branch`/`path` используются значения по умолчанию из конфигурации, но пустые бакеты и ключи запрещены.
+- Идентификатор документа валидируется как UUID; при отсутствии генерируется автоматически.
+- `ConfirmUpload` дополнительно проверяет соответствие бакета/ключа сохранённым значениям и наличие объекта через `storage-service.GetObject`.
+
 ### Политика retry/timeout конвертации
 - Stage worker `convert_to_markdown` вызывается с интервалом `stage_worker.interval` и пачкой `stage_worker.batch_size`; если transformer возвращает `status=pending|processing|waiting_docling`, задача переводится в `pending` с `next_run_at = now()+stage_worker.retry_delay` без создания дублей в `processing_jobs`.
 - gRPC вызов `ConvertDocumentToMarkdown` фиксирует `queue_id` и `markdown_object_key` только в `processing_jobs.payload` и `document_versions`/`documents`; других таблиц конвертер не трогает.

@@ -16,16 +16,16 @@ import (
 )
 
 type Repository interface {
-        CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error)
-        GetDocument(ctx context.Context, id string) (*model.Document, error)
-        ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
-        CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error)
+	CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error)
+	GetDocument(ctx context.Context, id string) (*model.Document, error)
+	ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
+	CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error)
 	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
-        LastNonFailedStatus(ctx context.Context, id string) (model.Status, error)
-        ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error)
-        CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error)
-        UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
-        RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error)
+	LastNonFailedStatus(ctx context.Context, id string) (model.Status, error)
+	ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error)
+	CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error)
+	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
+	RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error)
 }
 
 type Service struct {
@@ -53,20 +53,18 @@ func New(repo Repository, _ *Activities, storage storagev1.StorageServiceClient,
 }
 
 type CreateInput struct {
-	ID                 string
-	FileName           string
-	Owner              string
-	Repository         string
-	Branch             string
-	BaseBranch         string
-	Path               string
-	UploadBucket       string
-	UploadObjectKey    string
-	MarkdownBucket     string
-	MarkdownObjectKey  string
-	PublishPath        string
-	EntitySpecificPath string
-	CreatePR           bool
+	ID                string
+	FileName          string
+	Owner             string
+	Repository        string
+	Branch            string
+	BaseBranch        string
+	Path              string
+	UploadBucket      string
+	UploadObjectKey   string
+	MarkdownBucket    string
+	MarkdownObjectKey string
+	CreatePR          bool
 }
 
 type ConfirmUploadInput struct {
@@ -143,11 +141,6 @@ func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Do
 	path := strings.TrimSpace(in.Path)
 	if path == "" {
 		path = in.FileName
-	}
-
-	publishPath := strings.TrimSpace(in.PublishPath)
-	if publishPath == "" {
-		publishPath = path
 	}
 
 	originalKey := strings.TrimSpace(in.UploadObjectKey)
