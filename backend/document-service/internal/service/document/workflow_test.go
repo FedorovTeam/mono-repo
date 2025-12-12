@@ -253,10 +253,10 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 
 	activities := NewActivities(repo, nil, publisher, "owner", "repo", "main", "main", RetryPolicy{InitialBackoff: time.Second, MaxBackoff: time.Minute})
 
-	err := activities.PublishMarkdown(context.Background(), publishInput{
-		DocumentID:        "doc-2",
-		DocumentName:      "doc title",
-		MarkdownBucket:    "bucket",
+        _, err := activities.PublishMarkdown(context.Background(), publishInput{
+                DocumentID:        "doc-2",
+                DocumentName:      "doc title",
+                MarkdownBucket:    "bucket",
 		MarkdownObjectKey: "object",
 		Path:              "doc.md",
 	})

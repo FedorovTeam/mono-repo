@@ -7,11 +7,13 @@ import (
 	"strings"
 	"time"
 
+	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
+
 	"backend-document-service/internal/model"
 )
 
 type publishActivity interface {
-	PublishMarkdown(ctx context.Context, input publishInput) error
+	PublishMarkdown(ctx context.Context, input publishInput) (*githubpublisherv1.PublishMarkdownResponse, error)
 }
 
 // PublishRetrier повторно запускает публикацию в GitHub для документов,
@@ -156,7 +158,7 @@ func (r *PublishRetrier) reconcile(ctx context.Context) {
 				input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", doc.ID, input.Branch, input.MarkdownObjectKey)
 			}
 
-			if err := r.activities.PublishMarkdown(ctx, input); err != nil {
+			if _, err := r.activities.PublishMarkdown(ctx, input); err != nil {
 				r.logf("publish-retrier: publish document_id=%s correlation_id=%s attempt=%d/%d: %v", doc.ID, correlationID(fullDoc), attempts+1, r.maxAttempts, err)
 				r.metrics.recordError(ctx)
 				r.metrics.recordDuration(ctx, time.Since(start))

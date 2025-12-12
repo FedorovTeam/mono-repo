@@ -6,7 +6,11 @@ flowchart TD
     B --> C[storage-service: UploadOriginal/GenerateUploadURL]
     C --> D[DocumentService: documents + version + status Uploaded]
     D --> E[processing_jobs: store_original]
-    E --> F[Stage workers вызывают gRPC storage/transformer/github-publisher]
+    E --> F[Stage workers: store/convert/publish]
+    F -->|convert_to_markdown| TR[docling-transformer-service]
+    F -->|publish_to_github\n(idempotency_key, retry_policy)| GP[github-publisher-service]
+    GP -->|commit/PR| GitHub[(GitHub)]
+    F -->|job_events: commit_sha/retry_after| DB[(PostgreSQL)]
 ```
 
 ```mermaid

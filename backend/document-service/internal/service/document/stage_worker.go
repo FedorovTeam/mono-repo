@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"backend-document-service/internal/model"
+	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 )
 
 type pendingJobRepo interface {
@@ -128,18 +130,18 @@ func (w *StageWorker) handleJob(ctx context.Context, job model.ProcessingJob) {
 	case model.JobStagePublishToGitHub:
 		w.handlePublish(ctx, job)
 	default:
-		w.failJob(ctx, job, fmt.Sprintf("unsupported stage %s", job.Stage))
+		w.failJob(ctx, job, fmt.Sprintf("unsupported stage %s", job.Stage), nil, nil)
 	}
 }
 
 func (w *StageWorker) handleStoreOriginal(ctx context.Context, job model.ProcessingJob) {
 	if w.activities == nil {
-		w.failJob(ctx, job, "activities not configured")
+		w.failJob(ctx, job, "activities not configured", nil, nil)
 		return
 	}
 
 	if err := w.activities.MarkStoredOriginal(w.jobContext(ctx, job), job.DocumentID); err != nil {
-		w.failJob(ctx, job, err.Error())
+		w.failJob(ctx, job, err.Error(), nil, nil)
 		return
 	}
 
@@ -151,17 +153,17 @@ func (w *StageWorker) handleStoreOriginal(ctx context.Context, job model.Process
 
 func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob) {
 	if w.activities == nil {
-		w.failJob(ctx, job, "activities not configured")
+		w.failJob(ctx, job, "activities not configured", nil, nil)
 		return
 	}
 
 	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
-		w.failJob(ctx, job, fmt.Sprintf("load document: %v", err))
+		w.failJob(ctx, job, fmt.Sprintf("load document: %v", err), nil, nil)
 		return
 	}
 	if doc == nil {
-		w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID))
+		w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID), nil, nil)
 		return
 	}
 
@@ -183,7 +185,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 	convCtx := w.jobContext(ctx, job)
 	result, err := w.activities.ConvertToMarkdown(convCtx, input)
 	if err != nil {
-		w.failJob(ctx, job, err.Error())
+		w.failJob(ctx, job, err.Error(), nil, nil)
 		return
 	}
 
@@ -202,7 +204,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 	}
 
 	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
-		w.failJob(ctx, job, fmt.Sprintf("update status: %v", err))
+		w.failJob(ctx, job, fmt.Sprintf("update status: %v", err), nil, nil)
 		return
 	}
 
@@ -214,17 +216,17 @@ func (w *StageWorker) handleConvert(ctx context.Context, job model.ProcessingJob
 
 func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob) {
 	if w.activities == nil {
-		w.failJob(ctx, job, "activities not configured")
+		w.failJob(ctx, job, "activities not configured", nil, nil)
 		return
 	}
 
 	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
-		w.failJob(ctx, job, fmt.Sprintf("load document: %v", err))
+		w.failJob(ctx, job, fmt.Sprintf("load document: %v", err), nil, nil)
 		return
 	}
 	if doc == nil {
-		w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID))
+		w.failJob(ctx, job, fmt.Sprintf("document %s not found", job.DocumentID), nil, nil)
 		return
 	}
 
@@ -254,21 +256,37 @@ func (w *StageWorker) handlePublish(ctx context.Context, job model.ProcessingJob
 		input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", job.DocumentID, input.Branch, input.MarkdownObjectKey)
 	}
 
-	if err := w.activities.PublishMarkdown(w.jobContext(ctx, job), input); err != nil {
-		w.failJob(ctx, job, err.Error())
+	if job.Payload == nil {
+		job.Payload = map[string]any{}
+	}
+	job.Payload["markdown_bucket"] = input.MarkdownBucket
+	job.Payload["markdown_object_key"] = input.MarkdownObjectKey
+	job.Payload["repository"] = fmt.Sprintf("%s/%s", owner, repository)
+	job.Payload["branch"] = input.Branch
+	job.Payload["base_branch"] = input.BaseBranch
+	job.Payload["github_path"] = input.Path
+	job.Payload["create_pr"] = input.CreatePR
+	job.Payload["correlation_id"] = input.CorrelationID
+
+	resp, err := w.activities.PublishMarkdown(w.jobContext(ctx, job), input)
+	eventPayload := buildPublishEventPayload(resp)
+	if err != nil {
+		w.failJob(ctx, job, err.Error(), pickRetryAfter(resp), eventPayload)
 		return
 	}
 
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed"}); err != nil {
+	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusCompleted, nil, false, job.Payload, &model.JobEvent{EventType: "completed", Payload: eventPayload}); err != nil {
 		w.logf("stage-worker[%s]: complete publish job %s: %v", w.stage, job.TaskID, err)
 		w.metrics.recordError(ctx)
 	}
 }
 
-func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reason string) {
+func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reason string, retryAfter *durationpb.Duration, eventPayload map[string]any) {
 	corr := stringFromPayload(job.Payload, "correlation_id", correlationIDFromContext(ctx))
 	nextRun := time.Now().Add(w.retryDelay)
-	if w.stage == model.JobStagePublishToGitHub && w.publishRetry != nil {
+	if retryAfter != nil && retryAfter.AsDuration() > 0 {
+		nextRun = time.Now().Add(retryAfter.AsDuration())
+	} else if w.stage == model.JobStagePublishToGitHub && w.publishRetry != nil {
 		if backoff := w.publishRetry.backoff(job.Attempts); backoff > 0 {
 			nextRun = time.Now().Add(backoff)
 		}
@@ -277,10 +295,52 @@ func (w *StageWorker) failJob(ctx context.Context, job model.ProcessingJob, reas
 		job.Payload = map[string]any{}
 	}
 	job.Payload["last_error"] = reason
-	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusFailed, &nextRun, false, job.Payload, &model.JobEvent{EventType: "failed", Message: reason}); err != nil {
+	if retryAfter != nil {
+		job.Payload["retry_after"] = retryAfter.AsDuration().String()
+	}
+	if eventPayload == nil {
+		eventPayload = map[string]any{}
+	}
+	if retryAfter != nil && retryAfter.AsDuration() > 0 {
+		eventPayload["retry_after"] = retryAfter.AsDuration().String()
+	}
+	if _, err := w.repo.UpdateProcessingJob(ctx, job.TaskID, model.JobStatusFailed, &nextRun, false, job.Payload, &model.JobEvent{EventType: "failed", Message: reason, Payload: eventPayload}); err != nil {
 		w.logf("stage-worker[%s]: fail job %s correlation_id=%s: %v (original reason: %s)", w.stage, job.TaskID, corr, err, reason)
 		w.metrics.recordError(ctx)
 	}
+}
+
+func buildPublishEventPayload(resp *githubpublisherv1.PublishMarkdownResponse) map[string]any {
+	if resp == nil {
+		return nil
+	}
+	payload := map[string]any{}
+	if sha := strings.TrimSpace(resp.GetCommitSha()); sha != "" {
+		payload["commit_sha"] = sha
+	}
+	if resp.GetPullRequestNumber() > 0 {
+		payload["pull_request_number"] = resp.GetPullRequestNumber()
+	}
+	if url := strings.TrimSpace(resp.GetPullRequestUrl()); url != "" {
+		payload["pull_request_url"] = url
+	}
+	if resp.GetIdempotencyHit() {
+		payload["idempotency_hit"] = true
+	}
+	if retry := resp.GetRetryAfter(); retry != nil && retry.AsDuration() > 0 {
+		payload["retry_after"] = retry.AsDuration().String()
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	return payload
+}
+
+func pickRetryAfter(resp *githubpublisherv1.PublishMarkdownResponse) *durationpb.Duration {
+	if resp == nil {
+		return nil
+	}
+	return resp.GetRetryAfter()
 }
 
 func (w *StageWorker) jobContext(ctx context.Context, job model.ProcessingJob) context.Context {
