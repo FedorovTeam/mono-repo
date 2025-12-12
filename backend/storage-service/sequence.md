@@ -15,6 +15,12 @@ sequenceDiagram
     Note over Storage,MinIO: ConfigureUploadNotification(UploadBucket, WebhookArn)
     Storage->>MinIO: Настроить уведомления ObjectCreated на targetArn
     MinIO-->>Storage: OK
+    Storage->>Postgres: FOR UPDATE SKIP LOCKED: выбрать pending processing_jobs(stage)
+    Postgres-->>Storage: task_id, document_id, payload (correlation_id)
+    Storage->>Postgres: UPDATE processing_jobs SET status='in_progress'
+    Storage->>Postgres: UPDATE documents SET status='StoredOriginal'
+    Storage->>Postgres: INSERT document_status_logs + job_events(stage=store_original)
+    Postgres-->>Storage: OK
 
     %% UploadOriginal
     Client->>Storage: UploadOriginal(org_slug?, project_slug?, document_id, filename_extension, content)
@@ -52,6 +58,8 @@ sequenceDiagram
     Storage->>Storage: validate content_length > 0, expires_in_seconds > 0, ext ∈ {doc, docx, pdf}
     Storage->>Storage: BuildKey(org=knowledge, project=documents, document_id, ext) // включает uuid сегмент
     Storage->>MinIO: BucketExists(uploadBucket)
+    MinIO-->>Storage: exists
+    Storage->>MinIO: BucketExists(markdownBucket)
     MinIO-->>Storage: exists
     Storage->>MinIO: PresignHeader(PUT, bucket=uploadBucket, key, expires, x-amz-meta-correlation-id из запроса/метаданных)
     MinIO-->>Storage: upload_url
