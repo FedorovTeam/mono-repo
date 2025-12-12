@@ -11,7 +11,7 @@ import (
 
 	"backend-document-service/internal/config"
 	"backend-document-service/internal/grpcdial"
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 	"backend-document-service/internal/service/document"
 	documentv1 "backend-document-service/proto/backend/document/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
@@ -69,24 +69,24 @@ func grpcClientConfig() config.GRPCClient {
 
 type memoryRepo struct {
 	mu        sync.Mutex
-	documents map[string]model.Document
-	logs      map[string][]model.Status
-	jobs      map[string]model.ProcessingJob
+	documents map[string]domain.Document
+	logs      map[string][]domain.Status
+	jobs      map[string]domain.ProcessingJob
 }
 
-func (m *memoryRepo) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
+func (m *memoryRepo) CreateDocument(ctx context.Context, doc *domain.Document, version *domain.DocumentVersion, log *domain.DocumentStatusLog) (*domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.documents == nil {
-		m.documents = make(map[string]model.Document)
+		m.documents = make(map[string]domain.Document)
 	}
 	doc.ID = uuid.NewString()
-	doc.Versions = []model.DocumentVersion{*version}
+	doc.Versions = []domain.DocumentVersion{*version}
 	m.documents[doc.ID] = *doc
 	return doc, nil
 }
 
-func (m *memoryRepo) GetDocument(ctx context.Context, id string) (*model.Document, error) {
+func (m *memoryRepo) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	doc, ok := m.documents[id]
@@ -96,10 +96,10 @@ func (m *memoryRepo) GetDocument(ctx context.Context, id string) (*model.Documen
 	return &doc, nil
 }
 
-func (m *memoryRepo) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
+func (m *memoryRepo) ListDocuments(ctx context.Context, limit, offset int, status *domain.Status) ([]domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []model.Document
+	var out []domain.Document
 	for _, d := range m.documents {
 		if status != nil && d.Status != *status {
 			continue
@@ -109,20 +109,20 @@ func (m *memoryRepo) ListDocuments(ctx context.Context, limit, offset int, statu
 	return out, nil
 }
 
-func (m *memoryRepo) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+func (m *memoryRepo) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status domain.Status, reasonPrefix string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.logs[id]), nil
 }
 
-func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to domain.Status, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	doc, ok := m.documents[id]
 	if !ok {
 		return nil, errors.New("not found")
 	}
-	if err := model.ValidateTransition(doc.Status, to); err != nil {
+	if err := domain.ValidateTransition(doc.Status, to); err != nil {
 		return nil, err
 	}
 	doc.Status = to
@@ -134,14 +134,14 @@ func (m *memoryRepo) UpdateStatus(ctx context.Context, id string, to model.Statu
 		doc.MarkdownObjectKey = version.MarkdownObjectKey
 	}
 	if m.logs == nil {
-		m.logs = make(map[string][]model.Status)
+		m.logs = make(map[string][]domain.Status)
 	}
 	m.logs[id] = append(m.logs[id], to)
 	m.documents[id] = doc
 	return &doc, nil
 }
 
-func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
+func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*domain.Document, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	doc, ok := m.documents[id]
@@ -153,22 +153,22 @@ func (m *memoryRepo) UpdateWorkflowID(ctx context.Context, id, workflowID string
 	return &doc, nil
 }
 
-func (m *memoryRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (m *memoryRepo) CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()
 	}
 	if m.jobs == nil {
-		m.jobs = make(map[string]model.ProcessingJob)
+		m.jobs = make(map[string]domain.ProcessingJob)
 	}
 	if job.Status == "" {
-		job.Status = model.JobStatusPending
+		job.Status = domain.JobStatusPending
 	}
 	m.jobs[job.TaskID] = *job
 	return job, nil
 }
 
-func (m *memoryRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	job := model.ProcessingJob{TaskID: taskID, Status: status}
+func (m *memoryRepo) UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error) {
+	job := domain.ProcessingJob{TaskID: taskID, Status: status}
 	if nextRunAt != nil {
 		job.NextRunAt = *nextRunAt
 	}
@@ -176,18 +176,18 @@ func (m *memoryRepo) UpdateProcessingJob(ctx context.Context, taskID string, sta
 		job.Payload = payload
 	}
 	if m.jobs == nil {
-		m.jobs = make(map[string]model.ProcessingJob)
+		m.jobs = make(map[string]domain.ProcessingJob)
 	}
 	m.jobs[taskID] = job
 	return &job, nil
 }
 
-func (m *memoryRepo) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+func (m *memoryRepo) ActiveJob(ctx context.Context, documentID string) (*domain.ProcessingJob, error) {
 	for _, job := range m.jobs {
 		if job.DocumentID != documentID {
 			continue
 		}
-		if job.Status == model.JobStatusPending || job.Status == model.JobStatusInProgress {
+		if job.Status == domain.JobStatusPending || job.Status == domain.JobStatusInProgress {
 			copy := job
 			return &copy, nil
 		}
@@ -195,11 +195,11 @@ func (m *memoryRepo) ActiveJob(ctx context.Context, documentID string) (*model.P
 	return nil, nil
 }
 
-func (m *memoryRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+func (m *memoryRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]domain.ProcessingJob, error) {
 	return nil, nil
 }
 
-func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (domain.Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	doc, ok := m.documents[id]
@@ -208,13 +208,13 @@ func (m *memoryRepo) LastNonFailedStatus(ctx context.Context, id string) (model.
 	}
 	history := m.logs[id]
 	if len(history) == 0 {
-		if doc.Status != model.StatusFailed {
+		if doc.Status != domain.StatusFailed {
 			return doc.Status, nil
 		}
 		return "", sql.ErrNoRows
 	}
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i] != model.StatusFailed {
+		if history[i] != domain.StatusFailed {
 			return history[i], nil
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"log"
 	"strings"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 	"google.golang.org/grpc/codes"
@@ -95,7 +95,7 @@ func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) 
 	if err != nil {
 		return err
 	}
-	if status != model.StatusUploaded {
+	if status != domain.StatusUploaded {
 		return nil
 	}
 	if doc.OriginalBucket == "" || doc.OriginalObjectKey == "" {
@@ -107,7 +107,7 @@ func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) 
 		version = 1
 	}
 
-	_, err = a.repo.UpdateStatus(ctx, documentID, model.StatusStoredOriginal, "", "", &model.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey})
+	_, err = a.repo.UpdateStatus(ctx, documentID, domain.StatusStoredOriginal, "", "", &domain.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey})
 	return err
 }
 
@@ -125,7 +125,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	if err != nil {
 		return convertResult{}, err
 	}
-	if currentStatus == model.StatusConvertedToMarkdown || currentStatus == model.StatusPublishedToGitHub {
+	if currentStatus == domain.StatusConvertedToMarkdown || currentStatus == domain.StatusPublishedToGitHub {
 		latest := latestVersion(doc)
 		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(currentStatus), Version: latest.Version, Ready: true}, nil
 	}
@@ -158,12 +158,12 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		version = latestVersion(doc).Version + 1
 	}
 
-	ready := strings.EqualFold(resp.GetStatus(), "done") || strings.EqualFold(resp.GetStatus(), string(model.StatusConvertedToMarkdown))
+	ready := strings.EqualFold(resp.GetStatus(), "done") || strings.EqualFold(resp.GetStatus(), string(domain.StatusConvertedToMarkdown))
 
 	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: resp.GetStatus(), Version: version, Ready: ready}, nil
 }
 
-func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, markdownKey, queueID string, version int32) error {
+func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, queueID string, version int32) error {
 	if doc == nil {
 		return fmt.Errorf("document is required")
 	}
@@ -171,7 +171,7 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, mar
 	if err != nil {
 		return err
 	}
-	if statusVal == model.StatusConvertedToMarkdown || statusVal == model.StatusPublishedToGitHub {
+	if statusVal == domain.StatusConvertedToMarkdown || statusVal == domain.StatusPublishedToGitHub {
 		return nil
 	}
 
@@ -186,7 +186,7 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *model.Document, mar
 		version = latestVersion(doc).Version + 1
 	}
 
-	_, err = a.repo.UpdateStatus(ctx, doc.ID, model.StatusConvertedToMarkdown, "", "", &model.DocumentVersion{
+	_, err = a.repo.UpdateStatus(ctx, doc.ID, domain.StatusConvertedToMarkdown, "", "", &domain.DocumentVersion{
 		Version:           version,
 		MarkdownObjectKey: markdownKey,
 		MarkdownQueueID:   queueID,
@@ -208,7 +208,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 	if err != nil {
 		return nil, err
 	}
-	if statusVal == model.StatusPublishedToGitHub {
+	if statusVal == domain.StatusPublishedToGitHub {
 		return nil, nil
 	}
 	owner := strings.TrimSpace(input.Owner)
@@ -297,7 +297,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		if retryAfter := resp.GetRetryAfter(); retryAfter != nil {
 			log.Printf("publish markdown retry hint: document_id=%s correlation_id=%s retry_after=%s", input.DocumentID, correlation, retryAfter.AsDuration())
 		}
-		if _, updErr := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusFailed, reason, reason, nil); updErr != nil {
+		if _, updErr := a.repo.UpdateStatus(ctx, input.DocumentID, domain.StatusFailed, reason, reason, nil); updErr != nil {
 			log.Printf("update status after publish error: %v", updErr)
 		}
 		if resp.GetStatus() == githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
@@ -306,12 +306,12 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		return resp, fmt.Errorf("permanent github failure: %s", resp.GetErrorMessage())
 	}
 
-	var version *model.DocumentVersion
+	var version *domain.DocumentVersion
 	if input.Version > 0 {
-		version = &model.DocumentVersion{Version: input.Version, MarkdownObjectKey: markdownObjectKey}
+		version = &domain.DocumentVersion{Version: input.Version, MarkdownObjectKey: markdownObjectKey}
 	}
 
-	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, model.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), version); err != nil {
+	if _, err := a.repo.UpdateStatus(ctx, input.DocumentID, domain.StatusPublishedToGitHub, resp.GetCommitSha(), resp.GetCommitSha(), version); err != nil {
 		return resp, err
 	}
 
@@ -340,32 +340,32 @@ func mapPublishErrorCode(code githubpublisherv1.PublishErrorCode) string {
 }
 
 func (a *Activities) fail(ctx context.Context, documentID, reason string) error {
-	_, err := a.repo.UpdateStatus(ctx, documentID, model.StatusFailed, reason, reason, nil)
+	_, err := a.repo.UpdateStatus(ctx, documentID, domain.StatusFailed, reason, reason, nil)
 	return err
 }
 
-func (a *Activities) progressStatus(ctx context.Context, doc *model.Document) (model.Status, error) {
-	if doc.Status != model.StatusFailed {
+func (a *Activities) progressStatus(ctx context.Context, doc *domain.Document) (domain.Status, error) {
+	if doc.Status != domain.StatusFailed {
 		return doc.Status, nil
 	}
 
 	statusVal, err := a.repo.LastNonFailedStatus(ctx, doc.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return model.StatusUploaded, nil
+			return domain.StatusUploaded, nil
 		}
 		return "", err
 	}
 
 	if statusVal == "" {
-		return model.StatusUploaded, nil
+		return domain.StatusUploaded, nil
 	}
 
 	return statusVal, nil
 }
 
-func latestVersion(doc *model.Document) model.DocumentVersion {
-	var latest model.DocumentVersion
+func latestVersion(doc *domain.Document) domain.DocumentVersion {
+	var latest domain.DocumentVersion
 	for i := range doc.Versions {
 		if doc.Versions[i].Version > latest.Version {
 			latest = doc.Versions[i]
@@ -374,7 +374,7 @@ func latestVersion(doc *model.Document) model.DocumentVersion {
 	return latest
 }
 
-func resolvedMarkdownKey(doc *model.Document) string {
+func resolvedMarkdownKey(doc *domain.Document) string {
 	latest := latestVersion(doc)
 	if latest.MarkdownObjectKey != "" {
 		return latest.MarkdownObjectKey

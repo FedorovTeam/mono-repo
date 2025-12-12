@@ -5,11 +5,11 @@ import (
 	"log"
 	"time"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 )
 
 type confirmUploadCaller interface {
-	ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*model.Document, error)
+	ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*domain.Document, error)
 }
 
 type UploadReconciler struct {
@@ -60,7 +60,7 @@ func (r *UploadReconciler) Run(ctx context.Context, interval time.Duration) {
 }
 
 func (r *UploadReconciler) reconcile(ctx context.Context) {
-	docStatus := model.StatusUploaded
+	docStatus := domain.StatusUploaded
 	cutoff := r.now().Add(-r.minAge)
 	offset := 0
 

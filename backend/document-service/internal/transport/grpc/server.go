@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 	svc "backend-document-service/internal/service/document"
 	documentv1 "backend-document-service/proto/backend/document/v1"
 
@@ -72,7 +72,7 @@ func (s *Server) GetDocument(ctx context.Context, req *documentv1.GetDocumentReq
 
 func (s *Server) ListDocuments(ctx context.Context, req *documentv1.ListDocumentsRequest) (*documentv1.ListDocumentsResponse, error) {
 	s.logWithCorrelation(ctx, "ListDocuments")
-	var status *model.Status
+	var status *domain.Status
 	if req.GetStatusFilter() != documentv1.DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED {
 		mapped := fromProtoStatus(req.GetStatusFilter())
 		status = &mapped
@@ -119,7 +119,7 @@ func (s *Server) ConfirmUpload(ctx context.Context, req *documentv1.ConfirmUploa
 	return toProto(doc), nil
 }
 
-func toProto(doc *model.Document) *documentv1.Document {
+func toProto(doc *domain.Document) *documentv1.Document {
 	actualStatus := doc.ActualStatus
 	if actualStatus == "" {
 		actualStatus = doc.Status
@@ -148,37 +148,37 @@ func toProto(doc *model.Document) *documentv1.Document {
 	return p
 }
 
-func toProtoStatus(s model.Status) documentv1.DocumentStatus {
+func toProtoStatus(s domain.Status) documentv1.DocumentStatus {
 	switch s {
-	case model.StatusUploaded:
+	case domain.StatusUploaded:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED
-	case model.StatusStoredOriginal:
+	case domain.StatusStoredOriginal:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL
-	case model.StatusConvertedToMarkdown:
+	case domain.StatusConvertedToMarkdown:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN
-	case model.StatusPublishedToGitHub:
+	case domain.StatusPublishedToGitHub:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_PUBLISHED_TO_GITHUB
-	case model.StatusFailed:
+	case domain.StatusFailed:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_FAILED
 	default:
 		return documentv1.DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED
 	}
 }
 
-func fromProtoStatus(s documentv1.DocumentStatus) model.Status {
+func fromProtoStatus(s documentv1.DocumentStatus) domain.Status {
 	switch s {
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_UPLOADED:
-		return model.StatusUploaded
+		return domain.StatusUploaded
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_STORED_ORIGINAL:
-		return model.StatusStoredOriginal
+		return domain.StatusStoredOriginal
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_CONVERTED_TO_MARKDOWN:
-		return model.StatusConvertedToMarkdown
+		return domain.StatusConvertedToMarkdown
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_PUBLISHED_TO_GITHUB:
-		return model.StatusPublishedToGitHub
+		return domain.StatusPublishedToGitHub
 	case documentv1.DocumentStatus_DOCUMENT_STATUS_FAILED:
-		return model.StatusFailed
+		return domain.StatusFailed
 	default:
-		return model.Status("")
+		return domain.Status("")
 	}
 }
 

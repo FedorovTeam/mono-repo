@@ -4,51 +4,75 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
+	storagerepo "backend-document-service/internal/infrastructure/storage"
+	documentusecase "backend-document-service/internal/usecase/document"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 )
 
 type Repository interface {
-	CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error)
-	GetDocument(ctx context.Context, id string) (*model.Document, error)
-	ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error)
-	CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error)
-	UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error)
-	LastNonFailedStatus(ctx context.Context, id string) (model.Status, error)
-	ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error)
-	CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error)
-	UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error)
-	RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error)
+	CreateDocument(ctx context.Context, doc *domain.Document, version *domain.DocumentVersion, log *domain.DocumentStatusLog) (*domain.Document, error)
+	GetDocument(ctx context.Context, id string) (*domain.Document, error)
+	ListDocuments(ctx context.Context, limit, offset int, status *domain.Status) ([]domain.Document, error)
+	CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status domain.Status, reasonPrefix string) (int, error)
+	UpdateStatus(ctx context.Context, id string, to domain.Status, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error)
+	LastNonFailedStatus(ctx context.Context, id string) (domain.Status, error)
+	ActiveJob(ctx context.Context, documentID string) (*domain.ProcessingJob, error)
+	CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error)
+	UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error)
+	RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]domain.ProcessingJob, error)
 }
 
 type Service struct {
 	repo                  Repository
-	storage               storagev1.StorageServiceClient
+	storage               domain.Storage
 	defaultOriginalBucket string
 	defaultMarkdownBucket string
 	defaultOwner          string
 	defaultRepository     string
 	defaultBranch         string
 	defaultBaseBranch     string
+	createDocumentUC      *documentusecase.CreateDocument
+	confirmUploadUC       *documentusecase.ConfirmUpload
+	updateStatusUC        *documentusecase.UpdateStatus
 }
 
 func New(repo Repository, _ *Activities, storage storagev1.StorageServiceClient, defaultOriginalBucket, defaultMarkdownBucket, defaultOwner, defaultRepository, defaultBranch, defaultBaseBranch string) *Service {
+	storageAdapter := storagerepo.New(storage)
+	defaults := documentusecase.Defaults{
+		OriginalBucket: defaultOriginalBucket,
+		MarkdownBucket: defaultMarkdownBucket,
+		Owner:          defaultOwner,
+		Repository:     defaultRepository,
+		Branch:         defaultBranch,
+		BaseBranch:     defaultBaseBranch,
+	}
 	return &Service{
 		repo:                  repo,
-		storage:               storage,
+		storage:               storageAdapter,
 		defaultOriginalBucket: defaultOriginalBucket,
 		defaultMarkdownBucket: defaultMarkdownBucket,
 		defaultOwner:          defaultOwner,
 		defaultRepository:     defaultRepository,
 		defaultBranch:         defaultBranch,
 		defaultBaseBranch:     defaultBaseBranch,
+		createDocumentUC: &documentusecase.CreateDocument{
+			Repo:     repo,
+			Storage:  storageAdapter,
+			Defaults: defaults,
+		},
+		confirmUploadUC: &documentusecase.ConfirmUpload{
+			Repo:    repo,
+			Storage: storageAdapter,
+		},
+		updateStatusUC: &documentusecase.UpdateStatus{
+			Repo:    repo,
+			Storage: storageAdapter,
+		},
 	}
 }
 
@@ -75,7 +99,7 @@ type ConfirmUploadInput struct {
 
 type UpdateStatusInput struct {
 	DocumentID        string
-	Status            model.Status
+	Status            domain.Status
 	Reason            string
 	ErrorReason       string
 	MarkdownObjectKey string
@@ -83,110 +107,17 @@ type UpdateStatusInput struct {
 	Version           int32
 }
 
-func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*model.Document, error) {
-	if strings.TrimSpace(in.FileName) == "" {
-		return nil, errors.New("name is required")
-	}
-	if in.ID != "" {
-		if _, err := uuid.Parse(in.ID); err != nil {
-			return nil, errors.New("id is not a valid uuid")
-		}
-	} else {
-		in.ID = uuid.NewString()
-	}
-	owner := strings.TrimSpace(in.Owner)
-	repository := strings.TrimSpace(in.Repository)
-	if repository == "" {
-		repository = s.defaultRepository
-	}
-	if strings.Contains(repository, "/") {
-		ownerPart, repoPart, found := strings.Cut(repository, "/")
-		if !found || ownerPart == "" || repoPart == "" || strings.Contains(repoPart, "/") {
-			return nil, status.Error(codes.InvalidArgument, "repository must be in owner/repo format")
-		}
-		if owner != "" && ownerPart != owner {
-			return nil, status.Error(codes.InvalidArgument, "owner does not match repository")
-		}
-		if owner == "" {
-			owner = ownerPart
-		}
-		repository = repoPart
-	}
-	if owner == "" {
-		owner = s.defaultOwner
-	}
-	branch := strings.TrimSpace(in.Branch)
-	if branch == "" {
-		branch = s.defaultBranch
-	}
-	baseBranch := strings.TrimSpace(in.BaseBranch)
-	if baseBranch == "" {
-		baseBranch = s.defaultBaseBranch
-	}
-	if baseBranch == "" {
-		baseBranch = branch
-	}
-
-	originalBucket := strings.TrimSpace(in.UploadBucket)
-	if originalBucket == "" {
-		originalBucket = s.defaultOriginalBucket
-	}
-	markdownBucket := strings.TrimSpace(in.MarkdownBucket)
-	if markdownBucket == "" {
-		markdownBucket = s.defaultMarkdownBucket
-	}
-	if originalBucket == "" || markdownBucket == "" {
-		return nil, errors.New("buckets are required")
-	}
-	path := strings.TrimSpace(in.Path)
-	if path == "" {
-		path = in.FileName
-	}
-
-	originalKey := strings.TrimSpace(in.UploadObjectKey)
-	markdownKey := strings.TrimSpace(in.MarkdownObjectKey)
-	if originalKey == "" || markdownKey == "" {
-		return nil, errors.New("object keys are required")
-	}
-
-	doc := &model.Document{
-		ID:                in.ID,
-		Name:              in.FileName,
-		Owner:             owner,
-		Repository:        repository,
-		Branch:            branch,
-		BaseBranch:        baseBranch,
-		Path:              path,
-		WorkflowID:        in.ID,
-		Status:            model.StatusUploaded,
-		OriginalBucket:    originalBucket,
-		OriginalObjectKey: originalKey,
-		MarkdownBucket:    markdownBucket,
-		MarkdownObjectKey: markdownKey,
-		CreatePR:          in.CreatePR,
-	}
-	version := &model.DocumentVersion{
-		Version:           1,
-		OriginalObjectKey: originalKey,
-		MarkdownObjectKey: markdownKey,
-	}
-	log := &model.DocumentStatusLog{ToStatus: model.StatusUploaded}
-	created, err := s.repo.CreateDocument(ctx, doc, version, log)
+func (s *Service) CreateDocument(ctx context.Context, in CreateInput) (*domain.Document, error) {
+	doc, err := s.createDocumentUC.Execute(ctx, documentusecase.CreateInput(in))
 	if err != nil {
 		return nil, err
 	}
-	return created, nil
+	return doc, nil
 }
 
-func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*model.Document, error) {
-	if _, err := uuid.Parse(in.DocumentID); err != nil {
-		return nil, errors.New("invalid id")
-	}
-	if strings.TrimSpace(in.ObjectKey) == "" {
-		return nil, errors.New("object_key is required")
-	}
-	if strings.TrimSpace(in.Bucket) == "" {
-		return nil, errors.New("bucket is required")
+func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*domain.Document, error) {
+	if s.storage == nil {
+		return nil, errors.New("storage client is not configured")
 	}
 
 	doc, err := s.repo.GetDocument(ctx, in.DocumentID)
@@ -196,36 +127,34 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 	if doc == nil {
 		return nil, errors.New("document not found")
 	}
-	if doc.OriginalBucket != "" && doc.OriginalBucket != in.Bucket {
-		return nil, fmt.Errorf("bucket mismatch: expected %s, got %s", doc.OriginalBucket, in.Bucket)
-	}
-	if doc.OriginalObjectKey != "" && doc.OriginalObjectKey != in.ObjectKey {
-		return nil, fmt.Errorf("object key mismatch: expected %s, got %s", doc.OriginalObjectKey, in.ObjectKey)
+	if doc.Status != domain.StatusUploaded {
+		return doc, nil
 	}
 
-	if s.storage == nil {
-		return nil, errors.New("storage client is not configured")
-	}
-
-	if _, err := s.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: in.Bucket, ObjectKey: in.ObjectKey}); err != nil {
+	if err := s.storage.ValidateObject(ctx, in.Bucket, in.ObjectKey); err != nil {
 		return nil, fmt.Errorf("storage validation failed: %w", err)
+	}
+
+	doc, err = s.confirmUploadUC.Execute(ctx, documentusecase.ConfirmUploadInput(in))
+	if err != nil {
+		return nil, err
 	}
 
 	payload := map[string]any{
 		"bucket":     in.Bucket,
 		"object_key": in.ObjectKey,
 	}
-	job := &model.ProcessingJob{
+	job := &domain.ProcessingJob{
 		DocumentID: doc.ID,
-		Stage:      model.JobStageStoreOriginal,
-		Status:     model.JobStatusPending,
+		Stage:      domain.JobStageStoreOriginal,
+		Status:     domain.JobStatusPending,
 		Payload:    payload,
 	}
-	event := &model.JobEvent{EventType: "scheduled", Message: "confirmed upload"}
+	event := &domain.JobEvent{EventType: "scheduled", Message: "confirmed upload"}
 	createdJob, err := s.repo.CreateProcessingJob(ctx, job, event)
 	if err != nil {
 		reason := fmt.Sprintf("enqueue store_original: %v", err)
-		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
+		_, _ = s.repo.UpdateStatus(ctx, doc.ID, domain.StatusFailed, reason, reason, nil)
 		return nil, fmt.Errorf("enqueue processing job: %w", err)
 	}
 
@@ -236,46 +165,28 @@ func (s *Service) ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*mo
 	return doc, nil
 }
 
-func (s *Service) GetDocument(ctx context.Context, id string) (*model.Document, error) {
+func (s *Service) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, errors.New("invalid id")
 	}
 	return s.repo.GetDocument(ctx, id)
 }
 
-func (s *Service) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
+func (s *Service) ListDocuments(ctx context.Context, limit, offset int, status *domain.Status) ([]domain.Document, error) {
 	if status != nil {
-		if err := model.ValidateStatus(*status); err != nil {
+		if err := domain.ValidateStatus(*status); err != nil {
 			return nil, err
 		}
 	}
 	return s.repo.ListDocuments(ctx, limit, offset, status)
 }
 
-func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*model.Document, error) {
-	if _, err := uuid.Parse(in.DocumentID); err != nil {
-		return nil, errors.New("invalid id")
-	}
-	if err := model.ValidateStatus(in.Status); err != nil {
-		return nil, err
-	}
-
-	if in.ErrorReason == "" && in.Status == model.StatusFailed {
+func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*domain.Document, error) {
+	if in.ErrorReason == "" && in.Status == domain.StatusFailed {
 		in.ErrorReason = in.Reason
 	}
 
-	var version *model.DocumentVersion
-	if in.MarkdownObjectKey != "" || in.OriginalObjectKey != "" || in.Version > 0 {
-		version = &model.DocumentVersion{
-			Version:           in.Version,
-			OriginalObjectKey: in.OriginalObjectKey,
-			MarkdownObjectKey: in.MarkdownObjectKey,
-		}
-		if version.Version == 0 {
-			version.Version = 1
-		}
-	}
-	updated, err := s.repo.UpdateStatus(ctx, in.DocumentID, in.Status, in.Reason, in.ErrorReason, version)
+	updated, err := s.updateStatusUC.Execute(ctx, documentusecase.UpdateStatusInput(in))
 	if err != nil {
 		return nil, err
 	}
@@ -288,22 +199,22 @@ func (s *Service) UpdateStatus(ctx context.Context, in UpdateStatusInput) (*mode
 	return updated, nil
 }
 
-func (s *Service) enqueueNextStage(ctx context.Context, doc *model.Document) *model.ProcessingJob {
-	var stage model.JobStage
+func (s *Service) enqueueNextStage(ctx context.Context, doc *domain.Document) *domain.ProcessingJob {
+	var stage domain.JobStage
 	switch doc.Status {
-	case model.StatusStoredOriginal:
-		stage = model.JobStageConvertToMarkdown
-	case model.StatusConvertedToMarkdown:
-		stage = model.JobStagePublishToGitHub
+	case domain.StatusStoredOriginal:
+		stage = domain.JobStageConvertToMarkdown
+	case domain.StatusConvertedToMarkdown:
+		stage = domain.JobStagePublishToGitHub
 	default:
 		return nil
 	}
 
-	event := &model.JobEvent{EventType: "scheduled", Message: fmt.Sprintf("next stage after %s", doc.Status)}
-	job, err := s.repo.CreateProcessingJob(ctx, &model.ProcessingJob{DocumentID: doc.ID, Stage: stage, Status: model.JobStatusPending}, event)
+	event := &domain.JobEvent{EventType: "scheduled", Message: fmt.Sprintf("next stage after %s", doc.Status)}
+	job, err := s.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: stage, Status: domain.JobStatusPending}, event)
 	if err != nil {
 		reason := fmt.Sprintf("enqueue %s: %v", stage, err)
-		_, _ = s.repo.UpdateStatus(ctx, doc.ID, model.StatusFailed, reason, reason, nil)
+		_, _ = s.repo.UpdateStatus(ctx, doc.ID, domain.StatusFailed, reason, reason, nil)
 		return nil
 	}
 

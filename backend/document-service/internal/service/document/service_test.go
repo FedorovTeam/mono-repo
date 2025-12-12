@@ -11,20 +11,20 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 )
 
 type repoMock struct {
-	doc         *model.Document
-	docs        []model.Document
+	doc         *domain.Document
+	docs        []domain.Document
 	err         error
-	savedStatus model.Status
+	savedStatus domain.Status
 	savedError  string
 	attempts    int
-	job         *model.ProcessingJob
+	job         *domain.ProcessingJob
 }
 
-func (r *repoMock) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
+func (r *repoMock) CreateDocument(ctx context.Context, doc *domain.Document, version *domain.DocumentVersion, log *domain.DocumentStatusLog) (*domain.Document, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -33,15 +33,15 @@ func (r *repoMock) CreateDocument(ctx context.Context, doc *model.Document, vers
 	}
 	doc.CreatedAt = time.Now()
 	doc.UpdatedAt = doc.CreatedAt
-	doc.Versions = []model.DocumentVersion{*version}
+	doc.Versions = []domain.DocumentVersion{*version}
 	r.doc = doc
 	return doc, nil
 }
 
-func (r *repoMock) GetDocument(ctx context.Context, id string) (*model.Document, error) {
+func (r *repoMock) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	return r.doc, r.err
 }
-func (r *repoMock) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
+func (r *repoMock) ListDocuments(ctx context.Context, limit, offset int, status *domain.Status) ([]domain.Document, error) {
 	if len(r.docs) > 0 {
 		if limit == 0 {
 			limit = len(r.docs)
@@ -58,19 +58,19 @@ func (r *repoMock) ListDocuments(ctx context.Context, limit, offset int, status 
 	if r.doc == nil {
 		return nil, nil
 	}
-	return []model.Document{*r.doc}, nil
+	return []domain.Document{*r.doc}, nil
 }
 
-func (r *repoMock) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+func (r *repoMock) LastNonFailedStatus(ctx context.Context, id string) (domain.Status, error) {
 	if r.doc != nil {
 		return r.doc.Status, nil
 	}
 	return "", nil
 }
-func (r *repoMock) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+func (r *repoMock) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status domain.Status, reasonPrefix string) (int, error) {
 	return r.attempts, r.err
 }
-func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (r *repoMock) UpdateStatus(ctx context.Context, id string, to domain.Status, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -85,7 +85,7 @@ func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status,
 	}
 	if version != nil {
 		if len(r.doc.Versions) == 0 {
-			r.doc.Versions = []model.DocumentVersion{*version}
+			r.doc.Versions = []domain.DocumentVersion{*version}
 		} else {
 			r.doc.Versions[len(r.doc.Versions)-1] = *version
 		}
@@ -93,7 +93,7 @@ func (r *repoMock) UpdateStatus(ctx context.Context, id string, to model.Status,
 	return r.doc, nil
 }
 
-func (r *repoMock) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *repoMock) CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -104,18 +104,18 @@ func (r *repoMock) CreateProcessingJob(ctx context.Context, job *model.Processin
 	return job, nil
 }
 
-func (r *repoMock) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *repoMock) UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
-	return &model.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
+	return &domain.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
 }
 
-func (r *repoMock) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+func (r *repoMock) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]domain.ProcessingJob, error) {
 	return nil, r.err
 }
 
-func (r *repoMock) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+func (r *repoMock) ActiveJob(ctx context.Context, documentID string) (*domain.ProcessingJob, error) {
 	if r.job != nil && r.job.DocumentID == documentID {
 		return r.job, nil
 	}
@@ -154,7 +154,7 @@ func TestCreateDocumentSuccess(t *testing.T) {
 	require.Equal(t, "md", doc.MarkdownBucket)
 	require.Equal(t, "docs/articles/name.docx", doc.OriginalObjectKey)
 	require.Equal(t, "docs/articles/name.md", doc.MarkdownObjectKey)
-	require.Equal(t, model.StatusUploaded, doc.Status)
+	require.Equal(t, domain.StatusUploaded, doc.Status)
 	require.Len(t, doc.Versions, 1)
 	require.Equal(t, "owner", doc.Owner)
 }
@@ -191,20 +191,20 @@ func TestCreateDocumentRespectsProvidedID(t *testing.T) {
 }
 
 func TestConfirmUploadEnqueuesStoreOriginalJob(t *testing.T) {
-	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
+	repo := &repoMock{doc: &domain.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: domain.StatusUploaded, Versions: []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
 	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 
 	_, err := svc.ConfirmUpload(context.Background(), ConfirmUploadInput{DocumentID: repo.doc.ID, Bucket: "bucket", ObjectKey: "org/p.docx"})
 	require.NoError(t, err)
-	require.Equal(t, model.JobStageStoreOriginal, repo.job.Stage)
-	require.Equal(t, model.JobStatusPending, repo.job.Status)
+	require.Equal(t, domain.JobStageStoreOriginal, repo.job.Stage)
+	require.Equal(t, domain.JobStatusPending, repo.job.Status)
 	require.Equal(t, repo.doc.ID, repo.job.DocumentID)
 	require.Equal(t, "bucket", repo.job.Payload["bucket"])
 	require.Equal(t, "org/p.docx", repo.job.Payload["object_key"])
 }
 
 func TestConfirmUploadFailsWhenStorageUnavailable(t *testing.T) {
-	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded, Versions: []model.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
+	repo := &repoMock{doc: &domain.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: domain.StatusUploaded, Versions: []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "org/p.docx"}}}}
 	storage := &stubStorageClient{err: errors.New("minio down")}
 	svc := New(repo, nil, storage, "orig", "md", "owner", "repo", "main", "main")
 
@@ -215,7 +215,7 @@ func TestConfirmUploadFailsWhenStorageUnavailable(t *testing.T) {
 }
 
 func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
-	doc := &model.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: model.StatusUploaded}
+	doc := &domain.Document{ID: uuid.NewString(), Name: "file.docx", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", OriginalBucket: "bucket", OriginalObjectKey: "org/p.docx", Status: domain.StatusUploaded}
 	repo := &repoMock{doc: doc}
 	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 
@@ -226,25 +226,25 @@ func TestConfirmUploadIgnoresAlreadyStartedWorkflow(t *testing.T) {
 }
 
 func TestUpdateStatusValidation(t *testing.T) {
-	svc := New(&repoMock{doc: &model.Document{ID: uuid.NewString()}}, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
-	_, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: "bad", Status: model.StatusFailed})
+	svc := New(&repoMock{doc: &domain.Document{ID: uuid.NewString()}}, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
+	_, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: "bad", Status: domain.StatusFailed})
 	require.Error(t, err)
 }
 
 func TestUpdateStatusDelegates(t *testing.T) {
-	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
+	repo := &repoMock{doc: &domain.Document{ID: uuid.NewString(), Status: domain.StatusUploaded}}
 	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
-	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusStoredOriginal})
+	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: domain.StatusStoredOriginal})
 	require.NoError(t, err)
-	require.Equal(t, model.StatusStoredOriginal, doc.Status)
-	require.Equal(t, model.StatusStoredOriginal, repo.savedStatus)
+	require.Equal(t, domain.StatusStoredOriginal, doc.Status)
+	require.Equal(t, domain.StatusStoredOriginal, repo.savedStatus)
 }
 
 func TestUpdateStatusSavesErrorReason(t *testing.T) {
-	repo := &repoMock{doc: &model.Document{ID: uuid.NewString(), Status: model.StatusUploaded}}
+	repo := &repoMock{doc: &domain.Document{ID: uuid.NewString(), Status: domain.StatusUploaded}}
 	svc := New(repo, nil, &stubStorageClient{}, "orig", "md", "owner", "repo", "main", "main")
 
-	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: model.StatusFailed, Reason: "boom"})
+	doc, err := svc.UpdateStatus(context.Background(), UpdateStatusInput{DocumentID: repo.doc.ID, Status: domain.StatusFailed, Reason: "boom"})
 	require.NoError(t, err)
 	require.Equal(t, "boom", repo.savedError)
 	require.Equal(t, "boom", doc.ErrorReason)

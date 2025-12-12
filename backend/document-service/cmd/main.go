@@ -12,10 +12,10 @@ import (
 
 	"backend-document-service/db/migrations"
 	"backend-document-service/internal/config"
+	"backend-document-service/internal/domain"
 	"backend-document-service/internal/grpcdial"
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/infrastructure/persistence"
 	"backend-document-service/internal/observability"
-	"backend-document-service/internal/repository"
 	docservice "backend-document-service/internal/service/document"
 	transport "backend-document-service/internal/transport/grpc"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
@@ -71,7 +71,7 @@ func main() {
 		return
 	}
 
-	repo := repository.New(db)
+	repo := persistence.NewSQLRepository(db)
 	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)
@@ -129,9 +129,9 @@ func main() {
 
 	go processingReconciler.Run(ctx, cfg.StageWorker.Interval)
 
-	storeWorker := docservice.NewStageWorker(repo, activities, model.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	convertWorker := docservice.NewStageWorker(repo, activities, model.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	publishWorker := docservice.NewStageWorker(repo, activities, model.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 
 	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
 	go convertWorker.Run(ctx, cfg.StageWorker.Interval)

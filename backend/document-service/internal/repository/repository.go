@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 )
 
 type Repository struct {
@@ -22,7 +22,7 @@ func New(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
+func (r *Repository) CreateDocument(ctx context.Context, doc *domain.Document, version *domain.DocumentVersion, log *domain.DocumentStatusLog) (*domain.Document, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
         `, version.ID, version.DocumentID, version.Version, version.OriginalObjectKey, version.MarkdownObjectKey, version.MarkdownQueueID, version.CreatedAt, version.UpdatedAt); err != nil {
 			return nil, err
 		}
-		doc.Versions = []model.DocumentVersion{*version}
+		doc.Versions = []domain.DocumentVersion{*version}
 	}
 
 	if log != nil {
@@ -86,13 +86,13 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *model.Document, ve
 	return doc, nil
 }
 
-func (r *Repository) GetDocument(ctx context.Context, id string) (*model.Document, error) {
+func (r *Repository) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	row := r.db.QueryRowContext(ctx, `
 SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at
 FROM documents WHERE id=$1
 `, id)
 
-	var doc model.Document
+	var doc domain.Document
 	if err := row.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -109,10 +109,10 @@ FROM documents WHERE id=$1
 	return &doc, nil
 }
 
-func (r *Repository) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+func (r *Repository) LastNonFailedStatus(ctx context.Context, id string) (domain.Status, error) {
 	row := r.db.QueryRowContext(ctx, `
         SELECT to_status FROM document_status_logs WHERE document_id=$1 AND to_status <> $2 ORDER BY created_at DESC LIMIT 1
-    `, id, string(model.StatusFailed))
+    `, id, string(domain.StatusFailed))
 
 	var status sql.NullString
 	if err := row.Scan(&status); err != nil {
@@ -122,10 +122,10 @@ func (r *Repository) LastNonFailedStatus(ctx context.Context, id string) (model.
 		return "", sql.ErrNoRows
 	}
 
-	return model.Status(strings.TrimSpace(status.String)), nil
+	return domain.Status(strings.TrimSpace(status.String)), nil
 }
 
-func (r *Repository) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+func (r *Repository) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status domain.Status, reasonPrefix string) (int, error) {
 	row := r.db.QueryRowContext(ctx, `
         SELECT count(*) FROM document_status_logs WHERE document_id=$1 AND to_status=$2 AND reason LIKE $3
     `, id, string(status), reasonPrefix+"%")
@@ -137,7 +137,7 @@ func (r *Repository) CountStatusLogsWithReasonPrefix(ctx context.Context, id str
 	return count, nil
 }
 
-func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
+func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *domain.Status) ([]domain.Document, error) {
 	base := `SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents`
 	args := []any{}
 	if status != nil {
@@ -160,9 +160,9 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	}
 	defer rows.Close()
 
-	var result []model.Document
+	var result []domain.Document
 	for rows.Next() {
-		var doc model.Document
+		var doc domain.Document
 		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -175,14 +175,14 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	return result, nil
 }
 
-func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (r *Repository) UpdateStatus(ctx context.Context, id string, to domain.Status, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	var doc model.Document
+	var doc domain.Document
 	row := tx.QueryRowContext(ctx, `
         SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at
         FROM documents WHERE id=$1 FOR UPDATE
@@ -191,10 +191,10 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 		return nil, err
 	}
 
-	if err := model.ValidateStatus(to); err != nil {
+	if err := domain.ValidateStatus(to); err != nil {
 		return nil, err
 	}
-	if err := model.ValidateTransition(doc.Status, to); err != nil {
+	if err := domain.ValidateTransition(doc.Status, to); err != nil {
 		return nil, err
 	}
 
@@ -255,7 +255,7 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 			return nil, err
 		}
 		if statusChanged || versionInserted || reason != "" {
-			log := model.DocumentStatusLog{
+			log := domain.DocumentStatusLog{
 				ID:         uuid.NewString(),
 				DocumentID: id,
 				FromStatus: previousStatus,
@@ -298,14 +298,14 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to model.Statu
 }
 
 // UpdateWorkflowID сохраняет идентификатор запущенного workflow и возвращает актуальное состояние документа.
-func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*model.Document, error) {
+func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string) (*domain.Document, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	var doc model.Document
+	var doc domain.Document
 	row := tx.QueryRowContext(ctx, `
         SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at
         FROM documents WHERE id=$1 FOR UPDATE
@@ -342,16 +342,16 @@ func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string
 }
 
 // ActiveJob возвращает активную задачу для документа, если она есть.
-func (r *Repository) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+func (r *Repository) ActiveJob(ctx context.Context, documentID string) (*domain.ProcessingJob, error) {
 	row := r.db.QueryRowContext(ctx, `
 SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
 FROM processing_jobs
 WHERE document_id=$1 AND status IN ($2,$3)
 ORDER BY created_at DESC
 LIMIT 1
-`, documentID, model.JobStatusPending, model.JobStatusInProgress)
+`, documentID, domain.JobStatusPending, domain.JobStatusInProgress)
 
-	var job model.ProcessingJob
+	var job domain.ProcessingJob
 	var payloadRaw json.RawMessage
 	if err := row.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -365,7 +365,7 @@ LIMIT 1
 }
 
 // ListFinishedJobs возвращает завершённые или окончательно упавшие задачи и откладывает их повторную обработку.
-func (r *Repository) ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]model.ProcessingJob, error) {
+func (r *Repository) ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]domain.ProcessingJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -387,15 +387,15 @@ WHERE status IN ($1,$2) AND next_run_at <= $3
 ORDER BY next_run_at
 LIMIT $4
 FOR UPDATE SKIP LOCKED
-`, model.JobStatusCompleted, model.JobStatusFailed, now, limit)
+`, domain.JobStatusCompleted, domain.JobStatusFailed, now, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var jobs []model.ProcessingJob
+	var jobs []domain.ProcessingJob
 	for rows.Next() {
-		var job model.ProcessingJob
+		var job domain.ProcessingJob
 		var payloadRaw json.RawMessage
 		if err := rows.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
 			return nil, err
@@ -425,8 +425,8 @@ FOR UPDATE SKIP LOCKED
 }
 
 // AcquirePendingJobs выбирает pending-задачи для указанной стадии и помечает их in_progress.
-func (r *Repository) AcquirePendingJobs(ctx context.Context, stage model.JobStage, limit int) ([]model.ProcessingJob, error) {
-	if err := model.ValidateJobStage(stage); err != nil {
+func (r *Repository) AcquirePendingJobs(ctx context.Context, stage domain.JobStage, limit int) ([]domain.ProcessingJob, error) {
+	if err := domain.ValidateJobStage(stage); err != nil {
 		return nil, err
 	}
 	if limit <= 0 {
@@ -447,15 +447,15 @@ WHERE stage=$1 AND status=$2 AND next_run_at <= $3
 ORDER BY next_run_at
 LIMIT $4
 FOR UPDATE SKIP LOCKED
-`, stage, model.JobStatusPending, now, limit)
+`, stage, domain.JobStatusPending, now, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var jobs []model.ProcessingJob
+	var jobs []domain.ProcessingJob
 	for rows.Next() {
-		var job model.ProcessingJob
+		var job domain.ProcessingJob
 		var payloadRaw json.RawMessage
 		if err := rows.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
 			return nil, err
@@ -469,7 +469,7 @@ FOR UPDATE SKIP LOCKED
 	}
 
 	for i := range jobs {
-		jobs[i].Status = model.JobStatusInProgress
+		jobs[i].Status = domain.JobStatusInProgress
 		jobs[i].Attempts++
 		jobs[i].UpdatedAt = now
 		payloadBytes, err := json.Marshal(jobs[i].Payload)
@@ -491,7 +491,7 @@ FOR UPDATE SKIP LOCKED
 }
 
 // RequeueStaleProcessingJobs возвращает зависшие in_progress задачи в pending и фиксирует причину восстановления.
-func (r *Repository) RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error) {
+func (r *Repository) RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]domain.ProcessingJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -509,23 +509,23 @@ WHERE status=$1 AND updated_at <= $2
 ORDER BY updated_at
 LIMIT $3
 FOR UPDATE SKIP LOCKED
-`, model.JobStatusInProgress, staleBefore.UTC(), limit)
+`, domain.JobStatusInProgress, staleBefore.UTC(), limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	now := time.Now().UTC()
-	var jobs []model.ProcessingJob
+	var jobs []domain.ProcessingJob
 	for rows.Next() {
-		var job model.ProcessingJob
+		var job domain.ProcessingJob
 		var payloadRaw json.RawMessage
 		if err := rows.Scan(&job.TaskID, &job.DocumentID, &job.Stage, &job.Status, &job.Attempts, &job.NextRunAt, &payloadRaw, &job.CreatedAt, &job.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(payloadRaw, &job.Payload)
 
-		job.Status = model.JobStatusPending
+		job.Status = domain.JobStatusPending
 		job.Attempts++
 		job.NextRunAt = nextRunAt
 		job.UpdatedAt = now
@@ -544,7 +544,7 @@ FOR UPDATE SKIP LOCKED
 			return nil, err
 		}
 
-		eventPayload := map[string]any{"reason": reason, "previous_status": string(model.JobStatusInProgress)}
+		eventPayload := map[string]any{"reason": reason, "previous_status": string(domain.JobStatusInProgress)}
 		payloadEventBytes, err := json.Marshal(eventPayload)
 		if err != nil {
 			return nil, err
@@ -571,7 +571,7 @@ FOR UPDATE SKIP LOCKED
 	return jobs, nil
 }
 
-func (r *Repository) attachActiveJob(ctx context.Context, doc *model.Document) error {
+func (r *Repository) attachActiveJob(ctx context.Context, doc *domain.Document) error {
 	if doc == nil {
 		return nil
 	}
@@ -585,17 +585,17 @@ func (r *Repository) attachActiveJob(ctx context.Context, doc *model.Document) e
 	return nil
 }
 
-func (r *Repository) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *Repository) CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if job == nil {
 		return nil, errors.New("job is required")
 	}
-	if err := model.ValidateJobStage(job.Stage); err != nil {
+	if err := domain.ValidateJobStage(job.Stage); err != nil {
 		return nil, err
 	}
 	if job.Status == "" {
-		job.Status = model.JobStatusPending
+		job.Status = domain.JobStatusPending
 	}
-	if err := model.ValidateJobStatus(job.Status); err != nil {
+	if err := domain.ValidateJobStatus(job.Status); err != nil {
 		return nil, err
 	}
 	if job.DocumentID == "" {
@@ -673,11 +673,11 @@ func (r *Repository) CreateProcessingJob(ctx context.Context, job *model.Process
 	return job, nil
 }
 
-func (r *Repository) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (r *Repository) UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}
-	if err := model.ValidateJobStatus(status); err != nil {
+	if err := domain.ValidateJobStatus(status); err != nil {
 		return nil, err
 	}
 
@@ -687,7 +687,7 @@ func (r *Repository) UpdateProcessingJob(ctx context.Context, taskID string, sta
 	}
 	defer tx.Rollback()
 
-	var job model.ProcessingJob
+	var job domain.ProcessingJob
 	row := tx.QueryRowContext(ctx, `
         SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
         FROM processing_jobs WHERE task_id=$1 FOR UPDATE
@@ -754,7 +754,7 @@ func (r *Repository) UpdateProcessingJob(ctx context.Context, taskID string, sta
 	return &job, nil
 }
 
-func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]model.DocumentVersion, error) {
+func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]domain.DocumentVersion, error) {
 	rows, err := r.db.QueryContext(ctx, `
         SELECT id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at
         FROM document_versions WHERE document_id=$1 ORDER BY version
@@ -763,9 +763,9 @@ func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]mo
 		return nil, err
 	}
 	defer rows.Close()
-	var versions []model.DocumentVersion
+	var versions []domain.DocumentVersion
 	for rows.Next() {
-		var v model.DocumentVersion
+		var v domain.DocumentVersion
 		if err := rows.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.MarkdownQueueID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -774,19 +774,19 @@ func (r *Repository) fetchVersions(ctx context.Context, documentID string) ([]mo
 	return versions, nil
 }
 
-func (r *Repository) getVersionTx(ctx context.Context, tx *sql.Tx, documentID string, version int32) (*model.DocumentVersion, error) {
+func (r *Repository) getVersionTx(ctx context.Context, tx *sql.Tx, documentID string, version int32) (*domain.DocumentVersion, error) {
 	row := tx.QueryRowContext(ctx, `
         SELECT id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at
         FROM document_versions WHERE document_id=$1 AND version=$2
     `, documentID, version)
-	var v model.DocumentVersion
+	var v domain.DocumentVersion
 	if err := row.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.MarkdownQueueID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &v, nil
 }
 
-func (r *Repository) fetchVersionsTx(ctx context.Context, tx *sql.Tx, documentID string) ([]model.DocumentVersion, error) {
+func (r *Repository) fetchVersionsTx(ctx context.Context, tx *sql.Tx, documentID string) ([]domain.DocumentVersion, error) {
 	rows, err := tx.QueryContext(ctx, `
         SELECT id, document_id, version, original_object_key, markdown_object_key, markdown_queue_id, created_at, updated_at
         FROM document_versions WHERE document_id=$1 ORDER BY version
@@ -795,9 +795,9 @@ func (r *Repository) fetchVersionsTx(ctx context.Context, tx *sql.Tx, documentID
 		return nil, err
 	}
 	defer rows.Close()
-	var versions []model.DocumentVersion
+	var versions []domain.DocumentVersion
 	for rows.Next() {
-		var v model.DocumentVersion
+		var v domain.DocumentVersion
 		if err := rows.Scan(&v.ID, &v.DocumentID, &v.Version, &v.OriginalObjectKey, &v.MarkdownObjectKey, &v.MarkdownQueueID, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}

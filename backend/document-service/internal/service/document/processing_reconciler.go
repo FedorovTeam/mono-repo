@@ -6,11 +6,11 @@ import (
 	"log"
 	"time"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 )
 
 type processingRepo interface {
-	RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]model.ProcessingJob, error)
+	RequeueStaleProcessingJobs(ctx context.Context, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]domain.ProcessingJob, error)
 }
 
 // ProcessingReconciler возвращает зависшие processing-задачи в pending, чтобы их могли подобрать StageWorker-ы.

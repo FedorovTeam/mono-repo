@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"backend-document-service/internal/model"
+	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
@@ -18,62 +18,62 @@ import (
 )
 
 type fakeRepo struct {
-	lastStatus  model.Status
-	lastVersion *model.DocumentVersion
+	lastStatus  domain.Status
+	lastVersion *domain.DocumentVersion
 	lastError   string
-	doc         *model.Document
-	jobs        map[string]model.ProcessingJob
+	doc         *domain.Document
+	jobs        map[string]domain.ProcessingJob
 }
 
-func (f *fakeRepo) CreateDocument(ctx context.Context, doc *model.Document, version *model.DocumentVersion, log *model.DocumentStatusLog) (*model.Document, error) {
+func (f *fakeRepo) CreateDocument(ctx context.Context, doc *domain.Document, version *domain.DocumentVersion, log *domain.DocumentStatusLog) (*domain.Document, error) {
 	return nil, nil
 }
 
-func (f *fakeRepo) GetDocument(ctx context.Context, id string) (*model.Document, error) {
+func (f *fakeRepo) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	if f.doc != nil && f.doc.ID == id {
 		return f.doc, nil
 	}
 	return nil, fmt.Errorf("document %s not found", id)
 }
 
-func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status *model.Status) ([]model.Document, error) {
+func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status *domain.Status) ([]domain.Document, error) {
 	return nil, nil
 }
 
-func (f *fakeRepo) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status model.Status, reasonPrefix string) (int, error) {
+func (f *fakeRepo) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status domain.Status, reasonPrefix string) (int, error) {
 	return 0, nil
 }
 
-func (f *fakeRepo) LastNonFailedStatus(ctx context.Context, id string) (model.Status, error) {
+func (f *fakeRepo) LastNonFailedStatus(ctx context.Context, id string) (domain.Status, error) {
 	if f.doc != nil {
 		return f.doc.Status, nil
 	}
-	return model.Status(""), nil
+	return domain.Status(""), nil
 }
 
-func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to model.Status, reason, errorReason string, version *model.DocumentVersion) (*model.Document, error) {
+func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to domain.Status, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	f.lastStatus = to
 	f.lastVersion = version
 	f.lastError = errorReason
-	return &model.Document{ID: id, Status: to}, nil
+	return &domain.Document{ID: id, Status: to}, nil
 }
 
-func (f *fakeRepo) CreateProcessingJob(ctx context.Context, job *model.ProcessingJob, event *model.JobEvent) (*model.ProcessingJob, error) {
+func (f *fakeRepo) CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()
 	}
 	if f.jobs == nil {
-		f.jobs = make(map[string]model.ProcessingJob)
+		f.jobs = make(map[string]domain.ProcessingJob)
 	}
 	if job.Status == "" {
-		job.Status = model.JobStatusPending
+		job.Status = domain.JobStatusPending
 	}
 	f.jobs[job.TaskID] = *job
 	return job, nil
 }
 
-func (f *fakeRepo) UpdateProcessingJob(ctx context.Context, taskID string, status model.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *model.JobEvent) (*model.ProcessingJob, error) {
-	job := model.ProcessingJob{TaskID: taskID, Status: status}
+func (f *fakeRepo) UpdateProcessingJob(ctx context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, event *domain.JobEvent) (*domain.ProcessingJob, error) {
+	job := domain.ProcessingJob{TaskID: taskID, Status: status}
 	if payload != nil {
 		job.Payload = payload
 	}
@@ -81,18 +81,18 @@ func (f *fakeRepo) UpdateProcessingJob(ctx context.Context, taskID string, statu
 		job.NextRunAt = *nextRunAt
 	}
 	if f.jobs == nil {
-		f.jobs = make(map[string]model.ProcessingJob)
+		f.jobs = make(map[string]domain.ProcessingJob)
 	}
 	f.jobs[taskID] = job
 	return &job, nil
 }
 
-func (f *fakeRepo) ActiveJob(ctx context.Context, documentID string) (*model.ProcessingJob, error) {
+func (f *fakeRepo) ActiveJob(ctx context.Context, documentID string) (*domain.ProcessingJob, error) {
 	for _, job := range f.jobs {
 		if job.DocumentID != documentID {
 			continue
 		}
-		if job.Status == model.JobStatusPending || job.Status == model.JobStatusInProgress {
+		if job.Status == domain.JobStatusPending || job.Status == domain.JobStatusInProgress {
 			copy := job
 			return &copy, nil
 		}
@@ -100,7 +100,7 @@ func (f *fakeRepo) ActiveJob(ctx context.Context, documentID string) (*model.Pro
 	return nil, nil
 }
 
-func (f *fakeRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]model.ProcessingJob, error) {
+func (f *fakeRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]domain.ProcessingJob, error) {
 	return nil, nil
 }
 
@@ -160,8 +160,8 @@ func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpubli
 }
 
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
-	repo := &fakeRepo{doc: &model.Document{ID: "doc-1", Status: model.StatusStoredOriginal, Versions: []model.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
-	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: string(model.StatusConvertedToMarkdown), MarkdownObjectKey: "md-key"}}
+	repo := &fakeRepo{doc: &domain.Document{ID: "doc-1", Status: domain.StatusStoredOriginal, Versions: []domain.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
+	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: string(domain.StatusConvertedToMarkdown), MarkdownObjectKey: "md-key"}}
 
 	activities := NewActivities(repo, transformer, fakePublisher{})
 
@@ -193,7 +193,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		t.Fatalf("unexpected queue id: %s", result.QueueID)
 	}
 
-	if result.Status != string(model.StatusConvertedToMarkdown) {
+	if result.Status != string(domain.StatusConvertedToMarkdown) {
 		t.Fatalf("unexpected status: %s", result.Status)
 	}
 
@@ -201,7 +201,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		t.Fatalf("mark converted failed: %v", err)
 	}
 
-	if repo.lastStatus != model.StatusConvertedToMarkdown {
+	if repo.lastStatus != domain.StatusConvertedToMarkdown {
 		t.Fatalf("status was not updated, got %v", repo.lastStatus)
 	}
 
@@ -215,7 +215,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 }
 
 func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
-	doc := &model.Document{
+	doc := &domain.Document{
 		ID:                "doc-1",
 		Name:              "Document title",
 		Owner:             "owner",
@@ -223,12 +223,12 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 		Branch:            "main",
 		BaseBranch:        "main",
 		Path:              "docs/doc-1.md",
-		Status:            model.StatusUploaded,
+		Status:            domain.StatusUploaded,
 		OriginalBucket:    "orig",
 		OriginalObjectKey: "orig/doc-1.docx",
 		MarkdownBucket:    "md",
 		MarkdownObjectKey: "md/doc-1.md",
-		Versions:          []model.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/doc-1.docx", MarkdownObjectKey: "md/doc-1.md"}},
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/doc-1.docx", MarkdownObjectKey: "md/doc-1.md"}},
 	}
 	repo := &fakeRepo{doc: doc}
 	activities := NewActivities(repo, nil, nil)
@@ -237,13 +237,13 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if repo.lastStatus != model.StatusStoredOriginal {
+	if repo.lastStatus != domain.StatusStoredOriginal {
 		t.Fatalf("expected status StoredOriginal, got %v", repo.lastStatus)
 	}
 }
 
 func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
-	repo := &fakeRepo{doc: &model.Document{ID: "doc-2", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: model.StatusStoredOriginal}}
+	repo := &fakeRepo{doc: &domain.Document{ID: "doc-2", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: domain.StatusStoredOriginal}}
 	publisher := &trackingPublisher{}
 
 	activities := NewActivities(repo, nil, publisher)
@@ -262,7 +262,7 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	if !publisher.called {
 		t.Fatal("publisher was not called")
 	}
-	if repo.lastStatus != model.StatusPublishedToGitHub {
+	if repo.lastStatus != domain.StatusPublishedToGitHub {
 		t.Fatalf("expected published status, got %v", repo.lastStatus)
 	}
 }
