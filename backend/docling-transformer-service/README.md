@@ -30,6 +30,14 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - `observability.tracingEnabled` / `observability.metricsEnabled` / `observability.loggingEnabled` — флаги включения трассировки, метрик и логов (при `false` провайдеры и middleware не поднимаются).
 - `scheduler.poll_interval` / `scheduler.maintenance_interval` — шаг опроса очереди и периодичность технического цикла восстановления/очистки; `scheduler.batch_size` ограничивает размер выборки `SELECT ... FOR UPDATE SKIP LOCKED`, `scheduler.retry_backoff`/`scheduler.max_processing_retries` задают параметры повторов при ошибках обработки, а `scheduler.cleanup_retention` определяет TTL для завершённых задач.
 
+### Параметры воркера
+Основной бинарник `cmd/main.go` поднимает gRPC-сервер и фоновые воркеры очереди одновременно. Управление воркерами происходит через единый `config.yaml`:
+- `service.max_workers` — число параллельных обработчиков очереди;
+- `service.processing_timeout` и `service.io_timeout` — ограничение длительности долгих и быстрых операций (загрузка из MinIO, отправка в Docling);
+- `scheduler.*` — интервалы опроса очереди, повторов при ошибках и удаления завершённых записей;
+- `docling.status_*` и `docling.max_job_lifetime` — стратегия backoff/лимитов опроса Docling;
+- `minio.bucket` — обязательный бакет для сохранения результата, который воркер подставляет, если заявка пришла без собственного бакета.
+
 ## Локальный запуск
 ```bash
 # применить миграции без запуска сервиса
