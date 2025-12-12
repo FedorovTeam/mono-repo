@@ -10,8 +10,8 @@ sequenceDiagram
 
     Client->>Gateway: GraphQL mutation uploadKnowledgeDocument (X-API-Key, optional X-Correlation-ID)
     Gateway->>Gateway: CorrelationIDMiddleware сохраняет/генерирует correlation-id и проставляет его в ответ
-    Gateway->>Gateway: APIKeyMiddleware проверяет X-API-Key (кроме OPTIONS)
-    Gateway->>Gateway: validateUploadInput проверяет fileName, repository[/owner], branch, path, fileSizeBytes, extension по allowlist/лимиту
+    Gateway->>Gateway: APIKeyMiddleware проверяет X-API-Key (кроме OPTIONS) и сохраняет его в контексте
+    Gateway->>Gateway: validateUploadInput проверяет fileName, repository[/owner], branch, path, fileSizeBytes, extension по allowlist/лимиту и нормализует repository/owner
     Gateway->>Gateway: сгенерировать documentId (UUID)
     Gateway->>StorageService: GenerateUploadURL(DocumentId, FileName, ContentLength, CorrelationId, ExpiresInSeconds, gRPC meta: X-Correlation-ID + X-API-Key)
     StorageService-->>Gateway: uploadUrl + upload bucket/objectKey + markdown bucket/objectKey
