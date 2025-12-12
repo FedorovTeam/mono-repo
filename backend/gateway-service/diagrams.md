@@ -5,7 +5,7 @@ flowchart LR
     Client -->|GraphQL + X-API-Key + X-Correlation-ID| Gateway
     Gateway -->|GenerateUploadURL (gRPC)| StorageService
     Gateway -->|Create/Retry/List/Get (gRPC)| DocumentService
-    Gateway -->|workflow trigger| Temporal
+    Gateway -->|workflow trigger| DocumentService
     StorageService -->|presigned URL с x-amz-meta-correlation-id| MinIO
     DocumentService -->|ссылки/статусы| Postgres
 ```

@@ -1,7 +1,7 @@
 # Use cases
 
 ## Постановка задачи на конвертацию
-- **Акторы:** Gateway-service или Temporal Activity (gRPC клиент).
+- **Акторы:** Gateway-service (gRPC клиент).
 - **Валидация:**
   - `document_id` обязателен.
   - `original_bucket` и `original_object_key` обязательны.

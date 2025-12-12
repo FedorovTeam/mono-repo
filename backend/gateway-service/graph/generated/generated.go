@@ -351,7 +351,7 @@ func (ec *executionContext) introspectType(name string) (*introspection.Type, er
 var sources = []*ast.Source{
 	{Name: "../schema.graphqls", Input: `"""Запросы статуса и списка документов знаний."""
 type Query {
-  """Возвращает документ и его текущий статус по идентификатору Temporal/БД."""
+  """Возвращает документ и его текущий статус по идентификатору БД."""
   knowledgeDocument(id: ID!): KnowledgeDocument
   """Список документов с поддержкой фильтрации по статусу и репозиторию."""
   knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!

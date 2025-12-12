@@ -30,6 +30,6 @@ sequenceDiagram
 
 - PostgreSQL хранит таблицы `documents`, `document_versions`, `document_status_logs`.
 - MinIO обслуживается `storage-service`: загрузка/выдача объектов выполняется через его gRPC API (`UploadOriginal`/`UploadMarkdown`/`GetObject`), а `UploadReconciler` использует этот API для проверки наличия исходников.
-- Цепочка cron-воркеров (UploadReconciler → MarkdownConverter → GithubPublisher) читает статусы из PostgreSQL и двигает документ по шагам без Temporal; Document-service не использует прямые SDK MinIO/GitHub/Docling.
+- Цепочка cron-воркеров (UploadReconciler → MarkdownConverter → GithubPublisher) читает статусы из PostgreSQL и двигает документ по шагам; Document-service не использует прямые SDK MinIO/GitHub/Docling.
 - PublishMarkdown выполняется через gRPC вызов `github-publisher-service`; прямой вызов GitHub API в `document-service` не используется.
 - Корреляционный идентификатор передаётся через метаданные gRPC `x-correlation-id`, прокидывается в цепочку cron-задач и логирование.
