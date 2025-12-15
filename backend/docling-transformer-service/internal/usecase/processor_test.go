@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,15 +16,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/usecase/metrics"
 )
 
 type pollingRepoStub struct {
-	markWaitingCalls int
-	updateInfoCalls  int
-	markDoneCalls    int
-	cleanupCalls     int
+	markWaitingCalls    int
+	updateInfoCalls     int
+	markDoneCalls       int
+	cleanupCalls        int
+	lastWaitingNextPoll time.Time
 }
 
 var _ repo.QueueRepository = (*pollingRepoStub)(nil)
@@ -51,8 +55,9 @@ func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, 
 	p.updateInfoCalls++
 	return nil
 }
-func (p *pollingRepoStub) MarkDoclingWaiting(context.Context, uuid.UUID, string, int, time.Time) error {
+func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UUID, jobID string, pollCount int, nextPoll time.Time) error {
 	p.markWaitingCalls++
+	p.lastWaitingNextPoll = nextPoll
 	return nil
 }
 func (p *pollingRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
@@ -287,6 +292,48 @@ func TestDoclingPollerTemporaryErrorReturnsWaiting(t *testing.T) {
 	}
 	if repoStub.updateInfoCalls != 1 {
 		t.Fatalf("expected update info call, got %d", repoStub.updateInfoCalls)
+	}
+}
+
+func TestDoclingPollerTreats404AsTemporary(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/status/poll/"):
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, "not found", http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, nil)
+	config := DoclingPollerConfig{InitialInterval: 10 * time.Millisecond, MaxInterval: time.Second, BackoffFactor: 2, MaxAttempts: 5}
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, config)
+
+	task := &transformations.TransformationTask{ID: uuid.New(), DoclingJobID: "job-404", CreatedAt: time.Now().Add(-time.Minute)}
+
+	result, err := poller.Poll(context.Background(), task)
+	if !errors.Is(err, ErrDoclingWaiting) {
+		t.Fatalf("expected waiting error, got %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected no result on temporary error")
+	}
+
+	if repoStub.markWaitingCalls != 1 {
+		t.Fatalf("expected mark waiting call, got %d", repoStub.markWaitingCalls)
+	}
+	if repoStub.updateInfoCalls != 1 {
+		t.Fatalf("expected update info call, got %d", repoStub.updateInfoCalls)
+	}
+
+	if task.NextPollAt == nil || task.NextPollAt.IsZero() {
+		t.Fatalf("expected next poll to be scheduled, got %v", task.NextPollAt)
+	}
+	if repoStub.lastWaitingNextPoll.IsZero() {
+		t.Fatalf("expected next poll stored in repo, got zero time")
 	}
 }
 
