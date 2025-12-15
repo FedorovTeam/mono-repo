@@ -44,6 +44,8 @@ type SchedulerConfig struct {
 	RetryBackoff         time.Duration `yaml:"retry_backoff"`
 	MaxProcessingRetries int           `yaml:"max_processing_retries"`
 	CleanupRetention     time.Duration `yaml:"cleanup_retention"`
+	FailedRetryDelay     time.Duration `yaml:"failed_retry_delay"`
+	MaxFailedRetries     int           `yaml:"max_failed_retries"`
 }
 
 // DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.
@@ -156,6 +158,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Scheduler.CleanupRetention < 0 {
 		return fmt.Errorf("scheduler.cleanup_retention cannot be negative")
+	}
+	if c.Scheduler.FailedRetryDelay < 0 {
+		return fmt.Errorf("scheduler.failed_retry_delay cannot be negative")
+	}
+	if c.Scheduler.MaxFailedRetries < 0 {
+		return fmt.Errorf("scheduler.max_failed_retries cannot be negative")
 	}
 	if c.Postgres.DSN == "" {
 		return fmt.Errorf("postgres.dsn is required")

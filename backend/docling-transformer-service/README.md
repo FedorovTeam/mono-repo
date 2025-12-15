@@ -7,7 +7,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - gRPC метод `ConvertDocxToMarkdown` принимает байты или ссылку на DOCX/DOC/PDF, отправляет задачу напрямую в Docling и возвращает Markdown/charset без постановки в очередь.
 - Проверка на переполнение очереди (`service.queue_limit`): gRPC код `ResourceExhausted` возвращается только если суммарное число задач в статусах `pending`/`processing`/`waiting_docling` достигло установленного лимита; `service.max_workers` ограничивает только параллелизм фоновых воркеров.
 - HTTP-запрос к Docling-конвертеру выполняется воркером в фоне через `POST /v1/convert/file/async`, затем по `docling_job_id` он поллит `GET /v1/status/poll/{job_id}` и забирает результат `GET /v1/result/{job_id}`; итог сохраняется в MinIO в указанный `markdown_bucket/object_key` и помечается в очереди как `done/failed`.
-- При старте воркеров запускается сервисный цикл обслуживания очереди: он активирует задачи в `waiting_docling` с наступившим `next_poll_at` и помечает просроченные по `docling.max_job_lifetime` как `failed`; зависшие `processing` восстанавливаются или завершаются только при превышении `service.processing_timeout` с учётом лимитов `scheduler.max_processing_retries` и `docling.status_max_attempts`.
+- При старте воркеров запускается сервисный цикл обслуживания очереди: он активирует задачи в `waiting_docling` с наступившим `next_poll_at` и помечает просроченные по `docling.max_job_lifetime` как `failed`; зависшие `processing` восстанавливаются или завершаются только при превышении `service.processing_timeout` с учётом лимитов `scheduler.max_processing_retries` и `docling.status_max_attempts`; `failed` задачи старше `scheduler.failed_retry_delay` отправляются в повторную попытку, пока `retry_count < scheduler.max_failed_retries`, иначе остаются `failed` с причиной исчерпания попыток.
 - Проксирование correlation-id во все внешние вызовы (Docling, MinIO) из воркера.
 - Очередь хранится в PostgreSQL, схема создаётся через миграции `db/migrations/ и применяется автоматически при старте сервиса.
 - Настройки Docling, MinIO, PostgreSQL и наблюдаемости в одном конфигурационном файле.
@@ -16,7 +16,7 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 ### Политика retry/timeout конвертации
 - gRPC-слой не дублирует задачи: если в очереди уже есть запись для `document_id`, возвращается её `queue_id` и текущий статус (`pending`/`processing`/`waiting_docling`/`done`), что позволяет внешнему воркеру опрашивать готовность без раздувания очереди.
 - Лимит активных задач контролируется `service.queue_limit` (сумма `pending`/`processing`/`waiting_docling`); при превышении возвращается `ResourceExhausted`.
-- Фоновый воркер использует `scheduler.retry_backoff`, `scheduler.max_processing_retries` и `docling.status_*` для экспоненциального опроса Docling и восстановления зависших задач; `service.processing_timeout` и `docling.status_max_attempts` ограничивают длительность/число попыток обработки, `scheduler.cleanup_retention` удаляет завершённые задачи.
+- Фоновый воркер использует `scheduler.retry_backoff`, `scheduler.max_processing_retries` и `docling.status_*` для экспоненциального опроса Docling и восстановления зависших задач; `service.processing_timeout` и `docling.status_max_attempts` ограничивают длительность/число попыток обработки, `scheduler.cleanup_retention` удаляет завершённые задачи, а `scheduler.failed_retry_delay`/`scheduler.max_failed_retries` управляют повторными перезапусками задач после `failed`.
 
 ## Конфигурация
 Все параметры описаны в `config/config.yaml` и загружаются через переменную окружения `CONFIG_PATH` (по умолчанию этот файл). Обязательные поля и их рекомендованные значения:
@@ -29,12 +29,13 @@ Docling Transformer Service — gRPC-обёртка над Docling для кон
 - `minio.endpoint` — `api.minio.tech.fedorov-team.tech`, `minio.access_key` / `minio.secret_key` — учётные данные, `minio.bucket` — обязательный бакет для результата, `minio.region` и `minio.use_ssl` — параметры подключения.
 - `observability.tracingEnabled` / `observability.metricsEnabled` / `observability.loggingEnabled` — флаги включения трассировки, метрик и логов (при `false` провайдеры и middleware не поднимаются).
 - `scheduler.poll_interval` / `scheduler.maintenance_interval` — шаг опроса очереди и периодичность технического цикла восстановления/очистки; `scheduler.batch_size` ограничивает размер выборки `SELECT ... FOR UPDATE SKIP LOCKED`, `scheduler.retry_backoff`/`scheduler.max_processing_retries` задают параметры повторов при ошибках обработки, а `scheduler.cleanup_retention` определяет TTL для завершённых задач.
+- `scheduler.failed_retry_delay` / `scheduler.max_failed_retries` — период выжидания перед повтором `failed` задач и максимальное число запусков (при превышении запись остаётся в статусе `failed` с пометкой об исчерпании ретраев).
 
 ### Параметры воркера
 Основной бинарник `cmd/main.go` поднимает gRPC-сервер и фоновые воркеры очереди одновременно. Управление воркерами происходит через единый `config.yaml`:
 - `service.max_workers` — число параллельных обработчиков очереди;
 - `service.processing_timeout` и `service.io_timeout` — ограничение длительности долгих и быстрых операций (загрузка из MinIO, отправка в Docling);
-- `scheduler.*` — интервалы опроса очереди, повторов при ошибках и удаления завершённых записей;
+- `scheduler.*` — интервалы опроса очереди, повторов при ошибках, удаления завершённых записей и рестарта `failed` задач;
 - `docling.status_*` и `docling.max_job_lifetime` — стратегия backoff/лимитов опроса Docling;
 - `minio.bucket` — обязательный бакет для сохранения результата, который воркер подставляет, если заявка пришла без собственного бакета.
 

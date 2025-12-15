@@ -23,6 +23,8 @@ type Config struct {
 	RetryBackoff           time.Duration
 	CleanupInterval        time.Duration
 	CleanupRetention       time.Duration
+	FailedRetryDelay       time.Duration
+	MaxFailedRetries       int
 	DoclingInitialInterval time.Duration
 	DoclingMaxInterval     time.Duration
 	DoclingBackoffFactor   float64
@@ -71,6 +73,8 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 		CleanupRetention:     normalized.CleanupRetention,
 		DoclingMaxLifetime:   normalized.DoclingMaxLifetime,
 		DoclingMaxAttempts:   normalized.DoclingMaxAttempts,
+		FailedRetryDelay:     normalized.FailedRetryDelay,
+		MaxFailedRetries:     normalized.MaxFailedRetries,
 	})
 
 	return &Processor{queueWorker: queueWorker, maintenance: maintenance, metrics: workerMetrics, logger: logger}
