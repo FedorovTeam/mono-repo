@@ -19,6 +19,9 @@ type TransformationDTO struct {
 	DocumentID        string
 	OriginalBucket    string
 	OriginalObjectKey string
+	SourceBucket      string
+	SourceObjectKey   string
+	SourceURL         string
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
@@ -40,6 +43,9 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		DocumentID:        dto.DocumentID,
 		OriginalBucket:    dto.OriginalBucket,
 		OriginalObjectKey: dto.OriginalObjectKey,
+		SourceBucket:      dto.SourceBucket,
+		SourceObjectKey:   dto.SourceObjectKey,
+		SourceURL:         dto.SourceURL,
 		MarkdownBucket:    dto.MarkdownBucket,
 		MarkdownObjectKey: dto.MarkdownObjectKey,
 		FilenameExtension: dto.FilenameExtension,

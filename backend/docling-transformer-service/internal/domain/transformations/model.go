@@ -20,31 +20,37 @@ const (
 var ErrPollingAttemptsExceeded = errors.New("conversion polling attempts exceeded")
 
 type TransformationTask struct {
-	ID                uuid.UUID
-	Status            TransformationStatus
-	RetryCount        int
-	DoclingJobID      string
-	DoclingPollCount  int
-	NextPollAt        *time.Time
-	DocumentID        string
-	OriginalBucket    string
-	OriginalObjectKey string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	FilenameExtension string
-	CreatedAt         time.Time
-	StartedAt         *time.Time
-	FinishedAt        *time.Time
+ID                uuid.UUID
+Status            TransformationStatus
+RetryCount        int
+DoclingJobID      string
+DoclingPollCount  int
+NextPollAt        *time.Time
+DocumentID        string
+OriginalBucket    string
+OriginalObjectKey string
+SourceBucket      string
+SourceObjectKey   string
+SourceURL         string
+MarkdownBucket    string
+MarkdownObjectKey string
+FilenameExtension string
+CreatedAt         time.Time
+StartedAt         *time.Time
+FinishedAt        *time.Time
 	Error             *string
 	CorrelationID     string
 }
 
 type EnqueueParams struct {
-	DocumentID        string
-	OriginalBucket    string
-	OriginalObjectKey string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	FilenameExtension string
-	CorrelationID     string
+DocumentID        string
+OriginalBucket    string
+OriginalObjectKey string
+SourceBucket      string
+SourceObjectKey   string
+SourceURL         string
+MarkdownBucket    string
+MarkdownObjectKey string
+FilenameExtension string
+CorrelationID     string
 }

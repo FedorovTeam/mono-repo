@@ -18,6 +18,9 @@ message ConvertDocumentToMarkdownRequest {
   string filename_extension = 6;
   bool wait_for_result = 7;
   string correlation_id = 8;
+  string source_bucket = 9;
+  string source_object_key = 10;
+  string source_url = 11;
 }
 
 message ConvertDocumentToMarkdownResponse {
