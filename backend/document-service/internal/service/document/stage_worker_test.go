@@ -433,6 +433,97 @@ func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
 	}
 }
 
+func TestHandleConvertRetriesOnTemporaryGRPCErrors(t *testing.T) {
+	now := time.Now()
+	doc := &domain.Document{
+		ID:                "doc-temporary",
+		Name:              "Doc",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc.docx",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc.docx", MarkdownObjectKey: "path/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc, now: now}
+	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
+	activities := NewActivities(repo, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, 200*time.Millisecond)
+
+	start := time.Now()
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-temp", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Attempts: 1})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Status != domain.JobStatusPending {
+		t.Fatalf("expected pending status, got %s", result.Status)
+	}
+	if !result.IncrementAttempt {
+		t.Fatalf("expected attempts to be incremented")
+	}
+	if result.NextRun == nil {
+		t.Fatal("expected next run to be scheduled")
+	}
+
+	expectedDelay := 200 * time.Millisecond * 2
+	actualDelay := result.NextRun.Sub(start)
+	if actualDelay < expectedDelay-50*time.Millisecond || actualDelay > expectedDelay+250*time.Millisecond {
+		t.Fatalf("expected backoff around %s, got %s", expectedDelay, actualDelay)
+	}
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("document status should stay unchanged, got updates: %v", repo.statusUpdates)
+	}
+	if doc.Status == domain.DocumentStatusFailed {
+		t.Fatalf("document should not be marked failed on temporary errors")
+	}
+}
+
+func TestHandleConvertHonorsMaxAttemptsForTemporaryErrors(t *testing.T) {
+	now := time.Now()
+	doc := &domain.Document{
+		ID:                "doc-max-attempts",
+		Name:              "Doc",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc.docx",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc.docx", MarkdownObjectKey: "path/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc, now: now}
+	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
+	activities := NewActivities(repo, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker.maxAttempts = 1
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-max", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Attempts: 1, Payload: map[string]any{}})
+	if err == nil {
+		t.Fatal("expected error after reaching max attempts")
+	}
+	if result.Payload["last_error"] == nil {
+		t.Fatalf("expected last_error recorded, got %v", result.Payload)
+	}
+	if doc.Status != domain.DocumentStatusFailed {
+		t.Fatalf("document should be marked failed after exhausting attempts, got %s", doc.Status)
+	}
+	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusFailed {
+		t.Fatalf("expected failed status update, got %v", repo.statusUpdates)
+	}
+}
+
 func waitUntil(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.After(time.Second)
