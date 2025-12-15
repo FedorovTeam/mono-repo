@@ -36,16 +36,6 @@ func NewDoclingPoller(conv domain.Converter, repository repo.QueueRepository, me
 		logger = zap.NewNop()
 	}
 
-	if cfg.InitialInterval <= 0 {
-		cfg.InitialInterval = 15 * time.Second
-	}
-	if cfg.BackoffFactor <= 1 {
-		cfg.BackoffFactor = 2
-	}
-	if cfg.MaxInterval <= 0 {
-		cfg.MaxInterval = 30 * time.Minute
-	}
-
 	return &DoclingPoller{conv: conv, repo: repository, metrics: metrics, logger: logger, cfg: cfg}
 }
 

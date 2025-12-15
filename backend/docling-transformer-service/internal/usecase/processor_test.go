@@ -473,3 +473,54 @@ func TestMaintenanceRunnerRetriesFailedTasks(t *testing.T) {
 		t.Fatalf("expected failed tasks retry to be triggered")
 	}
 }
+
+func TestNormalizeConfigAppliesDefaults(t *testing.T) {
+	cfg := Config{}
+
+	normalized := normalizeConfig(cfg)
+
+	if normalized.MaxWorkers != 1 {
+		t.Fatalf("expected default max workers to be 1, got %d", normalized.MaxWorkers)
+	}
+	if normalized.PollInterval != time.Second {
+		t.Fatalf("expected default poll interval to be 1s, got %s", normalized.PollInterval)
+	}
+	if normalized.BatchSize != 1 {
+		t.Fatalf("expected default batch size to be 1, got %d", normalized.BatchSize)
+	}
+	if normalized.RetryBackoff != normalized.PollInterval {
+		t.Fatalf("expected retry backoff to equal poll interval, got %s", normalized.RetryBackoff)
+	}
+	if normalized.CleanupInterval != 30*time.Second {
+		t.Fatalf("expected default cleanup interval to be 30s, got %s", normalized.CleanupInterval)
+	}
+	if normalized.DoclingInitialInterval != 15*time.Second {
+		t.Fatalf("expected default docling initial interval to be 15s, got %s", normalized.DoclingInitialInterval)
+	}
+	if normalized.DoclingBackoffFactor != 2 {
+		t.Fatalf("expected default docling backoff factor to be 2, got %f", normalized.DoclingBackoffFactor)
+	}
+	if normalized.DoclingMaxInterval != 30*time.Minute {
+		t.Fatalf("expected default docling max interval to be 30m, got %s", normalized.DoclingMaxInterval)
+	}
+}
+
+func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
+	cfg := Config{
+		MarkdownBucket:         "custom",
+		MaxWorkers:             5,
+		PollInterval:           2 * time.Second,
+		BatchSize:              10,
+		RetryBackoff:           3 * time.Second,
+		CleanupInterval:        time.Minute,
+		DoclingInitialInterval: 5 * time.Second,
+		DoclingBackoffFactor:   1.5,
+		DoclingMaxInterval:     10 * time.Minute,
+	}
+
+	normalized := normalizeConfig(cfg)
+
+	if normalized != cfg {
+		t.Fatalf("expected custom config to remain unchanged after normalization")
+	}
+}
