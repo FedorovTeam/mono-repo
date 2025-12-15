@@ -51,9 +51,9 @@ func (g *GRPCClientConfig) setDefaults() {
 		g.MinConnectTimeout = 3 * time.Second
 	}
 
-	if g.Keepalive.Time == 0 {
-		g.Keepalive.Time = 30 * time.Second
-	}
+        if g.Keepalive.Time == 0 {
+                g.Keepalive.Time = 5 * time.Minute
+        }
 
 	if g.Keepalive.Timeout == 0 {
 		g.Keepalive.Timeout = 10 * time.Second
