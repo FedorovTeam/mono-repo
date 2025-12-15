@@ -42,7 +42,10 @@ func NewTransformerAPI(uc TransformerUseCase, logger *zap.Logger) *TransformerAP
 }
 
 func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *transformerv1.ConvertDocumentToMarkdownRequest) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
-	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+	ctx, correlationID := telemetry.ContextWithCorrelationID(ctx, req.GetCorrelationId())
+	if correlationID == "" {
+		ctx, correlationID = telemetry.EnsureCorrelationID(ctx)
+	}
 
 	s.logger.Info("ConvertDocumentToMarkdown started", zap.String("correlation_id", correlationID),
 		zap.String("document_id", req.GetDocumentId()),
@@ -84,11 +87,20 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		Status:            string(task.Status),
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
+		CorrelationId:     correlationID,
 	}, nil
 }
 
 func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transformerv1.ConvertDocxToMarkdownRequest) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
-	ctx, _ = telemetry.EnsureCorrelationID(ctx)
+	ctx, correlationID := telemetry.ContextWithCorrelationID(ctx, req.GetCorrelationId())
+	if correlationID == "" {
+		ctx, correlationID = telemetry.EnsureCorrelationID(ctx)
+	}
+
+	s.logger.Info("ConvertDocxToMarkdown started", zap.String("correlation_id", correlationID),
+		zap.String("document_id", req.GetDocumentId()),
+		zap.String("filename", req.GetFilename()),
+	)
 
 	if (len(req.GetDocxContent()) == 0 && req.GetDocxUrl() == "") || (len(req.GetDocxContent()) > 0 && req.GetDocxUrl() != "") {
 		return nil, status.Error(codes.InvalidArgument, "provide either docx_content or docx_url")
@@ -110,9 +122,10 @@ func (s *TransformerAPI) ConvertDocxToMarkdown(ctx context.Context, req *transfo
 	}
 
 	return &transformerv1.ConvertDocxToMarkdownResponse{
-		Markdown:  string(result.Content),
-		MediaType: result.MediaType,
-		Charset:   result.Charset,
+		Markdown:      string(result.Content),
+		MediaType:     result.MediaType,
+		Charset:       result.Charset,
+		CorrelationId: correlationID,
 	}, nil
 }
 

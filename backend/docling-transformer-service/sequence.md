@@ -86,7 +86,7 @@ sequenceDiagram
             TR->>DL: GET /v1/status/poll/{job_id}
             alt результат готов
                 TR->>DL: GET /v1/result/{job_id}
-                TR-->>CL: markdown + media_type + charset
+                TR-->>CL: markdown + media_type + charset + correlation_id
             else
                 TR-->>TR: ожидание c ростом интервала
             end

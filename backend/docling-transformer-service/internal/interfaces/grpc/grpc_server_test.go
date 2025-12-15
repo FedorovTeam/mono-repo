@@ -70,6 +70,40 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 	if uc.lastSubmit.CorrelationID != "corr-123" {
 		t.Fatalf("correlation id not propagated: %s", uc.lastSubmit.CorrelationID)
 	}
+
+	if resp.GetCorrelationId() != "corr-123" {
+		t.Fatalf("response correlation id mismatch: %s", resp.GetCorrelationId())
+	}
+}
+
+func TestConvertDocumentToMarkdownRespectsRequestCorrelation(t *testing.T) {
+	queueID := uuid.New()
+	uc := &mockTransformerUseCase{}
+	uc.submitFunc = func(_ context.Context, req usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error) {
+		uc.lastSubmit = req
+		return usecase.SubmitConversionResult{Task: &transformations.TransformationTask{ID: queueID, Status: transformations.StatusPending}}, nil
+	}
+
+	client, cleanup := startTestClient(t, uc)
+	t.Cleanup(cleanup)
+
+	resp, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-req",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "path/file.docx",
+		CorrelationId:     "corr-from-request",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if uc.lastSubmit.CorrelationID != "corr-from-request" {
+		t.Fatalf("expected correlation from request, got %s", uc.lastSubmit.CorrelationID)
+	}
+
+	if resp.GetCorrelationId() != "corr-from-request" {
+		t.Fatalf("response correlation id mismatch: %s", resp.GetCorrelationId())
+	}
 }
 
 func TestConvertDocumentToMarkdownWaitsForResult(t *testing.T) {
@@ -181,6 +215,10 @@ func TestConvertDocxToMarkdownFromURL(t *testing.T) {
 
 	if resp.GetMarkdown() != "# title" {
 		t.Fatalf("unexpected markdown: %s", resp.GetMarkdown())
+	}
+
+	if resp.GetCorrelationId() == "" {
+		t.Fatalf("expected correlation id in response")
 	}
 	if string(receivedContent) != string(docxContent) {
 		t.Fatalf("converter did not receive docx content")
