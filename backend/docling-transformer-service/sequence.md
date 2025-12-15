@@ -33,9 +33,10 @@ sequenceDiagram
 
     loop workerLoop (MaxWorkers)
         WK->>PG: AcquireBatch(pending сначала, затем waiting_docling по next_poll_at)
-        PG-->>WK: задачи со статусом processing
+        PG-->>WK: задачи со статусом processing (pending увеличивает retry_count)
         alt задача уже ждёт Docling (docling_job_id задан)
             WK->>DL: GET /v1/status/poll/{job_id} (X-Correlation-Id)
+            WK->>PG: UpdateDoclingInfo(job_id, docling_poll_count++)
             alt статус готов
                 WK->>DL: GET /v1/result/{job_id}
                 WK->>MN: PUT markdown_object_key в markdown_bucket c media_type
@@ -51,12 +52,12 @@ sequenceDiagram
         alt ошибка или лимит поллинга/таймауты
             WK->>PG: UPDATE status=failed, finished_at, error
         end
-    end
+        end
 
     loop maintenanceLoop
         WK->>PG: CountByStatus // снимок метрик очереди
         WK->>PG: ActivateWaiting(now, max_docling_lifetime) // возвращает pending, помечает просроченные как failed
-        WK->>PG: RestoreStuckProcessing(processing_timeout, max_retries, max_docling_attempts) // вернуть в pending или failed
+        WK->>PG: RestoreStuckProcessing(processing_timeout, max_retries, max_docling_attempts) // вернуть в pending или failed (сброс docling_job_id/poll_count/next_poll_at)
         WK->>PG: RetryFailed(olderThan=now-failed_retry_delay, max_failed_retries) // вернуть в pending или оставить failed при превышении лимита
         WK->>PG: CleanupFinished(retention)
     end
@@ -70,21 +71,25 @@ sequenceDiagram
     participant DL as Docling HTTP
 
     CL->>TR: ConvertDocxToMarkdown(docx_content|docx_url, filename?) + x-correlation-id
-    alt указан docx_url
-        TR->>SRC: GET docx_url (timeout 30s)
-        TR-->>TR: filename из URL, запасной document.docx
-    else бинарное содержимое
-        TR-->>TR: filename из запроса или document.docx
-    end
-    TR->>TR: ResolveContentTypeByExtension(filename)
-    TR->>DL: POST /v1/convert/file/async (multipart, X-Correlation-Id, X-Docling-Source-Filename)
-    loop pollUntilReady (poll_attempts, poll_interval<=pollMaxInterval)
-        TR->>DL: GET /v1/status/poll/{job_id}
-        alt результат готов
-            TR->>DL: GET /v1/result/{job_id}
-            TR-->>CL: markdown + media_type + charset
-        else
-            TR-->>TR: ожидание c ростом интервала
+    alt docx_content и docx_url заданы одновременно или оба пустые
+        TR-->>CL: INVALID_ARGUMENT
+    else валидный источник
+        alt указан docx_url
+            TR->>SRC: GET docx_url (timeout 30s)
+            TR-->>TR: filename из URL, запасной document.docx
+        else бинарное содержимое
+            TR-->>TR: filename из запроса или document.docx
+        end
+        TR->>TR: ResolveContentTypeByExtension(filename)
+        TR->>DL: POST /v1/convert/file/async (multipart, X-Correlation-Id, X-Docling-Source-Filename)
+        loop pollUntilReady (poll_attempts, poll_interval<=pollMaxInterval)
+            TR->>DL: GET /v1/status/poll/{job_id}
+            alt результат готов
+                TR->>DL: GET /v1/result/{job_id}
+                TR-->>CL: markdown + media_type + charset
+            else
+                TR-->>TR: ожидание c ростом интервала
+            end
         end
     end
     TR-->>CL: ошибка DeadlineExceeded если попытки исчерпаны
