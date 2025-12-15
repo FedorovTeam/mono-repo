@@ -55,6 +55,8 @@ sequenceDiagram
         SW-->>R: UPDATE processing_jobs status=completed + job_event{queue_id,status}
     else status=pending/processing/waiting_docling
         SW-->>R: UPDATE processing_jobs status=pending, next_run_at=now()+retry_delay, payload{queue_id,status,markdown_object_key}
+    else gRPC ResourceExhausted (переполнение очереди)
+        SW-->>R: UPDATE processing_jobs status=pending, next_run_at=now()+retry_delay, attempts++, payload.last_error=reason + job_event{postponed}
     else Ошибка/пустой markdown_object_key
         S->>R: UPDATE document status=Failed(reason)
         SW-->>R: UPDATE processing_jobs status=failed, next_run_at=now()+retry_delay, payload.last_error=reason

@@ -14,6 +14,7 @@ type jobUpdate struct {
 	status  domain.JobStatus
 	nextRun *time.Time
 	payload map[string]any
+	inc     bool
 }
 
 type fakeJobRepo struct {
@@ -58,8 +59,8 @@ func (r *fakeJobRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int
 	return nil, nil
 }
 
-func (r *fakeJobRepo) UpdateProcessingJob(_ context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, _ bool, payload map[string]any, _ *domain.JobEvent) (*domain.ProcessingJob, error) {
-	r.updates = append(r.updates, jobUpdate{taskID: taskID, status: status, nextRun: nextRunAt, payload: payload})
+func (r *fakeJobRepo) UpdateProcessingJob(_ context.Context, taskID string, status domain.JobStatus, nextRunAt *time.Time, incrementAttempt bool, payload map[string]any, _ *domain.JobEvent) (*domain.ProcessingJob, error) {
+	r.updates = append(r.updates, jobUpdate{taskID: taskID, status: status, nextRun: nextRunAt, payload: payload, inc: incrementAttempt})
 	return &domain.ProcessingJob{TaskID: taskID, Status: status, Payload: payload}, nil
 }
 
@@ -170,6 +171,30 @@ func TestWorkerServicePostponesJob(t *testing.T) {
 	}
 	if len(repo.events) == 0 || repo.events[0].EventType != "postponed" || repo.events[0].Status != domain.JobStatusPending {
 		t.Fatalf("postpone event not recorded: %+v", repo.events)
+	}
+}
+
+func TestWorkerServicePostponesJobWithIncrement(t *testing.T) {
+	repo := &fakeJobRepo{jobs: []domain.ProcessingJob{{TaskID: "task-4", Stage: domain.JobStageConvertToMarkdown}}}
+	retryAt := time.Date(2024, 3, 3, 15, 0, 0, 0, time.UTC)
+
+	svc := NewWorkerService(repo, repo, time.Minute)
+	svc.SetClock(func() time.Time { return retryAt })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go svc.Run(ctx, domain.JobStageConvertToMarkdown, time.Hour, 5, func(_ context.Context, job domain.ProcessingJob) (JobResult, error) {
+		next := retryAt.Add(time.Minute)
+		return JobResult{Status: domain.JobStatusPending, NextRun: &next, IncrementAttempt: true}, nil
+	}, nil)
+
+	waitForUpdates(t, repo, 1)
+	cancel()
+
+	upd := repo.updates[0]
+	if !upd.inc {
+		t.Fatalf("expected attempts increment to be requested")
 	}
 }
 

@@ -14,6 +14,8 @@ type JobResult struct {
 	NextRun *time.Time
 	Event   *domain.JobEvent
 	Status  domain.JobStatus
+	// IncrementAttempt увеличивает счётчик попыток при переотложенной задаче.
+	IncrementAttempt bool
 }
 
 // JobHandler инкапсулирует выполнение конкретного этапа обработки.
@@ -126,7 +128,7 @@ func (s *WorkerService) postponeJob(ctx context.Context, job domain.ProcessingJo
 	nextRun := s.computeNextRun(result.NextRun)
 	event := ensureEvent(result.Event, job, domain.JobStatusPending, "postponed", "")
 
-	if _, err := s.jobs.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusPending, &nextRun, false, payload, nil); err != nil {
+	if _, err := s.jobs.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusPending, &nextRun, result.IncrementAttempt, payload, nil); err != nil {
 		s.logf("worker[%s]: postpone job %s: %v", job.Stage, job.TaskID, err)
 	}
 	s.appendEvent(ctx, event)

@@ -177,6 +177,18 @@ func (*staticTransformer) ConvertDocxToMarkdown(context.Context, *transformerv1.
 	return nil, status.Error(codes.Unimplemented, "not implemented")
 }
 
+type errorTransformer struct {
+	err error
+}
+
+func (s *errorTransformer) ConvertDocumentToMarkdown(context.Context, *transformerv1.ConvertDocumentToMarkdownRequest, ...grpc.CallOption) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
+	return nil, s.err
+}
+
+func (*errorTransformer) ConvertDocxToMarkdown(context.Context, *transformerv1.ConvertDocxToMarkdownRequest, ...grpc.CallOption) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not implemented")
+}
+
 func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-commit",
@@ -370,6 +382,54 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	}
 	if result.Payload["status"] != "pending" {
 		t.Fatalf("expected transformer status in payload, got %v", result.Payload)
+	}
+}
+
+func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
+	now := time.Now()
+	doc := &domain.Document{
+		ID:                "doc-exhausted",
+		Name:              "Doc",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc.docx",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc.docx", MarkdownObjectKey: "path/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc, now: now}
+	transformer := &errorTransformer{err: status.Error(codes.ResourceExhausted, "queue limit reached")}
+	activities := NewActivities(repo, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-exhausted", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: map[string]any{}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Status != domain.JobStatusPending {
+		t.Fatalf("expected pending status, got %s", result.Status)
+	}
+	if result.NextRun == nil || !result.NextRun.After(time.Now().Add(-time.Millisecond)) {
+		t.Fatalf("expected postponed next run, got %v", result.NextRun)
+	}
+	if !result.IncrementAttempt {
+		t.Fatalf("expected attempts increment on postpone")
+	}
+	if result.Event == nil || result.Event.EventType != "postponed" {
+		t.Fatalf("expected postponed event, got %#v", result.Event)
+	}
+	if result.Payload == nil || result.Payload["last_error"] == nil {
+		t.Fatalf("expected last_error in payload, got %v", result.Payload)
+	}
+	if doc.Status != domain.DocumentStatusStoredOriginal {
+		t.Fatalf("document status should remain unchanged, got %s", doc.Status)
 	}
 }
 
