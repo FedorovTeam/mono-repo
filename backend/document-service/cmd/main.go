@@ -1,14 +1,13 @@
 package main
 
 import (
+	"backend-document-service/internal/infrastructure/grpcclient"
 	"backend-document-service/internal/infrastructure/postgres"
 	"backend-document-service/pkg/config"
 	"backend-document-service/pkg/observability"
 	"context"
 	"database/sql"
 	"flag"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"os"
 	"os/signal"
@@ -75,9 +74,9 @@ func main() {
 	}
 
 	repo := postgres.New(db)
-	storageConn, err := grpc.NewClient(
+	storageConn, err := grpcclient.NewGRPCClient(
 		cfg.Services.StorageService,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		cfg.ServicesGRPC,
 	)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)
@@ -87,18 +86,18 @@ func main() {
 	storageClient := storagev1.NewStorageServiceClient(storageConn)
 	storageAdapter := storagestore.New(storageClient)
 
-	transformerConn, err := grpc.NewClient(
+	transformerConn, err := grpcclient.NewGRPCClient(
 		cfg.Services.TransformerService,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		cfg.ServicesGRPC,
 	)
 	if err != nil {
 		log.Fatalf("transformer client: %v", err)
 	}
 	defer transformerConn.Close()
 
-	publisherConn, err := grpc.NewClient(
+	publisherConn, err := grpcclient.NewGRPCClient(
 		cfg.Services.GithubPublisherService,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		cfg.ServicesGRPC,
 	)
 	if err != nil {
 		log.Fatalf("publisher client: %v", err)
