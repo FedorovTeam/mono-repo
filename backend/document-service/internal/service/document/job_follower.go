@@ -130,33 +130,33 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 
 	switch job.Stage {
 	case domain.JobStageStoreOriginal:
-		payload := map[string]any{
-			"original_bucket":     doc.OriginalBucket,
-			"original_object_key": doc.OriginalObjectKey,
-			"markdown_bucket":     doc.MarkdownBucket,
-			"markdown_object_key": doc.MarkdownObjectKey,
-			"correlation_id":      correlationFromDoc(doc),
-		}
+		payload := domain.ConvertPayload{
+			OriginalBucket:     doc.OriginalBucket,
+			OriginalObjectKey:  doc.OriginalObjectKey,
+			MarkdownBucket:     doc.MarkdownBucket,
+			MarkdownObjectKey:  doc.MarkdownObjectKey,
+			JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
+		}.ToMap()
 		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
 		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 			f.logf("job-follower: enqueue convert for %s: %v", doc.ID, err)
 		}
 	case domain.JobStageConvertToMarkdown:
-		payload := map[string]any{
-			"markdown_bucket":     doc.MarkdownBucket,
-			"markdown_object_key": doc.MarkdownObjectKey,
-			"repository":          fmt.Sprintf("%s/%s", doc.Owner, doc.Repository),
-			"branch":              doc.Branch,
-			"base_branch":         doc.BaseBranch,
-			"github_path":         doc.Path,
-			"create_pr":           doc.CreatePR,
-			"commit_message":      pickCommitMessage(doc, f.defaults),
-			"pr_title":            pickPRTitle(doc, f.defaults),
-			"pr_body":             f.defaults.PRBody,
-			"author_name":         f.defaults.AuthorName,
-			"author_email":        f.defaults.AuthorEmail,
-			"correlation_id":      correlationFromDoc(doc),
-		}
+		payload := domain.PublishPayload{
+			MarkdownBucket:     doc.MarkdownBucket,
+			MarkdownObjectKey:  doc.MarkdownObjectKey,
+			Repository:         fmt.Sprintf("%s/%s", doc.Owner, doc.Repository),
+			Branch:             doc.Branch,
+			BaseBranch:         doc.BaseBranch,
+			GitHubPath:         doc.Path,
+			CreatePR:           boolPtr(doc.CreatePR),
+			CommitMessage:      pickCommitMessage(doc, f.defaults),
+			PRTitle:            pickPRTitle(doc, f.defaults),
+			PRBody:             f.defaults.PRBody,
+			AuthorName:         f.defaults.AuthorName,
+			AuthorEmail:        f.defaults.AuthorEmail,
+			JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
+		}.ToMap()
 		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: publish"}
 		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 			f.logf("job-follower: enqueue publish for %s: %v", doc.ID, err)

@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ProcessingJob описывает задачу фоновой обработки документа.
 type ProcessingJob struct {
@@ -33,4 +36,206 @@ type JobEvent struct {
 func (j *ProcessingJob) MarkStatus(status JobStatus) {
 	j.Status = status
 	j.UpdatedAt = time.Now().UTC()
+}
+
+// JobPayloadMetadata хранит общие поля для всех стадий.
+type JobPayloadMetadata struct {
+	CorrelationID string
+	LastError     string
+	RetryAfter    string
+}
+
+// StoreOriginalPayload описывает данные для шага сохранения оригинала.
+type StoreOriginalPayload struct {
+	JobPayloadMetadata
+	Bucket    string
+	ObjectKey string
+}
+
+// ConvertPayload описывает данные для шага конвертации в Markdown.
+type ConvertPayload struct {
+	JobPayloadMetadata
+	OriginalBucket    string
+	OriginalObjectKey string
+	MarkdownBucket    string
+	MarkdownObjectKey string
+	QueueID           string
+	Status            string
+}
+
+// PublishPayload описывает данные для шага публикации в GitHub.
+type PublishPayload struct {
+	JobPayloadMetadata
+	MarkdownBucket    string
+	MarkdownObjectKey string
+	Repository        string
+	Branch            string
+	BaseBranch        string
+	GitHubPath        string
+	CreatePR          *bool
+	CommitMessage     string
+	PRTitle           string
+	PRBody            string
+	AuthorName        string
+	AuthorEmail       string
+}
+
+func (p JobPayloadMetadata) applyTo(payload map[string]any) {
+	if p.CorrelationID != "" {
+		payload["correlation_id"] = p.CorrelationID
+	}
+	if p.LastError != "" {
+		payload["last_error"] = p.LastError
+	}
+	if p.RetryAfter != "" {
+		payload["retry_after"] = p.RetryAfter
+	}
+}
+
+func metadataFromMap(payload map[string]any) JobPayloadMetadata {
+	return JobPayloadMetadata{
+		CorrelationID: stringFromMap(payload, "correlation_id"),
+		LastError:     stringFromMap(payload, "last_error"),
+		RetryAfter:    stringFromMap(payload, "retry_after"),
+	}
+}
+
+// ToMap преобразует StoreOriginalPayload в map для хранения в БД.
+func (p StoreOriginalPayload) ToMap() map[string]any {
+	res := map[string]any{}
+	if p.Bucket != "" {
+		res["bucket"] = p.Bucket
+	}
+	if p.ObjectKey != "" {
+		res["object_key"] = p.ObjectKey
+	}
+	p.JobPayloadMetadata.applyTo(res)
+	return res
+}
+
+// StoreOriginalPayloadFromMap восстанавливает структуру из map.
+func StoreOriginalPayloadFromMap(payload map[string]any) StoreOriginalPayload {
+	return StoreOriginalPayload{
+		JobPayloadMetadata: metadataFromMap(payload),
+		Bucket:             stringFromMap(payload, "bucket"),
+		ObjectKey:          stringFromMap(payload, "object_key"),
+	}
+}
+
+// ToMap преобразует ConvertPayload в map для хранения в БД.
+func (p ConvertPayload) ToMap() map[string]any {
+	res := map[string]any{}
+	if p.OriginalBucket != "" {
+		res["original_bucket"] = p.OriginalBucket
+	}
+	if p.OriginalObjectKey != "" {
+		res["original_object_key"] = p.OriginalObjectKey
+	}
+	if p.MarkdownBucket != "" {
+		res["markdown_bucket"] = p.MarkdownBucket
+	}
+	if p.MarkdownObjectKey != "" {
+		res["markdown_object_key"] = p.MarkdownObjectKey
+	}
+	if p.QueueID != "" {
+		res["queue_id"] = p.QueueID
+	}
+	if p.Status != "" {
+		res["status"] = p.Status
+	}
+	p.JobPayloadMetadata.applyTo(res)
+	return res
+}
+
+// ConvertPayloadFromMap восстанавливает структуру из map.
+func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
+	return ConvertPayload{
+		JobPayloadMetadata: metadataFromMap(payload),
+		OriginalBucket:     stringFromMap(payload, "original_bucket"),
+		OriginalObjectKey:  stringFromMap(payload, "original_object_key"),
+		MarkdownBucket:     stringFromMap(payload, "markdown_bucket"),
+		MarkdownObjectKey:  stringFromMap(payload, "markdown_object_key"),
+		QueueID:            stringFromMap(payload, "queue_id"),
+		Status:             stringFromMap(payload, "status"),
+	}
+}
+
+// ToMap преобразует PublishPayload в map для хранения в БД.
+func (p PublishPayload) ToMap() map[string]any {
+	res := map[string]any{}
+	if p.MarkdownBucket != "" {
+		res["markdown_bucket"] = p.MarkdownBucket
+	}
+	if p.MarkdownObjectKey != "" {
+		res["markdown_object_key"] = p.MarkdownObjectKey
+	}
+	if p.Repository != "" {
+		res["repository"] = p.Repository
+	}
+	if p.Branch != "" {
+		res["branch"] = p.Branch
+	}
+	if p.BaseBranch != "" {
+		res["base_branch"] = p.BaseBranch
+	}
+	if p.GitHubPath != "" {
+		res["github_path"] = p.GitHubPath
+	}
+	if p.CreatePR != nil {
+		res["create_pr"] = *p.CreatePR
+	}
+	if p.CommitMessage != "" {
+		res["commit_message"] = p.CommitMessage
+	}
+	if p.PRTitle != "" {
+		res["pr_title"] = p.PRTitle
+	}
+	if p.PRBody != "" {
+		res["pr_body"] = p.PRBody
+	}
+	if p.AuthorName != "" {
+		res["author_name"] = p.AuthorName
+	}
+	if p.AuthorEmail != "" {
+		res["author_email"] = p.AuthorEmail
+	}
+	p.JobPayloadMetadata.applyTo(res)
+	return res
+}
+
+// PublishPayloadFromMap восстанавливает структуру из map.
+func PublishPayloadFromMap(payload map[string]any) PublishPayload {
+	var createPR *bool
+	if val, ok := payload["create_pr"]; ok {
+		if b, ok := val.(bool); ok {
+			createPR = &b
+		}
+	}
+	return PublishPayload{
+		JobPayloadMetadata: metadataFromMap(payload),
+		MarkdownBucket:     stringFromMap(payload, "markdown_bucket"),
+		MarkdownObjectKey:  stringFromMap(payload, "markdown_object_key"),
+		Repository:         stringFromMap(payload, "repository"),
+		Branch:             stringFromMap(payload, "branch"),
+		BaseBranch:         stringFromMap(payload, "base_branch"),
+		GitHubPath:         stringFromMap(payload, "github_path"),
+		CreatePR:           createPR,
+		CommitMessage:      stringFromMap(payload, "commit_message"),
+		PRTitle:            stringFromMap(payload, "pr_title"),
+		PRBody:             stringFromMap(payload, "pr_body"),
+		AuthorName:         stringFromMap(payload, "author_name"),
+		AuthorEmail:        stringFromMap(payload, "author_email"),
+	}
+}
+
+func stringFromMap(payload map[string]any, key string) string {
+	if payload == nil {
+		return ""
+	}
+	if val, ok := payload[key]; ok {
+		if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
 }

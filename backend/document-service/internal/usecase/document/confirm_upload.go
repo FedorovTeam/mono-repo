@@ -53,10 +53,7 @@ func (uc *ConfirmUpload) Execute(ctx context.Context, in ConfirmUploadInput) (*d
 		return nil, fmt.Errorf("storage validation failed: %w", err)
 	}
 
-	payload := map[string]any{
-		"bucket":     in.Bucket,
-		"object_key": in.ObjectKey,
-	}
+	payload := domain.StoreOriginalPayload{Bucket: in.Bucket, ObjectKey: in.ObjectKey}.ToMap()
 	job := &domain.ProcessingJob{
 		DocumentID: doc.ID,
 		Stage:      domain.JobStageStoreOriginal,

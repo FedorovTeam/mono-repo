@@ -209,11 +209,11 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 	activities := NewActivities(repo, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
-	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
-		"commit_message": "commit",
-		"author_name":    "Author",
-		"author_email":   "author@example.com",
-	}})
+	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: (domain.PublishPayload{
+		CommitMessage: "commit",
+		AuthorName:    "Author",
+		AuthorEmail:   "author@example.com",
+	}).ToMap()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -256,11 +256,11 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
 	start := time.Now()
-	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: map[string]any{
-		"commit_message": "commit",
-		"author_name":    "Author",
-		"author_email":   "author@example.com",
-	}})
+	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: (domain.PublishPayload{
+		CommitMessage: "commit",
+		AuthorName:    "Author",
+		AuthorEmail:   "author@example.com",
+	}).ToMap()})
 	if err == nil {
 		t.Fatal("expected error from publisher")
 	}
@@ -312,12 +312,8 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 				Stage:      domain.JobStagePublishToGitHub,
 				Status:     domain.JobStatusInProgress,
 				Attempts:   1,
-				Payload: map[string]any{
-					"commit_message": "commit",
-					"author_name":    "Author",
-					"author_email":   "author@example.com",
-				},
-				UpdatedAt: fixed.Add(-time.Minute),
+				Payload:    (domain.PublishPayload{CommitMessage: "commit", AuthorName: "Author", AuthorEmail: "author@example.com"}).ToMap(),
+				UpdatedAt:  fixed.Add(-time.Minute),
 			},
 		},
 	}
@@ -383,10 +379,11 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	if result.NextRun == nil || result.NextRun.Before(now.Add(900*time.Millisecond)) {
 		t.Fatalf("expected postponed next run, got %v", result.NextRun)
 	}
-	if result.Payload["queue_id"] != "queue-1" {
+	convertPayload := domain.ConvertPayloadFromMap(result.Payload)
+	if convertPayload.QueueID != "queue-1" {
 		t.Fatalf("expected queue_id in payload, got %v", result.Payload)
 	}
-	if result.Payload["status"] != "pending" {
+	if convertPayload.Status != "pending" {
 		t.Fatalf("expected transformer status in payload, got %v", result.Payload)
 	}
 }
@@ -414,12 +411,7 @@ func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 			DocumentID: doc.ID,
 			Stage:      domain.JobStageConvertToMarkdown,
 			Status:     domain.JobStatusPending,
-			Payload: map[string]any{
-				"original_bucket":     doc.OriginalBucket,
-				"original_object_key": doc.OriginalObjectKey,
-				"markdown_bucket":     doc.MarkdownBucket,
-				"markdown_object_key": doc.MarkdownObjectKey,
-			},
+			Payload:    (domain.ConvertPayload{OriginalBucket: doc.OriginalBucket, OriginalObjectKey: doc.OriginalObjectKey, MarkdownBucket: doc.MarkdownBucket, MarkdownObjectKey: doc.MarkdownObjectKey}).ToMap(),
 		},
 	}}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-2", Status: "failed"}}
@@ -431,7 +423,7 @@ func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 	waitUntil(t, func() bool { return repo.lastStatus == domain.JobStatusFailed })
 	cancel()
 
-	if repo.lastPayload == nil || repo.lastPayload["last_error"] == nil {
+	if payload := domain.ConvertPayloadFromMap(repo.lastPayload); payload.LastError == "" {
 		t.Fatalf("expected last_error to be stored in payload, got %v", repo.lastPayload)
 	}
 	if doc.Status != domain.DocumentStatusStoredOriginal {
@@ -465,7 +457,7 @@ func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
 	activities := NewActivities(repo, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
-	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-exhausted", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: map[string]any{}})
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-exhausted", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: (domain.ConvertPayload{}).ToMap()})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -482,7 +474,7 @@ func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
 	if result.Event == nil || result.Event.EventType != "postponed" {
 		t.Fatalf("expected postponed event, got %#v", result.Event)
 	}
-	if result.Payload == nil || result.Payload["last_error"] == nil {
+	if payload := domain.ConvertPayloadFromMap(result.Payload); payload.LastError == "" {
 		t.Fatalf("expected last_error in payload, got %v", result.Payload)
 	}
 	if doc.Status != domain.DocumentStatusStoredOriginal {
@@ -566,11 +558,11 @@ func TestHandleConvertHonorsMaxAttemptsForTemporaryErrors(t *testing.T) {
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 	worker.maxAttempts = 1
 
-	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-max", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Attempts: 1, Payload: map[string]any{}})
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-max", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Attempts: 1, Payload: (domain.ConvertPayload{}).ToMap()})
 	if err == nil {
 		t.Fatal("expected error after reaching max attempts")
 	}
-	if result.Payload["last_error"] == nil {
+	if payload := domain.ConvertPayloadFromMap(result.Payload); payload.LastError == "" {
 		t.Fatalf("expected last_error recorded, got %v", result.Payload)
 	}
 	if doc.Status != domain.DocumentStatusFailed {

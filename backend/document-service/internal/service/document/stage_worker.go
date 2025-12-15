@@ -94,67 +94,75 @@ func (w *StageWorker) handleJob(ctx context.Context, job domain.ProcessingJob) (
 }
 
 func (w *StageWorker) handleStoreOriginal(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
-	payload := clonePayload(job.Payload)
+	payload := domain.StoreOriginalPayloadFromMap(job.Payload)
+	correlationID := payload.CorrelationID
+	if correlationID == "" {
+		correlationID = correlationIDFromContext(ctx)
+	}
 	if w.activities == nil {
-		return workersvc.JobResult{Payload: payload}, errors.New("activities not configured")
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("activities not configured")
 	}
 
-	if err := w.activities.MarkStoredOriginal(w.jobContext(ctx, job), job.DocumentID); err != nil {
-		return workersvc.JobResult{Payload: payload}, err
+	if err := w.activities.MarkStoredOriginal(w.jobContext(ctx, correlationID), job.DocumentID); err != nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
 
-	return workersvc.JobResult{Payload: payload, Event: &domain.JobEvent{EventType: "completed"}}, nil
+	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed"}}, nil
 }
 
 func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
-	payload := clonePayload(job.Payload)
+	payload := domain.ConvertPayloadFromMap(job.Payload)
 	if w.activities == nil {
-		return workersvc.JobResult{Payload: payload}, errors.New("activities not configured")
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("activities not configured")
 	}
 
 	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
-		return workersvc.JobResult{Payload: payload}, fmt.Errorf("load document: %w", err)
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("load document: %w", err)
 	}
 	if doc == nil {
-		return workersvc.JobResult{Payload: payload}, fmt.Errorf("document %s not found", job.DocumentID)
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("document %s not found", job.DocumentID)
 	}
 
-	originalBucket := stringFromPayload(payload, "original_bucket", doc.OriginalBucket)
-	originalKey := stringFromPayload(payload, "original_object_key", doc.OriginalObjectKey)
-	markdownBucket := stringFromPayload(payload, "markdown_bucket", doc.MarkdownBucket)
-	markdownKey := stringFromPayload(payload, "markdown_object_key", resolvedMarkdownKey(doc))
+	payload.OriginalBucket = firstNonEmpty(payload.OriginalBucket, doc.OriginalBucket)
+	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
+	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, doc.MarkdownBucket)
+	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	if payload.CorrelationID == "" {
+		payload.CorrelationID = correlationFromDoc(doc)
+	}
 
 	input := convertInput{
 		DocumentID:        job.DocumentID,
-		OriginalBucket:    originalBucket,
-		MarkdownBucket:    markdownBucket,
-		OriginalObjectKey: originalKey,
-		MarkdownObjectKey: markdownKey,
+		OriginalBucket:    payload.OriginalBucket,
+		MarkdownBucket:    payload.MarkdownBucket,
+		OriginalObjectKey: payload.OriginalObjectKey,
+		MarkdownObjectKey: payload.MarkdownObjectKey,
 		Version:           latestVersion(doc).Version + 1,
 	}
 
-	convCtx := w.jobContext(ctx, job)
+	convCtx := w.jobContext(ctx, payload.CorrelationID)
 	result, err := w.activities.ConvertToMarkdown(convCtx, input)
 	if err != nil {
 		if isTemporaryGRPCError(err) {
-			return w.postponeWithBackoff(ctx, job, payload, err)
+			payload.LastError = err.Error()
+			return w.postponeWithBackoff(ctx, job, payload.ToMap(), err)
 		}
-		return workersvc.JobResult{Payload: payload}, err
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
 
-	payload["markdown_object_key"] = result.MarkdownKey
+	payload.MarkdownObjectKey = result.MarkdownKey
 	if queueID := strings.TrimSpace(result.QueueID); queueID != "" {
-		payload["queue_id"] = queueID
+		payload.QueueID = queueID
 	}
 	if status := strings.TrimSpace(result.Status); status != "" {
-		payload["status"] = status
+		payload.Status = status
 	}
 
 	if !result.Ready {
 		next := time.Now().Add(w.retryDelay)
 		return workersvc.JobResult{
-			Payload: payload,
+			Payload: payload.ToMap(),
 			NextRun: &next,
 			Status:  domain.JobStatusPending,
 			Event:   &domain.JobEvent{EventType: "postponed", Message: fmt.Sprintf("status=%s", result.Status)},
@@ -162,88 +170,100 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	}
 
 	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
-		return workersvc.JobResult{Payload: payload}, fmt.Errorf("update status: %w", err)
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("update status: %w", err)
 	}
 
-	return workersvc.JobResult{Payload: payload, Event: &domain.JobEvent{EventType: "completed"}}, nil
+	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed"}}, nil
 }
 
 func (w *StageWorker) handlePublish(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
-	payload := clonePayload(job.Payload)
+	payload := domain.PublishPayloadFromMap(job.Payload)
 	if w.activities == nil {
-		return workersvc.JobResult{Payload: payload}, errors.New("activities not configured")
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("activities not configured")
 	}
 
 	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
-		return workersvc.JobResult{Payload: payload}, fmt.Errorf("load document: %w", err)
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("load document: %w", err)
 	}
 	if doc == nil {
-		return workersvc.JobResult{Payload: payload}, fmt.Errorf("document %s not found", job.DocumentID)
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("document %s not found", job.DocumentID)
 	}
 
-	repoField := stringFromPayload(payload, "repository", fmt.Sprintf("%s/%s", doc.Owner, doc.Repository))
-	owner, repository, _ := strings.Cut(repoField, "/")
+	payload.Repository = firstNonEmpty(payload.Repository, fmt.Sprintf("%s/%s", doc.Owner, doc.Repository))
+	owner, repository, _ := strings.Cut(payload.Repository, "/")
 	if repository == "" {
-		repository = repoField
+		repository = payload.Repository
 	}
 
-	markdownKey := stringFromPayload(payload, "markdown_object_key", resolvedMarkdownKey(doc))
-	commitMessage := stringFromPayload(payload, "commit_message", pickCommitMessage(doc, PublishDefaults{}))
-	authorName := stringFromPayload(payload, "author_name", "")
-	authorEmail := stringFromPayload(payload, "author_email", "")
-	prTitle := stringFromPayload(payload, "pr_title", pickPRTitle(doc, PublishDefaults{}))
-	prBody := stringFromPayload(payload, "pr_body", "")
+	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, doc.MarkdownBucket)
+	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.Branch = firstNonEmpty(payload.Branch, doc.Branch)
+	payload.BaseBranch = firstNonEmpty(payload.BaseBranch, doc.BaseBranch)
+	payload.GitHubPath = firstNonEmpty(payload.GitHubPath, doc.Path)
+	if payload.CreatePR == nil {
+		payload.CreatePR = boolPtr(doc.CreatePR)
+	}
+	if payload.CommitMessage == "" {
+		payload.CommitMessage = pickCommitMessage(doc, PublishDefaults{})
+	}
+	if payload.PRTitle == "" {
+		payload.PRTitle = pickPRTitle(doc, PublishDefaults{})
+	}
+	if payload.CorrelationID == "" {
+		payload.CorrelationID = correlationFromDoc(doc)
+	}
 
 	input := publishInput{
 		DocumentID:        job.DocumentID,
 		DocumentName:      doc.Name,
 		Owner:             owner,
 		Repository:        repository,
-		Branch:            stringFromPayload(payload, "branch", doc.Branch),
-		BaseBranch:        stringFromPayload(payload, "base_branch", doc.BaseBranch),
-		Path:              stringFromPayload(payload, "github_path", doc.Path),
-		CreatePR:          boolFromPayload(payload, "create_pr", doc.CreatePR),
-		MarkdownBucket:    stringFromPayload(payload, "markdown_bucket", doc.MarkdownBucket),
-		MarkdownObjectKey: markdownKey,
-		CorrelationID:     stringFromPayload(payload, "correlation_id", correlationFromDoc(doc)),
-		CommitMessage:     commitMessage,
-		AuthorName:        authorName,
-		AuthorEmail:       authorEmail,
-		PRTitle:           prTitle,
-		PRBody:            prBody,
+		Branch:            payload.Branch,
+		BaseBranch:        payload.BaseBranch,
+		Path:              payload.GitHubPath,
+		CreatePR:          derefBool(payload.CreatePR),
+		MarkdownBucket:    payload.MarkdownBucket,
+		MarkdownObjectKey: payload.MarkdownObjectKey,
+		CorrelationID:     payload.CorrelationID,
+		CommitMessage:     payload.CommitMessage,
+		AuthorName:        payload.AuthorName,
+		AuthorEmail:       payload.AuthorEmail,
+		PRTitle:           payload.PRTitle,
+		PRBody:            payload.PRBody,
 	}
 
 	if strings.TrimSpace(input.CommitMessage) == "" {
-		return workersvc.JobResult{Payload: payload}, errors.New("commit_message is required for publish")
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("commit_message is required for publish")
 	}
 	if strings.TrimSpace(input.AuthorName) == "" || strings.TrimSpace(input.AuthorEmail) == "" {
-		return workersvc.JobResult{Payload: payload}, errors.New("author_name and author_email are required for publish")
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("author_name and author_email are required for publish")
 	}
 	if input.MarkdownObjectKey != "" {
 		input.IdempotencyKey = fmt.Sprintf("publish:%s:%s:%s", job.DocumentID, input.Branch, input.MarkdownObjectKey)
 	}
 
-	payload["markdown_bucket"] = input.MarkdownBucket
-	payload["markdown_object_key"] = input.MarkdownObjectKey
-	payload["repository"] = fmt.Sprintf("%s/%s", owner, repository)
-	payload["branch"] = input.Branch
-	payload["base_branch"] = input.BaseBranch
-	payload["github_path"] = input.Path
-	payload["create_pr"] = input.CreatePR
-	payload["commit_message"] = input.CommitMessage
-	payload["pr_title"] = input.PRTitle
-	payload["pr_body"] = input.PRBody
-	payload["author_name"] = input.AuthorName
-	payload["author_email"] = input.AuthorEmail
-	payload["correlation_id"] = input.CorrelationID
+	payload.Repository = fmt.Sprintf("%s/%s", owner, repository)
+	payload.Branch = input.Branch
+	payload.BaseBranch = input.BaseBranch
+	payload.GitHubPath = input.Path
+	payload.MarkdownBucket = input.MarkdownBucket
+	payload.MarkdownObjectKey = input.MarkdownObjectKey
+	payload.CommitMessage = input.CommitMessage
+	payload.PRTitle = input.PRTitle
+	payload.PRBody = input.PRBody
+	payload.AuthorName = input.AuthorName
+	payload.AuthorEmail = input.AuthorEmail
+	payload.CreatePR = boolPtr(input.CreatePR)
+	payload.CorrelationID = input.CorrelationID
 
-	resp, err := w.activities.PublishMarkdown(w.jobContext(ctx, job), input)
+	resp, err := w.activities.PublishMarkdown(w.jobContext(ctx, payload.CorrelationID), input)
 	eventPayload := buildPublishEventPayload(resp)
-	result := workersvc.JobResult{Payload: payload, Event: &domain.JobEvent{Payload: eventPayload, EventType: "completed"}}
+	result := workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{Payload: eventPayload, EventType: "completed"}}
 	if err != nil {
 		if isTemporaryGRPCError(err) {
-			return w.postponeWithBackoff(ctx, job, payload, err)
+			payload.LastError = err.Error()
+			return w.postponeWithBackoff(ctx, job, payload.ToMap(), err)
 		}
 		result.Event.EventType = "failed"
 		result.Event.Message = err.Error()
@@ -254,7 +274,8 @@ func (w *StageWorker) handlePublish(ctx context.Context, job domain.ProcessingJo
 				result.Event.Payload = map[string]any{}
 			}
 			result.Event.Payload["retry_after"] = retryAfter.AsDuration().String()
-			result.Payload["retry_after"] = retryAfter.AsDuration().String()
+			payload.RetryAfter = retryAfter.AsDuration().String()
+			result.Payload = payload.ToMap()
 		}
 		return result, err
 	}
@@ -282,17 +303,6 @@ func (w *StageWorker) postponeWithBackoff(ctx context.Context, job domain.Proces
 		IncrementAttempt: true,
 		Event:            &domain.JobEvent{EventType: "postponed", Message: err.Error()},
 	}, nil
-}
-
-func clonePayload(src map[string]any) map[string]any {
-	if src == nil {
-		return map[string]any{}
-	}
-	dst := make(map[string]any, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
 }
 
 func buildPublishEventPayload(resp *githubpublisherv1.PublishMarkdownResponse) map[string]any {
@@ -328,8 +338,11 @@ func pickRetryAfter(resp *githubpublisherv1.PublishMarkdownResponse) *durationpb
 	return resp.GetRetryAfter()
 }
 
-func (w *StageWorker) jobContext(ctx context.Context, job domain.ProcessingJob) context.Context {
-	corr := stringFromPayload(job.Payload, "correlation_id", correlationIDFromContext(ctx))
+func (w *StageWorker) jobContext(ctx context.Context, correlationID string) context.Context {
+	corr := strings.TrimSpace(correlationID)
+	if corr == "" {
+		corr = correlationIDFromContext(ctx)
+	}
 	if corr == "" {
 		return ctx
 	}
@@ -340,26 +353,20 @@ func metadataAppend(ctx context.Context, correlationID string) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, correlationID)
 }
 
-func stringFromPayload(payload map[string]any, key, fallback string) string {
-	if payload == nil {
-		return fallback
-	}
-	if val, ok := payload[key]; ok {
-		if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
-			return s
+func firstNonEmpty(values ...string) string {
+	for _, val := range values {
+		if strings.TrimSpace(val) != "" {
+			return val
 		}
 	}
-	return fallback
+	return ""
 }
 
-func boolFromPayload(payload map[string]any, key string, fallback bool) bool {
-	if payload == nil {
-		return fallback
+func boolPtr(val bool) *bool { return &val }
+
+func derefBool(val *bool) bool {
+	if val == nil {
+		return false
 	}
-	if val, ok := payload[key]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return fallback
+	return *val
 }
