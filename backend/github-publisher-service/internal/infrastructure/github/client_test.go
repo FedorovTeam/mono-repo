@@ -23,7 +23,8 @@ func TestCommitMarkdownSuccess(t *testing.T) {
 				t.Fatalf("unexpected auth header: %s", got)
 			}
 			if got := r.Header.Get("If-Match"); got != "" {
-				t.Fatalf("unexpected if-match header: %s", got)
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 			capturedCorrelation = r.Header.Get("X-Correlation-ID")
 			w.Header().Set("Content-Type", "application/json")
@@ -81,7 +82,6 @@ func TestCommitMarkdownSkipsWhenContentSame(t *testing.T) {
 
 func TestCommitMarkdownUpdatesExistingFile(t *testing.T) {
 	var receivedShaField string
-	var receivedIfMatch string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -91,7 +91,10 @@ func TestCommitMarkdownUpdatesExistingFile(t *testing.T) {
 				"encoding": "base64",
 			})
 		case http.MethodPut:
-			receivedIfMatch = r.Header.Get("If-Match")
+			if match := r.Header.Get("If-Match"); match != "" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode request body: %v", err)
@@ -118,9 +121,6 @@ func TestCommitMarkdownUpdatesExistingFile(t *testing.T) {
 	}
 	if receivedShaField != "existing-sha" {
 		t.Fatalf("sha field missing in request: %s", receivedShaField)
-	}
-	if receivedIfMatch != "existing-sha" {
-		t.Fatalf("if-match header missing: %s", receivedIfMatch)
 	}
 }
 

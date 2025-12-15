@@ -131,10 +131,6 @@ func (c *Client) CommitMarkdown(ctx context.Context, path, content, message, bra
 	}
 	c.setHeaders(req, correlationID)
 
-	if existingFile != nil && existingFile.SHA != "" {
-		req.Header.Set("If-Match", existingFile.SHA)
-	}
-
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("do request: %w", err)
