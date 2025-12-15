@@ -44,3 +44,42 @@ func TestValidateFailsOnMissingFields(t *testing.T) {
 		t.Fatal("expected validation error for empty config")
 	}
 }
+
+func TestStatusBackoffDefaultsApplied(t *testing.T) {
+	cfg := Config{}
+
+	policy := cfg.StatusBackoffPolicy()
+
+	if policy.InitialInterval != defaultStatusInitialInterval {
+		t.Fatalf("expected default initial interval %v, got %v", defaultStatusInitialInterval, policy.InitialInterval)
+	}
+	if policy.MaxInterval != defaultStatusMaxInterval {
+		t.Fatalf("expected default max interval %v, got %v", defaultStatusMaxInterval, policy.MaxInterval)
+	}
+	if policy.MaxAttempts != defaultStatusMaxAttempts {
+		t.Fatalf("expected default attempts %d, got %d", defaultStatusMaxAttempts, policy.MaxAttempts)
+	}
+	if policy.Factor != defaultStatusBackoffFactor {
+		t.Fatalf("expected default backoff factor %v, got %v", defaultStatusBackoffFactor, policy.Factor)
+	}
+}
+
+func TestStatusBackoffOverridesConfig(t *testing.T) {
+	cfg := Config{Docling: DoclingConfig{
+		StatusInitialInterval: time.Second,
+		StatusBackoffFactor:   3,
+		StatusMaxInterval:     5 * time.Second,
+		StatusMaxAttempts:     2,
+	}}
+
+	policy := cfg.StatusBackoffPolicy()
+
+	if policy.InitialInterval != time.Second || policy.MaxInterval != 5*time.Second || policy.MaxAttempts != 2 || policy.Factor != 3 {
+		t.Fatalf("unexpected policy: %+v", policy)
+	}
+
+	cfg.applyDefaults()
+	if cfg.Docling.StatusInitialInterval != time.Second || cfg.Docling.StatusMaxInterval != 5*time.Second || cfg.Docling.StatusMaxAttempts != 2 || cfg.Docling.StatusBackoffFactor != 3 {
+		t.Fatalf("defaults must not override provided values: %+v", cfg.Docling)
+	}
+}
