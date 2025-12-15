@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -407,6 +408,63 @@ func (r *queueRepoStub) AcquireBatch(context.Context, int) ([]*transformations.T
 	return batch, nil
 }
 
+type sequentialQueueRepoStub struct {
+	pollingRepoStub
+	tasks         []*transformations.TransformationTask
+	acquireLimits []int
+	waiting       atomic.Bool
+	mu            sync.Mutex
+}
+
+func (r *sequentialQueueRepoStub) AcquireBatch(_ context.Context, limit int) ([]*transformations.TransformationTask, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.acquireLimits = append(r.acquireLimits, limit)
+
+	if r.waiting.Load() || len(r.tasks) == 0 {
+		return nil, nil
+	}
+
+	if limit > len(r.tasks) {
+		limit = len(r.tasks)
+	}
+
+	batch := r.tasks[:limit]
+	r.tasks = r.tasks[limit:]
+	return batch, nil
+}
+
+func (r *sequentialQueueRepoStub) SetWaiting(waiting bool) {
+	r.waiting.Store(waiting)
+}
+
+type waitingProcessorStub struct {
+	repo      *sequentialQueueRepoStub
+	states    []TaskState
+	calls     atomic.Int64
+	processed chan uuid.UUID
+}
+
+func (p *waitingProcessorStub) ProcessTask(_ context.Context, task *transformations.TransformationTask) (TaskState, error) {
+	callIdx := int(p.calls.Load())
+	p.calls.Add(1)
+
+	state := TaskState(StateCompleted)
+	if callIdx < len(p.states) {
+		state = p.states[callIdx]
+	}
+
+	p.repo.SetWaiting(state == StateWaitingDocling)
+
+	select {
+	case p.processed <- task.ID:
+	default:
+	}
+
+	return state, nil
+}
+
 type cleanupRepoStub struct {
 	pollingRepoStub
 	activated int
@@ -435,6 +493,66 @@ func TestQueueWorkerHandlesWaitingAndCompletionStates(t *testing.T) {
 
 	worker.handleSingle(context.Background(), &transformations.TransformationTask{ID: uuid.New()})
 	worker.handleSingle(context.Background(), &transformations.TransformationTask{ID: uuid.New()})
+}
+
+func TestQueueWorkerSequentialProcessingWithBatchSizeOne(t *testing.T) {
+	taskOne := &transformations.TransformationTask{ID: uuid.New()}
+	taskTwo := &transformations.TransformationTask{ID: uuid.New()}
+
+	repoStub := &sequentialQueueRepoStub{tasks: []*transformations.TransformationTask{taskOne, taskTwo}}
+	processor := &waitingProcessorStub{
+		repo:      repoStub,
+		states:    []TaskState{StateWaitingDocling, StateCompleted},
+		processed: make(chan uuid.UUID, 2),
+	}
+
+	worker := NewQueueWorker(repoStub, processor, metrics.NewWorkerMetrics(nil), nil, QueueWorkerConfig{
+		Workers:      1,
+		PollInterval: 5 * time.Millisecond,
+		BatchSize:    1,
+		RetryBackoff: time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	worker.Start(ctx, &wg)
+
+	select {
+	case id := <-processor.processed:
+		if id != taskOne.ID {
+			t.Fatalf("expected first processed task to be %s, got %s", taskOne.ID, id)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for first task")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if processor.calls.Load() != 1 {
+		t.Fatalf("expected only one task to be processed while waiting, got %d", processor.calls.Load())
+	}
+
+	repoStub.SetWaiting(false)
+
+	select {
+	case id := <-processor.processed:
+		if id != taskTwo.ID {
+			t.Fatalf("expected second processed task to be %s, got %s", taskTwo.ID, id)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for second task")
+	}
+
+	cancel()
+	wg.Wait()
+
+	for _, limit := range repoStub.acquireLimits {
+		if limit != 1 {
+			t.Fatalf("expected AcquireBatch to be called with limit 1, got %d", limit)
+		}
+	}
 }
 
 func TestMaintenanceRunnerTriggersCleanup(t *testing.T) {
