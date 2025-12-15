@@ -1,12 +1,13 @@
 # usecases
 
 ## Загрузка оригинала через подписанную ссылку
-1. Клиент добавляет `X-API-Key` (обязательно для всех GraphQL запросов, включая чтение статусов; при необходимости — `X-Correlation-ID`) и вызывает мутацию `uploadKnowledgeDocument` с параметрами `fileName`, `fileSizeBytes`, `repository`, `branch`, `path`. `repository` можно передавать как `<repo>` или `<owner>/<repo>` — gateway сохранит владельца отдельно.
-2. gateway валидирует расширение, размер и обязательные поля по настройкам `uploads.*`, генерирует новый `document_id` и correlation-id (если его не было в запросе), запрашивает presigned PUT URL через `storage-service.GenerateUploadURL` и создаёт запись в `document-service.CreateDocument`, передавая bucket/object ключ из ответа хранилища.
-3. В ответе GraphQL возвращаются `uploadUrl` + `uploadMethod` (всегда `PUT`) и объект документа со статусом `UPLOADED`, `repositoryOwner` (если указан), `jobId` (workflowId/Id документа на стороне document-service маппится в это поле) и переданными метаданными. Correlation-id дублируется в заголовке ответа.
-4. Клиент загружает файл по `uploadUrl` методом `PUT`; после события `s3:ObjectCreated:*` MinIO отправляет webhook на `/internal/storage/uploaded`, который подтверждает загрузку через `document-service.ConfirmUpload`. Документ определяется по имени объекта (часть до расширения), correlation-id восстанавливается из метаданных `x-amz-meta-correlation-id` или сгенерируется заново, при успешной обработке HTTP-ответ — `202 Accepted`.
+1. Клиент добавляет `X-API-Key` (обязательно для всех GraphQL запросов, включая чтение статусов; при необходимости — `X-Correlation-ID`) и вызывает мутацию `uploadKnowledgeDocument` с параметрами `fileName`, `fileSizeBytes`, `repository`, `branch`, `path`. Значение `repository` передается как есть (gateway не разбирает владельца и не заполняет `repositoryOwner`).
+2. gateway гарантирует наличие `correlation-id`, проверяет, что обязательные поля заполнены, а `fileSizeBytes` положительный, и запрашивает подписанную PUT‑ссылку через `storage-service.GenerateUploadURL`, передавая TTL из `uploads.signedUrlTtlSeconds`.
+3. После генерации ссылки вызывается `document-service.CreateDocument` с новым `document_id`, переданными метаданными, `correlation-id` и bucket/object ключами из ответа хранилища.
+4. В ответе GraphQL клиент получает `uploadUrl`, `uploadMethod` (`PUT`) и объект документа со статусом из document-service (обычно `UPLOADED`), `jobId` и прочими метаданными. `correlation-id` дублируется в заголовке ответа.
+5. Клиент загружает файл по `uploadUrl` методом `PUT`; после события `s3:ObjectCreated:*` MinIO отправляет webhook на `/internal/storage/uploaded`. gateway разбирает каждое уведомление, декодирует `objectKey`, извлекает `document_id` из имени файла (часть до расширения), восстанавливает `correlation-id` из `x-amz-meta-correlation-id` в `userMetadata/responseElements` и подтверждает загрузку через `document-service.ConfirmUpload`. Если ни одно уведомление не обработано, HTTP‑ответ — `400 Bad Request`, иначе `202 Accepted`.
 
 ## Получение статуса/списка документов
 1. С авторизацией по `X-API-Key` выполняется запрос `knowledgeDocument(id)` или `knowledgeDocuments(filter, pagination)`.
-2. gateway пробрасывает `correlation-id` в gRPC-запросы `document-service`, мапит статусы (`UPLOADED/ STORED_ORIGINAL/ CONVERTED_TO_MARKDOWN/ PUBLISHED_TO_GITHUB/ FAILED`) и возвращает найденный документ или список с `totalCount` (pagination по `limit/offset`, по умолчанию 10/0, фильтр по статусу и репозиторию).
-
+2. gateway гарантирует `correlation-id`, пробрасывает его и API‑ключ в gRPC‑запросы `document-service`, мапит статусы (`UPLOADED/ STORED_ORIGINAL/ CONVERTED_TO_MARKDOWN/ PUBLISHED_TO_GITHUB/ FAILED`) и возвращает найденный документ или список.
+3. Пагинация по `limit/offset` (по умолчанию `10/0`), фильтр по статусу и строке `repository` передается в document-service без трансформации.
