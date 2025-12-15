@@ -29,7 +29,6 @@ var _ repo.QueueRepository = (*pollingRepoStub)(nil)
 func (p *pollingRepoStub) Enqueue(context.Context, transformations.EnqueueParams) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
-func (p *pollingRepoStub) CountActive(context.Context) (int, error) { return 0, nil }
 func (p *pollingRepoStub) AcquireNext(context.Context) (*transformations.TransformationTask, error) {
 	return nil, nil
 }

@@ -59,7 +59,6 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 
 type QueueRepository interface {
 	Enqueue(ctx context.Context, params transformations.EnqueueParams) (uuid.UUID, error)
-	CountActive(ctx context.Context) (int, error)
 	AcquireNext(ctx context.Context) (*transformations.TransformationTask, error)
 	AcquireBatch(ctx context.Context, limit int) ([]*transformations.TransformationTask, error)
 	GetLatestByDocument(ctx context.Context, documentID string) (*transformations.TransformationTask, error)
