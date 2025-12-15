@@ -26,9 +26,9 @@ docling:
   pdf_enable_ocr: true
   status_initial_interval: 15s
   status_backoff_factor: 2
-  status_max_interval: 30m
+  status_max_interval: 2m
   status_max_attempts: 0
-  max_job_lifetime: 24h
+  max_job_lifetime: 2h
 
 minio:
   endpoint: api.minio.tech.fedorov-team.tech
