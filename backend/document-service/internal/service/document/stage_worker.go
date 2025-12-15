@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"backend-document-service/internal/domain"
@@ -121,6 +123,17 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	convCtx := w.jobContext(ctx, job)
 	result, err := w.activities.ConvertToMarkdown(convCtx, input)
 	if err != nil {
+		if status.Code(err) == codes.ResourceExhausted {
+			next := time.Now().Add(w.retryDelay)
+			payload["last_error"] = err.Error()
+			return workersvc.JobResult{
+				Payload:          payload,
+				Status:           domain.JobStatusPending,
+				NextRun:          &next,
+				IncrementAttempt: true,
+				Event:            &domain.JobEvent{EventType: "postponed", Message: err.Error()},
+			}, nil
+		}
 		return workersvc.JobResult{Payload: payload}, err
 	}
 
