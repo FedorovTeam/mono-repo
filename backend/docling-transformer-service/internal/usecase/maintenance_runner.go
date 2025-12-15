@@ -33,10 +33,6 @@ func NewMaintenanceRunner(repository repo.QueueRepository, metrics *metrics.Work
 		logger = zap.NewNop()
 	}
 
-	if cfg.Interval <= 0 {
-		cfg.Interval = 30 * time.Second
-	}
-
 	return &MaintenanceRunner{repo: repository, metrics: metrics, logger: logger, cfg: cfg}
 }
 

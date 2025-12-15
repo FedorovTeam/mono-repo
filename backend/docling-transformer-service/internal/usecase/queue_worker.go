@@ -35,18 +35,6 @@ func NewQueueWorker(repository repo.QueueRepository, handler TaskProcessor, metr
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	if cfg.Workers <= 0 {
-		cfg.Workers = 1
-	}
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = time.Second
-	}
-	if cfg.BatchSize <= 0 {
-		cfg.BatchSize = 1
-	}
-	if cfg.RetryBackoff <= 0 {
-		cfg.RetryBackoff = cfg.PollInterval
-	}
 
 	return &QueueWorker{repo: repository, handler: handler, metrics: metrics, logger: logger, cfg: cfg}
 }
