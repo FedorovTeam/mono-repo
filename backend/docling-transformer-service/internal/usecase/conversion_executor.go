@@ -105,6 +105,9 @@ func (e *ConversionExecutor) pollDocling(ctx context.Context, task *transformati
 
 func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transformations.TransformationTask) (TaskState, error) {
 	useSourceAsync := e.cfg.UseSourceAsync && task.SourceURL == ""
+	if !useSourceAsync {
+		useSourceAsync = shouldUseSourceAsyncByTask(task)
+	}
 	fileExt := task.FilenameExtension
 	if fileExt == "" {
 		key := task.OriginalObjectKey
@@ -260,6 +263,15 @@ func (e *ConversionExecutor) fastPhaseContext(ctx context.Context) (context.Cont
 	}
 
 	return context.WithTimeout(ctx, e.cfg.FastOperationTimeout)
+}
+
+func shouldUseSourceAsyncByTask(task *transformations.TransformationTask) bool {
+	if task.SourceURL != "" {
+		return false
+	}
+
+	return task.SourceBucket != "" && task.SourceObjectKey != "" &&
+		task.SourceEndpoint != "" && task.SourceAccessKey != "" && task.SourceSecretKey != ""
 }
 
 func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, task *transformations.TransformationTask, err error) (TaskState, error, bool) {

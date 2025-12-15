@@ -204,6 +204,48 @@ func TestConversionExecutorDownloadsFromSourceBucket(t *testing.T) {
 	}
 }
 
+func TestConversionExecutorUsesSourceAsyncWhenCredentialsProvided(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	storage := &trackingStorage{downloadContent: []byte("should-not-be-used")}
+	conv := &submitOnlyConverter{jobID: "job-123"}
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
+
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+		MarkdownBucket: "md",
+	})
+
+	task := &transformations.TransformationTask{
+		ID:                uuid.New(),
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file.docx",
+		SourceBucket:      "source-bucket",
+		SourceObjectKey:   "incoming/file.docx",
+		SourceEndpoint:    "http://minio:9000",
+		SourceAccessKey:   "access",
+		SourceSecretKey:   "secret",
+	}
+
+	state, err := executor.ProcessTask(context.Background(), task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != StateWaitingDocling {
+		t.Fatalf("expected waiting state, got %s", state)
+	}
+	if storage.downloadCalls != 0 {
+		t.Fatalf("expected no storage downloads, got %d", storage.downloadCalls)
+	}
+	if len(conv.lastRequest.Content) != 0 {
+		t.Fatalf("expected no inline content, got %d bytes", len(conv.lastRequest.Content))
+	}
+	if conv.lastRequest.SourceBucket != "source-bucket" || conv.lastRequest.SourceObjectKey != "incoming/file.docx" {
+		t.Fatalf("converter received wrong source object: %s/%s", conv.lastRequest.SourceBucket, conv.lastRequest.SourceObjectKey)
+	}
+	if conv.lastRequest.SourceEndpoint != "http://minio:9000" || conv.lastRequest.SourceAccessKey != "access" || conv.lastRequest.SourceSecretKey != "secret" {
+		t.Fatalf("converter received wrong source credentials: %+v", conv.lastRequest)
+	}
+}
+
 func TestConversionExecutorErrorsOnUnavailableSource(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{downloadErr: errors.New("not found")}
