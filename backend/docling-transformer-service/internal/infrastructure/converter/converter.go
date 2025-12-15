@@ -98,6 +98,19 @@ func (e *temporaryDoclingError) Temporary() bool { return true }
 func (e *temporaryDoclingError) StatusCode() int { return e.statusCode }
 func (e *temporaryDoclingError) Body() string    { return e.body }
 
+func isTemporaryDoclingStatus(statusCode int) bool {
+	if statusCode >= 500 && statusCode < 600 {
+		return true
+	}
+
+	switch statusCode {
+	case http.StatusNotFound, http.StatusTooEarly, http.StatusTooManyRequests:
+		return true
+	}
+
+	return false
+}
+
 func responseSnippet(body []byte) string {
 	if len(body) == 0 {
 		return ""
@@ -918,7 +931,7 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 
 	if resp.StatusCode != http.StatusOK {
 		baseErr := fmt.Errorf("docling status returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+		if isTemporaryDoclingStatus(resp.StatusCode) {
 			return taskStatusResponse{}, body, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
 		}
 
