@@ -73,20 +73,22 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 	if repo.createdJobs[0].Stage != domain.JobStageConvertToMarkdown {
 		t.Fatalf("expected convert stage, got %s", repo.createdJobs[0].Stage)
 	}
-	if repo.createdJobs[0].Payload["original_bucket"] != "orig-bucket" {
+	convertPayload := domain.ConvertPayloadFromMap(repo.createdJobs[0].Payload)
+	if convertPayload.OriginalBucket != "orig-bucket" {
 		t.Fatalf("unexpected payload for convert: %+v", repo.createdJobs[0].Payload)
 	}
 
 	if repo.createdJobs[1].Stage != domain.JobStagePublishToGitHub {
 		t.Fatalf("expected publish stage, got %s", repo.createdJobs[1].Stage)
 	}
-	if repo.createdJobs[1].Payload["repository"] != "org/repo" {
+	publishPayload := domain.PublishPayloadFromMap(repo.createdJobs[1].Payload)
+	if publishPayload.Repository != "org/repo" {
 		t.Fatalf("unexpected repository in payload: %+v", repo.createdJobs[1].Payload)
 	}
-	if repo.createdJobs[1].Payload["commit_message"] != "commit message" {
+	if publishPayload.CommitMessage != "commit message" {
 		t.Fatalf("unexpected commit_message in payload: %+v", repo.createdJobs[1].Payload)
 	}
-	if repo.createdJobs[1].Payload["author_email"] != "author@example.com" {
+	if publishPayload.AuthorEmail != "author@example.com" {
 		t.Fatalf("author fields were not propagated: %+v", repo.createdJobs[1].Payload)
 	}
 }
