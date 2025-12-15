@@ -25,10 +25,10 @@ sequenceDiagram
         else
             Publisher-->>Publisher: correlation_id = ""
         end
-        Publisher-->>Publisher: owner = request.owner или config.owner
-        Publisher-->>Publisher: repository = request.repository или config.repository
+        Publisher-->>Publisher: owner = trim(request.owner)
+        Publisher-->>Publisher: repository = trim(request.repository)
         alt repository содержит слэш
-            alt parts != owner/repo
+            alt parts != owner/repo или есть пустые сегменты
                 Publisher-->>Client: gRPC InvalidArgument
             else owner указан и отличается от префикса
                 Publisher-->>Client: gRPC InvalidArgument
@@ -36,6 +36,8 @@ sequenceDiagram
                 Publisher-->>Publisher: owner, repository = split(repository)
             end
         end
+        Publisher-->>Publisher: owner = owner или config.owner
+        Publisher-->>Publisher: repository = repository или config.repository
         alt content пустой
             alt storage не сконфигурирован
                 Publisher-->>Client: gRPC FailedPrecondition
@@ -52,7 +54,7 @@ sequenceDiagram
         end
         Publisher-->>Publisher: branch = request.branch или default_branch
         Publisher-->>Publisher: base_branch = request.base_branch или default_branch
-        Publisher-->>Publisher: commit_message = trim(request.commit_message) или "Update <path>"
+        Publisher-->>Publisher: commit_message = trim(request.commit_message) или defaultCommitMessage(path)
         Publisher-->>Publisher: author = request.author_* или config.author_*
         Publisher-->>Publisher: retry_policy = request.retry_policy или config (initial/max backoff, max attempts)
         Publisher-->>Publisher: attempt_offset = request.attempt (для расчёта retry_after)
