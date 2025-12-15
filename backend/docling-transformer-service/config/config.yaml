@@ -9,7 +9,7 @@ service:
 scheduler:
   poll_interval: 5s
   maintenance_interval: 30s
-  batch_size: 50
+  batch_size: 1 # очередь обрабатывается строго последовательно
   retry_backoff: 10s
   max_processing_retries: 3
   cleanup_retention: 24h
