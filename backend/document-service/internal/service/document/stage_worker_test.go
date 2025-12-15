@@ -385,6 +385,57 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	}
 }
 
+func TestHandleConvertMarksFailedStatus(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-failed-status",
+		Name:              "Doc",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc.docx",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc.docx", MarkdownObjectKey: "path/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc, jobs: map[string]domain.ProcessingJob{
+		"job-failed": {
+			TaskID:     "job-failed",
+			DocumentID: doc.ID,
+			Stage:      domain.JobStageConvertToMarkdown,
+			Status:     domain.JobStatusPending,
+			Payload: map[string]any{
+				"original_bucket":     doc.OriginalBucket,
+				"original_object_key": doc.OriginalObjectKey,
+				"markdown_bucket":     doc.MarkdownBucket,
+				"markdown_object_key": doc.MarkdownObjectKey,
+			},
+		},
+	}}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-2", Status: "failed"}}
+	activities := NewActivities(repo, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go worker.Run(ctx, 10*time.Millisecond)
+	waitUntil(t, func() bool { return repo.lastStatus == domain.JobStatusFailed })
+	cancel()
+
+	if repo.lastPayload == nil || repo.lastPayload["last_error"] == nil {
+		t.Fatalf("expected last_error to be stored in payload, got %v", repo.lastPayload)
+	}
+	if doc.Status != domain.DocumentStatusFailed {
+		t.Fatalf("expected document to be marked failed, got %s", doc.Status)
+	}
+	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusFailed {
+		t.Fatalf("expected failed status update to be recorded, got %v", repo.statusUpdates)
+	}
+}
+
 func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
 	now := time.Now()
 	doc := &domain.Document{

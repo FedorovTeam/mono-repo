@@ -144,6 +144,15 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
+	statusVal := strings.TrimSpace(resp.GetStatus())
+	if isTransformerFailureStatus(statusVal) {
+		reason := fmt.Sprintf("transformer returned status %q", statusVal)
+		if failErr := a.fail(ctx, input.DocumentID, reason); failErr != nil {
+			log.Printf("convert: mark failed document %s: %v", input.DocumentID, failErr)
+		}
+		return convertResult{}, status.Error(codes.FailedPrecondition, reason)
+	}
+
 	markdownKey := resp.GetMarkdownObjectKey()
 	if markdownKey == "" {
 		markdownKey = input.MarkdownObjectKey
@@ -160,9 +169,9 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		version = latestVersion(doc).Version + 1
 	}
 
-	ready := strings.EqualFold(resp.GetStatus(), "done") || strings.EqualFold(resp.GetStatus(), string(domain.DocumentStatusConvertedToMarkdown))
+	ready := strings.EqualFold(statusVal, "done") || strings.EqualFold(statusVal, string(domain.DocumentStatusConvertedToMarkdown))
 
-	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: resp.GetStatus(), Version: version, Ready: ready}, nil
+	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: statusVal, Version: version, Ready: ready}, nil
 }
 
 func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, queueID string, version int32) error {
@@ -389,6 +398,15 @@ func correlationIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+func isTransformerFailureStatus(val string) bool {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "failed", "failure", "error", "errored", strings.ToLower(string(domain.DocumentStatusFailed)):
+		return true
+	default:
+		return false
+	}
+}
+    
 func isTemporaryGRPCError(err error) bool {
 	code := status.Code(err)
 	switch code {

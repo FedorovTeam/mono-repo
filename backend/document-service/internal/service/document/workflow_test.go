@@ -165,6 +165,32 @@ func (p *trackingPublisher) PublishMarkdown(ctx context.Context, in *githubpubli
 	return &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc"}, nil
 }
 
+func TestConvertToMarkdownFailsOnTransformerFailureStatus(t *testing.T) {
+	repo := &fakeRepo{doc: &domain.Document{ID: "doc-1", Status: domain.DocumentStatusStoredOriginal, Versions: []domain.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
+	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "failed"}}
+
+	activities := NewActivities(repo, transformer, fakePublisher{})
+
+	_, err := activities.ConvertToMarkdown(context.Background(), convertInput{
+		DocumentID:        "doc-1",
+		OriginalBucket:    "orig-bucket",
+		MarkdownBucket:    "md-bucket",
+		OriginalObjectKey: "path/doc-1.docx",
+		MarkdownObjectKey: "path/doc-1.md",
+		Version:           3,
+	})
+	if err == nil {
+		t.Fatal("expected error from transformer failure status")
+	}
+
+	if repo.lastStatus != domain.DocumentStatusFailed {
+		t.Fatalf("expected document to be marked failed, got %s", repo.lastStatus)
+	}
+	if repo.lastError == "" {
+		t.Fatal("expected failure reason to be recorded")
+	}
+}
+
 func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{doc: &domain.Document{ID: "doc-1", Status: domain.DocumentStatusStoredOriginal, Versions: []domain.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: string(domain.DocumentStatusConvertedToMarkdown), MarkdownObjectKey: "md-key"}}
@@ -191,9 +217,9 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
 	}
 
-        if transformer.lastRequest.GetMarkdownObjectKey() != "path/doc-1.md" || transformer.lastRequest.GetWaitForResult() {
-                t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
-        }
+	if transformer.lastRequest.GetMarkdownObjectKey() != "path/doc-1.md" || transformer.lastRequest.GetWaitForResult() {
+		t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
+	}
 
 	if result.QueueID != "queue-1" {
 		t.Fatalf("unexpected queue id: %s", result.QueueID)
