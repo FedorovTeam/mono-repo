@@ -148,6 +148,50 @@ func pickBool(override *bool, fallback bool) bool {
 	return fallback
 }
 
+func pickStringWithDefault(primary, secondary, fallback string) string {
+	if primary != "" {
+		return primary
+	}
+
+	if secondary != "" {
+		return secondary
+	}
+
+	return fallback
+}
+
+func pickBoolWithDefault(primary, secondary *bool, fallback bool) bool {
+	if primary != nil {
+		return *primary
+	}
+
+	if secondary != nil {
+		return *secondary
+	}
+
+	return fallback
+}
+
+func (c *DoclingConverter) resolveSourceStorage(req domain.ConvertRequest) storageSettings {
+	return storageSettings{
+		Endpoint:  pickStringWithDefault(req.SourceEndpoint, req.MinioEndpoint, c.storage.Endpoint),
+		AccessKey: pickStringWithDefault(req.SourceAccessKey, req.MinioAccessKey, c.storage.AccessKey),
+		SecretKey: pickStringWithDefault(req.SourceSecretKey, req.MinioSecretKey, c.storage.SecretKey),
+		Region:    pickStringWithDefault(req.SourceRegion, req.MinioRegion, c.storage.Region),
+		UseSSL:    pickBoolWithDefault(req.SourceUseSSL, req.MinioUseSSL, c.storage.UseSSL),
+	}
+}
+
+func (c *DoclingConverter) resolveTargetStorage(req domain.ConvertRequest) storageSettings {
+	return storageSettings{
+		Endpoint:  pickStringWithDefault(req.TargetEndpoint, req.MinioEndpoint, c.storage.Endpoint),
+		AccessKey: pickStringWithDefault(req.TargetAccessKey, req.MinioAccessKey, c.storage.AccessKey),
+		SecretKey: pickStringWithDefault(req.TargetSecretKey, req.MinioSecretKey, c.storage.SecretKey),
+		Region:    pickStringWithDefault(req.TargetRegion, req.MinioRegion, c.storage.Region),
+		UseSSL:    pickBoolWithDefault(req.TargetUseSSL, req.MinioUseSSL, c.storage.UseSSL),
+	}
+}
+
 func normalizeStatus(status string) string {
 	return strings.ToLower(strings.TrimSpace(status))
 }
@@ -226,6 +270,14 @@ type s3TargetRequest struct {
 	Bucket    string `json:"bucket"`
 	KeyPrefix string `json:"key_prefix"`
 	Region    string `json:"region,omitempty"`
+}
+
+type storageSettings struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	Region    string
+	UseSSL    bool
 }
 
 type doclingOptions struct {
@@ -777,33 +829,25 @@ func (c *DoclingConverter) submitSourceAsync(
 	}
 
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
-	sourceEndpoint := pickString(req.SourceEndpoint, c.storage.Endpoint)
-	sourceAccessKey := pickString(req.SourceAccessKey, c.storage.AccessKey)
-	sourceSecretKey := pickString(req.SourceSecretKey, c.storage.SecretKey)
-	sourceRegion := pickString(req.SourceRegion, c.storage.Region)
-	sourceUseSSL := pickBool(req.SourceUseSSL, c.storage.UseSSL)
+	sourceStorage := c.resolveSourceStorage(req)
 
-	if sourceEndpoint == "" || sourceAccessKey == "" || sourceSecretKey == "" {
+	if sourceStorage.Endpoint == "" || sourceStorage.AccessKey == "" || sourceStorage.SecretKey == "" {
 		return "", errors.New("docling source storage config is incomplete")
 	}
 
-	targetEndpoint := pickString(req.TargetEndpoint, c.storage.Endpoint)
-	targetAccessKey := pickString(req.TargetAccessKey, c.storage.AccessKey)
-	targetSecretKey := pickString(req.TargetSecretKey, c.storage.SecretKey)
-	targetRegion := pickString(req.TargetRegion, c.storage.Region)
-	targetUseSSL := pickBool(req.TargetUseSSL, c.storage.UseSSL)
+	targetStorage := c.resolveTargetStorage(req)
 
 	requestBody := convertDocumentsRequest{
 		Sources: []s3SourceRequest{
 			{
 				Kind:      "s3",
-				Endpoint:  sourceEndpoint,
-				VerifySSL: sourceUseSSL,
-				AccessKey: sourceAccessKey,
-				SecretKey: sourceSecretKey,
+				Endpoint:  sourceStorage.Endpoint,
+				VerifySSL: sourceStorage.UseSSL,
+				AccessKey: sourceStorage.AccessKey,
+				SecretKey: sourceStorage.SecretKey,
 				Bucket:    req.SourceBucket,
 				KeyPrefix: strings.TrimPrefix(req.SourceObjectKey, "/"),
-				Region:    sourceRegion,
+				Region:    sourceStorage.Region,
 			},
 		},
 		Options: c.buildDoclingOptions(contentType, fileExt),
@@ -812,13 +856,13 @@ func (c *DoclingConverter) submitSourceAsync(
 	if req.TargetBucket != "" {
 		requestBody.Target = &s3TargetRequest{
 			Kind:      "s3",
-			Endpoint:  targetEndpoint,
-			VerifySSL: targetUseSSL,
-			AccessKey: targetAccessKey,
-			SecretKey: targetSecretKey,
+			Endpoint:  targetStorage.Endpoint,
+			VerifySSL: targetStorage.UseSSL,
+			AccessKey: targetStorage.AccessKey,
+			SecretKey: targetStorage.SecretKey,
 			Bucket:    req.TargetBucket,
 			KeyPrefix: strings.TrimPrefix(req.TargetObjectKey, "/"),
-			Region:    targetRegion,
+			Region:    targetStorage.Region,
 		}
 	}
 
