@@ -37,6 +37,7 @@ type Config struct {
 		AuthorName    string `yaml:"author_name"`
 		AuthorEmail   string `yaml:"author_email"`
 	} `yaml:"github"`
+	ServicesGRPC  ServicesGRPC  `yaml:"grpc_clients"`
 	Observability Observability `yaml:"observability"`
 	Reconciler    Reconciler    `yaml:"reconciler"`
 	JobFollower   JobFollower   `yaml:"job_follower"`
@@ -76,6 +77,25 @@ type StageWorker struct {
 	GracePeriod      time.Duration `yaml:"grace_period"`
 }
 
+type ServicesGRPC struct {
+	Timeout   time.Duration   `yaml:"timeout"`
+	Keepalive KeepaliveConfig `yaml:"keepalive"`
+	Backoff   BackoffConfig   `yaml:"backoff"`
+}
+
+type KeepaliveConfig struct {
+	Time                time.Duration `yaml:"time"`
+	Timeout             time.Duration `yaml:"timeout"`
+	PermitWithoutStream bool          `yaml:"permit_without_stream"`
+}
+
+type BackoffConfig struct {
+	BaseDelay  time.Duration `yaml:"base_delay"`
+	Multiplier float64       `yaml:"multiplier"`
+	Jitter     float64       `yaml:"jitter"`
+	MaxDelay   time.Duration `yaml:"max_delay"`
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -104,6 +124,22 @@ func (c *Config) Validate() error {
 	}
 	if c.Services.StorageService == "" || c.Services.TransformerService == "" || c.Services.GithubPublisherService == "" {
 		return fmt.Errorf("services endpoints must be provided")
+	}
+
+	if c.ServicesGRPC.Timeout <= 0 {
+		return fmt.Errorf("grpc_clients.timeout must be positive")
+	}
+	if c.ServicesGRPC.Keepalive.Time <= 0 || c.ServicesGRPC.Keepalive.Timeout <= 0 {
+		return fmt.Errorf("grpc_clients.keepalive time and timeout must be positive")
+	}
+	if c.ServicesGRPC.Backoff.BaseDelay <= 0 || c.ServicesGRPC.Backoff.MaxDelay <= 0 {
+		return fmt.Errorf("grpc_clients.backoff base_delay and max_delay must be positive")
+	}
+	if c.ServicesGRPC.Backoff.Multiplier <= 0 {
+		return fmt.Errorf("grpc_clients.backoff multiplier must be positive")
+	}
+	if c.ServicesGRPC.Backoff.Jitter < 0 {
+		return fmt.Errorf("grpc_clients.backoff jitter cannot be negative")
 	}
 
 	if c.Reconciler.Interval <= 0 || c.Reconciler.BatchSize <= 0 {
