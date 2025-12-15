@@ -101,17 +101,6 @@ INSERT INTO transformations_queue (
 	return id, nil
 }
 
-func (r *PostgresQueueRepository) CountActive(ctx context.Context) (int, error) {
-	const query = `SELECT COUNT(*) FROM transformations_queue WHERE status IN ('pending', 'processing', 'waiting_docling')`
-
-	var count int
-	if err := r.pool.QueryRow(ctx, query).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count active tasks: %w", err)
-	}
-
-	return count, nil
-}
-
 func (r *PostgresQueueRepository) CountByStatus(ctx context.Context) (pending, processing, waitingDocling int, err error) {
 	const query = `
 SELECT

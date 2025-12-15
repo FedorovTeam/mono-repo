@@ -22,7 +22,6 @@ import (
 
 type stubQueueRepo struct {
 	enqueueCalled []repository.EnqueueParams
-	active        int
 	enqueueErr    error
 	countErr      error
 
@@ -48,13 +47,6 @@ func (s *stubQueueRepo) Enqueue(_ context.Context, params repository.EnqueuePara
 		return uuid.Nil, s.enqueueErr
 	}
 	return uuid.New(), nil
-}
-
-func (s *stubQueueRepo) CountActive(context.Context) (int, error) {
-	if s.countErr != nil {
-		return 0, s.countErr
-	}
-	return s.active, nil
 }
 
 func (s *stubQueueRepo) AcquireNext(context.Context) (*repository.TransformationTask, error) {
@@ -236,7 +228,7 @@ var _ storage.ObjectStorage = (*stubStorage)(nil)
 var _ converter.Converter = (*stubConverter)(nil)
 
 func TestConvertDocumentQueuesTask(t *testing.T) {
-	repo := &stubQueueRepo{active: 0}
+	repo := &stubQueueRepo{}
 	api := server.NewTransformerAPI(repo, "markdown-bucket", 0, nil, 0, 0, 0, zap.NewNop())
 
 	resp, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
