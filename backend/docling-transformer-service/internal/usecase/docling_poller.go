@@ -134,14 +134,10 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 	return &result, nil
 }
 
-type temporaryError interface{ Temporary() bool }
-
-type statusCoder interface{ StatusCode() int }
-
 func isTemporaryDoclingError(err error) (bool, int) {
-	var tmp temporaryError
+	var tmp domain.TemporaryError
 	if errors.As(err, &tmp) && tmp.Temporary() {
-		var code statusCoder
+		var code domain.StatusCoder
 		if errors.As(err, &code) {
 			return true, code.StatusCode()
 		}

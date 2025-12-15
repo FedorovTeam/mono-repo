@@ -6,6 +6,7 @@
 ## SLA и таймауты
 - `service.processing_timeout` — верхняя граница на нахождение задачи в статусе `processing`; по превышению задача возвращается в `pending`, `docling_job_id`/`docling_poll_count` сбрасываются и воркер начинает конвертацию с нуля.
 - `service.io_timeout` — ограничение на короткие операции (MinIO/submit Docling), не распространяется на ожидание Docling.
+- Отправка в Docling: до 5 быстрых ретраев с экспоненциальной задержкой (0.5s → 5s) для временных 5xx/timeout; если попытки исчерпаны, задача переводится в `waiting_docling` с новым `next_poll_at`, чтобы воркер повторил submit вместо финального `failed`.
 - `service.cleanup_interval` — частота фоновой проверки зависших задач и очистки завершённых записей.
 - `docling.status_initial_interval` / `docling.status_backoff_factor` / `docling.status_max_interval` — экспоненциальный backoff между запросами статуса Docling (до 30–60 минут при длительном ожидании).
 - `docling.status_max_attempts` — лимит количества запросов статуса (0 — без ограничения).

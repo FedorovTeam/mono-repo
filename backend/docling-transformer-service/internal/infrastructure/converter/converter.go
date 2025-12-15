@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -37,8 +38,11 @@ const (
 
 	doclingFileFieldName = "files"
 
-	defaultExtension    = "docx"
-	submitRetryAttempts = 3
+	defaultExtension       = "docx"
+	submitRetryAttempts    = 5
+	submitRetryInitialWait = 500 * time.Millisecond
+	submitRetryBackoff     = 2.0
+	submitRetryMaxWait     = 5 * time.Second
 
 	maxResponseSnippetLen = 1024
 )
@@ -376,19 +380,32 @@ func (c *DoclingConverter) submitWithRetry(
 		}
 
 		lastErr = err
-		c.logger.Error("docling submit failed",
+		isTemporary, statusCode := isTemporaryDoclingError(err)
+		delay := submitRetryDelay(attempt)
+
+		fields := []zap.Field{
 			zap.String("correlation_id", correlationID),
 			zap.Int("attempt", attempt),
+			zap.Bool("temporary", isTemporary),
+			zap.Int("status_code", statusCode),
 			zap.Error(err),
-		)
-
+		}
 		if attempt < submitRetryAttempts {
+			fields = append(fields, zap.Duration("retry_in", delay))
+			c.logger.Warn("docling submit failed", fields...)
+
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
-			case <-time.After(time.Duration(attempt) * 300 * time.Millisecond):
+			case <-time.After(delay):
 			}
+		} else {
+			c.logger.Error("docling submit failed", fields...)
 		}
+	}
+
+	if isTemporary, _ := isTemporaryDoclingError(lastErr); isTemporary {
+		return "", &domain.TemporarySubmitRetryExhaustedError{Err: lastErr}
 	}
 
 	return "", lastErr
@@ -547,7 +564,12 @@ func (c *DoclingConverter) submit(
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		return "", fmt.Errorf("docling submit returned status %d: %s", resp.StatusCode, string(body))
+		baseErr := fmt.Errorf("docling submit returned status %d: %s", resp.StatusCode, string(body))
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			return "", &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
+		}
+
+		return "", baseErr
 	}
 
 	var submitResp doclingSubmitResponse
@@ -685,4 +707,31 @@ func firstNonEmpty(values ...*string) string {
 		}
 	}
 	return ""
+}
+
+func submitRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+
+	delay := time.Duration(float64(submitRetryInitialWait) * math.Pow(submitRetryBackoff, float64(attempt-1)))
+	if delay > submitRetryMaxWait {
+		return submitRetryMaxWait
+	}
+
+	return delay
+}
+
+func isTemporaryDoclingError(err error) (bool, int) {
+	var tmp domain.TemporaryError
+	if errors.As(err, &tmp) && tmp.Temporary() {
+		var code domain.StatusCoder
+		if errors.As(err, &code) {
+			return true, code.StatusCode()
+		}
+
+		return true, 0
+	}
+
+	return false, 0
 }
