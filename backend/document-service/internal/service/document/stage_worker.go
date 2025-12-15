@@ -8,9 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"backend-document-service/internal/domain"
@@ -20,13 +18,14 @@ import (
 
 // StageWorker обрабатывает pending-задачи из processing_jobs.
 type StageWorker struct {
-	repo       Repository
-	activities *Activities
-	stage      domain.JobStage
-	batchSize  int
-	metrics    *workerMetrics
-	service    *workersvc.WorkerService
-	retryDelay time.Duration
+	repo        Repository
+	activities  *Activities
+	stage       domain.JobStage
+	batchSize   int
+	metrics     *workerMetrics
+	service     *workersvc.WorkerService
+	retryDelay  time.Duration
+	maxAttempts int
 }
 
 func NewStageWorker(repo Repository, activities *Activities, stage domain.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
@@ -36,18 +35,20 @@ func NewStageWorker(repo Repository, activities *Activities, stage domain.JobSta
 	if retryDelay <= 0 {
 		retryDelay = time.Minute
 	}
+	const defaultMaxAttempts = 5
 
 	service := workersvc.NewWorkerService(repo, repo, retryDelay)
 	service.SetLogger(log.Printf)
 
 	return &StageWorker{
-		repo:       repo,
-		activities: activities,
-		stage:      stage,
-		batchSize:  batchSize,
-		metrics:    newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
-		service:    service,
-		retryDelay: retryDelay,
+		repo:        repo,
+		activities:  activities,
+		stage:       stage,
+		batchSize:   batchSize,
+		metrics:     newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
+		service:     service,
+		retryDelay:  retryDelay,
+		maxAttempts: defaultMaxAttempts,
 	}
 }
 
@@ -123,16 +124,8 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	convCtx := w.jobContext(ctx, job)
 	result, err := w.activities.ConvertToMarkdown(convCtx, input)
 	if err != nil {
-		if status.Code(err) == codes.ResourceExhausted {
-			next := time.Now().Add(w.retryDelay)
-			payload["last_error"] = err.Error()
-			return workersvc.JobResult{
-				Payload:          payload,
-				Status:           domain.JobStatusPending,
-				NextRun:          &next,
-				IncrementAttempt: true,
-				Event:            &domain.JobEvent{EventType: "postponed", Message: err.Error()},
-			}, nil
+		if isTemporaryGRPCError(err) {
+			return w.postponeWithBackoff(ctx, job, payload, err)
 		}
 		return workersvc.JobResult{Payload: payload}, err
 	}
@@ -236,6 +229,9 @@ func (w *StageWorker) handlePublish(ctx context.Context, job domain.ProcessingJo
 	eventPayload := buildPublishEventPayload(resp)
 	result := workersvc.JobResult{Payload: payload, Event: &domain.JobEvent{Payload: eventPayload, EventType: "completed"}}
 	if err != nil {
+		if isTemporaryGRPCError(err) {
+			return w.postponeWithBackoff(ctx, job, payload, err)
+		}
 		result.Event.EventType = "failed"
 		result.Event.Message = err.Error()
 		if retryAfter := pickRetryAfter(resp); retryAfter != nil && retryAfter.AsDuration() > 0 {
@@ -251,6 +247,28 @@ func (w *StageWorker) handlePublish(ctx context.Context, job domain.ProcessingJo
 	}
 
 	return result, nil
+}
+
+func (w *StageWorker) postponeWithBackoff(ctx context.Context, job domain.ProcessingJob, payload map[string]any, err error) (workersvc.JobResult, error) {
+	if job.Attempts >= w.maxAttempts {
+		if w.activities != nil && w.activities.statuses != nil {
+			_ = w.activities.statuses.Fail(ctx, job.DocumentID, fmt.Sprintf("max attempts exceeded: %v", err))
+		}
+		payload["last_error"] = err.Error()
+		return workersvc.JobResult{Payload: payload}, fmt.Errorf("max attempts exceeded for job %s: %w", job.TaskID, err)
+	}
+
+	delay := w.retryDelay * time.Duration(1<<job.Attempts)
+	next := time.Now().Add(delay)
+	payload["last_error"] = err.Error()
+
+	return workersvc.JobResult{
+		Payload:          payload,
+		Status:           domain.JobStatusPending,
+		NextRun:          &next,
+		IncrementAttempt: true,
+		Event:            &domain.JobEvent{EventType: "postponed", Message: err.Error()},
+	}, nil
 }
 
 func clonePayload(src map[string]any) map[string]any {
