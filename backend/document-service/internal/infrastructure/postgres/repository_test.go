@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"regexp"
 	"testing"
@@ -241,5 +242,56 @@ FOR UPDATE SKIP LOCKED`)).
 	require.Equal(t, domain.JobStatusInProgress, jobs[0].Status)
 	require.Equal(t, 1, jobs[0].Attempts)
 	require.Equal(t, "bar", jobs[0].Payload["foo"])
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestRequeueStaleProcessingJobs_RetryAfterBadConnection(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := New(db)
+	ctx := context.Background()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE status=$1 AND updated_at <= $2
+ORDER BY updated_at
+LIMIT $3
+FOR UPDATE SKIP LOCKED`)).
+		WithArgs(domain.JobStatusInProgress, sqlmock.AnyArg(), 1).
+		WillReturnError(driver.ErrBadConn)
+	mock.ExpectRollback()
+
+	mock.ExpectPing()
+
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{"task_id", "document_id", "stage", "status", "attempts", "next_run_at", "payload", "created_at", "updated_at"}).
+		AddRow("task-1", "doc-1", domain.JobStageStoreOriginal, domain.JobStatusInProgress, 0, now, json.RawMessage(`{"foo":"bar"}`), now.Add(-time.Minute), now.Add(-time.Minute))
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
+FROM processing_jobs
+WHERE status=$1 AND updated_at <= $2
+ORDER BY updated_at
+LIMIT $3
+FOR UPDATE SKIP LOCKED`)).
+		WithArgs(domain.JobStatusInProgress, sqlmock.AnyArg(), 1).
+		WillReturnRows(rows)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE processing_jobs SET status=$1, attempts=$2, next_run_at=$3, payload=$4, updated_at=$5 WHERE task_id=$6")).
+		WithArgs(domain.JobStatusPending, 1, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "task-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO job_events (id, job_id, stage, status, event_type, message, payload, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")).
+		WithArgs(sqlmock.AnyArg(), "task-1", domain.JobStageStoreOriginal, domain.JobStatusPending, "recovered", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	jobs, err := repo.RequeueStaleProcessingJobs(ctx, time.Now(), 1, time.Now().Add(time.Minute), "restored")
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, "task-1", jobs[0].TaskID)
+	require.Equal(t, domain.JobStatusPending, jobs[0].Status)
+	require.Equal(t, 1, jobs[0].Attempts)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

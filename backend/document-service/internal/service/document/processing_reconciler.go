@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	"backend-document-service/internal/domain"
@@ -26,6 +27,7 @@ type ProcessingReconciler struct {
 	retryBackoff  time.Duration
 	maxBackoff    time.Duration
 	sleep         func(ctx context.Context, d time.Duration)
+	random        *rand.Rand
 }
 
 func NewProcessingReconciler(repo processingRepo, batchSize int, stageInterval, grace time.Duration) *ProcessingReconciler {
@@ -51,6 +53,7 @@ func NewProcessingReconciler(repo processingRepo, batchSize int, stageInterval, 
 		retryBackoff:  time.Second,
 		maxBackoff:    time.Minute,
 		sleep:         sleepWithContext,
+		random:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -62,25 +65,25 @@ func (r *ProcessingReconciler) Run(ctx context.Context, interval time.Duration) 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	r.reconcile(ctx)
+	r.reconcile(ctx, interval)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.reconcile(ctx)
+			r.reconcile(ctx, interval)
 		}
 	}
 }
 
-func (r *ProcessingReconciler) reconcile(ctx context.Context) {
+func (r *ProcessingReconciler) reconcile(ctx context.Context, interval time.Duration) {
 	cutoff := r.now().Add(-(r.stageInterval + r.gracePeriod))
 	nextRun := r.now()
 	reason := fmt.Sprintf("restored after exceeding %s in processing", r.stageInterval+r.gracePeriod)
 
 	for {
-		jobs, err := r.retryRequeue(ctx, cutoff, nextRun, reason)
+		jobs, err := r.retryRequeue(ctx, cutoff, nextRun, reason, interval)
 		if err != nil {
 			return
 		}
@@ -100,7 +103,7 @@ func (r *ProcessingReconciler) reconcile(ctx context.Context) {
 	}
 }
 
-func (r *ProcessingReconciler) retryRequeue(ctx context.Context, cutoff time.Time, nextRun time.Time, reason string) ([]domain.ProcessingJob, error) {
+func (r *ProcessingReconciler) retryRequeue(ctx context.Context, cutoff time.Time, nextRun time.Time, reason string, interval time.Duration) ([]domain.ProcessingJob, error) {
 	maxRetries := r.retryAttempts
 	if maxRetries <= 0 {
 		maxRetries = 3
@@ -133,6 +136,17 @@ func (r *ProcessingReconciler) retryRequeue(ctx context.Context, cutoff time.Tim
 			r.logf("processing-reconciler: requeue stale jobs failed after %d retries: %v", attempt, err)
 			r.metrics.recordError(ctx)
 			r.metrics.recordFinalError(ctx)
+			cooldown := interval
+			if cooldown <= 0 {
+				cooldown = time.Minute
+			}
+			jitter := time.Duration(0)
+			if r.random != nil && cooldown > 0 {
+				jitter = time.Duration(r.random.Int63n(int64(cooldown/2 + 1)))
+			}
+			delay := cooldown + jitter
+			r.logf("processing-reconciler: waiting %s before next run after repeated failures", delay)
+			r.sleep(ctx, delay)
 			return nil, err
 		}
 
