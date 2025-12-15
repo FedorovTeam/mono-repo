@@ -5,6 +5,6 @@ metadata:
 data:
   shadowbox_server_config.json: |
     {
-      "hostname": "vpn.example.com",
+      "hostname": "vpn.tech.fedorov-team.tech",
       "portForNewAccessKeys": 12001
     }
