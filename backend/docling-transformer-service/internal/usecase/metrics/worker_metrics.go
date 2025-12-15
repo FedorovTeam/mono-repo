@@ -16,6 +16,9 @@ type WorkerMetrics struct {
 	restoredCounter  metric.Int64Counter
 	rejectedCounter  metric.Int64Counter
 	temporaryRetry   metric.Int64Counter
+	retryAttempt     metric.Int64Counter
+	failedRetry      metric.Int64Counter
+	failedExhausted  metric.Int64Counter
 	acquiredCounter  metric.Int64Counter
 	completedCounter metric.Int64Counter
 	failedCounter    metric.Int64Counter
@@ -57,6 +60,18 @@ func NewWorkerMetrics(logger *zap.Logger) *WorkerMetrics {
 	m.temporaryRetry, err = meter.Int64Counter("docling_transformer_docling_temporary_retries")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create temporary retry counter", zap.Error(err))
+	}
+	m.retryAttempt, err = meter.Int64Counter("docling_transformer_tasks_retry_attempts")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create retry attempt counter", zap.Error(err))
+	}
+	m.failedRetry, err = meter.Int64Counter("docling_transformer_tasks_failed_rescheduled")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create failed retry counter", zap.Error(err))
+	}
+	m.failedExhausted, err = meter.Int64Counter("docling_transformer_tasks_failed_exhausted")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create failed exhausted counter", zap.Error(err))
 	}
 	m.acquiredCounter, err = meter.Int64Counter("docling_transformer_tasks_acquired")
 	if err != nil && logger != nil {
@@ -203,4 +218,26 @@ func (m *WorkerMetrics) RecordTemporaryRetry(ctx context.Context, retries int) {
 	}
 
 	m.temporaryRetry.Add(ctx, int64(retries))
+}
+
+func (m *WorkerMetrics) RecordRetryAttempt(ctx context.Context, attempt int) {
+	if m == nil || m.retryAttempt == nil || attempt <= 1 {
+		return
+	}
+
+	m.retryAttempt.Add(ctx, 1)
+}
+
+func (m *WorkerMetrics) RecordFailedRetries(ctx context.Context, retried, exhausted int) {
+	if m == nil {
+		return
+	}
+
+	if retried > 0 && m.failedRetry != nil {
+		m.failedRetry.Add(ctx, int64(retried))
+	}
+
+	if exhausted > 0 && m.failedExhausted != nil {
+		m.failedExhausted.Add(ctx, int64(exhausted))
+	}
 }

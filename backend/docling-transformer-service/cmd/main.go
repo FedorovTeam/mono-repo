@@ -118,6 +118,8 @@ func main() {
 		RetryBackoff:           cfg.Scheduler.RetryBackoff,
 		CleanupInterval:        cfg.Scheduler.MaintenanceInterval,
 		CleanupRetention:       cfg.Scheduler.CleanupRetention,
+		FailedRetryDelay:       cfg.Scheduler.FailedRetryDelay,
+		MaxFailedRetries:       cfg.Scheduler.MaxFailedRetries,
 		DoclingInitialInterval: cfg.Docling.StatusInitialInterval,
 		DoclingMaxInterval:     cfg.Docling.StatusMaxInterval,
 		DoclingBackoffFactor:   cfg.Docling.StatusBackoffFactor,

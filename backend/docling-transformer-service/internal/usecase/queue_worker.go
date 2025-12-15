@@ -96,7 +96,9 @@ func (w *QueueWorker) handleSingle(ctx context.Context, task *transformations.Tr
 	}
 
 	taskCtx, correlationID := telemetry.ContextWithCorrelationID(ctx, task.CorrelationID)
-	w.logger.Info("processing transformation", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID))
+	isRetry := task.RetryCount > 1
+	w.metrics.RecordRetryAttempt(taskCtx, task.RetryCount)
+	w.logger.Info("processing transformation", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Int("attempt", task.RetryCount), zap.Bool("retry", isRetry))
 
 	state, err := w.handler.ProcessTask(taskCtx, task)
 	duration := time.Since(start)

@@ -157,3 +157,97 @@ INSERT INTO transformations_queue (
 	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, expiredID).Scan(&expiredStatus))
 	require.Equal(t, StatusFailed, expiredStatus)
 }
+
+func TestRetryFailedMovesTasksToPending(t *testing.T) {
+	ctx := context.Background()
+
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker binary not available for testcontainers")
+	}
+
+	infoCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(infoCtx, "docker", "info").Run(); err != nil {
+		t.Skip("docker daemon not available for testcontainers")
+	}
+
+	pgContainer, err := postgres.RunContainer(ctx,
+		testcontainers.WithImage("postgres:16-alpine"),
+		postgres.WithDatabase("transformations"),
+		postgres.WithUsername("postgres"),
+		postgres.WithPassword("password"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = pgContainer.Terminate(ctx)
+	})
+
+	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err)
+
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	require.Eventually(t, func() bool {
+		return db.PingContext(ctx) == nil
+	}, 10*time.Second, 300*time.Millisecond)
+
+	require.NoError(t, migrations.Run(ctx, db))
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	repo := NewQueueRepository(pool)
+
+	finishedAt := time.Now().Add(-2 * time.Hour)
+	retryID := uuid.New()
+	recentID := uuid.New()
+	exhaustedID := uuid.New()
+
+	_, err = pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, finished_at, retry_count, correlation_id, error, docling_job_id, docling_poll_count
+) VALUES
+    ($1, 'failed', 'doc-retry', 'orig', 'path/retry.docx', 'md', 'dest/retry.md', 'docx', $4, $2, 1, 'corr-retry', 'tmp error', 'job-1', 2),
+    ($3, 'failed', 'doc-recent', 'orig', 'path/recent.docx', 'md', 'dest/recent.md', 'docx', $4, NOW(), 1, 'corr-recent', 'recent fail', 'job-2', 1),
+    ($5, 'failed', 'doc-exhaust', 'orig', 'path/exhaust.docx', 'md', 'dest/exhaust.md', 'docx', $4, $2, 5, 'corr-exhaust', 'old fail', 'job-3', 1)
+`, retryID, finishedAt, recentID, finishedAt.Add(-time.Minute), exhaustedID)
+	require.NoError(t, err)
+
+	retried, exhausted, err := repo.RetryFailed(ctx, time.Now().Add(-time.Hour), 3)
+	require.NoError(t, err)
+	require.Equal(t, 1, retried)
+	require.Equal(t, 1, exhausted)
+
+	var status TransformationStatus
+	var startedAt *time.Time
+	var finishedAtPtr *time.Time
+	var doclingJob string
+	var doclingPolls int
+	var taskError *string
+
+	err = pool.QueryRow(ctx, `SELECT status, started_at, finished_at, error, docling_job_id, docling_poll_count FROM transformations_queue WHERE id = $1`, retryID).
+		Scan(&status, &startedAt, &finishedAtPtr, &taskError, &doclingJob, &doclingPolls)
+	require.NoError(t, err)
+	require.Equal(t, StatusPending, status)
+	require.Nil(t, startedAt)
+	require.Nil(t, finishedAtPtr)
+	require.Nil(t, taskError)
+	require.Equal(t, "", doclingJob)
+	require.Equal(t, 0, doclingPolls)
+
+	var recentStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, recentID).Scan(&recentStatus))
+	require.Equal(t, StatusFailed, recentStatus)
+
+	var exhaustedStatus TransformationStatus
+	var exhaustedError string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status, error FROM transformations_queue WHERE id = $1`, exhaustedID).Scan(&exhaustedStatus, &exhaustedError))
+	require.Equal(t, StatusFailed, exhaustedStatus)
+	require.Contains(t, exhaustedError, "retry limit exceeded (5/3)")
+	require.Contains(t, exhaustedError, "old fail")
+}
