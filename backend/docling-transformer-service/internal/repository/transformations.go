@@ -22,8 +22,18 @@ type TransformationDTO struct {
 	SourceBucket      string
 	SourceObjectKey   string
 	SourceURL         string
+	SourceEndpoint    string
+	SourceAccessKey   string
+	SourceSecretKey   string
+	SourceUseSSL      *bool
+	SourceRegion      string
 	MarkdownBucket    string
 	MarkdownObjectKey string
+	TargetEndpoint    string
+	TargetAccessKey   string
+	TargetSecretKey   string
+	TargetUseSSL      *bool
+	TargetRegion      string
 	FilenameExtension string
 	CreatedAt         time.Time
 	StartedAt         *time.Time
@@ -46,8 +56,18 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		SourceBucket:      dto.SourceBucket,
 		SourceObjectKey:   dto.SourceObjectKey,
 		SourceURL:         dto.SourceURL,
+		SourceEndpoint:    dto.SourceEndpoint,
+		SourceAccessKey:   dto.SourceAccessKey,
+		SourceSecretKey:   dto.SourceSecretKey,
+		SourceUseSSL:      dto.SourceUseSSL,
+		SourceRegion:      dto.SourceRegion,
 		MarkdownBucket:    dto.MarkdownBucket,
 		MarkdownObjectKey: dto.MarkdownObjectKey,
+		TargetEndpoint:    dto.TargetEndpoint,
+		TargetAccessKey:   dto.TargetAccessKey,
+		TargetSecretKey:   dto.TargetSecretKey,
+		TargetUseSSL:      dto.TargetUseSSL,
+		TargetRegion:      dto.TargetRegion,
 		FilenameExtension: dto.FilenameExtension,
 		CreatedAt:         dto.CreatedAt,
 		StartedAt:         dto.StartedAt,

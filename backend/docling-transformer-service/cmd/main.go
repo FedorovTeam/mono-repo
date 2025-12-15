@@ -119,6 +119,7 @@ func main() {
 		MarkdownBucket: cfg.Minio.Bucket,
 		QueueLimit:     cfg.Service.QueueLimit,
 		StatusBackoff:  statusPolicy,
+		UseSourceAsync: cfg.Docling.Mode == "source_async",
 	}, logger, &http.Client{Timeout: 30 * time.Second})
 
 	workerProcessor := usecase.NewProcessor(queueRepo, conv, storageClient, logger, usecase.Config{

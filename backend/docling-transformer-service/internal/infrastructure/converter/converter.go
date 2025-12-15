@@ -132,6 +132,22 @@ type StorageConfig struct {
 	UseSSL    bool
 }
 
+func pickString(override, fallback string) string {
+	if override != "" {
+		return override
+	}
+
+	return fallback
+}
+
+func pickBool(override *bool, fallback bool) bool {
+	if override != nil {
+		return *override
+	}
+
+	return fallback
+}
+
 func normalizeStatus(status string) string {
 	return strings.ToLower(strings.TrimSpace(status))
 }
@@ -760,23 +776,34 @@ func (c *DoclingConverter) submitSourceAsync(
 		return "", errors.New("source bucket/object key is required for source_async mode")
 	}
 
-	if c.storage.Endpoint == "" || c.storage.AccessKey == "" || c.storage.SecretKey == "" || c.storage.Bucket == "" {
-		return "", errors.New("docling storage config is incomplete")
+	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
+	sourceEndpoint := pickString(req.SourceEndpoint, c.storage.Endpoint)
+	sourceAccessKey := pickString(req.SourceAccessKey, c.storage.AccessKey)
+	sourceSecretKey := pickString(req.SourceSecretKey, c.storage.SecretKey)
+	sourceRegion := pickString(req.SourceRegion, c.storage.Region)
+	sourceUseSSL := pickBool(req.SourceUseSSL, c.storage.UseSSL)
+
+	if sourceEndpoint == "" || sourceAccessKey == "" || sourceSecretKey == "" {
+		return "", errors.New("docling source storage config is incomplete")
 	}
 
-	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
+	targetEndpoint := pickString(req.TargetEndpoint, c.storage.Endpoint)
+	targetAccessKey := pickString(req.TargetAccessKey, c.storage.AccessKey)
+	targetSecretKey := pickString(req.TargetSecretKey, c.storage.SecretKey)
+	targetRegion := pickString(req.TargetRegion, c.storage.Region)
+	targetUseSSL := pickBool(req.TargetUseSSL, c.storage.UseSSL)
 
 	requestBody := convertDocumentsRequest{
 		Sources: []s3SourceRequest{
 			{
 				Kind:      "s3",
-				Endpoint:  c.storage.Endpoint,
-				VerifySSL: c.storage.UseSSL,
-				AccessKey: c.storage.AccessKey,
-				SecretKey: c.storage.SecretKey,
+				Endpoint:  sourceEndpoint,
+				VerifySSL: sourceUseSSL,
+				AccessKey: sourceAccessKey,
+				SecretKey: sourceSecretKey,
 				Bucket:    req.SourceBucket,
 				KeyPrefix: strings.TrimPrefix(req.SourceObjectKey, "/"),
-				Region:    c.storage.Region,
+				Region:    sourceRegion,
 			},
 		},
 		Options: c.buildDoclingOptions(contentType, fileExt),
@@ -785,13 +812,13 @@ func (c *DoclingConverter) submitSourceAsync(
 	if req.TargetBucket != "" {
 		requestBody.Target = &s3TargetRequest{
 			Kind:      "s3",
-			Endpoint:  c.storage.Endpoint,
-			VerifySSL: c.storage.UseSSL,
-			AccessKey: c.storage.AccessKey,
-			SecretKey: c.storage.SecretKey,
+			Endpoint:  targetEndpoint,
+			VerifySSL: targetUseSSL,
+			AccessKey: targetAccessKey,
+			SecretKey: targetSecretKey,
 			Bucket:    req.TargetBucket,
 			KeyPrefix: strings.TrimPrefix(req.TargetObjectKey, "/"),
-			Region:    c.storage.Region,
+			Region:    targetRegion,
 		}
 	}
 
