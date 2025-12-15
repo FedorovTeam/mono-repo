@@ -86,6 +86,10 @@ func (f *fakeQueueRepository) MarkDoclingWaiting(context.Context, uuid.UUID, str
 	return nil
 }
 
+func (f *fakeQueueRepository) RequeueDoclingWaiting(context.Context, uuid.UUID) error {
+	return nil
+}
+
 func (f *fakeQueueRepository) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
 	return 0, 0, nil
 }

@@ -312,6 +312,26 @@ WHERE id = $1`
 	return nil
 }
 
+func (r *PostgresQueueRepository) RequeueDoclingWaiting(ctx context.Context, id uuid.UUID) error {
+	const query = `
+UPDATE transformations_queue
+SET status = 'pending',
+    retry_count = retry_count + 1,
+    started_at = NULL,
+    finished_at = NULL,
+    error = NULL,
+    docling_job_id = NULL,
+    docling_poll_count = 0,
+    next_poll_at = NULL
+WHERE id = $1 AND status = 'waiting_docling'`
+
+	if _, err := r.pool.Exec(ctx, query, id); err != nil {
+		return fmt.Errorf("requeue docling waiting: %w", err)
+	}
+
+	return nil
+}
+
 func (r *PostgresQueueRepository) ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {

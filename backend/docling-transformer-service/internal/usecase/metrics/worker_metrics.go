@@ -20,6 +20,7 @@ type WorkerMetrics struct {
 	failedRetry      metric.Int64Counter
 	failedExhausted  metric.Int64Counter
 	acquiredCounter  metric.Int64Counter
+	doclingRequeued  metric.Int64Counter
 	completedCounter metric.Int64Counter
 	failedCounter    metric.Int64Counter
 	durationHist     metric.Float64Histogram
@@ -72,6 +73,10 @@ func NewWorkerMetrics(logger *zap.Logger) *WorkerMetrics {
 	m.failedExhausted, err = meter.Int64Counter("docling_transformer_tasks_failed_exhausted")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create failed exhausted counter", zap.Error(err))
+	}
+	m.doclingRequeued, err = meter.Int64Counter("docling_transformer_docling_job_requeued")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create docling requeued counter", zap.Error(err))
 	}
 	m.acquiredCounter, err = meter.Int64Counter("docling_transformer_tasks_acquired")
 	if err != nil && logger != nil {
@@ -240,4 +245,12 @@ func (m *WorkerMetrics) RecordFailedRetries(ctx context.Context, retried, exhaus
 	if exhausted > 0 && m.failedExhausted != nil {
 		m.failedExhausted.Add(ctx, int64(exhausted))
 	}
+}
+
+func (m *WorkerMetrics) RecordDoclingRequeued(ctx context.Context) {
+	if m == nil || m.doclingRequeued == nil {
+		return
+	}
+
+	m.doclingRequeued.Add(ctx, 1)
 }

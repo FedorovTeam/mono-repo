@@ -19,6 +19,7 @@ import (
 	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/usecase/metrics"
+	"go.uber.org/zap"
 )
 
 type pollingRepoStub struct {
@@ -27,6 +28,8 @@ type pollingRepoStub struct {
 	markDoneCalls       int
 	cleanupCalls        int
 	lastWaitingNextPoll time.Time
+	requeueCalls        int
+	lastRequeueID       uuid.UUID
 }
 
 var _ repo.QueueRepository = (*pollingRepoStub)(nil)
@@ -58,6 +61,11 @@ func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, 
 func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UUID, jobID string, pollCount int, nextPoll time.Time) error {
 	p.markWaitingCalls++
 	p.lastWaitingNextPoll = nextPoll
+	return nil
+}
+func (p *pollingRepoStub) RequeueDoclingWaiting(_ context.Context, id uuid.UUID) error {
+	p.requeueCalls++
+	p.lastRequeueID = id
 	return nil
 }
 func (p *pollingRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
@@ -132,6 +140,59 @@ func TestConversionExecutorReschedulesAfterTemporarySubmitError(t *testing.T) {
 
 	if task.NextPollAt == nil {
 		t.Fatalf("expected next poll to be scheduled")
+	}
+}
+
+func TestConversionExecutorRestartsAfterDoclingRequeue(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := &restartingConverter{submitOnlyConverter: submitOnlyConverter{jobID: "job-new"}}
+	workerMetrics := metrics.NewWorkerMetrics(zap.NewNop())
+	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{MaxAttempts: 1, InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, workerMetrics, zap.NewNop(), ConversionExecutorConfig{
+		MarkdownBucket: "md",
+		UseSourceAsync: true,
+	})
+
+	task := &transformations.TransformationTask{
+		ID:                uuid.New(),
+		Status:            transformations.StatusProcessing,
+		DoclingJobID:      "old-job",
+		DoclingPollCount:  1,
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file.docx",
+		SourceBucket:      "orig",
+		SourceObjectKey:   "path/file.docx",
+	}
+
+	state, err := executor.ProcessTask(context.Background(), task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != StateWaitingDocling {
+		t.Fatalf("expected waiting state after requeue, got %s", state)
+	}
+	if repoStub.requeueCalls != 1 {
+		t.Fatalf("expected single requeue call, got %d", repoStub.requeueCalls)
+	}
+
+	task.Status = transformations.StatusPending
+
+	state, err = executor.ProcessTask(context.Background(), task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != StateWaitingDocling {
+		t.Fatalf("expected waiting state after resubmit, got %s", state)
+	}
+	if task.DoclingJobID != "job-new" {
+		t.Fatalf("expected new docling job id, got %s", task.DoclingJobID)
+	}
+	if storage.downloadCalls != 0 {
+		t.Fatalf("expected no downloads on resubmit, got %d", storage.downloadCalls)
+	}
+	if conv.lastRequest.SourceBucket != "orig" || conv.lastRequest.SourceObjectKey != "path/file.docx" {
+		t.Fatalf("expected source bucket preserved, got %s/%s", conv.lastRequest.SourceBucket, conv.lastRequest.SourceObjectKey)
 	}
 }
 
@@ -424,6 +485,14 @@ func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertReques
 func (c *submitOnlyConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	c.checkCalled = true
 	return domain.StatusCheckResult{}, errors.New("status should not be called")
+}
+
+type restartingConverter struct {
+	submitOnlyConverter
+}
+
+func (c *restartingConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+	return domain.StatusCheckResult{}, temporaryStatusError{}
 }
 
 type queueProcessorStub struct {
