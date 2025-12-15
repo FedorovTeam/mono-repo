@@ -47,7 +47,7 @@ func TestValidateFailsOnMissingFields(t *testing.T) {
 	}
 }
 
-func TestValidateAllowsSourceAsyncWithRequestCredentials(t *testing.T) {
+func TestValidateFailsWithoutSourceAsyncStorage(t *testing.T) {
 	cfg := Config{
 		Service: ServiceConfig{
 			Name:              "docling-transformer",
@@ -77,8 +77,8 @@ func TestValidateAllowsSourceAsyncWithRequestCredentials(t *testing.T) {
 		Postgres: PostgresConfig{DSN: "postgres://user:pass@localhost:5432/db"},
 	}
 
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("unexpected validation error: %v", err)
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for missing docling.storage in source_async mode")
 	}
 }
 

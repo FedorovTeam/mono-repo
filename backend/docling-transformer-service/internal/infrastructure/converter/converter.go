@@ -132,40 +132,34 @@ type StorageConfig struct {
 	UseSSL    bool
 }
 
-func pickString(override, fallback string) string {
-	if override != "" {
-		return override
+func (c *DoclingConverter) resolveSourceStorage(req domain.ConvertRequest) (storageSettings, error) {
+	if req.SourceBucket == "" || req.SourceObjectKey == "" {
+		return storageSettings{}, errors.New("source bucket/object key is required for source_async mode")
 	}
 
-	return fallback
+	return c.storageFromConfig()
 }
 
-func pickBool(override *bool, fallback bool) bool {
-	if override != nil {
-		return *override
+func (c *DoclingConverter) resolveTargetStorage(req domain.ConvertRequest) (storageSettings, error) {
+	if req.TargetBucket == "" && req.TargetObjectKey == "" {
+		return storageSettings{}, nil
 	}
 
-	return fallback
+	return c.storageFromConfig()
 }
 
-func (c *DoclingConverter) resolveSourceStorage() storageSettings {
+func (c *DoclingConverter) storageFromConfig() (storageSettings, error) {
+	if c.storage.Endpoint == "" || c.storage.AccessKey == "" || c.storage.SecretKey == "" {
+		return storageSettings{}, errors.New("docling storage config is incomplete")
+	}
+
 	return storageSettings{
 		Endpoint:  c.storage.Endpoint,
 		AccessKey: c.storage.AccessKey,
 		SecretKey: c.storage.SecretKey,
 		Region:    c.storage.Region,
 		UseSSL:    c.storage.UseSSL,
-	}
-}
-
-func (c *DoclingConverter) resolveTargetStorage() storageSettings {
-	return storageSettings{
-		Endpoint:  c.storage.Endpoint,
-		AccessKey: c.storage.AccessKey,
-		SecretKey: c.storage.SecretKey,
-		Region:    c.storage.Region,
-		UseSSL:    c.storage.UseSSL,
-	}
+	}, nil
 }
 
 func normalizeStatus(status string) string {
@@ -800,18 +794,16 @@ func (c *DoclingConverter) submitSourceAsync(
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
 ) (string, error) {
-	if req.SourceBucket == "" || req.SourceObjectKey == "" {
-		return "", errors.New("source bucket/object key is required for source_async mode")
-	}
-
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
-	sourceStorage := c.resolveSourceStorage()
-
-	if sourceStorage.Endpoint == "" || sourceStorage.AccessKey == "" || sourceStorage.SecretKey == "" {
-		return "", errors.New("docling source storage config is incomplete")
+	sourceStorage, err := c.resolveSourceStorage(req)
+	if err != nil {
+		return "", err
 	}
 
-	targetStorage := c.resolveTargetStorage()
+	targetStorage, err := c.resolveTargetStorage(req)
+	if err != nil {
+		return "", err
+	}
 
 	requestBody := convertDocumentsRequest{
 		Sources: []s3SourceRequest{
