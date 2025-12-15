@@ -67,6 +67,7 @@ type QueueRepository interface {
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
 	MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPollAt time.Time) error
+	RequeueDoclingWaiting(ctx context.Context, id uuid.UUID) error
 	ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error)
 	RestoreProcessing(ctx context.Context) (int, error)
 	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error)
