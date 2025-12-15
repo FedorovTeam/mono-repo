@@ -278,6 +278,12 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 	if delay < 2*time.Second || delay > 4*time.Second {
 		t.Fatalf("expected retry_after to be respected, got delay=%s", delay)
 	}
+	if doc.Status != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document status to stay converted, got %s", doc.Status)
+	}
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected no document status updates, got %v", repo.statusUpdates)
+	}
 }
 
 func TestRecoveredJobPickedByStageWorker(t *testing.T) {
@@ -385,7 +391,7 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	}
 }
 
-func TestHandleConvertMarksFailedStatus(t *testing.T) {
+func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-failed-status",
 		Name:              "Doc",
@@ -428,11 +434,11 @@ func TestHandleConvertMarksFailedStatus(t *testing.T) {
 	if repo.lastPayload == nil || repo.lastPayload["last_error"] == nil {
 		t.Fatalf("expected last_error to be stored in payload, got %v", repo.lastPayload)
 	}
-	if doc.Status != domain.DocumentStatusFailed {
-		t.Fatalf("expected document to be marked failed, got %s", doc.Status)
+	if doc.Status != domain.DocumentStatusStoredOriginal {
+		t.Fatalf("expected document status to remain unchanged, got %s", doc.Status)
 	}
-	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusFailed {
-		t.Fatalf("expected failed status update to be recorded, got %v", repo.statusUpdates)
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected no document status updates, got %v", repo.statusUpdates)
 	}
 }
 
