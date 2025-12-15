@@ -37,6 +37,7 @@ sequenceDiagram
         alt задача уже ждёт Docling (docling_job_id задан)
             WK->>DL: GET /v1/status/poll/{job_id} (X-Correlation-Id)
             alt статус готов
+                WK->>DL: GET /v1/result/{job_id}
                 WK->>MN: PUT markdown_object_key в markdown_bucket c media_type
                 WK->>PG: UPDATE status=done, finished_at, markdown_* fields
             else статус pending / временная ошибка
@@ -65,11 +66,12 @@ sequenceDiagram
 sequenceDiagram
     participant CL as Client/gRPC caller
     participant TR as Transformer gRPC
+    participant SRC as HTTP Source (docx_url)
     participant DL as Docling HTTP
 
     CL->>TR: ConvertDocxToMarkdown(docx_content|docx_url, filename?) + x-correlation-id
     alt указан docx_url
-        TR->>DL: GET docx_url (timeout 30s)
+        TR->>SRC: GET docx_url (timeout 30s)
         TR-->>TR: filename из URL, запасной document.docx
     else бинарное содержимое
         TR-->>TR: filename из запроса или document.docx
@@ -79,6 +81,7 @@ sequenceDiagram
     loop pollUntilReady (poll_attempts, poll_interval<=pollMaxInterval)
         TR->>DL: GET /v1/status/poll/{job_id}
         alt результат готов
+            TR->>DL: GET /v1/result/{job_id}
             TR-->>CL: markdown + media_type + charset
         else
             TR-->>TR: ожидание c ростом интервала
