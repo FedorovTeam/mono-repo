@@ -16,6 +16,7 @@ sequenceDiagram
     Gateway->>Gateway: сгенерировать documentId (UUID)
     Gateway->>StorageService: GenerateUploadURL(DocumentId, FileName, ContentLength, CorrelationId, ExpiresInSeconds, gRPC meta: X-Correlation-ID + X-API-Key)
     StorageService-->>Gateway: uploadUrl + upload bucket/objectKey + markdown bucket/objectKey
+    Gateway->>Gateway: validateUploadURL убеждается, что bucket/objectKey/markdownBucket/markdownObjectKey не пустые
     Gateway->>DocumentService: CreateDocument(id, fileName, repository, branch, path, contentLength, upload bucket/objectKey, markdown bucket/objectKey, correlation-id; repositoryOwner не передается; gRPC meta: X-Correlation-ID + X-API-Key)
     DocumentService-->>Gateway: документ (id/status/jobId)
     Gateway-->>Client: uploadUrl + uploadMethod=PUT + документ{id,status,jobId}
