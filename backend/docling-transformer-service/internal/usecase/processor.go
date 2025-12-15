@@ -1,9 +1,9 @@
 package usecase
 
 import (
-"context"
-"sync"
-"time"
+	"context"
+	"sync"
+	"time"
 
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
@@ -30,6 +30,7 @@ type Config struct {
 	DoclingBackoffFactor   float64
 	DoclingMaxAttempts     int
 	DoclingMaxLifetime     time.Duration
+	UseSourceAsync         bool
 }
 
 type Processor struct {
@@ -57,6 +58,7 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 	executor := NewConversionExecutor(repository, conv, storage, poller, workerMetrics, logger, ConversionExecutorConfig{
 		MarkdownBucket:       normalized.MarkdownBucket,
 		FastOperationTimeout: normalized.FastOperationTimeout,
+		UseSourceAsync:       normalized.UseSourceAsync,
 	})
 
 	queueWorker := NewQueueWorker(repository, executor, workerMetrics, logger, QueueWorkerConfig{

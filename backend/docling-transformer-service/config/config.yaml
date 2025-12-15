@@ -23,6 +23,7 @@ postgres:
 docling:
   endpoint: https://docling.tech.fedorov-team.tech
   api_key: ""
+  mode: upload_file
   default_language: ru
   pdf_default_language: ru
   pdf_enable_ocr: true
@@ -31,6 +32,13 @@ docling:
   status_max_interval: 2m
   status_max_attempts: 0
   max_job_lifetime: 2h
+  storage:
+    endpoint: api.minio.tech.fedorov-team.tech
+    access_key: "xUCM3lvYME7MrYTwegSA"
+    secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
+    bucket: knowledge-md
+    region: us-east-1
+    use_ssl: true
 
 minio:
   endpoint: api.minio.tech.fedorov-team.tech

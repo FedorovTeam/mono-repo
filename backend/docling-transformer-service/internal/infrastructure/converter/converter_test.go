@@ -148,6 +148,101 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 	}
 }
 
+func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
+	var submitCalls, statusCalls int32
+	var receivedRequest convertDocumentsRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSourceSubmitPath:
+			atomic.AddInt32(&submitCalls, 1)
+			if r.Header.Get(apiKeyHeader) != "token" {
+				t.Fatalf("unexpected api key: %s", r.Header.Get(apiKeyHeader))
+			}
+			if r.Header.Get(correlationIDHeader) == "" {
+				t.Fatalf("expected correlation header")
+			}
+
+			if err := json.NewDecoder(r.Body).Decode(&receivedRequest); err != nil {
+				t.Fatalf("failed to decode submit body: %v", err)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "s3-task"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			atomic.AddInt32(&statusCalls, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{TaskID: path.Base(r.URL.Path), TaskStatus: "success"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{Status: "success", Document: exportDocumentResponse{MdContent: ptr("# ok")}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{
+		Endpoint:           server.URL,
+		APIKey:             "token",
+		DefaultLanguage:    "ru",
+		PDFDefaultLanguage: "ru",
+		PDFEnableOCR:       true,
+		Mode:               "source_async",
+		Storage: StorageConfig{
+			Endpoint:  "minio:9000",
+			AccessKey: "acc",
+			SecretKey: "sec",
+			Bucket:    "bucket",
+			Region:    "us-east-1",
+			UseSSL:    true,
+		},
+	}, zap.NewNop())
+
+	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "corr-source")
+	jobID, err := conv.Submit(ctx, domain.ConvertRequest{
+		FileName:        "source.pdf",
+		ContentType:     "application/pdf",
+		SourceBucket:    "src-bucket",
+		SourceObjectKey: "path/to/file.pdf",
+		TargetBucket:    "md-bucket",
+		TargetObjectKey: "path/to/result.md",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	status, err := conv.CheckStatus(ctx, jobID)
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Result == nil || string(status.Result.Content) != "# ok" {
+		t.Fatalf("unexpected result: %+v", status.Result)
+	}
+
+	if submitCalls != 1 || statusCalls != 1 {
+		t.Fatalf("unexpected call counts: submit=%d status=%d", submitCalls, statusCalls)
+	}
+
+	if len(receivedRequest.Sources) != 1 {
+		t.Fatalf("expected single source, got %+v", receivedRequest.Sources)
+	}
+
+	source := receivedRequest.Sources[0]
+	if source.Kind != "s3" || source.Bucket != "src-bucket" || source.KeyPrefix != "path/to/file.pdf" || !source.VerifySSL {
+		t.Fatalf("unexpected source payload: %+v", source)
+	}
+	if receivedRequest.Target == nil || receivedRequest.Target.Bucket != "md-bucket" || receivedRequest.Target.KeyPrefix != "path/to/result.md" {
+		t.Fatalf("unexpected target payload: %+v", receivedRequest.Target)
+	}
+
+	if receivedRequest.Options.Language != "ru" || receivedRequest.Options.OCR == nil || !*receivedRequest.Options.OCR {
+		t.Fatalf("expected language and ocr options, got %+v", receivedRequest.Options)
+	}
+}
+
 func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 	var submitAttempts int32
 
@@ -468,6 +563,56 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 
 	if receivedOCRField != "true" {
 		t.Fatalf("expected ocr form field, got %s", receivedOCRField)
+	}
+}
+
+func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSourceSubmitPath:
+			if atomic.AddInt32(&attempts, 1) == 1 {
+				http.Error(w, "unavailable", http.StatusBadGateway)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "retry-task"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{TaskID: "retry-task", TaskStatus: "success"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{Status: "success", Document: exportDocumentResponse{MdContent: ptr("res")}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{
+		Endpoint: server.URL,
+		Mode:     "source_async",
+		Storage:  StorageConfig{Endpoint: "minio", AccessKey: "a", SecretKey: "b", Bucket: "bucket"},
+	}, zap.NewNop())
+
+	jobID, err := conv.Submit(context.Background(), domain.ConvertRequest{
+		FileName:        "file.docx",
+		ContentType:     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		SourceBucket:    "bucket",
+		SourceObjectKey: "file.docx",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error after retry: %v", err)
+	}
+
+	if attempts != 2 {
+		t.Fatalf("expected retry, got %d attempts", attempts)
+	}
+
+	if _, err := conv.CheckStatus(context.Background(), jobID); err != nil {
+		t.Fatalf("unexpected status error: %v", err)
 	}
 }
 

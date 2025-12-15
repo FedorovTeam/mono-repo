@@ -102,6 +102,15 @@ func main() {
 		DefaultLanguage:    cfg.Docling.DefaultLanguage,
 		PDFDefaultLanguage: cfg.Docling.PDFDefaultLanguage,
 		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
+		Mode:               cfg.Docling.Mode,
+		Storage: converter.StorageConfig{
+			Endpoint:  cfg.Docling.Storage.Endpoint,
+			AccessKey: cfg.Docling.Storage.AccessKey,
+			SecretKey: cfg.Docling.Storage.SecretKey,
+			Bucket:    cfg.Docling.Storage.Bucket,
+			Region:    cfg.Docling.Storage.Region,
+			UseSSL:    cfg.Docling.Storage.UseSSL,
+		},
 	}, logger)
 
 	statusPolicy := cfg.StatusBackoffPolicy()
@@ -130,6 +139,7 @@ func main() {
 		DoclingBackoffFactor:   cfg.Docling.StatusBackoffFactor,
 		DoclingMaxAttempts:     cfg.Docling.StatusMaxAttempts,
 		DoclingMaxLifetime:     cfg.Docling.MaxJobLifetime,
+		UseSourceAsync:         cfg.Docling.Mode == "source_async",
 	})
 
 	workerDone := make(chan struct{})
