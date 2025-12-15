@@ -2,16 +2,16 @@ service:
   name: docling-transformer-service
   grpc_port: 9090
   max_workers: 1
-  queue_limit: 100
-  processing_timeout: 30s
+  queue_limit: 0
+  processing_timeout: 30m
   io_timeout: 15s
 
 scheduler:
   poll_interval: 5s
-  maintenance_interval: 1m
+  maintenance_interval: 30s
   batch_size: 50
   retry_backoff: 10s
-  max_processing_retries: 3
+  max_processing_retries: 6
   cleanup_retention: 24h
 
 postgres:
