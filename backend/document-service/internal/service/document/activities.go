@@ -9,6 +9,7 @@ import (
 	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -129,6 +130,12 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		latest := latestVersion(doc)
 		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(currentStatus), Version: latest.Version, Ready: true}, nil
 	}
+
+	correlationID := correlationIDFromContext(ctx)
+	if correlationID == "" {
+		correlationID = uuid.NewString()
+		ctx = metadata.AppendToOutgoingContext(ctx, correlationIDHeader, correlationID)
+	}
 	resp, err := a.transformer.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
 		DocumentId:        input.DocumentID,
 		OriginalBucket:    input.OriginalBucket,
@@ -136,6 +143,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		MarkdownBucket:    input.MarkdownBucket,
 		MarkdownObjectKey: input.MarkdownObjectKey,
 		WaitForResult:     false,
+		CorrelationId:     correlationID,
 	})
 	if err != nil {
 		return convertResult{}, err

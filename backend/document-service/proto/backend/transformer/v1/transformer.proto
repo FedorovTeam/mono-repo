@@ -17,6 +17,7 @@ message ConvertDocumentToMarkdownRequest {
   string markdown_object_key = 5;
   string filename_extension = 6;
   bool wait_for_result = 7;
+  string correlation_id = 8;
 }
 
 message ConvertDocumentToMarkdownResponse {
@@ -24,6 +25,7 @@ message ConvertDocumentToMarkdownResponse {
   string status = 2;
   string markdown_bucket = 3;
   string markdown_object_key = 4;
+  string correlation_id = 5;
 }
 
 message ConvertDocxToMarkdownRequest {
@@ -33,10 +35,12 @@ message ConvertDocxToMarkdownRequest {
     string docx_url = 3;
   }
   string filename = 4;
+  string correlation_id = 5;
 }
 
 message ConvertDocxToMarkdownResponse {
   string markdown = 1;
   string media_type = 2;
   string charset = 3;
+  string correlation_id = 4;
 }
