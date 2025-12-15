@@ -3,9 +3,11 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -16,6 +18,65 @@ import (
 
 type Repository struct {
 	db *sql.DB
+}
+
+func (r *Repository) withTxRetry(ctx context.Context, opts *sql.TxOptions, fn func(tx *sql.Tx) error) error {
+	const maxAttempts = 3
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		tx, err := r.db.BeginTx(ctx, opts)
+		if err != nil {
+			lastErr = err
+			if r.retryAfterConnectionError(ctx, attempt, maxAttempts, err) {
+				continue
+			}
+			return err
+		}
+
+		if err := fn(tx); err != nil {
+			_ = tx.Rollback()
+			lastErr = err
+			if r.retryAfterConnectionError(ctx, attempt, maxAttempts, err) {
+				continue
+			}
+			return err
+		}
+
+		if err := tx.Commit(); err != nil {
+			_ = tx.Rollback()
+			lastErr = err
+			if r.retryAfterConnectionError(ctx, attempt, maxAttempts, err) {
+				continue
+			}
+			return err
+		}
+
+		return nil
+	}
+
+	return lastErr
+}
+
+func (r *Repository) retryAfterConnectionError(ctx context.Context, attempt, maxAttempts int, err error) bool {
+	if !isConnectionError(err) || attempt+1 >= maxAttempts {
+		return false
+	}
+
+	if pingErr := r.db.PingContext(ctx); pingErr != nil {
+		return false
+	}
+
+	return true
+}
+
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var netErr net.Error
+	return errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone) || errors.As(err, &netErr)
 }
 
 // AddJobEvent добавляет запись о событии фоновой задачи.
@@ -523,12 +584,21 @@ func (r *Repository) RequeueStaleProcessingJobs(ctx context.Context, staleBefore
 		limit = 100
 	}
 
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	var jobs []domain.ProcessingJob
+	err := r.withTxRetry(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(tx *sql.Tx) error {
+		var innerErr error
+		jobs, innerErr = r.requeueStaleProcessingJobsTx(ctx, tx, staleBefore, limit, nextRunAt, reason)
+		return innerErr
+	})
+
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
 
+	return jobs, nil
+}
+
+func (r *Repository) requeueStaleProcessingJobsTx(ctx context.Context, tx *sql.Tx, staleBefore time.Time, limit int, nextRunAt time.Time, reason string) ([]domain.ProcessingJob, error) {
 	rows, err := tx.QueryContext(ctx, `
 SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at
 FROM processing_jobs
@@ -588,10 +658,6 @@ FOR UPDATE SKIP LOCKED
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 

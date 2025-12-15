@@ -2,7 +2,9 @@ package document
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -26,7 +28,7 @@ func TestProcessingReconciler_RetryTemporaryFailures(t *testing.T) {
 	reconciler.sleep = func(context.Context, time.Duration) {}
 	reconciler.now = func() time.Time { return time.Unix(0, 0) }
 
-	reconciler.reconcile(context.Background())
+	reconciler.reconcile(context.Background(), time.Second)
 
 	if repo.calls != len(repo.responses) {
 		t.Fatalf("expected %d calls to repo, got %d", len(repo.responses), repo.calls)
@@ -67,4 +69,70 @@ func (s *processingRepoStub) RequeueStaleProcessingJobs(ctx context.Context, sta
 	}
 
 	return resp.jobs, resp.err
+}
+
+func TestProcessingReconciler_CooldownAfterMaxRetries(t *testing.T) {
+	repo := &flakyProcessingRepo{failTimes: 3}
+
+	reconciler := NewProcessingReconciler(repo, 1, time.Second, 0)
+	reconciler.retryAttempts = 2
+	reconciler.retryBackoff = time.Millisecond
+	reconciler.maxBackoff = time.Millisecond
+	reconciler.random = rand.New(rand.NewSource(1))
+	reconciler.now = func() time.Time { return time.Unix(0, 0) }
+
+	var sleeps []time.Duration
+	reconciler.sleep = func(ctx context.Context, d time.Duration) {
+		sleeps = append(sleeps, d)
+		if len(sleeps) == 3 {
+			repo.recovered = true
+		}
+	}
+
+	reconciler.reconcile(context.Background(), 50*time.Millisecond)
+
+	if repo.calls != 3 {
+		t.Fatalf("expected 3 attempts before cooldown, got %d", repo.calls)
+	}
+
+	if len(sleeps) != 3 {
+		t.Fatalf("expected 3 sleep calls (2 retries + cooldown), got %d", len(sleeps))
+	}
+
+	if sleeps[2] < 50*time.Millisecond {
+		t.Fatalf("expected cooldown to be at least the interval, got %s", sleeps[2])
+	}
+
+	reconciler.reconcile(context.Background(), 50*time.Millisecond)
+
+	if !repo.finished {
+		t.Fatalf("expected reconciler to continue after recovering from bad connection")
+	}
+}
+
+type flakyProcessingRepo struct {
+	failTimes int
+	calls     int
+	recovered bool
+	delivered bool
+	finished  bool
+}
+
+func (f *flakyProcessingRepo) RequeueStaleProcessingJobs(context.Context, time.Time, int, time.Time, string) ([]domain.ProcessingJob, error) {
+	f.calls++
+
+	if !f.recovered {
+		if f.calls <= f.failTimes {
+			return nil, driver.ErrBadConn
+		}
+		return nil, errors.New("connection still down")
+	}
+
+	if !f.delivered {
+		f.delivered = true
+		return []domain.ProcessingJob{{TaskID: "task-1", Stage: domain.JobStageConvertToMarkdown}}, nil
+	}
+
+	f.finished = true
+	return []domain.ProcessingJob{}, nil
 }

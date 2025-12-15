@@ -170,7 +170,7 @@ func TestProcessingReconcilerReturnsStaleJobsToPending(t *testing.T) {
 	reconciler := NewProcessingReconciler(repo, 5, 30*time.Second, 15*time.Second)
 	reconciler.now = func() time.Time { return fixed }
 
-	reconciler.reconcile(context.Background())
+	reconciler.reconcile(context.Background(), time.Minute)
 
 	require.Equal(t, domain.JobStatusPending, repo.jobs[0].Status)
 	require.Equal(t, 2, repo.jobs[0].Attempts)
