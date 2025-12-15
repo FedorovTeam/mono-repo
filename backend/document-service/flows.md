@@ -7,7 +7,7 @@
    - В PostgreSQL создаётся запись с `status=Uploaded`, `workflow_id=document_id`, флагом `create_pr`; версия `1` фиксируется в `document_versions`, в `document_status_logs` добавляется переход в `Uploaded`.
 
 2. **Подтверждение загрузки**
-   - Storage-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после успешного `UploadOriginal`/webhook-а из MinIO.
+   - Gateway-service вызывает `ConfirmUpload(document_id, bucket, object_key)` после успешного `UploadOriginal`/webhook-а из MinIO.
    - Сервис валидирует `document_id`, совпадение бакета и ключа с сохранёнными значениями и проверяет наличие объекта через клиент `storage-service`; без настроенного клиента метод завершится ошибкой. При успехе создаётся задача `processing_jobs` со стадией `store_original` в статусе `pending`; статус документа остаётся `Uploaded`, ошибка постановки задачи переводит его в `Failed`.
    - Периодический cron-воркер `UploadReconciler` опрашивает таблицу `documents` в статусе `Uploaded`, учитывает минимальный возраст записи и повторно вызывает `ConfirmUpload`, используя сохранённые bucket/object_key; записи без bucket/object_key пропускаются.
 
