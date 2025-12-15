@@ -194,11 +194,8 @@ func (c *Config) Validate() error {
 	}
 	if mode == "source_async" {
 		storage := c.Docling.Storage
-		storageConfigured := storage.Endpoint != "" || storage.AccessKey != "" || storage.SecretKey != "" || storage.Bucket != ""
-		storageComplete := storage.Endpoint != "" && storage.AccessKey != "" && storage.SecretKey != "" && storage.Bucket != ""
-
-		if storageConfigured && !storageComplete {
-			return fmt.Errorf("docling.storage configuration is incomplete for source_async mode")
+		if storage.Endpoint == "" || storage.AccessKey == "" || storage.SecretKey == "" || storage.Bucket == "" {
+			return fmt.Errorf("docling.storage configuration is required for source_async mode")
 		}
 	}
 
