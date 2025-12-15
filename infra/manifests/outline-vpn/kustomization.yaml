@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: outline
+
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - configmap-shadowbox.yaml
+  - secret-shadowbox-tls.yaml
+  - deployment.yaml
+  - service-api.yaml
+  - service-keys.yaml
+  - ingress-api.yaml

@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shadowbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shadowbox
+  template:
+    metadata:
+      labels:
+        app: shadowbox
+    spec:
+      containers:
+        - name: shadowbox
+          image: quay.io/outline/shadowbox:stable
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SB_STATE_DIR
+              value: /opt/outline/persisted-state
+            - name: SB_API_PORT
+              value: "12000"
+            - name: SB_API_PREFIX
+              value: "cjaorBbzegUKLvKxJhqzug"
+            - name: SB_CERTIFICATE_FILE
+              value: /opt/outline/persisted-state/shadowbox-selfsigned.crt
+            - name: SB_PRIVATE_KEY_FILE
+              value: /opt/outline/persisted-state/shadowbox-selfsigned.key
+            - name: SB_METRICS_URL
+              value: ""
+          ports:
+            - name: api
+              containerPort: 12000
+              protocol: TCP
+            - name: keys-tcp
+              containerPort: 12001
+              protocol: TCP
+            - name: keys-udp
+              containerPort: 12001
+              protocol: UDP
+          volumeMounts:
+            - name: state
+              mountPath: /opt/outline/persisted-state
+
+            # кладём config в persisted-state
+            - name: shadowbox-config
+              mountPath: /opt/outline/persisted-state/shadowbox_server_config.json
+              subPath: shadowbox_server_config.json
+              readOnly: true
+
+            # кладём TLS в persisted-state (файлами с нужными именами)
+            - name: tls
+              mountPath: /opt/outline/persisted-state/shadowbox-selfsigned.crt
+              subPath: tls.crt
+              readOnly: true
+            - name: tls
+              mountPath: /opt/outline/persisted-state/shadowbox-selfsigned.key
+              subPath: tls.key
+              readOnly: true
+
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: shadowbox-state
+        - name: shadowbox-config
+          configMap:
+            name: shadowbox-config
+        - name: tls
+          secret:
+            secretName: shadowbox-tls

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shadowbox-config
+data:
+  shadowbox_server_config.json: |
+    {
+      "hostname": "vpn.example.com",
+      "portForNewAccessKeys": 12001
+    }
