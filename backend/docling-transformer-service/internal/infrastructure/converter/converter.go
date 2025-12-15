@@ -25,7 +25,8 @@ import (
 
 const (
 	// Async конвертация файла
-	doclingSubmitPath = "/v1/convert/file/async"
+	doclingSubmitPath       = "/v1/convert/file/async"
+	doclingSourceSubmitPath = "/v1/convert/source/async"
 	// Поллинг статуса задачи
 	doclingStatusPath = "/v1/status/poll/"
 	// Получение результата задачи
@@ -43,6 +44,9 @@ const (
 	submitRetryInitialWait = 500 * time.Millisecond
 	submitRetryBackoff     = 2.0
 	submitRetryMaxWait     = 5 * time.Second
+
+	doclingModeUploadFile  = "upload_file"
+	doclingModeSourceAsync = "source_async"
 
 	maxResponseSnippetLen = 1024
 )
@@ -114,6 +118,18 @@ type Config struct {
 	DefaultLanguage    string
 	PDFDefaultLanguage string
 	PDFEnableOCR       bool
+	Mode               string
+	Storage            StorageConfig
+}
+
+// StorageConfig описывает настройки доступа Docling к MinIO/S3.
+type StorageConfig struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	Bucket    string
+	Region    string
+	UseSSL    bool
 }
 
 func normalizeStatus(status string) string {
@@ -168,6 +184,49 @@ type doclingSubmitResponse struct {
 	TaskID string `json:"task_id"`
 }
 
+type convertDocumentsRequest struct {
+	Sources []s3SourceRequest `json:"sources"`
+	Target  *s3TargetRequest  `json:"target,omitempty"`
+	Options doclingOptions    `json:"options,omitempty"`
+}
+
+type s3SourceRequest struct {
+	Kind      string `json:"kind"`
+	Endpoint  string `json:"endpoint"`
+	VerifySSL bool   `json:"verify_ssl"`
+	AccessKey string `json:"access_key"`
+	SecretKey string `json:"secret_key"`
+	Bucket    string `json:"bucket"`
+	KeyPrefix string `json:"key_prefix"`
+	Region    string `json:"region,omitempty"`
+}
+
+type s3TargetRequest struct {
+	Kind      string `json:"kind"`
+	Endpoint  string `json:"endpoint"`
+	VerifySSL bool   `json:"verify_ssl"`
+	AccessKey string `json:"access_key"`
+	SecretKey string `json:"secret_key"`
+	Bucket    string `json:"bucket"`
+	KeyPrefix string `json:"key_prefix"`
+	Region    string `json:"region,omitempty"`
+}
+
+type doclingOptions struct {
+	ToFormats         []string `json:"to_formats,omitempty"`
+	FromFormats       []string `json:"from_formats,omitempty"`
+	Language          string   `json:"language,omitempty"`
+	OCR               *bool    `json:"ocr,omitempty"`
+	DoOCR             *bool    `json:"do_ocr,omitempty"`
+	OCREngine         string   `json:"ocr_engine,omitempty"`
+	OCRLang           string   `json:"ocr_lang,omitempty"`
+	PDFBackend        string   `json:"pdf_backend,omitempty"`
+	TableMode         string   `json:"table_mode,omitempty"`
+	TableCellMatching *bool    `json:"table_cell_matching,omitempty"`
+	ImageExportMode   string   `json:"image_export_mode,omitempty"`
+	Pipeline          string   `json:"pipeline,omitempty"`
+}
+
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
 type DoclingConverter struct {
 	endpoint           string
@@ -175,6 +234,8 @@ type DoclingConverter struct {
 	defaultLanguage    string
 	pdfDefaultLanguage string
 	pdfEnableOCR       bool
+	mode               string
+	storage            StorageConfig
 	client             *http.Client
 	logger             *zap.Logger
 }
@@ -185,12 +246,24 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		logger = zap.NewNop()
 	}
 
+	mode := strings.TrimSpace(cfg.Mode)
+	if mode == "" {
+		mode = doclingModeUploadFile
+	}
+
+	storage := cfg.Storage
+	if storage.Bucket == "" {
+		storage.Bucket = cfg.Storage.Bucket
+	}
+
 	return &DoclingConverter{
 		endpoint:           strings.TrimRight(cfg.Endpoint, "/"),
 		apiKey:             cfg.APIKey,
 		defaultLanguage:    cfg.DefaultLanguage,
 		pdfDefaultLanguage: cfg.PDFDefaultLanguage,
 		pdfEnableOCR:       cfg.PDFEnableOCR,
+		mode:               mode,
+		storage:            storage,
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -238,10 +311,6 @@ func (c *DoclingConverter) selectLanguage(contentType string) string {
 
 // Submit отправляет документ в Docling и возвращает идентификатор задачи.
 func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest) (string, error) {
-	if len(req.Content) == 0 {
-		return "", errors.New("empty document")
-	}
-
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
 	contentType, fileExt, err := resolveContentTypeAndExt(req.ContentType, req.FileName)
@@ -254,19 +323,40 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 		filename = fmt.Sprintf("document.%s", fileExt)
 	}
 
-	jobID, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content)
-	if err != nil {
-		return "", err
+	switch c.mode {
+	case doclingModeSourceAsync:
+		jobID, err := c.submitSourceAsyncWithRetry(ctx, correlationID, filename, contentType, fileExt, req)
+		if err != nil {
+			return "", err
+		}
+
+		c.logger.Info("docling submit accepted",
+			zap.String("job_id", jobID),
+			zap.String("correlation_id", correlationID),
+			zap.String("content_type", contentType),
+			zap.String("file_ext", fileExt),
+		)
+
+		return jobID, nil
+	default:
+		if len(req.Content) == 0 {
+			return "", errors.New("empty document")
+		}
+
+		jobID, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content)
+		if err != nil {
+			return "", err
+		}
+
+		c.logger.Info("docling submit accepted",
+			zap.String("job_id", jobID),
+			zap.String("correlation_id", correlationID),
+			zap.String("content_type", contentType),
+			zap.String("file_ext", fileExt),
+		)
+
+		return jobID, nil
 	}
-
-	c.logger.Info("docling submit accepted",
-		zap.String("job_id", jobID),
-		zap.String("correlation_id", correlationID),
-		zap.String("content_type", contentType),
-		zap.String("file_ext", fileExt),
-	)
-
-	return jobID, nil
 }
 
 // CheckStatus делает одиночный запрос статуса Docling и возвращает результат при готовности.
@@ -411,6 +501,51 @@ func (c *DoclingConverter) submitWithRetry(
 	return "", lastErr
 }
 
+func (c *DoclingConverter) submitSourceAsyncWithRetry(
+	ctx context.Context,
+	correlationID, filename, contentType, fileExt string,
+	req domain.ConvertRequest,
+) (string, error) {
+	var lastErr error
+
+	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
+		jobID, err := c.submitSourceAsync(ctx, correlationID, filename, contentType, fileExt, req)
+		if err == nil {
+			return jobID, nil
+		}
+
+		lastErr = err
+		isTemporary, statusCode := isTemporaryDoclingError(err)
+		delay := submitRetryDelay(attempt)
+
+		fields := []zap.Field{
+			zap.String("correlation_id", correlationID),
+			zap.Int("attempt", attempt),
+			zap.Bool("temporary", isTemporary),
+			zap.Int("status_code", statusCode),
+			zap.Error(err),
+		}
+		if attempt < submitRetryAttempts {
+			fields = append(fields, zap.Duration("retry_in", delay))
+			c.logger.Warn("docling submit failed", fields...)
+
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(delay):
+			}
+		} else {
+			c.logger.Error("docling submit failed", fields...)
+		}
+	}
+
+	if isTemporary, _ := isTemporaryDoclingError(lastErr); isTemporary {
+		return "", &domain.TemporarySubmitRetryExhaustedError{Err: lastErr}
+	}
+
+	return "", lastErr
+}
+
 // writeDoclingOptions — формирует form-data поля с опциями Docling Serve.
 func (c *DoclingConverter) writeDoclingOptions(
 	writer *multipart.Writer,
@@ -482,6 +617,34 @@ func (c *DoclingConverter) writeDoclingOptions(
 	}
 
 	return nil
+}
+
+func (c *DoclingConverter) buildDoclingOptions(contentType, fileExt string) doclingOptions {
+	opts := doclingOptions{
+		ToFormats:         []string{"md"},
+		TableMode:         "accurate",
+		TableCellMatching: boolPtr(true),
+		ImageExportMode:   "embedded",
+		Pipeline:          "standard",
+	}
+
+	if fileExt != "" {
+		opts.FromFormats = []string{fileExt}
+	}
+
+	if lang := c.selectLanguage(contentType); lang != "" {
+		opts.Language = lang
+		opts.OCRLang = lang
+	}
+
+	if c.shouldEnableOCR(contentType) {
+		opts.OCR = boolPtr(true)
+		opts.DoOCR = boolPtr(true)
+		opts.PDFBackend = "pypdfium2"
+		opts.OCREngine = "auto"
+	}
+
+	return opts
 }
 
 func (c *DoclingConverter) submit(
@@ -561,6 +724,106 @@ func (c *DoclingConverter) submit(
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
 		return "", fmt.Errorf("read docling submit response: %w", readErr)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		baseErr := fmt.Errorf("docling submit returned status %d: %s", resp.StatusCode, string(body))
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			return "", &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
+		}
+
+		return "", baseErr
+	}
+
+	var submitResp doclingSubmitResponse
+	if err := json.Unmarshal(body, &submitResp); err != nil {
+		return "", fmt.Errorf("unmarshal docling submit response: %w", err)
+	}
+
+	jobID := submitResp.JobID
+	if jobID == "" {
+		jobID = submitResp.TaskID
+	}
+	if jobID == "" {
+		return "", errors.New("docling submit response has empty job_id")
+	}
+
+	return jobID, nil
+}
+
+func (c *DoclingConverter) submitSourceAsync(
+	ctx context.Context,
+	correlationID, filename, contentType, fileExt string,
+	req domain.ConvertRequest,
+) (string, error) {
+	if req.SourceBucket == "" || req.SourceObjectKey == "" {
+		return "", errors.New("source bucket/object key is required for source_async mode")
+	}
+
+	if c.storage.Endpoint == "" || c.storage.AccessKey == "" || c.storage.SecretKey == "" || c.storage.Bucket == "" {
+		return "", errors.New("docling storage config is incomplete")
+	}
+
+	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
+
+	requestBody := convertDocumentsRequest{
+		Sources: []s3SourceRequest{
+			{
+				Kind:      "s3",
+				Endpoint:  c.storage.Endpoint,
+				VerifySSL: c.storage.UseSSL,
+				AccessKey: c.storage.AccessKey,
+				SecretKey: c.storage.SecretKey,
+				Bucket:    req.SourceBucket,
+				KeyPrefix: strings.TrimPrefix(req.SourceObjectKey, "/"),
+				Region:    c.storage.Region,
+			},
+		},
+		Options: c.buildDoclingOptions(contentType, fileExt),
+	}
+
+	if req.TargetBucket != "" {
+		requestBody.Target = &s3TargetRequest{
+			Kind:      "s3",
+			Endpoint:  c.storage.Endpoint,
+			VerifySSL: c.storage.UseSSL,
+			AccessKey: c.storage.AccessKey,
+			SecretKey: c.storage.SecretKey,
+			Bucket:    req.TargetBucket,
+			KeyPrefix: strings.TrimPrefix(req.TargetObjectKey, "/"),
+			Region:    c.storage.Region,
+		}
+	}
+
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal docling source request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("build docling source request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set(correlationIDHeader, correlationID)
+	httpReq.Header.Set(endpointHeader, c.endpoint)
+	if c.apiKey != "" {
+		httpReq.Header.Set(apiKeyHeader, c.apiKey)
+	}
+	if filename != "" {
+		httpReq.Header.Set(sourceFileHeader, filename)
+	}
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("call docling source submit: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return "", fmt.Errorf("read docling source submit response: %w", readErr)
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
@@ -734,4 +997,8 @@ func isTemporaryDoclingError(err error) (bool, int) {
 	}
 
 	return false, 0
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

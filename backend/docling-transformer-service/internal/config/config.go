@@ -50,16 +50,27 @@ type SchedulerConfig struct {
 
 // DoclingConfig описывает URL Docling-конвертера и публичный endpoint для проксирования.
 type DoclingConfig struct {
-	Endpoint              string        `yaml:"endpoint"`
-	APIKey                string        `yaml:"api_key"`
-	DefaultLanguage       string        `yaml:"default_language"`
-	PDFDefaultLanguage    string        `yaml:"pdf_default_language"`
-	PDFEnableOCR          bool          `yaml:"pdf_enable_ocr"`
-	StatusInitialInterval time.Duration `yaml:"status_initial_interval"`
-	StatusBackoffFactor   float64       `yaml:"status_backoff_factor"`
-	StatusMaxInterval     time.Duration `yaml:"status_max_interval"`
-	StatusMaxAttempts     int           `yaml:"status_max_attempts"`
-	MaxJobLifetime        time.Duration `yaml:"max_job_lifetime"`
+	Endpoint              string               `yaml:"endpoint"`
+	APIKey                string               `yaml:"api_key"`
+	DefaultLanguage       string               `yaml:"default_language"`
+	PDFDefaultLanguage    string               `yaml:"pdf_default_language"`
+	PDFEnableOCR          bool                 `yaml:"pdf_enable_ocr"`
+	Mode                  string               `yaml:"mode"`
+	Storage               DoclingStorageConfig `yaml:"storage"`
+	StatusInitialInterval time.Duration        `yaml:"status_initial_interval"`
+	StatusBackoffFactor   float64              `yaml:"status_backoff_factor"`
+	StatusMaxInterval     time.Duration        `yaml:"status_max_interval"`
+	StatusMaxAttempts     int                  `yaml:"status_max_attempts"`
+	MaxJobLifetime        time.Duration        `yaml:"max_job_lifetime"`
+}
+
+type DoclingStorageConfig struct {
+	Endpoint  string `yaml:"endpoint"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+	Bucket    string `yaml:"bucket"`
+	Region    string `yaml:"region"`
+	UseSSL    bool   `yaml:"use_ssl"`
 }
 
 // MinioConfig описывает параметры доступа к MinIO.
@@ -174,6 +185,18 @@ func (c *Config) Validate() error {
 	if c.Docling.Endpoint == "" {
 		return fmt.Errorf("docling.endpoint is required")
 	}
+	mode := c.Docling.Mode
+	if mode == "" {
+		mode = "upload_file"
+	}
+	if mode != "upload_file" && mode != "source_async" {
+		return fmt.Errorf("docling.mode must be either upload_file or source_async")
+	}
+	if mode == "source_async" {
+		if c.Docling.Storage.Endpoint == "" || c.Docling.Storage.AccessKey == "" || c.Docling.Storage.SecretKey == "" || c.Docling.Storage.Bucket == "" {
+			return fmt.Errorf("docling.storage configuration is incomplete for source_async mode")
+		}
+	}
 
 	if err := c.StatusBackoffPolicy().Validate(); err != nil {
 		return fmt.Errorf("docling status backoff: %w", err)
@@ -187,6 +210,37 @@ func (c *Config) applyDefaults() {
 	c.Docling.StatusBackoffFactor = policy.Factor
 	c.Docling.StatusMaxInterval = policy.MaxInterval
 	c.Docling.StatusMaxAttempts = policy.MaxAttempts
+
+	if c.Docling.Mode == "" {
+		c.Docling.Mode = "upload_file"
+	}
+
+	if c.Docling.Storage.Endpoint == "" && c.Docling.Storage.AccessKey == "" && c.Docling.Storage.SecretKey == "" && c.Docling.Storage.Bucket == "" {
+		c.Docling.Storage = DoclingStorageConfig{
+			Endpoint:  c.Minio.Endpoint,
+			AccessKey: c.Minio.AccessKey,
+			SecretKey: c.Minio.SecretKey,
+			Bucket:    c.Minio.Bucket,
+			Region:    c.Minio.Region,
+			UseSSL:    c.Minio.UseSSL,
+		}
+	} else {
+		if c.Docling.Storage.Endpoint == "" {
+			c.Docling.Storage.Endpoint = c.Minio.Endpoint
+		}
+		if c.Docling.Storage.AccessKey == "" {
+			c.Docling.Storage.AccessKey = c.Minio.AccessKey
+		}
+		if c.Docling.Storage.SecretKey == "" {
+			c.Docling.Storage.SecretKey = c.Minio.SecretKey
+		}
+		if c.Docling.Storage.Bucket == "" {
+			c.Docling.Storage.Bucket = c.Minio.Bucket
+		}
+		if c.Docling.Storage.Region == "" {
+			c.Docling.Storage.Region = c.Minio.Region
+		}
+	}
 }
 
 // StatusBackoffPolicy возвращает backoff-политику для опроса статуса Docling

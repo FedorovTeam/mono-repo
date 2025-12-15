@@ -28,6 +28,7 @@ type ConversionExecutorConfig struct {
 	MarkdownBucket       string
 	FastOperationTimeout time.Duration
 	HTTPClient           HTTPClient
+	UseSourceAsync       bool
 }
 
 type ConversionExecutor struct {
@@ -103,6 +104,7 @@ func (e *ConversionExecutor) pollDocling(ctx context.Context, task *transformati
 }
 
 func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transformations.TransformationTask) (TaskState, error) {
+	useSourceAsync := e.cfg.UseSourceAsync && task.SourceURL == ""
 	fileExt := task.FilenameExtension
 	if fileExt == "" {
 		key := task.OriginalObjectKey
@@ -120,12 +122,15 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, err
 	}
 
-	downloadCtx, cancelDownload := e.fastPhaseContext(ctx)
-	defer cancelDownload()
+	var sourceContent []byte
+	if !useSourceAsync {
+		downloadCtx, cancelDownload := e.fastPhaseContext(ctx)
+		defer cancelDownload()
 
-	sourceContent, err := e.downloadSource(downloadCtx, task)
-	if err != nil {
-		return StateProcessing, err
+		sourceContent, err = e.downloadSource(downloadCtx, task)
+		if err != nil {
+			return StateProcessing, err
+		}
 	}
 
 	originalFileName := task.OriginalObjectKey
@@ -140,11 +145,28 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	submitCtx, cancelSubmit := e.fastPhaseContext(ctx)
 	defer cancelSubmit()
 
-	jobID, err := e.conv.Submit(submitCtx, domain.ConvertRequest{
-		FileName:    originalFileName,
-		Content:     sourceContent,
-		ContentType: contentType,
-	})
+	sourceBucket := task.OriginalBucket
+	sourceObjectKey := task.OriginalObjectKey
+	if task.SourceBucket != "" && task.SourceObjectKey != "" {
+		sourceBucket = task.SourceBucket
+		sourceObjectKey = task.SourceObjectKey
+	}
+
+	if useSourceAsync && (sourceBucket == "" || sourceObjectKey == "") {
+		return StateProcessing, fmt.Errorf("source bucket/object key are required for source_async mode")
+	}
+
+	convertReq := domain.ConvertRequest{
+		FileName:        originalFileName,
+		Content:         sourceContent,
+		ContentType:     contentType,
+		SourceBucket:    sourceBucket,
+		SourceObjectKey: sourceObjectKey,
+		TargetBucket:    task.MarkdownBucket,
+		TargetObjectKey: task.MarkdownObjectKey,
+	}
+
+	jobID, err := e.conv.Submit(submitCtx, convertReq)
 	if err != nil {
 		if state, handleErr, handled := e.handleTemporarySubmitError(ctx, task, err); handled {
 			return state, handleErr

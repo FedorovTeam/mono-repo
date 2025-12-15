@@ -3,9 +3,13 @@ package domain
 import "context"
 
 type ConvertRequest struct {
-	FileName    string
-	Content     []byte
-	ContentType string
+	FileName        string
+	Content         []byte
+	ContentType     string
+	SourceBucket    string
+	SourceObjectKey string
+	TargetBucket    string
+	TargetObjectKey string
 }
 
 type ConvertResult struct {
