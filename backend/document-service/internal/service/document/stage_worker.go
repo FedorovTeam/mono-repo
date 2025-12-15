@@ -24,6 +24,7 @@ type StageWorker struct {
 	batchSize  int
 	metrics    *workerMetrics
 	service    *workersvc.WorkerService
+	retryDelay time.Duration
 }
 
 func NewStageWorker(repo Repository, activities *Activities, stage domain.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
@@ -44,6 +45,7 @@ func NewStageWorker(repo Repository, activities *Activities, stage domain.JobSta
 		batchSize:  batchSize,
 		metrics:    newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
 		service:    service,
+		retryDelay: retryDelay,
 	}
 }
 
@@ -123,9 +125,21 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	}
 
 	payload["markdown_object_key"] = result.MarkdownKey
+	if queueID := strings.TrimSpace(result.QueueID); queueID != "" {
+		payload["queue_id"] = queueID
+	}
+	if status := strings.TrimSpace(result.Status); status != "" {
+		payload["status"] = status
+	}
 
 	if !result.Ready {
-		return workersvc.JobResult{Payload: payload}, errors.New("conversion did not finish")
+		next := time.Now().Add(w.retryDelay)
+		return workersvc.JobResult{
+			Payload: payload,
+			NextRun: &next,
+			Status:  domain.JobStatusPending,
+			Event:   &domain.JobEvent{EventType: "postponed", Message: fmt.Sprintf("status=%s", result.Status)},
+		}, nil
 	}
 
 	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {

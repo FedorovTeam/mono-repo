@@ -140,6 +140,39 @@ func TestWorkerServiceFailsJob(t *testing.T) {
 	}
 }
 
+func TestWorkerServicePostponesJob(t *testing.T) {
+	repo := &fakeJobRepo{jobs: []domain.ProcessingJob{{TaskID: "task-3", Stage: domain.JobStageConvertToMarkdown}}}
+	retryAt := time.Date(2024, 2, 2, 15, 0, 0, 0, time.UTC)
+
+	svc := NewWorkerService(repo, repo, time.Minute)
+	svc.SetClock(func() time.Time { return retryAt })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go svc.Run(ctx, domain.JobStageConvertToMarkdown, time.Hour, 5, func(_ context.Context, job domain.ProcessingJob) (JobResult, error) {
+		next := retryAt.Add(30 * time.Second)
+		return JobResult{Payload: map[string]any{"queue_id": "queue-1"}, NextRun: &next, Status: domain.JobStatusPending}, nil
+	}, nil)
+
+	waitForUpdates(t, repo, 1)
+	cancel()
+
+	upd := repo.updates[0]
+	if upd.status != domain.JobStatusPending {
+		t.Fatalf("expected pending status, got %s", upd.status)
+	}
+	if upd.nextRun == nil || !upd.nextRun.Equal(retryAt.Add(30*time.Second)) {
+		t.Fatalf("unexpected next run: %v", upd.nextRun)
+	}
+	if upd.payload["queue_id"] != "queue-1" {
+		t.Fatalf("payload not merged: %v", upd.payload)
+	}
+	if len(repo.events) == 0 || repo.events[0].EventType != "postponed" || repo.events[0].Status != domain.JobStatusPending {
+		t.Fatalf("postpone event not recorded: %+v", repo.events)
+	}
+}
+
 func waitForUpdates(t *testing.T, repo *fakeJobRepo, expected int) {
 	t.Helper()
 	deadline := time.After(time.Second)

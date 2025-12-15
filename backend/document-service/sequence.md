@@ -47,13 +47,15 @@ sequenceDiagram
         F->>R: UPDATE processing_jobs status=failed {handled}
     end
 
-    Note over SW,TR: StageWorker(convert_to_markdown) вызывает transformer-service c WaitForResult=true
+    Note over SW,TR: StageWorker(convert_to_markdown) вызывает transformer-service c WaitForResult=false
     SW->>TR: ConvertDocumentToMarkdown(bucket/object_key + markdown_bucket, markdown_object_key, correlation-id?)
-    TR-->>SW: markdown_object_key?, queue_id, status
-    alt Готово и markdown_object_key не пустой
+    TR-->>SW: markdown_object_key?, queue_id, status(pending/processing/waiting_docling/done)
+    alt status=done и markdown_object_key не пустой
         SW->>S: Activities.MarkConverted -> UPDATE document status=ConvertedToMarkdown (+markdown_queue_id/object_key, version++)
-        SW-->>R: UPDATE processing_jobs status=completed + job_event
-    else Ошибка/пустой markdown_object_key/конвертация не завершилась
+        SW-->>R: UPDATE processing_jobs status=completed + job_event{queue_id,status}
+    else status=pending/processing/waiting_docling
+        SW-->>R: UPDATE processing_jobs status=pending, next_run_at=now()+retry_delay, payload{queue_id,status,markdown_object_key}
+    else Ошибка/пустой markdown_object_key
         S->>R: UPDATE document status=Failed(reason)
         SW-->>R: UPDATE processing_jobs status=failed, next_run_at=now()+retry_delay, payload.last_error=reason
     end

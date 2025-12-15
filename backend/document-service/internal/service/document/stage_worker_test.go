@@ -6,10 +6,13 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
+	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 )
 
 type publishRepoStub struct {
@@ -159,6 +162,19 @@ type staticPublisher struct {
 func (s *staticPublisher) PublishMarkdown(ctx context.Context, in *githubpublisherv1.PublishMarkdownRequest, opts ...grpc.CallOption) (*githubpublisherv1.PublishMarkdownResponse, error) {
 	s.lastRequest = in
 	return s.resp, nil
+}
+
+type staticTransformer struct {
+	resp *transformerv1.ConvertDocumentToMarkdownResponse
+}
+
+func (s *staticTransformer) ConvertDocumentToMarkdown(ctx context.Context, in *transformerv1.ConvertDocumentToMarkdownRequest, opts ...grpc.CallOption) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
+	_ = in
+	return s.resp, nil
+}
+
+func (*staticTransformer) ConvertDocxToMarkdown(context.Context, *transformerv1.ConvertDocxToMarkdownRequest, ...grpc.CallOption) (*transformerv1.ConvertDocxToMarkdownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not implemented")
 }
 
 func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
@@ -313,6 +329,48 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 		return completed.Status == domain.JobStatusCompleted && doc.Status == domain.DocumentStatusPublishedToGitHub
 	})
 	cancel()
+}
+
+func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
+	now := time.Now()
+	doc := &domain.Document{
+		ID:                "doc-pending",
+		Name:              "Doc",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc.docx",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc.docx", MarkdownObjectKey: "path/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc, now: now}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending"}}
+	activities := NewActivities(repo, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Status != domain.JobStatusPending {
+		t.Fatalf("expected pending status, got %s", result.Status)
+	}
+	if result.NextRun == nil || result.NextRun.Before(now.Add(900*time.Millisecond)) {
+		t.Fatalf("expected postponed next run, got %v", result.NextRun)
+	}
+	if result.Payload["queue_id"] != "queue-1" {
+		t.Fatalf("expected queue_id in payload, got %v", result.Payload)
+	}
+	if result.Payload["status"] != "pending" {
+		t.Fatalf("expected transformer status in payload, got %v", result.Payload)
+	}
 }
 
 func waitUntil(t *testing.T, cond func() bool) {
