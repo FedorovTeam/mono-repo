@@ -65,6 +65,7 @@ type QueueRepository interface {
 	ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error)
 	RestoreProcessing(ctx context.Context) (int, error)
 	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error)
+	RetryFailed(ctx context.Context, olderThan time.Time, maxRetries int) (retried, exhausted int, err error)
 	CleanupFinished(ctx context.Context, retention time.Duration) (int, error)
 	CountByStatus(ctx context.Context) (pending, processing, waitingDocling int, err error)
 }

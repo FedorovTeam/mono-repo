@@ -22,6 +22,8 @@ func TestValidateSuccess(t *testing.T) {
 			RetryBackoff:         time.Second,
 			MaxProcessingRetries: 1,
 			CleanupRetention:     time.Hour,
+			FailedRetryDelay:     time.Minute,
+			MaxFailedRetries:     3,
 		},
 		Docling: DoclingConfig{Endpoint: "http://docling"},
 		Minio: MinioConfig{
