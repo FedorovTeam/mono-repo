@@ -12,4 +12,5 @@ resources:
   - deployment.yaml
   - service-api.yaml
   - service-keys.yaml
-  - ingress-api.yaml
+  - ingressroute-api.yaml
+  - serverstransport.yaml

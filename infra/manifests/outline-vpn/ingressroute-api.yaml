@@ -1,0 +1,17 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: shadowbox-api
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`vpn.tech.fedorov-team.tech`) && PathPrefix(`/cjaorBbzegUKLvKxJhqzug`)
+      kind: Rule
+      services:
+        - name: shadowbox-api
+          port: 12000
+          scheme: https
+          serversTransport: shadowbox-https
+  tls:
+    secretName: shadowbox-tls
