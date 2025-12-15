@@ -16,7 +16,7 @@ kubectl apply -k k8s/outline-vpn
 
 ## 4) Проверка
 Проверить, что запущен outline-ss-server:
-kubectl -n outlin-vpne exec -it deploy/shadowbox -- sh -lc 'ps auxww | egrep "outline-ss-server|main.js"'
+kubectl -n outline-vpn exec -it deploy/shadowbox -- sh -lc 'ps auxww | egrep "outline-ss-server|main.js"'
 
 Проверить API внутри кластера:
 kubectl -n outline-vpn run -it --rm curl --image=curlimages/curl -- \

@@ -1,3 +1,4 @@
+# infra/manifests/outline-vpn/configmap-shadowbox.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:

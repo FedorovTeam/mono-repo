@@ -1,3 +1,4 @@
+# infra/manifests/outline-vpn/namespace.yaml
 apiVersion: v1
 kind: Namespace
 metadata:

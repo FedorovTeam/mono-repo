@@ -1,3 +1,4 @@
+# infra/manifests/outline-vpn/pvc.yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

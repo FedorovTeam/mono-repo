@@ -1,3 +1,4 @@
+# infra/manifests/outline-vpn/service-keys.yaml
 apiVersion: v1
 kind: Service
 metadata:
