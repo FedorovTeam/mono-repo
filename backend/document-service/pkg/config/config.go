@@ -21,10 +21,9 @@ type Config struct {
 		MarkdownBucket string `yaml:"markdown_bucket"`
 	} `yaml:"storage"`
 	Services struct {
-		StorageService         string     `yaml:"storage_service"`
-		TransformerService     string     `yaml:"transformer_service"`
-		GithubPublisherService string     `yaml:"github_publisher_service"`
-		GRPC                   GRPCClient `yaml:"grpc"`
+		StorageService         string `yaml:"storage_service"`
+		TransformerService     string `yaml:"transformer_service"`
+		GithubPublisherService string `yaml:"github_publisher_service"`
 	} `yaml:"services"`
 	Github struct {
 		Owner         string `yaml:"owner"`
@@ -42,26 +41,6 @@ type Config struct {
 	Reconciler    Reconciler    `yaml:"reconciler"`
 	JobFollower   JobFollower   `yaml:"job_follower"`
 	StageWorker   StageWorker   `yaml:"stage_worker"`
-}
-
-type GRPCClient struct {
-	DialTimeout       time.Duration `yaml:"dial_timeout"`
-	MinConnectTimeout time.Duration `yaml:"min_connect_timeout"`
-	Backoff           Backoff       `yaml:"backoff"`
-	Keepalive         Keepalive     `yaml:"keepalive"`
-}
-
-type Backoff struct {
-	BaseDelay  time.Duration `yaml:"base_delay"`
-	Multiplier float64       `yaml:"multiplier"`
-	Jitter     float64       `yaml:"jitter"`
-	MaxDelay   time.Duration `yaml:"max_delay"`
-}
-
-type Keepalive struct {
-	Time                time.Duration `yaml:"time"`
-	Timeout             time.Duration `yaml:"timeout"`
-	PermitWithoutStream bool          `yaml:"permit_without_stream"`
 }
 
 type Observability struct {

@@ -3,11 +3,12 @@ package main
 import (
 	"backend-document-service/internal/infrastructure/postgres"
 	"backend-document-service/pkg/config"
-	"backend-document-service/pkg/grpcdial"
 	"backend-document-service/pkg/observability"
 	"context"
 	"database/sql"
 	"flag"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"os"
 	"os/signal"
@@ -74,7 +75,10 @@ func main() {
 	}
 
 	repo := postgres.New(db)
-	storageConn, err := grpcdial.DialContext(ctx, cfg.Services.StorageService, cfg.Services.GRPC)
+	storageConn, err := grpc.NewClient(
+		cfg.Services.StorageService,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		log.Fatalf("storage client: %v", err)
 	}
@@ -82,13 +86,20 @@ func main() {
 
 	storageClient := storagev1.NewStorageServiceClient(storageConn)
 	storageAdapter := storagestore.New(storageClient)
-	transformerConn, err := grpcdial.DialContext(ctx, cfg.Services.TransformerService, cfg.Services.GRPC)
+
+	transformerConn, err := grpc.NewClient(
+		cfg.Services.TransformerService,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		log.Fatalf("transformer client: %v", err)
 	}
 	defer transformerConn.Close()
 
-	publisherConn, err := grpcdial.DialContext(ctx, cfg.Services.GithubPublisherService, cfg.Services.GRPC)
+	publisherConn, err := grpc.NewClient(
+		cfg.Services.GithubPublisherService,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		log.Fatalf("publisher client: %v", err)
 	}
