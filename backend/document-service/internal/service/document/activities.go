@@ -138,7 +138,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		WaitForResult:     false,
 	})
 	if err != nil {
-		if status.Code(err) != codes.ResourceExhausted {
+		if !isTemporaryGRPCError(err) {
 			_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("convert: %v", err))
 		}
 		return convertResult{}, err
@@ -401,6 +401,16 @@ func correlationIDFromContext(ctx context.Context) string {
 func isTransformerFailureStatus(val string) bool {
 	switch strings.ToLower(strings.TrimSpace(val)) {
 	case "failed", "failure", "error", "errored", strings.ToLower(string(domain.DocumentStatusFailed)):
+		return true
+	default:
+		return false
+	}
+}
+    
+func isTemporaryGRPCError(err error) bool {
+	code := status.Code(err)
+	switch code {
+	case codes.DeadlineExceeded, codes.Unavailable, codes.Internal, codes.Aborted, codes.ResourceExhausted:
 		return true
 	default:
 		return false
