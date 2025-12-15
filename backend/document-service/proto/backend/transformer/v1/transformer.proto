@@ -21,16 +21,8 @@ message ConvertDocumentToMarkdownRequest {
   string source_bucket = 9;
   string source_object_key = 10;
   string source_url = 11;
-  string source_endpoint = 12;
-  string source_access_key = 13;
-  string source_secret_key = 14;
-  optional bool source_use_ssl = 15;
-  string source_region = 16;
-  string target_endpoint = 17;
-  string target_access_key = 18;
-  string target_secret_key = 19;
-  optional bool target_use_ssl = 20;
-  string target_region = 21;
+
+  reserved 12 to 21;
 }
 
 message ConvertDocumentToMarkdownResponse {

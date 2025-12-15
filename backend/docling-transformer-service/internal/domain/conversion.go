@@ -6,25 +6,10 @@ type ConvertRequest struct {
 	FileName        string
 	Content         []byte
 	ContentType     string
-	MinioEndpoint   string
-	MinioAccessKey  string
-	MinioSecretKey  string
-	MinioUseSSL     *bool
-	MinioRegion     string
 	SourceBucket    string
 	SourceObjectKey string
-	SourceEndpoint  string
-	SourceAccessKey string
-	SourceSecretKey string
-	SourceUseSSL    *bool
-	SourceRegion    string
 	TargetBucket    string
 	TargetObjectKey string
-	TargetEndpoint  string
-	TargetAccessKey string
-	TargetSecretKey string
-	TargetUseSSL    *bool
-	TargetRegion    string
 }
 
 type ConvertResult struct {

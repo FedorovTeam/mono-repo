@@ -10,7 +10,7 @@
   - При превышении лимита очереди (`pending`/`processing`/`waiting_docling` >= `service.queue_limit`, если он задан) возвращается `ResourceExhausted`.
 - **Поведение:** если уже есть последняя задача для `document_id` не в статусе `failed`, она возвращается как результат вызова без создания новой записи; выходные bucket/object_key берутся из задачи или из запроса/конфига.
 - **Шаги:**
-  1. Принять gRPC вызов `ConvertDocumentToMarkdown` с обязательными `document_id`, `original_bucket`, `original_object_key`, опциональными `markdown_bucket`, `markdown_object_key`, `filename_extension`, флагом `wait_for_result`; `x-correlation-id` читается из метаданных или генерируется заново.
+1. Принять gRPC вызов `ConvertDocumentToMarkdown` с обязательными `document_id`, `original_bucket`, `original_object_key`, опциональными `markdown_bucket`, `markdown_object_key`, `filename_extension`, флагом `wait_for_result`, а также источником (`source_bucket`/`source_object_key` либо `source_url`) без передачи кредов; `x-correlation-id` читается из метаданных или генерируется заново.
   2. Нормализовать расширение и вычислить `markdown_object_key`, если не передан (замена исходного расширения на `.md`).
   3. Создать запись в таблице `transformations_queue` со статусом `pending`, путём исходника и результата, нормализованным расширением и прокинутым `correlation_id`.
   4. Вернуть `queue_id`, `status` текущей задачи, а также фактические `markdown_bucket` и `markdown_object_key`. При `wait_for_result=true` use case дожидается `done`/`failed` с backoff-политикой `docling.status_*` и возвращает данные существующей задачи, либо `DeadlineExceeded`/`ResultNotReady` при исчерпании попыток.
