@@ -138,18 +138,12 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		WaitForResult:     false,
 	})
 	if err != nil {
-		if !isTemporaryGRPCError(err) {
-			_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("convert: %v", err))
-		}
 		return convertResult{}, err
 	}
 
 	statusVal := strings.TrimSpace(resp.GetStatus())
 	if isTransformerFailureStatus(statusVal) {
 		reason := fmt.Sprintf("transformer returned status %q", statusVal)
-		if failErr := a.fail(ctx, input.DocumentID, reason); failErr != nil {
-			log.Printf("convert: mark failed document %s: %v", input.DocumentID, failErr)
-		}
 		return convertResult{}, status.Error(codes.FailedPrecondition, reason)
 	}
 
@@ -160,7 +154,6 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 
 	if markdownKey == "" {
 		reason := fmt.Sprintf("markdown object key is empty for bucket=%q", input.MarkdownBucket)
-		_ = a.fail(ctx, input.DocumentID, reason)
 		return convertResult{}, status.Error(codes.FailedPrecondition, reason)
 	}
 
@@ -263,7 +256,6 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 
 	if markdownBucket == "" || markdownObjectKey == "" {
 		reason := fmt.Sprintf("markdown content is empty (bucket=%q, object_key=%q)", markdownBucket, markdownObjectKey)
-		_ = a.fail(ctx, input.DocumentID, reason)
 		return nil, status.Error(codes.FailedPrecondition, reason)
 	}
 
@@ -308,10 +300,11 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		if retryAfter := resp.GetRetryAfter(); retryAfter != nil {
 			log.Printf("publish markdown retry hint: document_id=%s correlation_id=%s retry_after=%s", input.DocumentID, correlation, retryAfter.AsDuration())
 		}
-		if err := a.statuses.Fail(ctx, input.DocumentID, reason); err != nil {
-			log.Printf("update status after publish error: %v", err)
+		retryable := resp.GetStatus() == githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE
+		if retryAfter := resp.GetRetryAfter(); retryAfter != nil {
+			retryable = true
 		}
-		if resp.GetStatus() == githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE {
+		if retryable {
 			return resp, fmt.Errorf("temporary github failure: %s", resp.GetErrorMessage())
 		}
 		return resp, fmt.Errorf("permanent github failure: %s", resp.GetErrorMessage())
@@ -348,11 +341,6 @@ func mapPublishErrorCode(code githubpublisherv1.PublishErrorCode) string {
 	default:
 		return publishGithubUnknownReason
 	}
-}
-
-func (a *Activities) fail(ctx context.Context, documentID, reason string) error {
-	_, err := a.repo.UpdateStatus(ctx, documentID, domain.DocumentStatusFailed, reason, reason, nil)
-	return err
 }
 
 func latestVersion(doc *domain.Document) domain.DocumentVersion {
@@ -406,7 +394,7 @@ func isTransformerFailureStatus(val string) bool {
 		return false
 	}
 }
-    
+
 func isTemporaryGRPCError(err error) bool {
 	code := status.Code(err)
 	switch code {

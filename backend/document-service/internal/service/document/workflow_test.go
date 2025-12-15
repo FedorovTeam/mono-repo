@@ -183,11 +183,11 @@ func TestConvertToMarkdownFailsOnTransformerFailureStatus(t *testing.T) {
 		t.Fatal("expected error from transformer failure status")
 	}
 
-	if repo.lastStatus != domain.DocumentStatusFailed {
-		t.Fatalf("expected document to be marked failed, got %s", repo.lastStatus)
+	if repo.lastStatus != "" {
+		t.Fatalf("expected no document status update, got %s", repo.lastStatus)
 	}
-	if repo.lastError == "" {
-		t.Fatal("expected failure reason to be recorded")
+	if repo.doc.Status != domain.DocumentStatusStoredOriginal {
+		t.Fatalf("expected document status to remain stored, got %s", repo.doc.Status)
 	}
 }
 

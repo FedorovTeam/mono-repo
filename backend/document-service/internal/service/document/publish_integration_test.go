@@ -2,7 +2,6 @@ package document
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +48,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 		}
 	})
 
-	t.Run("marks document failed when publisher returns failure", func(t *testing.T) {
+	t.Run("keeps document status on temporary publisher failure", func(t *testing.T) {
 		t.Parallel()
 
 		repo := &integrationRepo{}
@@ -68,11 +67,11 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 
-		if repo.lastStatus != domain.DocumentStatusFailed {
-			t.Fatalf("expected failed status, got %v", repo.lastStatus)
+		if repo.lastStatus != "" {
+			t.Fatalf("expected no status update, got %v", repo.lastStatus)
 		}
-		if repo.lastError == "" || !strings.Contains(repo.lastError, "timeout") {
-			t.Fatalf("expected error to contain publisher message, got %q", repo.lastError)
+		if doc, _ := repo.GetDocument(context.Background(), "doc-missing"); doc.Status != domain.DocumentStatusConvertedToMarkdown {
+			t.Fatalf("expected document to remain converted, got %v", doc.Status)
 		}
 	})
 }
