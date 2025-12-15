@@ -95,6 +95,38 @@ func TestConversionExecutorSetsWaitingState(t *testing.T) {
 	}
 }
 
+func TestConversionExecutorReschedulesAfterTemporarySubmitError(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := &submitOnlyConverter{submitErr: &domain.TemporarySubmitRetryExhaustedError{Err: temporaryStatusError{}}}
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md"})
+
+	task := &transformations.TransformationTask{
+		ID:                uuid.New(),
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file.docx",
+		RetryCount:        2,
+	}
+
+	state, err := executor.ProcessTask(context.Background(), task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if state != StateWaitingDocling {
+		t.Fatalf("expected waiting state, got %s", state)
+	}
+
+	if repoStub.markWaitingCalls != 1 {
+		t.Fatalf("expected mark waiting to be called once, got %d", repoStub.markWaitingCalls)
+	}
+
+	if task.NextPollAt == nil {
+		t.Fatalf("expected next poll to be scheduled")
+	}
+}
+
 type temporaryStatusError struct{}
 
 func (temporaryStatusError) Error() string   { return "temporary" }
@@ -156,10 +188,14 @@ type submitOnlyConverter struct {
 	jobID        string
 	submitCalled bool
 	checkCalled  bool
+	submitErr    error
 }
 
 func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertRequest) (string, error) {
 	c.submitCalled = true
+	if c.submitErr != nil {
+		return "", c.submitErr
+	}
 	if c.jobID == "" {
 		c.jobID = "job-from-submit"
 	}

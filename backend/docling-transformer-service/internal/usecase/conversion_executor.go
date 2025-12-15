@@ -122,6 +122,10 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		ContentType: contentType,
 	})
 	if err != nil {
+		if state, handleErr, handled := e.handleTemporarySubmitError(ctx, task, err); handled {
+			return state, handleErr
+		}
+
 		return StateProcessing, fmt.Errorf("docling submit: %w", err)
 	}
 
@@ -145,4 +149,43 @@ func (e *ConversionExecutor) fastPhaseContext(ctx context.Context) (context.Cont
 	}
 
 	return context.WithTimeout(ctx, e.cfg.FastOperationTimeout)
+}
+
+func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, task *transformations.TransformationTask, err error) (TaskState, error, bool) {
+	var tmpErr *domain.TemporarySubmitRetryExhaustedError
+	if !errors.As(err, &tmpErr) {
+		return StateProcessing, nil, false
+	}
+
+	if e.poller == nil {
+		return StateProcessing, fmt.Errorf("docling submit: %w", err), true
+	}
+
+	retryIndex := task.RetryCount
+	if retryIndex < 0 {
+		retryIndex = 0
+	}
+
+	nextPoll := e.poller.NextPollTime(time.Now(), retryIndex)
+	if markErr := e.repo.MarkDoclingWaiting(ctx, task.ID, task.DoclingJobID, task.DoclingPollCount, nextPoll); markErr != nil {
+		return StateProcessing, fmt.Errorf("store docling waiting: %w", markErr), true
+	}
+
+	task.NextPollAt = &nextPoll
+
+	var statusCode int
+	var coder domain.StatusCoder
+	if errors.As(err, &coder) {
+		statusCode = coder.StatusCode()
+	}
+
+	e.logger.Warn("docling submit temporary error, rescheduled",
+		zap.String("queue_id", task.ID.String()),
+		zap.Int("retry_attempt", retryIndex),
+		zap.Int("status_code", statusCode),
+		zap.Time("next_poll_at", nextPoll),
+		zap.Error(err),
+	)
+
+	return StateWaitingDocling, nil, true
 }
