@@ -191,9 +191,9 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
 	}
 
-	if transformer.lastRequest.GetMarkdownObjectKey() != "path/doc-1.md" || !transformer.lastRequest.GetWaitForResult() {
-		t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
-	}
+        if transformer.lastRequest.GetMarkdownObjectKey() != "path/doc-1.md" || transformer.lastRequest.GetWaitForResult() {
+                t.Fatalf("unexpected transformer request: %+v", transformer.lastRequest)
+        }
 
 	if result.QueueID != "queue-1" {
 		t.Fatalf("unexpected queue id: %s", result.QueueID)

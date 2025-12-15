@@ -129,14 +129,14 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		latest := latestVersion(doc)
 		return convertResult{MarkdownKey: resolvedMarkdownKey(doc), QueueID: latest.MarkdownQueueID, Status: string(currentStatus), Version: latest.Version, Ready: true}, nil
 	}
-	resp, err := a.transformer.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
-		DocumentId:        input.DocumentID,
-		OriginalBucket:    input.OriginalBucket,
-		OriginalObjectKey: input.OriginalObjectKey,
-		MarkdownBucket:    input.MarkdownBucket,
-		MarkdownObjectKey: input.MarkdownObjectKey,
-		WaitForResult:     true,
-	})
+        resp, err := a.transformer.ConvertDocumentToMarkdown(ctx, &transformerv1.ConvertDocumentToMarkdownRequest{
+                DocumentId:        input.DocumentID,
+                OriginalBucket:    input.OriginalBucket,
+                OriginalObjectKey: input.OriginalObjectKey,
+                MarkdownBucket:    input.MarkdownBucket,
+                MarkdownObjectKey: input.MarkdownObjectKey,
+                WaitForResult:     false,
+        })
 	if err != nil {
 		_ = a.fail(ctx, input.DocumentID, fmt.Sprintf("convert: %v", err))
 		return convertResult{}, err

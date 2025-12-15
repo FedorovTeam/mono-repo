@@ -13,6 +13,7 @@ type JobResult struct {
 	Payload map[string]any
 	NextRun *time.Time
 	Event   *domain.JobEvent
+	Status  domain.JobStatus
 }
 
 // JobHandler инкапсулирует выполнение конкретного этапа обработки.
@@ -109,11 +110,26 @@ func (s *WorkerService) reconcile(ctx context.Context, stage domain.JobStage, ba
 
 func (s *WorkerService) handleJob(ctx context.Context, job domain.ProcessingJob, handler JobHandler) {
 	result, err := handler(ctx, job)
+	if result.Status == domain.JobStatusPending {
+		s.postponeJob(ctx, job, result)
+		return
+	}
 	if err != nil {
 		s.failJob(ctx, job, result, err)
 		return
 	}
 	s.completeJob(ctx, job, result)
+}
+
+func (s *WorkerService) postponeJob(ctx context.Context, job domain.ProcessingJob, result JobResult) {
+	payload := mergePayload(job.Payload, result.Payload)
+	nextRun := s.computeNextRun(result.NextRun)
+	event := ensureEvent(result.Event, job, domain.JobStatusPending, "postponed", "")
+
+	if _, err := s.jobs.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusPending, &nextRun, false, payload, nil); err != nil {
+		s.logf("worker[%s]: postpone job %s: %v", job.Stage, job.TaskID, err)
+	}
+	s.appendEvent(ctx, event)
 }
 
 func (s *WorkerService) completeJob(ctx context.Context, job domain.ProcessingJob, result JobResult) {
@@ -135,10 +151,7 @@ func (s *WorkerService) failJob(ctx context.Context, job domain.ProcessingJob, r
 		payload["last_error"] = err.Error()
 	}
 
-	nextRun := s.now().Add(s.retry)
-	if result.NextRun != nil {
-		nextRun = *result.NextRun
-	}
+	nextRun := s.computeNextRun(result.NextRun)
 
 	event := ensureEvent(result.Event, job, domain.JobStatusFailed, "failed", err.Error())
 
@@ -146,6 +159,13 @@ func (s *WorkerService) failJob(ctx context.Context, job domain.ProcessingJob, r
 		s.logf("worker[%s]: fail job %s: %v (original: %v)", job.Stage, job.TaskID, updateErr, err)
 	}
 	s.appendEvent(ctx, event)
+}
+
+func (s *WorkerService) computeNextRun(next *time.Time) time.Time {
+	if next != nil {
+		return *next
+	}
+	return s.now().Add(s.retry)
 }
 
 func (s *WorkerService) appendEvent(ctx context.Context, event *domain.JobEvent) {
