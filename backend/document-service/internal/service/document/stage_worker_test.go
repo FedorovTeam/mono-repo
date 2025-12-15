@@ -290,7 +290,7 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 
 	reconciler := NewProcessingReconciler(repo, 2, 30*time.Second, 15*time.Second)
 	reconciler.now = func() time.Time { return repo.now }
-	reconciler.reconcile(context.Background())
+	reconciler.reconcile(context.Background(), time.Second)
 
 	recovered := repo.jobs["job-stuck"]
 	if recovered.Status != domain.JobStatusPending {
