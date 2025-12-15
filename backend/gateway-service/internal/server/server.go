@@ -1,11 +1,10 @@
 package server
 
 import (
-	"backend-gateway-service/pkg/grpcdial"
-	"backend-gateway-service/pkg/logging"
 	"backend-gateway-service/pkg/middleware"
 	"backend-gateway-service/pkg/observability"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -21,8 +20,6 @@ import (
 	"backend-gateway-service/graph/generated"
 	"backend-gateway-service/internal/config"
 	"backend-gateway-service/internal/domain"
-	docclient "backend-gateway-service/internal/infrastructure/clients/document"
-	storageclient "backend-gateway-service/internal/infrastructure/clients/storage"
 	"backend-gateway-service/internal/infrastructure/webhook"
 	"backend-gateway-service/internal/usecase"
 )
@@ -40,54 +37,47 @@ type Server struct {
 	shutdownOTEL         func(context.Context) error
 }
 
-// New создаёт сервер и подключает клиентов.
-func New(cfg config.Config) (*Server, error) {
-	logger, err := logging.New(cfg.Logging.Level)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init logger: %w", err)
+// Dependencies содержит внешние зависимости сервера.
+type Dependencies struct {
+	Logger         *zap.Logger
+	DocumentClient domain.DocumentClient
+	StorageClient  domain.StorageClient
+	Providers      observability.Providers
+	ShutdownOTEL   func(context.Context) error
+}
+
+// New создаёт сервер из готовых зависимостей.
+func New(cfg config.Config, deps Dependencies) (*Server, error) {
+	if deps.Logger == nil {
+		return nil, errors.New("logger is required")
+	}
+	if deps.DocumentClient == nil {
+		return nil, errors.New("document client is required")
+	}
+	if deps.StorageClient == nil {
+		return nil, errors.New("storage client is required")
+	}
+	if deps.ShutdownOTEL == nil {
+		deps.ShutdownOTEL = func(context.Context) error { return nil }
 	}
 
-	providers, shutdown, err := observability.Setup(context.Background(), cfg.Observability.EnabledOrDefault(), cfg.Observability.OTLPEndpoint, cfg.Observability.ServiceName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init telemetry: %w", err)
-	}
-
-	dialOpts := grpcdial.DefaultOptions(cfg.DocumentService.GRPC, providers)
-
-	docDialCtx, cancelDocDial := context.WithTimeout(context.Background(), cfg.DocumentService.GRPC.DialTimeout)
-	defer cancelDocDial()
-
-	docClient, err := docclient.NewGRPCClient(docDialCtx, cfg.DocumentService.Address, dialOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init document client: %w", err)
-	}
-
-	storageDialOpts := grpcdial.DefaultOptions(cfg.StorageService.GRPC, providers)
-	storageDialCtx, cancelStorageDial := context.WithTimeout(context.Background(), cfg.StorageService.GRPC.DialTimeout)
-	defer cancelStorageDial()
-
-	storageClient, err := storageclient.NewGRPCClient(storageDialCtx, cfg.StorageService.Address, storageDialOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init storage client: %w", err)
-	}
-
-	uploadUseCase := usecase.NewUploadService(docClient, storageClient, usecase.UploadConfig{
+	uploadUseCase := usecase.NewUploadService(deps.DocumentClient, deps.StorageClient, usecase.UploadConfig{
 		SignedURLTTLSeconds: cfg.Uploads.SignedURLTTLSecond,
 	})
-	docUseCase := usecase.NewDocumentService(docClient)
+	docUseCase := usecase.NewDocumentService(deps.DocumentClient)
 	webhookParser := webhook.NewMinIOWebhookParser()
-	uploadConfirmationUseCase := usecase.NewUploadConfirmationService(webhookParser, docClient)
+	uploadConfirmationUseCase := usecase.NewUploadConfirmationService(webhookParser, deps.DocumentClient)
 
 	return &Server{
 		cfg:                  cfg,
-		logger:               logger,
-		documentClient:       docClient,
-		storageClient:        storageClient,
+		logger:               deps.Logger,
+		documentClient:       deps.DocumentClient,
+		storageClient:        deps.StorageClient,
 		uploadUseCase:        uploadUseCase,
 		docUseCase:           docUseCase,
 		uploadConfirmationUC: uploadConfirmationUseCase,
-		otelProviders:        providers,
-		shutdownOTEL:         shutdown,
+		otelProviders:        deps.Providers,
+		shutdownOTEL:         deps.ShutdownOTEL,
 	}, nil
 }
 
