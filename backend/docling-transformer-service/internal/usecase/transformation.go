@@ -95,6 +95,15 @@ func validateStorageCredentials(name, endpoint, accessKey, secretKey string) err
 	return nil
 }
 
+func shouldUseSourceAsyncByRequest(params SubmitConversionRequest) bool {
+	if params.SourceURL != "" {
+		return false
+	}
+
+	return params.SourceBucket != "" && params.SourceObjectKey != "" &&
+		params.SourceEndpoint != "" && params.SourceAccessKey != "" && params.SourceSecretKey != ""
+}
+
 func (uc *TransformerService) SubmitConversion(ctx context.Context, params SubmitConversionRequest) (SubmitConversionResult, error) {
 	if params.DocumentID == "" {
 		return SubmitConversionResult{}, fmt.Errorf("%w: document_id is required", ErrInvalidArgument)
@@ -113,7 +122,12 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		return SubmitConversionResult{}, fmt.Errorf("%w: provide either source_url or source bucket/object key", ErrInvalidArgument)
 	}
 
-	if uc.cfg.UseSourceAsync && params.SourceURL == "" {
+	useSourceAsync := uc.cfg.UseSourceAsync && params.SourceURL == ""
+	if !useSourceAsync {
+		useSourceAsync = shouldUseSourceAsyncByRequest(params)
+	}
+
+	if useSourceAsync {
 		if err := validateStorageCredentials("source", params.SourceEndpoint, params.SourceAccessKey, params.SourceSecretKey); err != nil {
 			return SubmitConversionResult{}, err
 		}

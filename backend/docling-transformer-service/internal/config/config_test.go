@@ -47,6 +47,41 @@ func TestValidateFailsOnMissingFields(t *testing.T) {
 	}
 }
 
+func TestValidateAllowsSourceAsyncWithRequestCredentials(t *testing.T) {
+	cfg := Config{
+		Service: ServiceConfig{
+			Name:              "docling-transformer",
+			GRPCPort:          9090,
+			MaxWorkers:        1,
+			QueueLimit:        10,
+			ProcessingTimeout: time.Minute,
+			IOTimeout:         time.Second,
+		},
+		Scheduler: SchedulerConfig{
+			PollInterval:         time.Second,
+			MaintenanceInterval:  time.Minute,
+			BatchSize:            5,
+			RetryBackoff:         time.Second,
+			MaxProcessingRetries: 1,
+			CleanupRetention:     time.Hour,
+			FailedRetryDelay:     time.Minute,
+			MaxFailedRetries:     3,
+		},
+		Docling: DoclingConfig{Endpoint: "http://docling", Mode: "source_async"},
+		Minio: MinioConfig{
+			Endpoint:  "minio",
+			AccessKey: "key",
+			SecretKey: "secret",
+			Bucket:    "bucket",
+		},
+		Postgres: PostgresConfig{DSN: "postgres://user:pass@localhost:5432/db"},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func TestStatusBackoffDefaultsApplied(t *testing.T) {
 	cfg := Config{}
 
