@@ -5,7 +5,15 @@ import (
 	"os"
 	"time"
 
+	"github.com/mono-repo/docling-transformer-service/internal/backoff"
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	defaultStatusInitialInterval = 2 * time.Second
+	defaultStatusMaxInterval     = 10 * time.Second
+	defaultStatusMaxAttempts     = 10
+	defaultStatusBackoffFactor   = 2
 )
 
 // Config описывает параметры для gRPC сервера, подключения к Docling и инфраструктурных сервисов.
@@ -87,6 +95,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	cfg.applyDefaults()
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
@@ -156,5 +166,35 @@ func (c *Config) Validate() error {
 	if c.Docling.Endpoint == "" {
 		return fmt.Errorf("docling.endpoint is required")
 	}
+
+	if err := c.StatusBackoffPolicy().Validate(); err != nil {
+		return fmt.Errorf("docling status backoff: %w", err)
+	}
 	return nil
+}
+
+func (c *Config) applyDefaults() {
+	policy := c.StatusBackoffPolicy()
+	c.Docling.StatusInitialInterval = policy.InitialInterval
+	c.Docling.StatusBackoffFactor = policy.Factor
+	c.Docling.StatusMaxInterval = policy.MaxInterval
+	c.Docling.StatusMaxAttempts = policy.MaxAttempts
+}
+
+// StatusBackoffPolicy возвращает backoff-политику для опроса статуса Docling
+// с учётом дефолтных значений.
+func (c *Config) StatusBackoffPolicy() backoff.Policy {
+	policy := backoff.Policy{
+		InitialInterval: c.Docling.StatusInitialInterval,
+		MaxInterval:     c.Docling.StatusMaxInterval,
+		MaxAttempts:     c.Docling.StatusMaxAttempts,
+		Factor:          c.Docling.StatusBackoffFactor,
+	}
+
+	return policy.Normalize(backoff.Policy{
+		InitialInterval: defaultStatusInitialInterval,
+		MaxInterval:     defaultStatusMaxInterval,
+		MaxAttempts:     defaultStatusMaxAttempts,
+		Factor:          defaultStatusBackoffFactor,
+	})
 }

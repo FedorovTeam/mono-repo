@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mono-repo/docling-transformer-service/internal/backoff"
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
@@ -27,11 +28,9 @@ var (
 )
 
 type TransformationConfig struct {
-	MarkdownBucket  string
-	QueueLimit      int
-	PollInterval    time.Duration
-	PollMaxInterval time.Duration
-	PollAttempts    int
+	MarkdownBucket string
+	QueueLimit     int
+	StatusBackoff  backoff.Policy
 }
 
 type SubmitConversionRequest struct {
@@ -148,21 +147,9 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 }
 
 func (uc *TransformerService) WaitForResult(ctx context.Context, queueID uuid.UUID) (*transformations.TransformationTask, error) {
-	backoff := uc.cfg.PollInterval
-	if backoff <= 0 {
-		backoff = 2 * time.Second
-	}
-	maxInterval := uc.cfg.PollMaxInterval
-	if maxInterval <= 0 {
-		maxInterval = 10 * time.Second
-	}
+	strategy := backoff.NewStrategy(uc.cfg.StatusBackoff)
 
-	attempts := uc.cfg.PollAttempts
-	if attempts <= 0 {
-		attempts = 10
-	}
-
-	for attempt := 1; attempt <= attempts; attempt++ {
+	for attempt := 1; attempt <= uc.cfg.StatusBackoff.MaxAttempts; attempt++ {
 		task, err := uc.repo.GetByID(ctx, queueID)
 		if err != nil {
 			return nil, fmt.Errorf("fetch task status: %w", err)
@@ -175,7 +162,7 @@ func (uc *TransformerService) WaitForResult(ctx context.Context, queueID uuid.UU
 			return task, nil
 		}
 
-		waitFor := backoff
+		waitFor := strategy.NextInterval()
 		if task.NextPollAt != nil {
 			until := time.Until(*task.NextPollAt)
 			if until > 0 {
@@ -183,7 +170,7 @@ func (uc *TransformerService) WaitForResult(ctx context.Context, queueID uuid.UU
 			}
 		}
 
-		if attempt == attempts {
+		if attempt == uc.cfg.StatusBackoff.MaxAttempts {
 			break
 		}
 
@@ -191,11 +178,6 @@ func (uc *TransformerService) WaitForResult(ctx context.Context, queueID uuid.UU
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(waitFor):
-		}
-
-		backoff = backoff * 2
-		if backoff > maxInterval {
-			backoff = maxInterval
 		}
 	}
 
@@ -267,9 +249,9 @@ func (uc *TransformerService) FetchContentByURL(ctx context.Context, rawURL stri
 }
 
 func (uc *TransformerService) pollUntilReady(ctx context.Context, jobID string) (domain.ConvertResult, error) {
-	backoff := uc.cfg.PollInterval
+	strategy := backoff.NewStrategy(uc.cfg.StatusBackoff)
 
-	for attempt := 1; attempt <= uc.cfg.PollAttempts; attempt++ {
+	for attempt := 1; attempt <= uc.cfg.StatusBackoff.MaxAttempts; attempt++ {
 		statusResult, err := uc.conv.CheckStatus(ctx, jobID)
 		if err != nil {
 			return domain.ConvertResult{}, err
@@ -278,19 +260,14 @@ func (uc *TransformerService) pollUntilReady(ctx context.Context, jobID string) 
 			return *statusResult.Result, nil
 		}
 
-		if attempt == uc.cfg.PollAttempts {
+		if attempt == uc.cfg.StatusBackoff.MaxAttempts {
 			break
 		}
 
 		select {
 		case <-ctx.Done():
 			return domain.ConvertResult{}, ctx.Err()
-		case <-time.After(backoff):
-		}
-
-		backoff = backoff * 2
-		if uc.cfg.PollMaxInterval > 0 && backoff > uc.cfg.PollMaxInterval {
-			backoff = uc.cfg.PollMaxInterval
+		case <-time.After(strategy.NextInterval()):
 		}
 	}
 

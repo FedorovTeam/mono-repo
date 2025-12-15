@@ -99,12 +99,12 @@ func main() {
 		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
 	}, logger)
 
+	statusPolicy := cfg.StatusBackoffPolicy()
+
 	transformUC := usecase.NewTransformerService(queueRepo, conv, usecase.TransformationConfig{
-		MarkdownBucket:  cfg.Minio.Bucket,
-		QueueLimit:      cfg.Service.QueueLimit,
-		PollInterval:    cfg.Docling.StatusInitialInterval,
-		PollMaxInterval: cfg.Docling.StatusMaxInterval,
-		PollAttempts:    cfg.Docling.StatusMaxAttempts,
+		MarkdownBucket: cfg.Minio.Bucket,
+		QueueLimit:     cfg.Service.QueueLimit,
+		StatusBackoff:  statusPolicy,
 	}, logger, &http.Client{Timeout: 30 * time.Second})
 
 	workerProcessor := usecase.NewProcessor(queueRepo, conv, storageClient, logger, usecase.Config{
