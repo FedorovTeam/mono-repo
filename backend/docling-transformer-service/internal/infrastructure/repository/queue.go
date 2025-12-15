@@ -166,10 +166,10 @@ func (r *PostgresQueueRepository) selectNextTasks(ctx context.Context, tx pgx.Tx
 	tasks, err := r.fetchTasks(ctx, tx, `
 SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
-WHERE status = 'pending'
-ORDER BY created_at
+WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
+ORDER BY COALESCE(next_poll_at, created_at), created_at
 LIMIT $1
-FOR UPDATE SKIP LOCKED`, limit)
+FOR UPDATE SKIP LOCKED`, 1)
 	if err == nil && len(tasks) > 0 {
 		return tasks, nil
 	}
@@ -177,22 +177,40 @@ FOR UPDATE SKIP LOCKED`, limit)
 		return nil, err
 	}
 
+	hasWaiting, err := r.hasWaitingDocling(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if hasWaiting {
+		return nil, pgx.ErrNoRows
+	}
+
 	tasks, err = r.fetchTasks(ctx, tx, `
 SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
-WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
-ORDER BY COALESCE(next_poll_at, created_at), created_at
+WHERE status = 'pending'
+ORDER BY created_at
 LIMIT $1
 FOR UPDATE SKIP LOCKED`, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(tasks) == 0 {
-		return nil, pgx.ErrNoRows
-	}
-
 	return tasks, nil
+}
+
+func (r *PostgresQueueRepository) hasWaitingDocling(ctx context.Context, tx pgx.Tx) (bool, error) {
+	const query = `SELECT 1 FROM transformations_queue WHERE status = 'waiting_docling' LIMIT 1`
+
+	var marker int
+	switch err := tx.QueryRow(ctx, query).Scan(&marker); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	default:
+		return false, fmt.Errorf("check waiting docling: %w", err)
+	}
 }
 
 func (r *PostgresQueueRepository) fetchTasks(ctx context.Context, tx pgx.Tx, query string, limit int) ([]*TransformationTask, error) {

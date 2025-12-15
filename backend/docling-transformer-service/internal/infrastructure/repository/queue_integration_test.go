@@ -265,3 +265,78 @@ INSERT INTO transformations_queue (
 	require.Contains(t, exhaustedError, "retry limit exceeded (5/3)")
 	require.Contains(t, exhaustedError, "old fail")
 }
+
+func TestAcquireBatchPrioritizesWaitingDocling(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	repo := NewQueueRepository(pool)
+	now := time.Now()
+
+	waitingFirst := uuid.New()
+	waitingSecond := uuid.New()
+	pendingID := uuid.New()
+
+	_, err := pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, correlation_id, docling_job_id, docling_poll_count, next_poll_at
+) VALUES ($1, 'waiting_docling', 'doc-10', 'orig', 'path/first.docx', 'md', 'dest/first.md', 'docx', $4, 'corr-wait-1', 'job-1', 1, $2),
+         ($3, 'waiting_docling', 'doc-11', 'orig', 'path/second.docx', 'md', 'dest/second.md', 'docx', $5, 'corr-wait-2', 'job-2', 1, $6),
+         ($7, 'pending', 'doc-12', 'orig', 'path/pending.docx', 'md', 'dest/pending.md', 'docx', $5, 'corr-pending', NULL, 0, NULL)
+`, waitingFirst, now.Add(-2*time.Minute), waitingSecond, now.Add(-time.Minute), now.Add(-90*time.Second), now.Add(-30*time.Second), pendingID)
+	require.NoError(t, err)
+
+	tasks, err := repo.AcquireBatch(ctx, 5)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, waitingFirst, tasks[0].ID)
+	require.Equal(t, StatusProcessing, tasks[0].Status)
+
+	var secondStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, waitingSecond).Scan(&secondStatus))
+	require.Equal(t, StatusDocling, secondStatus)
+
+	var pendingStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, pendingID).Scan(&pendingStatus))
+	require.Equal(t, StatusPending, pendingStatus)
+
+	tasks, err = repo.AcquireBatch(ctx, 5)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, waitingSecond, tasks[0].ID)
+
+	tasks, err = repo.AcquireBatch(ctx, 5)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, pendingID, tasks[0].ID)
+}
+
+func TestAcquireBatchDoesNotStartPendingWhileWaitingScheduled(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	repo := NewQueueRepository(pool)
+
+	waitingID := uuid.New()
+	pendingID := uuid.New()
+
+	_, err := pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, correlation_id, docling_job_id, docling_poll_count, next_poll_at
+) VALUES ($1, 'waiting_docling', 'doc-20', 'orig', 'path/waiting.docx', 'md', 'dest/waiting.md', 'docx', NOW(), 'corr-wait', 'job-20', 1, NOW() + INTERVAL '5 minutes'),
+         ($2, 'pending', 'doc-21', 'orig', 'path/pending.docx', 'md', 'dest/pending.md', 'docx', NOW(), 'corr-pending', NULL, 0, NULL)
+`, waitingID, pendingID)
+	require.NoError(t, err)
+
+	tasks, err := repo.AcquireBatch(ctx, 5)
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+
+	var waitingStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, waitingID).Scan(&waitingStatus))
+	require.Equal(t, StatusDocling, waitingStatus)
+
+	var pendingStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, pendingID).Scan(&pendingStatus))
+	require.Equal(t, StatusPending, pendingStatus)
+}
