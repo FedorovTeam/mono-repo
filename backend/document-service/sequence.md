@@ -9,62 +9,65 @@ sequenceDiagram
     participant TR as TransformerService (gRPC)
     participant GP as GithubPublisherService (gRPC)
     participant R as PostgreSQL (documents + processing_jobs)
-    participant UR as UploadReconciler
+    participant UR as UploadReconciler (cron)
+    participant PR as ProcessingReconciler (cron)
     participant F as JobFollower (cron)
-    participant SW as stage worker (store/convert/publish)
+    participant SW as StageWorker (store/convert/publish)
 
     C->>G: CreateDocument(id?, fileName, repo?, path?, upload_object_key, markdown_object_key)
-    G->>S: Валидация + defaults (owner/repo/branch/base_branch, buckets)
+    G->>S: Валидация + defaults (owner/repo/branch/base_branch/path, buckets)
     S->>R: INSERT document{status=Uploaded, workflow_id=id, bucket/object_key из запроса}, versions, status_logs
     S-->>C: Document с сохранёнными bucket/object_key
 
-    Note over UR,ST: UploadReconciler опрашивает documents со статусом Uploaded и вызывает ConfirmUpload, используя сохранённые bucket/object_key
+    Note over UR,R: UploadReconciler опрашивает documents со статусом Uploaded, возрастом > minAge и непустыми bucket/object_key
     UR->>G: ConfirmUpload(document_id, bucket, object_key)
-    G->>S: Валидация bucket/object_key
-    S->>ST: GetObject(bucket, object_key) для проверки доступности объекта
-    S->>R: INSERT job store_original (pending, payload=bucket/object_key)
-
-    Note over SW,R: stage worker берёт job=store_original (pending)
-    SW->>S: Activities.MarkStoredOriginal(document_id) -> repo.UpdateStatus(StatusStoredOriginal)
-    alt Успешно
-        SW->>R: UPDATE processing_jobs status=completed
-    else Ошибка (например, нет bucket/object_key)
-        SW->>R: UPDATE processing_jobs status=failed + payload.last_error
+    G->>S: Валидация id/bucket/object_key, совпадения с документом
+    S->>ST: ValidateObject (GetObject) для проверки доступности объекта
+    alt Очередь создана
+        S->>R: INSERT job store_original (pending, payload=bucket/object_key) + job_event; document.active_job_id
+    else Ошибка постановки задачи
+        S->>R: UPDATE document status=Failed(reason)
     end
 
-    Note over F,R: JobFollower опрашивает completed/failed
+    Note over SW,R: StageWorker(store_original) берёт pending-задачи store_original
+    SW->>S: Activities.MarkStoredOriginal(document_id) -> переход Uploaded->StoredOriginal (idempotent)
+    alt Успешно
+        SW-->>R: UPDATE processing_jobs status=completed + job_event
+    else Ошибка (нет ключа/документ не найден и т.п.)
+        SW-->>R: UPDATE processing_jobs status=failed, next_run_at=now()+retry_delay, payload.last_error
+    end
+
+    Note over F,R: JobFollower опрашивает completed/failed с паузой postpone
     alt store_original completed
-        F->>R: INSERT job convert_to_markdown (pending) с payload
+        F->>R: INSERT job convert_to_markdown (pending, payload=orig/markdown buckets+keys, correlation_id)
     else convert_to_markdown completed
-        F->>R: INSERT job publish_to_github (pending)
-    else any failed
-        F->>R: UPDATE document status=Failed (reason from payload.last_error)
+        F->>R: INSERT job publish_to_github (pending, payload=markdown_bucket/object_key, repo/branch/base_branch/path, create_pr, commit_message/pr_title/pr_body/author_*, correlation_id)
+    else любой failed
+        F->>R: UPDATE document status=Failed(reason из payload.last_error)
         F->>R: UPDATE processing_jobs status=failed {handled}
     end
 
-    Note over SW,TR: convert_to_markdown вызывает transformer-service c WaitForResult=true
-    SW->>TR: ConvertDocumentToMarkdown(bucket/object_key + markdown_bucket, correlation-id)
+    Note over SW,TR: StageWorker(convert_to_markdown) вызывает transformer-service c WaitForResult=true
+    SW->>TR: ConvertDocumentToMarkdown(bucket/object_key + markdown_bucket, markdown_object_key, correlation-id?)
     TR-->>SW: markdown_object_key?, queue_id, status
-    alt success (status=done/ConvertedToMarkdown)
+    alt Готово и markdown_object_key не пустой
         SW->>S: Activities.MarkConverted -> UPDATE document status=ConvertedToMarkdown (+markdown_queue_id/object_key, version++)
-        SW->>R: UPDATE processing_jobs status=completed
-    else error / пустой markdown_object_key
-        SW->>S: Activities.fail -> UPDATE document status=Failed(reason)
-        SW->>R: UPDATE processing_jobs status=failed + payload.last_error + next_run_at=now()+retry_delay
+        SW-->>R: UPDATE processing_jobs status=completed + job_event
+    else Ошибка/пустой markdown_object_key/конвертация не завершилась
+        S->>R: UPDATE document status=Failed(reason)
+        SW-->>R: UPDATE processing_jobs status=failed, next_run_at=now()+retry_delay, payload.last_error=reason
     end
 
-    Note over SW,GP: publish_to_github вызывает gRPC PublishMarkdown в github-publisher-service с idempotency_key и correlation-id
-    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, branch/base_branch, path, commit_message, author_*, pr_*, create_pr, idempotency_key, correlation-id)
-    GP-->>SW: status + commit_sha/pr + retry_after + idempotency_hit
+    Note over SW,GP: StageWorker(publish_to_github) требует commit_message и author_name/author_email
+    SW->>GP: PublishMarkdown(markdown_bucket/object_key, repo, branch/base_branch, path, create_pr, commit_message, author_*, pr_*, idempotency_key, correlation-id)
+    GP-->>SW: status + commit_sha/pr/retry_after/idempotency_hit + error_code?
     alt success
-        SW->>S: Activities.PublishMarkdown -> UPDATE document status=PublishedToGitHub (+commit_sha)
-        SW->>R: UPDATE processing_jobs status=completed + job_events{commit_sha,pull_request?,retry_after?,idempotency_hit?}
-    else failure (temporary/permanent)
-        SW->>S: Activities.PublishMarkdown -> UPDATE document status=Failed(reason)
-        SW->>R: UPDATE processing_jobs status=failed, next_run_at=retry_after или retry_delay, payload.last_error=reason
+        S->>R: UPDATE document status=PublishedToGitHub (+commit_sha, version?)
+        SW-->>R: UPDATE processing_jobs status=completed + job_event{commit_sha,pull_request?,retry_after?,idempotency_hit?}
+    else temporary/permanent failure
+        S->>R: UPDATE document status=Failed(reason от error_code/message)
+        SW-->>R: UPDATE processing_jobs status=failed, next_run_at=retry_after или retry_delay, payload.last_error=reason
     end
 
-    Note over F,R: JobFollower читает completed/failed jobs с паузой postpone
-    F->>R: INSERT next stage job после completed
-    F->>R: UPDATE document status=Failed + UPDATE processing_jobs{handled} при job.status=failed
+    Note over PR,R: ProcessingReconciler возвращает зависшие processing-задачи в pending после stage_interval+grace
 ```
