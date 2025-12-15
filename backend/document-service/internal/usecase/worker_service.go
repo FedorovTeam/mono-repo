@@ -63,6 +63,16 @@ func (s *WorkerService) SetClock(now func() time.Time) {
 
 // Run выполняет периодическую обработку задач указанной стадии.
 func (s *WorkerService) Run(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, handler JobHandler, observe BatchObserver) {
+	s.run(ctx, stage, interval, batchSize, 0, handler, observe)
+}
+
+// RunWithBatchLimit выполняет ограниченное количество пачек задач за одну итерацию.
+// Если maxBatches <= 0, поведение эквивалентно Run.
+func (s *WorkerService) RunWithBatchLimit(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) {
+	s.run(ctx, stage, interval, batchSize, maxBatches, handler, observe)
+}
+
+func (s *WorkerService) run(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) {
 	if interval <= 0 {
 		interval = time.Minute
 	}
@@ -73,21 +83,25 @@ func (s *WorkerService) Run(ctx context.Context, stage domain.JobStage, interval
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	s.reconcile(ctx, stage, batchSize, handler, observe)
+	s.reconcile(ctx, stage, batchSize, maxBatches, handler, observe)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reconcile(ctx, stage, batchSize, handler, observe)
+			s.reconcile(ctx, stage, batchSize, maxBatches, handler, observe)
 		}
 	}
 }
 
-// reconcile считывает пачку задач и обрабатывает их до исчерпания очереди.
-func (s *WorkerService) reconcile(ctx context.Context, stage domain.JobStage, batchSize int, handler JobHandler, observe BatchObserver) {
+// reconcile считывает пачки задач и обрабатывает их до исчерпания очереди или достижения лимита пачек.
+func (s *WorkerService) reconcile(ctx context.Context, stage domain.JobStage, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) {
+	batches := 0
 	for {
+		if maxBatches > 0 && batches >= maxBatches {
+			return
+		}
 		jobs, err := s.jobs.AcquirePendingJobs(ctx, stage, batchSize)
 		if err != nil {
 			s.logf("worker[%s]: acquire pending jobs: %v", stage, err)
@@ -103,6 +117,8 @@ func (s *WorkerService) reconcile(ctx context.Context, stage domain.JobStage, ba
 		for _, job := range jobs {
 			s.handleJob(ctx, job, handler)
 		}
+
+		batches++
 
 		if len(jobs) < batchSize {
 			return

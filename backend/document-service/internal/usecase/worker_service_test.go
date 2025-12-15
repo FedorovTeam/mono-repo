@@ -23,6 +23,11 @@ type fakeJobRepo struct {
 	events  []domain.JobEvent
 }
 
+type limitedJobRepo struct {
+	fakeJobRepo
+	acquireLimits []int
+}
+
 func (r *fakeJobRepo) CreateDocument(context.Context, *domain.Document, *domain.DocumentVersion, *domain.DocumentStatusLog) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }
@@ -52,6 +57,22 @@ func (r *fakeJobRepo) ActiveJob(context.Context, string) (*domain.ProcessingJob,
 func (r *fakeJobRepo) AcquirePendingJobs(context.Context, domain.JobStage, int) ([]domain.ProcessingJob, error) {
 	jobs := r.jobs
 	r.jobs = nil
+	return jobs, nil
+}
+
+func (r *limitedJobRepo) AcquirePendingJobs(_ context.Context, _ domain.JobStage, limit int) ([]domain.ProcessingJob, error) {
+	r.acquireLimits = append(r.acquireLimits, limit)
+	jobs := r.fakeJobRepo.jobs
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+
+	if limit > 0 && limit < len(jobs) {
+		r.fakeJobRepo.jobs = jobs[limit:]
+		return jobs[:limit], nil
+	}
+
+	r.fakeJobRepo.jobs = nil
 	return jobs, nil
 }
 
@@ -195,6 +216,39 @@ func TestWorkerServicePostponesJobWithIncrement(t *testing.T) {
 	upd := repo.updates[0]
 	if !upd.inc {
 		t.Fatalf("expected attempts increment to be requested")
+	}
+}
+
+func TestWorkerServiceStopsAfterSingleBatch(t *testing.T) {
+	repo := &limitedJobRepo{fakeJobRepo: fakeJobRepo{jobs: []domain.ProcessingJob{
+		{TaskID: "task-1", Stage: domain.JobStageConvertToMarkdown},
+		{TaskID: "task-2", Stage: domain.JobStageConvertToMarkdown},
+	}}}
+	svc := NewWorkerService(repo, repo, time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		svc.RunWithBatchLimit(ctx, domain.JobStageConvertToMarkdown, time.Hour, 1, 1, func(_ context.Context, job domain.ProcessingJob) (JobResult, error) {
+			return JobResult{}, nil
+		}, nil)
+		close(done)
+	}()
+
+	waitForUpdates(t, &repo.fakeJobRepo, 1)
+	cancel()
+	<-done
+
+	if len(repo.fakeJobRepo.updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(repo.fakeJobRepo.updates))
+	}
+	if remaining := len(repo.fakeJobRepo.jobs); remaining != 1 {
+		t.Fatalf("expected one job to remain pending, got %d", remaining)
+	}
+	if len(repo.acquireLimits) == 0 || repo.acquireLimits[0] != 1 {
+		t.Fatalf("expected acquire limit to be 1, got %v", repo.acquireLimits)
 	}
 }
 

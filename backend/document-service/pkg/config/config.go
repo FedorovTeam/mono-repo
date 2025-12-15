@@ -68,11 +68,12 @@ type JobFollower struct {
 }
 
 type StageWorker struct {
-	Interval     time.Duration `yaml:"interval"`
-	BatchSize    int           `yaml:"batch_size"`
-	RetryDelay   time.Duration `yaml:"retry_delay"`
-	WaitMarkdown bool          `yaml:"wait_markdown"`
-	GracePeriod  time.Duration `yaml:"grace_period"`
+	Interval         time.Duration `yaml:"interval"`
+	BatchSize        int           `yaml:"batch_size"`
+	ConvertBatchSize int           `yaml:"convert_batch_size"`
+	RetryDelay       time.Duration `yaml:"retry_delay"`
+	WaitMarkdown     bool          `yaml:"wait_markdown"`
+	GracePeriod      time.Duration `yaml:"grace_period"`
 }
 
 func Load(path string) (*Config, error) {
@@ -111,8 +112,11 @@ func (c *Config) Validate() error {
 	if c.JobFollower.Interval <= 0 || c.JobFollower.BatchSize <= 0 {
 		return fmt.Errorf("job_follower.interval and batch_size must be positive")
 	}
-	if c.StageWorker.Interval <= 0 || c.StageWorker.BatchSize <= 0 || c.StageWorker.RetryDelay <= 0 {
-		return fmt.Errorf("stage_worker interval, batch_size and retry_delay must be positive")
+	if c.StageWorker.ConvertBatchSize == 0 {
+		c.StageWorker.ConvertBatchSize = 1
+	}
+	if c.StageWorker.Interval <= 0 || c.StageWorker.BatchSize <= 0 || c.StageWorker.RetryDelay <= 0 || c.StageWorker.ConvertBatchSize <= 0 {
+		return fmt.Errorf("stage_worker interval, batch_size, convert_batch_size and retry_delay must be positive")
 	}
 	if c.StageWorker.GracePeriod < 0 {
 		return fmt.Errorf("stage_worker.grace_period cannot be negative")

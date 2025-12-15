@@ -144,7 +144,7 @@ func main() {
 	go processingReconciler.Run(ctx, cfg.StageWorker.Interval)
 
 	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.ConvertBatchSize, cfg.StageWorker.RetryDelay)
 	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 
 	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
