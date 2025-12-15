@@ -41,18 +41,8 @@ type SubmitConversionRequest struct {
 	SourceBucket      string
 	SourceObjectKey   string
 	SourceURL         string
-	SourceEndpoint    string
-	SourceAccessKey   string
-	SourceSecretKey   string
-	SourceUseSSL      *bool
-	SourceRegion      string
 	MarkdownBucket    string
 	MarkdownObjectKey string
-	TargetEndpoint    string
-	TargetAccessKey   string
-	TargetSecretKey   string
-	TargetUseSSL      *bool
-	TargetRegion      string
 	FilenameExtension string
 	CorrelationID     string
 }
@@ -83,27 +73,6 @@ func NewTransformerService(repo repo.QueueRepository, conv domain.Converter, cfg
 	return &TransformerService{repo: repo, conv: conv, cfg: cfg, logger: logger, client: client}
 }
 
-func validateStorageCredentials(name, endpoint, accessKey, secretKey string) error {
-	if endpoint == "" && accessKey == "" && secretKey == "" {
-		return nil
-	}
-
-	if endpoint == "" || accessKey == "" || secretKey == "" {
-		return fmt.Errorf("%w: %s storage credentials must include endpoint, access_key and secret_key", ErrInvalidArgument, name)
-	}
-
-	return nil
-}
-
-func shouldUseSourceAsyncByRequest(params SubmitConversionRequest) bool {
-	if params.SourceURL != "" {
-		return false
-	}
-
-	return params.SourceBucket != "" && params.SourceObjectKey != "" &&
-		params.SourceEndpoint != "" && params.SourceAccessKey != "" && params.SourceSecretKey != ""
-}
-
 func (uc *TransformerService) SubmitConversion(ctx context.Context, params SubmitConversionRequest) (SubmitConversionResult, error) {
 	if params.DocumentID == "" {
 		return SubmitConversionResult{}, fmt.Errorf("%w: document_id is required", ErrInvalidArgument)
@@ -120,21 +89,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 
 	if params.SourceURL != "" && (params.SourceBucket != "" || params.SourceObjectKey != "") {
 		return SubmitConversionResult{}, fmt.Errorf("%w: provide either source_url or source bucket/object key", ErrInvalidArgument)
-	}
-
-	useSourceAsync := uc.cfg.UseSourceAsync && params.SourceURL == ""
-	if !useSourceAsync {
-		useSourceAsync = shouldUseSourceAsyncByRequest(params)
-	}
-
-	if useSourceAsync {
-		if err := validateStorageCredentials("source", params.SourceEndpoint, params.SourceAccessKey, params.SourceSecretKey); err != nil {
-			return SubmitConversionResult{}, err
-		}
-
-		if err := validateStorageCredentials("target", params.TargetEndpoint, params.TargetAccessKey, params.TargetSecretKey); err != nil {
-			return SubmitConversionResult{}, err
-		}
 	}
 
 	markdownBucket := params.MarkdownBucket
@@ -191,18 +145,8 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		SourceBucket:      params.SourceBucket,
 		SourceObjectKey:   params.SourceObjectKey,
 		SourceURL:         params.SourceURL,
-		SourceEndpoint:    params.SourceEndpoint,
-		SourceAccessKey:   params.SourceAccessKey,
-		SourceSecretKey:   params.SourceSecretKey,
-		SourceUseSSL:      params.SourceUseSSL,
-		SourceRegion:      params.SourceRegion,
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
-		TargetEndpoint:    params.TargetEndpoint,
-		TargetAccessKey:   params.TargetAccessKey,
-		TargetSecretKey:   params.TargetSecretKey,
-		TargetUseSSL:      params.TargetUseSSL,
-		TargetRegion:      params.TargetRegion,
 		FilenameExtension: fileExt,
 		CorrelationID:     params.CorrelationID,
 	})
@@ -219,16 +163,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 			SourceBucket:      params.SourceBucket,
 			SourceObjectKey:   params.SourceObjectKey,
 			SourceURL:         params.SourceURL,
-			SourceEndpoint:    params.SourceEndpoint,
-			SourceAccessKey:   params.SourceAccessKey,
-			SourceSecretKey:   params.SourceSecretKey,
-			SourceUseSSL:      params.SourceUseSSL,
-			SourceRegion:      params.SourceRegion,
-			TargetEndpoint:    params.TargetEndpoint,
-			TargetAccessKey:   params.TargetAccessKey,
-			TargetSecretKey:   params.TargetSecretKey,
-			TargetUseSSL:      params.TargetUseSSL,
-			TargetRegion:      params.TargetRegion,
 		},
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,

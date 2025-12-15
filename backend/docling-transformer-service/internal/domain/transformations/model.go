@@ -32,18 +32,8 @@ type TransformationTask struct {
 	SourceBucket      string
 	SourceObjectKey   string
 	SourceURL         string
-	SourceEndpoint    string
-	SourceAccessKey   string
-	SourceSecretKey   string
-	SourceUseSSL      *bool
-	SourceRegion      string
 	MarkdownBucket    string
 	MarkdownObjectKey string
-	TargetEndpoint    string
-	TargetAccessKey   string
-	TargetSecretKey   string
-	TargetUseSSL      *bool
-	TargetRegion      string
 	FilenameExtension string
 	CreatedAt         time.Time
 	StartedAt         *time.Time
@@ -59,18 +49,8 @@ type EnqueueParams struct {
 	SourceBucket      string
 	SourceObjectKey   string
 	SourceURL         string
-	SourceEndpoint    string
-	SourceAccessKey   string
-	SourceSecretKey   string
-	SourceUseSSL      *bool
-	SourceRegion      string
 	MarkdownBucket    string
 	MarkdownObjectKey string
-	TargetEndpoint    string
-	TargetAccessKey   string
-	TargetSecretKey   string
-	TargetUseSSL      *bool
-	TargetRegion      string
 	FilenameExtension string
 	CorrelationID     string
 }

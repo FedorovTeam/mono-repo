@@ -105,8 +105,8 @@ func (e *ConversionExecutor) pollDocling(ctx context.Context, task *transformati
 
 func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transformations.TransformationTask) (TaskState, error) {
 	useSourceAsync := e.cfg.UseSourceAsync && task.SourceURL == ""
-	if !useSourceAsync {
-		useSourceAsync = shouldUseSourceAsyncByTask(task)
+	if !useSourceAsync && task.SourceURL == "" && task.SourceBucket != "" && task.SourceObjectKey != "" && task.OriginalBucket != "" {
+		useSourceAsync = true
 	}
 	fileExt := task.FilenameExtension
 	if fileExt == "" {
@@ -165,18 +165,8 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		ContentType:     contentType,
 		SourceBucket:    sourceBucket,
 		SourceObjectKey: sourceObjectKey,
-		SourceEndpoint:  task.SourceEndpoint,
-		SourceAccessKey: task.SourceAccessKey,
-		SourceSecretKey: task.SourceSecretKey,
-		SourceUseSSL:    task.SourceUseSSL,
-		SourceRegion:    task.SourceRegion,
 		TargetBucket:    task.MarkdownBucket,
 		TargetObjectKey: task.MarkdownObjectKey,
-		TargetEndpoint:  task.TargetEndpoint,
-		TargetAccessKey: task.TargetAccessKey,
-		TargetSecretKey: task.TargetSecretKey,
-		TargetUseSSL:    task.TargetUseSSL,
-		TargetRegion:    task.TargetRegion,
 	}
 
 	jobID, err := e.conv.Submit(submitCtx, convertReq)
@@ -263,15 +253,6 @@ func (e *ConversionExecutor) fastPhaseContext(ctx context.Context) (context.Cont
 	}
 
 	return context.WithTimeout(ctx, e.cfg.FastOperationTimeout)
-}
-
-func shouldUseSourceAsyncByTask(task *transformations.TransformationTask) bool {
-	if task.SourceURL != "" {
-		return false
-	}
-
-	return task.SourceBucket != "" && task.SourceObjectKey != "" &&
-		task.SourceEndpoint != "" && task.SourceAccessKey != "" && task.SourceSecretKey != ""
 }
 
 func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, task *transformations.TransformationTask, err error) (TaskState, error, bool) {

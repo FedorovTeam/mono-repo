@@ -204,7 +204,7 @@ func TestConversionExecutorDownloadsFromSourceBucket(t *testing.T) {
 	}
 }
 
-func TestConversionExecutorUsesSourceAsyncWhenCredentialsProvided(t *testing.T) {
+func TestConversionExecutorUsesSourceAsyncWhenSourceObjectProvided(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{downloadContent: []byte("should-not-be-used")}
 	conv := &submitOnlyConverter{jobID: "job-123"}
@@ -220,9 +220,6 @@ func TestConversionExecutorUsesSourceAsyncWhenCredentialsProvided(t *testing.T) 
 		OriginalObjectKey: "path/file.docx",
 		SourceBucket:      "source-bucket",
 		SourceObjectKey:   "incoming/file.docx",
-		SourceEndpoint:    "http://minio:9000",
-		SourceAccessKey:   "access",
-		SourceSecretKey:   "secret",
 	}
 
 	state, err := executor.ProcessTask(context.Background(), task)
@@ -240,9 +237,6 @@ func TestConversionExecutorUsesSourceAsyncWhenCredentialsProvided(t *testing.T) 
 	}
 	if conv.lastRequest.SourceBucket != "source-bucket" || conv.lastRequest.SourceObjectKey != "incoming/file.docx" {
 		t.Fatalf("converter received wrong source object: %s/%s", conv.lastRequest.SourceBucket, conv.lastRequest.SourceObjectKey)
-	}
-	if conv.lastRequest.SourceEndpoint != "http://minio:9000" || conv.lastRequest.SourceAccessKey != "access" || conv.lastRequest.SourceSecretKey != "secret" {
-		t.Fatalf("converter received wrong source credentials: %+v", conv.lastRequest)
 	}
 }
 
