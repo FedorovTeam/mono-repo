@@ -6,6 +6,7 @@
 - `GetDocument` — получение по ID.
 - `ListDocuments` — пагинация и фильтры по статусу.
 - `UpdateDocumentStatus` — обновление статуса с валидацией переходов.
+- Поле `status` сообщения `Document` — единственный источник правды о прогрессе документа; поле `actual_status` удалено и зарезервировано в proto. Для восстановления после `FAILED` используется история `document_status_logs`.
 
 ## MinIO / storage-service
 - Для каждого документа `storage-service` формирует ключи по шаблону `org/<org_slug>/project/<project_slug>/year=YYYY/month=MM/day=DD/<uuid>/<document_id>.<ext>` для оригинала и `.../<uuid>/<document_id>.md` для Markdown.

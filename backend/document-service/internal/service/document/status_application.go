@@ -43,7 +43,7 @@ func (s *StatusApplication) Transition(ctx context.Context, doc *domain.Document
 	if doc == nil {
 		return nil, errors.New("document is required")
 	}
-	current, err := s.ResolveActualStatus(ctx, doc)
+	current, err := s.ResolveCurrentStatus(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
@@ -64,8 +64,10 @@ func (s *StatusApplication) Fail(ctx context.Context, documentID, reason string)
 	return err
 }
 
-// ResolveActualStatus возвращает актуальный статус, учитывая восстановление после Failed.
-func (s *StatusApplication) ResolveActualStatus(ctx context.Context, doc *domain.Document) (domain.DocumentStatus, error) {
+// ResolveCurrentStatus возвращает фактический этап обработки документа.
+// Если документ в статусе Failed, метод ищет последний успешный статус в логах,
+// чтобы повторный запуск продолжал цепочку с корректного шага.
+func (s *StatusApplication) ResolveCurrentStatus(ctx context.Context, doc *domain.Document) (domain.DocumentStatus, error) {
 	if doc == nil {
 		return "", errors.New("document is required")
 	}

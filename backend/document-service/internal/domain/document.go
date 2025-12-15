@@ -17,7 +17,6 @@ type Document struct {
 	BaseBranch        string
 	Path              string
 	Status            DocumentStatus
-	ActualStatus      DocumentStatus
 	WorkflowID        string
 	ActiveJobID       string
 	ErrorReason       string

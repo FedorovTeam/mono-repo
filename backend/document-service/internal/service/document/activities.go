@@ -91,7 +91,7 @@ func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) 
 		return fmt.Errorf("document %s not found", documentID)
 	}
 
-	status, err := a.statuses.ResolveActualStatus(ctx, doc)
+	status, err := a.statuses.ResolveCurrentStatus(ctx, doc)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
-	currentStatus, err := a.statuses.ResolveActualStatus(ctx, doc)
+	currentStatus, err := a.statuses.ResolveCurrentStatus(ctx, doc)
 	if err != nil {
 		return convertResult{}, err
 	}
@@ -167,7 +167,7 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, ma
 	if doc == nil {
 		return fmt.Errorf("document is required")
 	}
-	statusVal, err := a.statuses.ResolveActualStatus(ctx, doc)
+	statusVal, err := a.statuses.ResolveCurrentStatus(ctx, doc)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 		return nil, err
 	}
 
-	statusVal, err := a.statuses.ResolveActualStatus(ctx, doc)
+	statusVal, err := a.statuses.ResolveCurrentStatus(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
