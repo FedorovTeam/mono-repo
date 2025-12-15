@@ -126,11 +126,22 @@ func main() {
 		DoclingMaxAttempts:     cfg.Docling.StatusMaxAttempts,
 		DoclingMaxLifetime:     cfg.Docling.MaxJobLifetime,
 	})
-	workerProcessor.Run(ctx)
+
+	workerDone := make(chan struct{})
+	go func() {
+		workerProcessor.Run(ctx)
+		close(workerDone)
+	}()
+	logger.Info("worker processor started")
 
 	if err := grpcapi.Run(ctx, logger, transformUC, cfg.Service.GRPCPort); err != nil {
+		stop()
+		<-workerDone
 		logger.Fatal("server failed", zap.Error(err))
 	}
+
+	stop()
+	<-workerDone
 }
 
 func resolveConfigPath(flagPath string) string {
