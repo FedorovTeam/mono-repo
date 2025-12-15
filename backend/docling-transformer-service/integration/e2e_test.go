@@ -140,6 +140,10 @@ func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, i
 	return s.restored, s.rejected, nil
 }
 
+func (s *stubQueueRepo) RetryFailed(context.Context, time.Time, int) (int, int, error) {
+	return 0, 0, nil
+}
+
 func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
 	return nil
 }

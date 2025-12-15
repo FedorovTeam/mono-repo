@@ -425,6 +425,59 @@ SELECT (SELECT COUNT(*) FROM restored), (SELECT COUNT(*) FROM failed);`
 	return restored, failed, nil
 }
 
+func (r *PostgresQueueRepository) RetryFailed(ctx context.Context, olderThan time.Time, maxRetries int) (retried, exhausted int, err error) {
+	if maxRetries <= 0 {
+		return 0, 0, nil
+	}
+
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin retry tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	const query = `
+WITH failed AS (
+    SELECT id, retry_count, error FROM transformations_queue
+    WHERE status = 'failed' AND finished_at IS NOT NULL AND finished_at <= $1
+),
+exhausted AS (
+    UPDATE transformations_queue
+    SET error = format(
+            'retry limit exceeded (%s/%s)%s',
+            retry_count,
+            $2,
+            CASE WHEN error IS NOT NULL AND error <> '' THEN format(': %s', error) ELSE '' END
+        ),
+        finished_at = NOW()
+    WHERE id IN (SELECT id FROM failed WHERE retry_count >= $2)
+    RETURNING 1
+),
+retried AS (
+    UPDATE transformations_queue
+    SET status = 'pending',
+        started_at = NULL,
+        finished_at = NULL,
+        error = NULL,
+        docling_job_id = NULL,
+        docling_poll_count = 0,
+        next_poll_at = NULL
+    WHERE id IN (SELECT id FROM failed WHERE retry_count < $2)
+    RETURNING 1
+)
+SELECT (SELECT COUNT(*) FROM retried), (SELECT COUNT(*) FROM exhausted);`
+
+	if err := tx.QueryRow(ctx, query, olderThan, maxRetries).Scan(&retried, &exhausted); err != nil {
+		return 0, 0, fmt.Errorf("retry failed tasks: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("commit retry tx: %w", err)
+	}
+
+	return retried, exhausted, nil
+}
+
 func (r *PostgresQueueRepository) CleanupFinished(ctx context.Context, retention time.Duration) (int, error) {
 	const query = `DELETE FROM transformations_queue WHERE status IN ('done', 'failed') AND finished_at < NOW() - $1::interval RETURNING 1`
 

@@ -56,6 +56,7 @@ sequenceDiagram
         WK->>PG: CountByStatus // снимок метрик очереди
         WK->>PG: ActivateWaiting(now, max_docling_lifetime) // возвращает pending, помечает просроченные как failed
         WK->>PG: RestoreStuckProcessing(processing_timeout, max_retries, max_docling_attempts) // вернуть в pending или failed
+        WK->>PG: RetryFailed(olderThan=now-failed_retry_delay, max_failed_retries) // вернуть в pending или оставить failed при превышении лимита
         WK->>PG: CleanupFinished(retention)
     end
 ```

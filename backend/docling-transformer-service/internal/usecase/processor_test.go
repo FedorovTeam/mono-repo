@@ -59,6 +59,9 @@ func (p *pollingRepoStub) RestoreProcessing(context.Context) (int, error) { retu
 func (p *pollingRepoStub) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
 	return 0, 0, nil
 }
+func (p *pollingRepoStub) RetryFailed(context.Context, time.Time, int) (int, int, error) {
+	return 0, 0, nil
+}
 func (p *pollingRepoStub) CleanupFinished(context.Context, time.Duration) (int, error) {
 	p.cleanupCalls++
 	return 0, nil
@@ -204,11 +207,23 @@ func (r *queueRepoStub) AcquireBatch(context.Context, int) ([]*transformations.T
 type cleanupRepoStub struct {
 	pollingRepoStub
 	activated int
+	retried   int
+	exhausted int
 }
 
 func (r *cleanupRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
 	r.activated++
 	return 1, 0, nil
+}
+
+func (r *cleanupRepoStub) RetryFailed(ctx context.Context, olderThan time.Time, maxRetries int) (int, int, error) {
+	if olderThan.IsZero() || maxRetries <= 0 {
+		return 0, 0, nil
+	}
+
+	r.retried = 1
+	r.exhausted = 1
+	return r.retried, r.exhausted, nil
 }
 
 func TestQueueWorkerHandlesWaitingAndCompletionStates(t *testing.T) {
@@ -238,5 +253,20 @@ func TestMaintenanceRunnerTriggersCleanup(t *testing.T) {
 	}
 	if repoStub.activated == 0 {
 		t.Fatalf("expected waiting activation to be triggered")
+	}
+}
+
+func TestMaintenanceRunnerRetriesFailedTasks(t *testing.T) {
+	repoStub := &cleanupRepoStub{}
+	runner := NewMaintenanceRunner(repoStub, metrics.NewWorkerMetrics(nil), nil, MaintenanceConfig{
+		Interval:         time.Millisecond,
+		FailedRetryDelay: time.Minute,
+		MaxFailedRetries: 3,
+	})
+
+	runner.runOnce(context.Background())
+
+	if repoStub.retried == 0 || repoStub.exhausted == 0 {
+		t.Fatalf("expected failed tasks retry to be triggered")
 	}
 }

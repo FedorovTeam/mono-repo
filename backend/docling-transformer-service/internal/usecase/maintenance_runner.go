@@ -17,6 +17,8 @@ type MaintenanceConfig struct {
 	CleanupRetention     time.Duration
 	DoclingMaxLifetime   time.Duration
 	DoclingMaxAttempts   int
+	FailedRetryDelay     time.Duration
+	MaxFailedRetries     int
 }
 
 type MaintenanceRunner struct {
@@ -81,6 +83,17 @@ func (r *MaintenanceRunner) runOnce(ctx context.Context) {
 		}
 
 		r.metrics.RecordRecoveries(ctx, restored, failed)
+	}
+
+	if r.cfg.FailedRetryDelay > 0 && r.cfg.MaxFailedRetries > 0 {
+		retried, exhausted, err := r.repo.RetryFailed(ctx, time.Now().Add(-r.cfg.FailedRetryDelay), r.cfg.MaxFailedRetries)
+		if err != nil {
+			r.logger.Error("retry failed tasks failed", zap.Error(err))
+		} else if retried > 0 || exhausted > 0 {
+			r.logger.Info("failed tasks processed", zap.Int("restarted", retried), zap.Int("exhausted", exhausted), zap.Duration("retry_delay", r.cfg.FailedRetryDelay), zap.Int("max_retries", r.cfg.MaxFailedRetries))
+		}
+
+		r.metrics.RecordFailedRetries(ctx, retried, exhausted)
 	}
 
 	if r.cfg.CleanupRetention > 0 {
