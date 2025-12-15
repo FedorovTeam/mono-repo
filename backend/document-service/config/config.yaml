@@ -18,9 +18,9 @@ services:
       jitter: 0.2
       max_delay: 120s
     keepalive:
-      time: 30s
+      time: 5m
       timeout: 10s
-      permit_without_stream: true
+      permit_without_stream: false
 github:
   owner: "FedorovTeam"
   repository: "knowledge-base"
