@@ -188,8 +188,8 @@ FOR UPDATE SKIP LOCKED`, 1)
 	tasks, err = r.fetchTasks(ctx, tx, `
 SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
-WHERE status = 'pending'
-ORDER BY created_at
+WHERE status = 'pending' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
+ORDER BY COALESCE(next_poll_at, created_at), created_at
 LIMIT $1
 FOR UPDATE SKIP LOCKED`, limit)
 	if err != nil {
@@ -312,7 +312,7 @@ WHERE id = $1`
 	return nil
 }
 
-func (r *PostgresQueueRepository) RequeueDoclingWaiting(ctx context.Context, id uuid.UUID) error {
+func (r *PostgresQueueRepository) RequeueDoclingWaiting(ctx context.Context, id uuid.UUID, nextPollAt *time.Time) error {
 	const query = `
 UPDATE transformations_queue
 SET status = 'pending',
@@ -322,10 +322,10 @@ SET status = 'pending',
     error = NULL,
     docling_job_id = NULL,
     docling_poll_count = 0,
-    next_poll_at = NULL
+    next_poll_at = $2
 WHERE id = $1 AND status = 'waiting_docling'`
 
-	if _, err := r.pool.Exec(ctx, query, id); err != nil {
+	if _, err := r.pool.Exec(ctx, query, id, nextPollAt); err != nil {
 		return fmt.Errorf("requeue docling waiting: %w", err)
 	}
 

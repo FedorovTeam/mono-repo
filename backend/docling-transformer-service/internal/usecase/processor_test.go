@@ -30,6 +30,7 @@ type pollingRepoStub struct {
 	lastWaitingNextPoll time.Time
 	requeueCalls        int
 	lastRequeueID       uuid.UUID
+	lastRequeueNextPoll *time.Time
 }
 
 var _ repo.QueueRepository = (*pollingRepoStub)(nil)
@@ -63,9 +64,10 @@ func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UU
 	p.lastWaitingNextPoll = nextPoll
 	return nil
 }
-func (p *pollingRepoStub) RequeueDoclingWaiting(_ context.Context, id uuid.UUID) error {
+func (p *pollingRepoStub) RequeueDoclingWaiting(_ context.Context, id uuid.UUID, nextPollAt *time.Time) error {
 	p.requeueCalls++
 	p.lastRequeueID = id
+	p.lastRequeueNextPoll = nextPollAt
 	return nil
 }
 func (p *pollingRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
@@ -737,6 +739,12 @@ func TestNormalizeConfigAppliesDefaults(t *testing.T) {
 	if normalized.DoclingMaxInterval != 30*time.Minute {
 		t.Fatalf("expected default docling max interval to be 30m, got %s", normalized.DoclingMaxInterval)
 	}
+	if normalized.DoclingRequeueDelay != normalized.PollInterval {
+		t.Fatalf("expected default docling requeue delay to equal poll interval, got %s", normalized.DoclingRequeueDelay)
+	}
+	if normalized.DoclingMaxRestarts != 3 {
+		t.Fatalf("expected default docling max restarts to be 3, got %d", normalized.DoclingMaxRestarts)
+	}
 }
 
 func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
@@ -750,6 +758,8 @@ func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
 		DoclingInitialInterval: 5 * time.Second,
 		DoclingBackoffFactor:   1.5,
 		DoclingMaxInterval:     10 * time.Minute,
+		DoclingRequeueDelay:    15 * time.Second,
+		DoclingMaxRestarts:     7,
 	}
 
 	normalized := normalizeConfig(cfg)

@@ -140,6 +140,8 @@ func main() {
 		DoclingBackoffFactor:   cfg.Docling.StatusBackoffFactor,
 		DoclingMaxAttempts:     cfg.Docling.StatusMaxAttempts,
 		DoclingMaxLifetime:     cfg.Docling.MaxJobLifetime,
+		DoclingRequeueDelay:    cfg.Scheduler.DoclingRequeueDelay,
+		DoclingMaxRestarts:     cfg.Scheduler.DoclingMaxRestarts,
 		UseSourceAsync:         cfg.Docling.Mode == "source_async",
 	})
 

@@ -32,7 +32,7 @@ sequenceDiagram
     end
 
     loop workerLoop (MaxWorkers)
-        WK->>PG: AcquireBatch(pending сначала, затем waiting_docling по next_poll_at)
+        WK->>PG: AcquireBatch(waiting_docling с наступившим next_poll_at, затем pending с next_poll_at <= NOW())
         PG-->>WK: задачи со статусом processing (pending увеличивает retry_count)
         alt задача уже ждёт Docling (docling_job_id задан)
             WK->>DL: GET /v1/status/poll/{job_id} (X-Correlation-Id)
@@ -43,6 +43,8 @@ sequenceDiagram
                 WK->>PG: UPDATE status=done, finished_at, markdown_* fields
             else статус pending / временная ошибка
                 WK->>PG: UPDATE status=waiting_docling, docling_poll_count++, next_poll_at=exp.backoff
+            else превышен лимит опросов/рестартов
+                WK->>PG: UPDATE status=pending, docling_job_id=NULL, docling_poll_count=0, next_poll_at=NOW()+scheduler.docling_requeue_delay
             end
         else новая конвертация
             WK->>MN: GET original_object_key из original_bucket

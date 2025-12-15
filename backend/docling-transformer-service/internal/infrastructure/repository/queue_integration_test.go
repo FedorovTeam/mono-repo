@@ -340,3 +340,30 @@ INSERT INTO transformations_queue (
 	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, pendingID).Scan(&pendingStatus))
 	require.Equal(t, StatusPending, pendingStatus)
 }
+
+func TestAcquireBatchSkipsPendingWithFutureNextPoll(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	repo := NewQueueRepository(pool)
+	now := time.Now()
+	delayedID := uuid.New()
+	readyID := uuid.New()
+
+	_, err := pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, retry_count, correlation_id, next_poll_at
+) VALUES ($1, 'pending', 'doc-delayed', 'orig', 'path/delayed.docx', 'md', 'dest/delayed.md', 'docx', $2, 1, 'corr-delayed', $3),
+         ($4, 'pending', 'doc-ready', 'orig', 'path/ready.docx', 'md', 'dest/ready.md', 'docx', $5, 1, 'corr-ready', NULL)
+`, delayedID, now.Add(-time.Hour), now.Add(time.Hour), readyID, now)
+	require.NoError(t, err)
+
+	tasks, err := repo.AcquireBatch(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, readyID, tasks[0].ID)
+
+	var delayedStatus TransformationStatus
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, delayedID).Scan(&delayedStatus))
+	require.Equal(t, StatusPending, delayedStatus)
+}
