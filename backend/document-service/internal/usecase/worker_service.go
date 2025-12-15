@@ -62,17 +62,17 @@ func (s *WorkerService) SetClock(now func() time.Time) {
 }
 
 // Run выполняет периодическую обработку задач указанной стадии.
-func (s *WorkerService) Run(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, handler JobHandler, observe BatchObserver) {
-	s.run(ctx, stage, interval, batchSize, 0, handler, observe)
+func (s *WorkerService) Run(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, handler JobHandler, observe BatchObserver) error {
+	return s.run(ctx, stage, interval, batchSize, 0, handler, observe)
 }
 
 // RunWithBatchLimit выполняет ограниченное количество пачек задач за одну итерацию.
 // Если maxBatches <= 0, поведение эквивалентно Run.
-func (s *WorkerService) RunWithBatchLimit(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) {
-	s.run(ctx, stage, interval, batchSize, maxBatches, handler, observe)
+func (s *WorkerService) RunWithBatchLimit(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) error {
+	return s.run(ctx, stage, interval, batchSize, maxBatches, handler, observe)
 }
 
-func (s *WorkerService) run(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) {
+func (s *WorkerService) run(ctx context.Context, stage domain.JobStage, interval time.Duration, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) error {
 	if interval <= 0 {
 		interval = time.Minute
 	}
@@ -83,84 +83,90 @@ func (s *WorkerService) run(ctx context.Context, stage domain.JobStage, interval
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	s.reconcile(ctx, stage, batchSize, maxBatches, handler, observe)
+	if err := s.reconcile(ctx, stage, batchSize, maxBatches, handler, observe); err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-ticker.C:
-			s.reconcile(ctx, stage, batchSize, maxBatches, handler, observe)
+			if err := s.reconcile(ctx, stage, batchSize, maxBatches, handler, observe); err != nil {
+				return err
+			}
 		}
 	}
 }
 
 // reconcile считывает пачки задач и обрабатывает их до исчерпания очереди или достижения лимита пачек.
-func (s *WorkerService) reconcile(ctx context.Context, stage domain.JobStage, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) {
+func (s *WorkerService) reconcile(ctx context.Context, stage domain.JobStage, batchSize int, maxBatches int, handler JobHandler, observe BatchObserver) error {
 	batches := 0
 	for {
 		if maxBatches > 0 && batches >= maxBatches {
-			return
+			return nil
 		}
 		jobs, err := s.jobs.AcquirePendingJobs(ctx, stage, batchSize)
 		if err != nil {
 			s.logf("worker[%s]: acquire pending jobs: %v", stage, err)
-			return
+			return err
 		}
 		if observe != nil {
 			observe(ctx, len(jobs))
 		}
 		if len(jobs) == 0 {
-			return
+			return nil
 		}
 
 		for _, job := range jobs {
-			s.handleJob(ctx, job, handler)
+			if err := s.handleJob(ctx, job, handler); err != nil {
+				return err
+			}
 		}
 
 		batches++
 
 		if len(jobs) < batchSize {
-			return
+			return nil
 		}
 	}
 }
 
-func (s *WorkerService) handleJob(ctx context.Context, job domain.ProcessingJob, handler JobHandler) {
+func (s *WorkerService) handleJob(ctx context.Context, job domain.ProcessingJob, handler JobHandler) error {
 	result, err := handler(ctx, job)
 	if result.Status == domain.JobStatusPending {
-		s.postponeJob(ctx, job, result)
-		return
+		return s.postponeJob(ctx, job, result)
 	}
 	if err != nil {
-		s.failJob(ctx, job, result, err)
-		return
+		return s.failJob(ctx, job, result, err)
 	}
-	s.completeJob(ctx, job, result)
+	return s.completeJob(ctx, job, result)
 }
 
-func (s *WorkerService) postponeJob(ctx context.Context, job domain.ProcessingJob, result JobResult) {
+func (s *WorkerService) postponeJob(ctx context.Context, job domain.ProcessingJob, result JobResult) error {
 	payload := mergePayload(job.Payload, result.Payload)
 	nextRun := s.computeNextRun(result.NextRun)
 	event := ensureEvent(result.Event, job, domain.JobStatusPending, "postponed", "")
 
 	if _, err := s.jobs.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusPending, &nextRun, result.IncrementAttempt, payload, nil); err != nil {
 		s.logf("worker[%s]: postpone job %s: %v", job.Stage, job.TaskID, err)
+		return err
 	}
-	s.appendEvent(ctx, event)
+	return s.appendEvent(ctx, event)
 }
 
-func (s *WorkerService) completeJob(ctx context.Context, job domain.ProcessingJob, result JobResult) {
+func (s *WorkerService) completeJob(ctx context.Context, job domain.ProcessingJob, result JobResult) error {
 	payload := mergePayload(job.Payload, result.Payload)
 	event := ensureEvent(result.Event, job, domain.JobStatusCompleted, "completed", "")
 
 	if _, err := s.jobs.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusCompleted, nil, false, payload, nil); err != nil {
 		s.logf("worker[%s]: update completed job %s: %v", job.Stage, job.TaskID, err)
+		return err
 	}
-	s.appendEvent(ctx, event)
+	return s.appendEvent(ctx, event)
 }
 
-func (s *WorkerService) failJob(ctx context.Context, job domain.ProcessingJob, result JobResult, err error) {
+func (s *WorkerService) failJob(ctx context.Context, job domain.ProcessingJob, result JobResult, err error) error {
 	payload := mergePayload(job.Payload, result.Payload)
 	if payload == nil {
 		payload = map[string]any{}
@@ -175,8 +181,9 @@ func (s *WorkerService) failJob(ctx context.Context, job domain.ProcessingJob, r
 
 	if _, updateErr := s.jobs.UpdateProcessingJob(ctx, job.TaskID, domain.JobStatusFailed, &nextRun, false, payload, nil); updateErr != nil {
 		s.logf("worker[%s]: fail job %s: %v (original: %v)", job.Stage, job.TaskID, updateErr, err)
+		return updateErr
 	}
-	s.appendEvent(ctx, event)
+	return s.appendEvent(ctx, event)
 }
 
 func (s *WorkerService) computeNextRun(next *time.Time) time.Time {
@@ -186,13 +193,16 @@ func (s *WorkerService) computeNextRun(next *time.Time) time.Time {
 	return s.now().Add(s.retry)
 }
 
-func (s *WorkerService) appendEvent(ctx context.Context, event *domain.JobEvent) {
+func (s *WorkerService) appendEvent(ctx context.Context, event *domain.JobEvent) error {
 	if s.events == nil || event == nil {
-		return
+		return nil
 	}
 	if err := s.events.AddJobEvent(ctx, event); err != nil {
 		s.logf("worker: append job event %s: %v", event.ID, err)
+		return err
 	}
+
+	return nil
 }
 
 func mergePayload(base, additional map[string]any) map[string]any {

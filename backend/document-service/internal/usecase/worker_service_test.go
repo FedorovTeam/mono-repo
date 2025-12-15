@@ -205,10 +205,12 @@ func TestWorkerServicePostponesJobWithIncrement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go svc.Run(ctx, domain.JobStageConvertToMarkdown, time.Hour, 5, func(_ context.Context, job domain.ProcessingJob) (JobResult, error) {
-		next := retryAt.Add(time.Minute)
-		return JobResult{Status: domain.JobStatusPending, NextRun: &next, IncrementAttempt: true}, nil
-	}, nil)
+	go func() {
+		_ = svc.Run(ctx, domain.JobStageConvertToMarkdown, time.Hour, 5, func(_ context.Context, job domain.ProcessingJob) (JobResult, error) {
+			next := retryAt.Add(time.Minute)
+			return JobResult{Status: domain.JobStatusPending, NextRun: &next, IncrementAttempt: true}, nil
+		}, nil)
+	}()
 
 	waitForUpdates(t, repo, 1)
 	cancel()
@@ -231,7 +233,7 @@ func TestWorkerServiceStopsAfterSingleBatch(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		svc.RunWithBatchLimit(ctx, domain.JobStageConvertToMarkdown, time.Hour, 1, 1, func(_ context.Context, job domain.ProcessingJob) (JobResult, error) {
+		_ = svc.RunWithBatchLimit(ctx, domain.JobStageConvertToMarkdown, time.Hour, 1, 1, func(_ context.Context, job domain.ProcessingJob) (JobResult, error) {
 			return JobResult{}, nil
 		}, nil)
 		close(done)

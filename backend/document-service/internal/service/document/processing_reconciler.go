@@ -57,7 +57,7 @@ func NewProcessingReconciler(repo processingRepo, batchSize int, stageInterval, 
 	}
 }
 
-func (r *ProcessingReconciler) Run(ctx context.Context, interval time.Duration) {
+func (r *ProcessingReconciler) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = time.Minute
 	}
@@ -65,19 +65,23 @@ func (r *ProcessingReconciler) Run(ctx context.Context, interval time.Duration) 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	r.reconcile(ctx, interval)
+	if err := r.reconcile(ctx, interval); err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-ticker.C:
-			r.reconcile(ctx, interval)
+			if err := r.reconcile(ctx, interval); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func (r *ProcessingReconciler) reconcile(ctx context.Context, interval time.Duration) {
+func (r *ProcessingReconciler) reconcile(ctx context.Context, interval time.Duration) error {
 	cutoff := r.now().Add(-(r.stageInterval + r.gracePeriod))
 	nextRun := r.now()
 	reason := fmt.Sprintf("restored after exceeding %s in processing", r.stageInterval+r.gracePeriod)
@@ -85,12 +89,12 @@ func (r *ProcessingReconciler) reconcile(ctx context.Context, interval time.Dura
 	for {
 		jobs, err := r.retryRequeue(ctx, cutoff, nextRun, reason, interval)
 		if err != nil {
-			return
+			return err
 		}
 		r.metrics.observeBatch(ctx, len(jobs))
 		if len(jobs) == 0 {
 			r.metrics.observeBatch(ctx, 0)
-			return
+			return nil
 		}
 
 		for _, job := range jobs {
@@ -98,7 +102,7 @@ func (r *ProcessingReconciler) reconcile(ctx context.Context, interval time.Dura
 		}
 
 		if len(jobs) < r.batchSize {
-			return
+			return nil
 		}
 	}
 }

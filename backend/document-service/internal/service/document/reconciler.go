@@ -2,7 +2,6 @@ package document
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"backend-document-service/internal/domain"
@@ -40,7 +39,7 @@ func NewUploadReconciler(repo Repository, confirm confirmUploadCaller, batchSize
 	}
 }
 
-func (r *UploadReconciler) Run(ctx context.Context, interval time.Duration) {
+func (r *UploadReconciler) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = time.Minute
 	}
@@ -48,19 +47,23 @@ func (r *UploadReconciler) Run(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	r.reconcile(ctx)
+	if err := r.reconcile(ctx); err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-ticker.C:
-			r.reconcile(ctx)
+			if err := r.reconcile(ctx); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func (r *UploadReconciler) reconcile(ctx context.Context) {
+func (r *UploadReconciler) reconcile(ctx context.Context) error {
 	docStatus := domain.DocumentStatusUploaded
 	cutoff := r.now().Add(-r.minAge)
 	offset := 0
@@ -68,14 +71,13 @@ func (r *UploadReconciler) reconcile(ctx context.Context) {
 	for {
 		docs, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &docStatus)
 		if err != nil {
-			log.Printf("reconciler: list documents: %v", err)
 			r.metrics.recordError(ctx)
-			return
+			return err
 		}
 		r.metrics.observeBatch(ctx, len(docs))
 		if len(docs) == 0 {
 			r.metrics.observeBatch(ctx, 0)
-			return
+			return nil
 		}
 
 		for _, doc := range docs {
@@ -88,14 +90,14 @@ func (r *UploadReconciler) reconcile(ctx context.Context) {
 			}
 
 			if _, err := r.confirmUpload.ConfirmUpload(ctx, usecase.ConfirmUploadInput{DocumentID: doc.ID, Bucket: doc.OriginalBucket, ObjectKey: doc.OriginalObjectKey}); err != nil {
-				log.Printf("reconciler: confirm upload for %s: %v", doc.ID, err)
 				r.metrics.recordError(ctx)
+				return err
 			}
 			r.metrics.recordDuration(ctx, time.Since(started))
 		}
 
 		if len(docs) < r.batchSize {
-			return
+			return nil
 		}
 		offset += len(docs)
 	}

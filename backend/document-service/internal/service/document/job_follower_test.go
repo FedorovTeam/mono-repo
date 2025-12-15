@@ -64,7 +64,9 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 		AuthorName:    "Author",
 		AuthorEmail:   "author@example.com",
 	})
-	follower.reconcile(context.Background())
+	if err := follower.reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	if len(repo.createdJobs) != 2 {
 		t.Fatalf("expected 2 scheduled jobs, got %d", len(repo.createdJobs))
@@ -105,7 +107,9 @@ func TestJobFollowerMarksFailed(t *testing.T) {
 	}
 
 	follower := NewJobFollower(repo, 10, time.Minute, PublishDefaults{})
-	follower.reconcile(context.Background())
+	if err := follower.reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	if len(repo.updatedStatus) != 1 || repo.updatedStatus[0] != domain.DocumentStatusFailed {
 		t.Fatalf("document status was not marked as failed: %+v", repo.updatedStatus)
