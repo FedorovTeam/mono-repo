@@ -148,47 +148,23 @@ func pickBool(override *bool, fallback bool) bool {
 	return fallback
 }
 
-func pickStringWithDefault(primary, secondary, fallback string) string {
-	if primary != "" {
-		return primary
-	}
-
-	if secondary != "" {
-		return secondary
-	}
-
-	return fallback
-}
-
-func pickBoolWithDefault(primary, secondary *bool, fallback bool) bool {
-	if primary != nil {
-		return *primary
-	}
-
-	if secondary != nil {
-		return *secondary
-	}
-
-	return fallback
-}
-
-func (c *DoclingConverter) resolveSourceStorage(req domain.ConvertRequest) storageSettings {
+func (c *DoclingConverter) resolveSourceStorage() storageSettings {
 	return storageSettings{
-		Endpoint:  pickStringWithDefault(req.SourceEndpoint, req.MinioEndpoint, c.storage.Endpoint),
-		AccessKey: pickStringWithDefault(req.SourceAccessKey, req.MinioAccessKey, c.storage.AccessKey),
-		SecretKey: pickStringWithDefault(req.SourceSecretKey, req.MinioSecretKey, c.storage.SecretKey),
-		Region:    pickStringWithDefault(req.SourceRegion, req.MinioRegion, c.storage.Region),
-		UseSSL:    pickBoolWithDefault(req.SourceUseSSL, req.MinioUseSSL, c.storage.UseSSL),
+		Endpoint:  c.storage.Endpoint,
+		AccessKey: c.storage.AccessKey,
+		SecretKey: c.storage.SecretKey,
+		Region:    c.storage.Region,
+		UseSSL:    c.storage.UseSSL,
 	}
 }
 
-func (c *DoclingConverter) resolveTargetStorage(req domain.ConvertRequest) storageSettings {
+func (c *DoclingConverter) resolveTargetStorage() storageSettings {
 	return storageSettings{
-		Endpoint:  pickStringWithDefault(req.TargetEndpoint, req.MinioEndpoint, c.storage.Endpoint),
-		AccessKey: pickStringWithDefault(req.TargetAccessKey, req.MinioAccessKey, c.storage.AccessKey),
-		SecretKey: pickStringWithDefault(req.TargetSecretKey, req.MinioSecretKey, c.storage.SecretKey),
-		Region:    pickStringWithDefault(req.TargetRegion, req.MinioRegion, c.storage.Region),
-		UseSSL:    pickBoolWithDefault(req.TargetUseSSL, req.MinioUseSSL, c.storage.UseSSL),
+		Endpoint:  c.storage.Endpoint,
+		AccessKey: c.storage.AccessKey,
+		SecretKey: c.storage.SecretKey,
+		Region:    c.storage.Region,
+		UseSSL:    c.storage.UseSSL,
 	}
 }
 
@@ -829,13 +805,13 @@ func (c *DoclingConverter) submitSourceAsync(
 	}
 
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
-	sourceStorage := c.resolveSourceStorage(req)
+	sourceStorage := c.resolveSourceStorage()
 
 	if sourceStorage.Endpoint == "" || sourceStorage.AccessKey == "" || sourceStorage.SecretKey == "" {
 		return "", errors.New("docling source storage config is incomplete")
 	}
 
-	targetStorage := c.resolveTargetStorage(req)
+	targetStorage := c.resolveTargetStorage()
 
 	requestBody := convertDocumentsRequest{
 		Sources: []s3SourceRequest{
