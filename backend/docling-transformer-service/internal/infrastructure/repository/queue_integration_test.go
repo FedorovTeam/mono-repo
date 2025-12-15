@@ -18,7 +18,9 @@ import (
 
 type TransformationStatus = transformations.TransformationStatus
 
-func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
+func startPostgresContainer(t *testing.T) (context.Context, *pgxpool.Pool) {
+	t.Helper()
+
 	ctx := context.Background()
 
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -39,7 +41,7 @@ func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = pgContainer.Terminate(ctx)
+		_ = pgContainer.Terminate(context.Background())
 	})
 
 	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
@@ -47,8 +49,10 @@ func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
 
 	db, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
-	defer db.Close()
 	db.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 
 	require.Eventually(t, func() bool {
 		return db.PingContext(ctx) == nil
@@ -58,9 +62,18 @@ func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
 
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
-	defer pool.Close()
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	return ctx, pool
+}
+
+func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
 
 	repo := NewQueueRepository(pool)
+	var err error
 
 	startedAt := time.Now().Add(-5 * time.Minute)
 	taskID := uuid.New()
@@ -158,49 +171,50 @@ INSERT INTO transformations_queue (
 	require.Equal(t, StatusFailed, expiredStatus)
 }
 
-func TestRetryFailedMovesTasksToPending(t *testing.T) {
-	ctx := context.Background()
-
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker binary not available for testcontainers")
-	}
-
-	infoCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := exec.CommandContext(infoCtx, "docker", "info").Run(); err != nil {
-		t.Skip("docker daemon not available for testcontainers")
-	}
-
-	pgContainer, err := postgres.RunContainer(ctx,
-		testcontainers.WithImage("postgres:16-alpine"),
-		postgres.WithDatabase("transformations"),
-		postgres.WithUsername("postgres"),
-		postgres.WithPassword("password"),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = pgContainer.Terminate(ctx)
-	})
-
-	dsn, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-
-	require.Eventually(t, func() bool {
-		return db.PingContext(ctx) == nil
-	}, 10*time.Second, 300*time.Millisecond)
-
-	require.NoError(t, migrations.Run(ctx, db))
-
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	defer pool.Close()
+func TestRestoreProcessingMovesTasksToPendingOnStartup(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
 
 	repo := NewQueueRepository(pool)
+	var err error
+
+	startedAt := time.Now().Add(-2 * time.Minute)
+	taskID := uuid.New()
+	_, err = pool.Exec(ctx, `
+INSERT INTO transformations_queue (
+    id, status, document_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, filename_extension,
+    created_at, started_at, retry_count, correlation_id
+) VALUES ($1, 'processing', 'doc-start', 'orig', 'path/start.docx', 'md', 'dest/start.md', 'docx', $2, $3, 1, 'corr-start')
+`, taskID, startedAt.Add(-time.Minute), startedAt)
+	require.NoError(t, err)
+
+	restored, err := repo.RestoreProcessing(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, restored)
+
+	var status TransformationStatus
+	var started *time.Time
+	var retryCount int
+	var errorMessage string
+	err = pool.QueryRow(ctx, `SELECT status, started_at, retry_count, error FROM transformations_queue WHERE id = $1`, taskID).
+		Scan(&status, &started, &retryCount, &errorMessage)
+	require.NoError(t, err)
+	require.Equal(t, StatusPending, status)
+	require.Nil(t, started)
+	require.Equal(t, 1, retryCount)
+	require.Equal(t, "", errorMessage)
+
+	task, err := repo.AcquireNext(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Equal(t, taskID, task.ID)
+	require.Equal(t, StatusProcessing, task.Status)
+}
+
+func TestRetryFailedMovesTasksToPending(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	repo := NewQueueRepository(pool)
+	var err error
 
 	finishedAt := time.Now().Add(-2 * time.Hour)
 	retryID := uuid.New()

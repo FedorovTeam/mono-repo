@@ -91,6 +91,11 @@ func main() {
 	defer pool.Close()
 
 	queueRepo := repository.NewQueueRepository(pool)
+	restored, err := queueRepo.RestoreProcessing(ctx)
+	if err != nil {
+		logger.Fatal("failed to restore processing tasks", zap.Error(err))
+	}
+	logger.Info("restored processing tasks", zap.Int("count", restored))
 	conv := converter.NewDoclingConverter(converter.Config{
 		Endpoint:           cfg.Docling.Endpoint,
 		APIKey:             cfg.Docling.APIKey,
