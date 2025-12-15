@@ -1,9 +1,9 @@
 package usecase
 
 import (
-	"context"
-	"sync"
-	"time"
+"context"
+"sync"
+"time"
 
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"

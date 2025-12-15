@@ -1,8 +1,11 @@
 package usecase
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -127,6 +130,104 @@ func TestConversionExecutorReschedulesAfterTemporarySubmitError(t *testing.T) {
 	}
 }
 
+func TestConversionExecutorDownloadsFromSourceURL(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	storage := &trackingStorage{}
+	conv := &submitOnlyConverter{jobID: "job-123"}
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
+	httpClient := &recordingHTTPClient{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewBufferString("url-content"))}}
+
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+		MarkdownBucket:       "md",
+		FastOperationTimeout: time.Second,
+		HTTPClient:           httpClient,
+	})
+
+	task := &transformations.TransformationTask{
+		ID:                uuid.New(),
+		SourceURL:         "https://example.com/doc.docx",
+		OriginalObjectKey: "path/file.docx",
+	}
+
+	state, err := executor.ProcessTask(context.Background(), task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != StateWaitingDocling {
+		t.Fatalf("expected waiting state, got %s", state)
+	}
+	if len(httpClient.requests) != 1 {
+		t.Fatalf("expected single http request, got %d", len(httpClient.requests))
+	}
+	if storage.downloadCalls != 0 {
+		t.Fatalf("expected no storage downloads, got %d", storage.downloadCalls)
+	}
+	if string(conv.lastRequest.Content) != "url-content" {
+		t.Fatalf("converter received wrong content: %s", string(conv.lastRequest.Content))
+	}
+}
+
+func TestConversionExecutorDownloadsFromSourceBucket(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	storage := &trackingStorage{downloadContent: []byte("bucket-content")}
+	conv := &submitOnlyConverter{jobID: "job-123"}
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
+	httpClient := &recordingHTTPClient{}
+
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+		MarkdownBucket:       "md",
+		FastOperationTimeout: time.Second,
+		HTTPClient:           httpClient,
+	})
+
+	task := &transformations.TransformationTask{
+		ID:              uuid.New(),
+		SourceBucket:    "source-bucket",
+		SourceObjectKey: "incoming/file.docx",
+	}
+
+	state, err := executor.ProcessTask(context.Background(), task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if state != StateWaitingDocling {
+		t.Fatalf("expected waiting state, got %s", state)
+	}
+	if storage.downloadCalls != 1 {
+		t.Fatalf("expected single storage download, got %d", storage.downloadCalls)
+	}
+	if len(httpClient.requests) != 0 {
+		t.Fatalf("expected no http requests, got %d", len(httpClient.requests))
+	}
+	if string(conv.lastRequest.Content) != "bucket-content" {
+		t.Fatalf("converter received wrong content: %s", string(conv.lastRequest.Content))
+	}
+}
+
+func TestConversionExecutorErrorsOnUnavailableSource(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	storage := &trackingStorage{downloadErr: errors.New("not found")}
+	conv := &submitOnlyConverter{jobID: "job-123"}
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
+	httpClient := &recordingHTTPClient{err: errors.New("unreachable")}
+
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+		MarkdownBucket:       "md",
+		FastOperationTimeout: time.Second,
+		HTTPClient:           httpClient,
+	})
+
+	_, err := executor.ProcessTask(context.Background(), &transformations.TransformationTask{ID: uuid.New(), SourceURL: "https://example.com/doc.docx"})
+	if err == nil {
+		t.Fatalf("expected error for unreachable url")
+	}
+
+	state, err := executor.ProcessTask(context.Background(), &transformations.TransformationTask{ID: uuid.New(), SourceBucket: "src", SourceObjectKey: "missing.docx"})
+	if err == nil || state != StateProcessing {
+		t.Fatalf("expected processing state with error for missing object, got state=%s err=%v", state, err)
+	}
+}
+
 type temporaryStatusError struct{}
 
 func (temporaryStatusError) Error() string   { return "temporary" }
@@ -172,10 +273,21 @@ func (c *staticResultConverter) CheckStatus(context.Context, string) (domain.Sta
 }
 
 type trackingStorage struct {
-	uploadCalls int
+	uploadCalls     int
+	downloadCalls   int
+	downloadErr     error
+	downloadContent []byte
 }
 
 func (s *trackingStorage) Download(context.Context, string, string) ([]byte, error) {
+	s.downloadCalls++
+	if s.downloadErr != nil {
+		return nil, s.downloadErr
+	}
+	if s.downloadContent != nil {
+		return s.downloadContent, nil
+	}
+
 	return []byte("original"), nil
 }
 
@@ -184,15 +296,35 @@ func (s *trackingStorage) Upload(context.Context, string, string, string, []byte
 	return nil
 }
 
+type recordingHTTPClient struct {
+	requests []*http.Request
+	resp     *http.Response
+	err      error
+}
+
+func (c *recordingHTTPClient) Do(req *http.Request) (*http.Response, error) {
+	c.requests = append(c.requests, req)
+	if c.err != nil {
+		return nil, c.err
+	}
+	if c.resp == nil {
+		return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(bytes.NewBufferString(""))}, nil
+	}
+
+	return c.resp, nil
+}
+
 type submitOnlyConverter struct {
 	jobID        string
 	submitCalled bool
 	checkCalled  bool
 	submitErr    error
+	lastRequest  domain.ConvertRequest
 }
 
 func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertRequest) (string, error) {
 	c.submitCalled = true
+	c.lastRequest = req
 	if c.submitErr != nil {
 		return "", c.submitErr
 	}

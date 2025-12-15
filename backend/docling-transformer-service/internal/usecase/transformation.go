@@ -37,6 +37,9 @@ type SubmitConversionRequest struct {
 	DocumentID        string
 	OriginalBucket    string
 	OriginalObjectKey string
+	SourceBucket      string
+	SourceObjectKey   string
+	SourceURL         string
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
@@ -75,6 +78,16 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 	}
 	if params.OriginalBucket == "" || params.OriginalObjectKey == "" {
 		return SubmitConversionResult{}, fmt.Errorf("%w: original bucket and key are required", ErrInvalidArgument)
+	}
+
+	if params.SourceBucket != "" || params.SourceObjectKey != "" {
+		if params.SourceBucket == "" || params.SourceObjectKey == "" {
+			return SubmitConversionResult{}, fmt.Errorf("%w: both source bucket and key are required together", ErrInvalidArgument)
+		}
+	}
+
+	if params.SourceURL != "" && (params.SourceBucket != "" || params.SourceObjectKey != "") {
+		return SubmitConversionResult{}, fmt.Errorf("%w: provide either source_url or source bucket/object key", ErrInvalidArgument)
 	}
 
 	markdownBucket := params.MarkdownBucket
@@ -128,6 +141,9 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		DocumentID:        params.DocumentID,
 		OriginalBucket:    params.OriginalBucket,
 		OriginalObjectKey: params.OriginalObjectKey,
+		SourceBucket:      params.SourceBucket,
+		SourceObjectKey:   params.SourceObjectKey,
+		SourceURL:         params.SourceURL,
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		FilenameExtension: fileExt,
@@ -138,7 +154,15 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 	}
 
 	result := SubmitConversionResult{
-		Task:              &transformations.TransformationTask{ID: queueID, Status: transformations.StatusPending, MarkdownBucket: markdownBucket, MarkdownObjectKey: markdownKey},
+		Task: &transformations.TransformationTask{
+			ID:                queueID,
+			Status:            transformations.StatusPending,
+			MarkdownBucket:    markdownBucket,
+			MarkdownObjectKey: markdownKey,
+			SourceBucket:      params.SourceBucket,
+			SourceObjectKey:   params.SourceObjectKey,
+			SourceURL:         params.SourceURL,
+		},
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 	}

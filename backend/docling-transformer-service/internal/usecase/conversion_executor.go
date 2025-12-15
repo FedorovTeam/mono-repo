@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"path/filepath"
 	"time"
 
@@ -25,16 +27,18 @@ const (
 type ConversionExecutorConfig struct {
 	MarkdownBucket       string
 	FastOperationTimeout time.Duration
+	HTTPClient           HTTPClient
 }
 
 type ConversionExecutor struct {
-	repo    repo.QueueRepository
-	conv    domain.Converter
-	storage domain.ObjectStorage
-	poller  *DoclingPoller
-	metrics *metrics.WorkerMetrics
-	logger  *zap.Logger
-	cfg     ConversionExecutorConfig
+	repo       repo.QueueRepository
+	conv       domain.Converter
+	storage    domain.ObjectStorage
+	poller     *DoclingPoller
+	metrics    *metrics.WorkerMetrics
+	logger     *zap.Logger
+	httpClient HTTPClient
+	cfg        ConversionExecutorConfig
 }
 
 func NewConversionExecutor(repository repo.QueueRepository, conv domain.Converter, storage domain.ObjectStorage, poller *DoclingPoller, metrics *metrics.WorkerMetrics, logger *zap.Logger, cfg ConversionExecutorConfig) *ConversionExecutor {
@@ -42,7 +46,16 @@ func NewConversionExecutor(repository repo.QueueRepository, conv domain.Converte
 		logger = zap.NewNop()
 	}
 
-	return &ConversionExecutor{repo: repository, conv: conv, storage: storage, poller: poller, metrics: metrics, logger: logger, cfg: cfg}
+	client := cfg.HTTPClient
+	if client == nil {
+		timeout := cfg.FastOperationTimeout
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+		client = &http.Client{Timeout: timeout}
+	}
+
+	return &ConversionExecutor{repo: repository, conv: conv, storage: storage, poller: poller, metrics: metrics, logger: logger, httpClient: client, cfg: cfg}
 }
 
 func (e *ConversionExecutor) ProcessTask(ctx context.Context, task *transformations.TransformationTask) (TaskState, error) {
@@ -92,7 +105,14 @@ func (e *ConversionExecutor) pollDocling(ctx context.Context, task *transformati
 func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transformations.TransformationTask) (TaskState, error) {
 	fileExt := task.FilenameExtension
 	if fileExt == "" {
-		fileExt = domain.NormalizeExtension(filepath.Ext(task.OriginalObjectKey))
+		key := task.OriginalObjectKey
+		if task.SourceObjectKey != "" {
+			key = task.SourceObjectKey
+		}
+		fileExt = domain.NormalizeExtension(filepath.Ext(key))
+	}
+	if fileExt == "" {
+		fileExt = domain.NormalizeExtension(filepath.Ext(ResolveFilenameFromURL(task.SourceURL, "")))
 	}
 
 	contentType, err := domain.ResolveContentTypeByExtension(fileExt)
@@ -103,12 +123,16 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	downloadCtx, cancelDownload := e.fastPhaseContext(ctx)
 	defer cancelDownload()
 
-	originalContent, err := e.storage.Download(downloadCtx, task.OriginalBucket, task.OriginalObjectKey)
+	sourceContent, err := e.downloadSource(downloadCtx, task)
 	if err != nil {
-		return StateProcessing, fmt.Errorf("download original: %w", err)
+		return StateProcessing, err
 	}
 
-	originalFileName := filepath.Base(task.OriginalObjectKey)
+	originalFileName := task.OriginalObjectKey
+	if task.SourceObjectKey != "" {
+		originalFileName = task.SourceObjectKey
+	}
+	originalFileName = ResolveFilenameFromURL(task.SourceURL, filepath.Base(originalFileName))
 	if filepath.Ext(originalFileName) == "" && fileExt != "" {
 		originalFileName = fmt.Sprintf("document.%s", fileExt)
 	}
@@ -118,7 +142,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 
 	jobID, err := e.conv.Submit(submitCtx, domain.ConvertRequest{
 		FileName:    originalFileName,
-		Content:     originalContent,
+		Content:     sourceContent,
 		ContentType: contentType,
 	})
 	if err != nil {
@@ -141,6 +165,61 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	e.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll))
 
 	return StateWaitingDocling, nil
+}
+
+func (e *ConversionExecutor) downloadSource(ctx context.Context, task *transformations.TransformationTask) ([]byte, error) {
+	if task.SourceURL != "" {
+		return e.downloadFromURL(ctx, task.SourceURL)
+	}
+
+	if task.SourceBucket != "" && task.SourceObjectKey != "" {
+		content, err := e.storage.Download(ctx, task.SourceBucket, task.SourceObjectKey)
+		if err != nil {
+			return nil, fmt.Errorf("download source object: %w", err)
+		}
+
+		return content, nil
+	}
+
+	content, err := e.storage.Download(ctx, task.OriginalBucket, task.OriginalObjectKey)
+	if err != nil {
+		return nil, fmt.Errorf("download original: %w", err)
+	}
+
+	return content, nil
+}
+
+func (e *ConversionExecutor) downloadFromURL(ctx context.Context, rawURL string) ([]byte, error) {
+	if e.httpClient == nil {
+		return nil, fmt.Errorf("download source: http client is not configured")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("download source: build request: %w", err)
+	}
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download source: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("download source: status %d: %s", resp.StatusCode, string(body))
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("download source: read body: %w", err)
+	}
+
+	if len(data) == 0 {
+		return nil, fmt.Errorf("download source: empty body")
+	}
+
+	return data, nil
 }
 
 func (e *ConversionExecutor) fastPhaseContext(ctx context.Context) (context.Context, context.CancelFunc) {

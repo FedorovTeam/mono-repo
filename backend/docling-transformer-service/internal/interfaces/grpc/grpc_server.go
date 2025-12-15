@@ -51,12 +51,26 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		zap.String("document_id", req.GetDocumentId()),
 		zap.String("original_bucket", req.GetOriginalBucket()),
 		zap.String("original_object_key", req.GetOriginalObjectKey()),
+		zap.String("source_bucket", req.GetSourceBucket()),
+		zap.String("source_object_key", req.GetSourceObjectKey()),
+		zap.String("source_url", req.GetSourceUrl()),
 		zap.String("filename_extension", req.GetFilenameExtension()))
+
+	if req.GetSourceUrl() != "" && (req.GetSourceBucket() != "" || req.GetSourceObjectKey() != "") {
+		return nil, status.Error(codes.InvalidArgument, "provide either source_url or source bucket/object key")
+	}
+
+	if (req.GetSourceBucket() == "") != (req.GetSourceObjectKey() == "") {
+		return nil, status.Error(codes.InvalidArgument, "source_bucket and source_object_key must be set together")
+	}
 
 	result, err := s.usecase.SubmitConversion(ctx, usecase.SubmitConversionRequest{
 		DocumentID:        req.GetDocumentId(),
 		OriginalBucket:    req.GetOriginalBucket(),
 		OriginalObjectKey: req.GetOriginalObjectKey(),
+		SourceBucket:      req.GetSourceBucket(),
+		SourceObjectKey:   req.GetSourceObjectKey(),
+		SourceURL:         req.GetSourceUrl(),
 		MarkdownBucket:    req.GetMarkdownBucket(),
 		MarkdownObjectKey: req.GetMarkdownObjectKey(),
 		FilenameExtension: req.GetFilenameExtension(),
