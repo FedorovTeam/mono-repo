@@ -13,6 +13,7 @@
 - `job_events` — аудит выполнения задач, фиксирует смену статуса, сообщение ошибки и полезную нагрузку.
 - `payload` в `processing_jobs` и `job_events` хранит только ссылки и параметры для gRPC-исполнителей (`bucket`/`object_key`, `queue_id`, `github_path`, `create_pr`), бинарные данные не пишутся в БД, а сами интеграции выполняют внешние сервисы (MinIO обслуживается через gRPC `storage-service`, без прямых клиентов внутри document-service).
 - Индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run` поддерживают выборку готовых задач, `SELECT ... FOR UPDATE SKIP LOCKED` защищает от двойного захвата при нескольких воркерах.
+- Все фоновые воркеры (`UploadReconciler`, `ProcessingReconciler`, stage worker-ы и `JobFollower`) запускаются одним раннером на базе `errgroup.WithContext`: первая ошибка воркера отменяет общий контекст, останавливая остальные фоновые задачи и gRPC-сервер.
 
 ## Валидация входных данных
 - `CreateDocument` принимает минимальный набор полей (имя файла, repository/owner, branch/baseBranch, path, бакеты и object_key) и сам нормализует `repository`: если передан формат `owner/repo`, владелец выделяется автоматически, а конфликт между `owner` и префиксом в `repository` приводит к `InvalidArgument`.

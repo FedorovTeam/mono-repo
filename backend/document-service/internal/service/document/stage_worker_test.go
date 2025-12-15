@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -320,7 +321,9 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 
 	reconciler := NewProcessingReconciler(repo, 2, 30*time.Second, 15*time.Second)
 	reconciler.now = func() time.Time { return repo.now }
-	reconciler.reconcile(context.Background(), time.Second)
+	if err := reconciler.reconcile(context.Background(), time.Second); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	recovered := repo.jobs["job-stuck"]
 	if recovered.Status != domain.JobStatusPending {
@@ -336,13 +339,17 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 2, time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go worker.Run(ctx, time.Second)
+	runErr := make(chan error, 1)
+	go func() { runErr <- worker.Run(ctx, time.Second) }()
 
 	waitUntil(t, func() bool {
 		completed := repo.jobs["job-stuck"]
 		return completed.Status == domain.JobStatusCompleted && doc.Status == domain.DocumentStatusPublishedToGitHub
 	})
 	cancel()
+	if err := <-runErr; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("unexpected worker error: %v", err)
+	}
 }
 
 func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
@@ -419,9 +426,14 @@ func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go worker.Run(ctx, 10*time.Millisecond)
+	runErr := make(chan error, 1)
+	go func() { runErr <- worker.Run(ctx, 10*time.Millisecond) }()
 	waitUntil(t, func() bool { return repo.lastStatus == domain.JobStatusFailed })
 	cancel()
+
+	if err := <-runErr; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("unexpected worker error: %v", err)
+	}
 
 	if payload := domain.ConvertPayloadFromMap(repo.lastPayload); payload.LastError == "" {
 		t.Fatalf("expected last_error to be stored in payload, got %v", repo.lastPayload)

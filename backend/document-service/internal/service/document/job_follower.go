@@ -3,7 +3,6 @@ package document
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -32,7 +31,6 @@ type JobFollower struct {
 	repo      jobFollowerRepo
 	batchSize int
 	postpone  time.Duration
-	logf      func(format string, args ...interface{})
 	metrics   *workerMetrics
 	defaults  PublishDefaults
 }
@@ -49,13 +47,12 @@ func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration,
 		repo:      repo,
 		batchSize: batchSize,
 		postpone:  postpone,
-		logf:      log.Printf,
 		metrics:   newWorkerMetrics("job_follower"),
 		defaults:  defaults,
 	}
 }
 
-func (f *JobFollower) Run(ctx context.Context, interval time.Duration) {
+func (f *JobFollower) Run(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = time.Minute
 	}
@@ -63,69 +60,74 @@ func (f *JobFollower) Run(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	f.reconcile(ctx)
+	if err := f.reconcile(ctx); err != nil {
+		return err
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-ticker.C:
-			f.reconcile(ctx)
+			if err := f.reconcile(ctx); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func (f *JobFollower) reconcile(ctx context.Context) {
+func (f *JobFollower) reconcile(ctx context.Context) error {
 	for {
 		jobs, err := f.repo.ListFinishedJobs(ctx, f.batchSize, f.postpone)
 		if err != nil {
-			f.logf("job-follower: list finished jobs: %v", err)
 			f.metrics.recordError(ctx)
-			return
+			return err
 		}
 		f.metrics.observeBatch(ctx, len(jobs))
 		if len(jobs) == 0 {
 			f.metrics.observeBatch(ctx, 0)
-			return
+			return nil
 		}
 
 		for _, job := range jobs {
-			f.handleJob(ctx, job)
+			if err := f.handleJob(ctx, job); err != nil {
+				return err
+			}
 		}
 
 		if len(jobs) < f.batchSize {
-			return
+			return nil
 		}
 	}
 }
 
-func (f *JobFollower) handleJob(ctx context.Context, job domain.ProcessingJob) {
+func (f *JobFollower) handleJob(ctx context.Context, job domain.ProcessingJob) error {
 	start := time.Now()
 	defer f.metrics.recordDuration(ctx, time.Since(start))
 
 	doc, err := f.repo.GetDocument(ctx, job.DocumentID)
 	if err != nil {
-		f.logf("job-follower: load document %s: %v", job.DocumentID, err)
 		f.metrics.recordError(ctx)
-		return
+		return err
 	}
 	if doc == nil {
-		f.logf("job-follower: document %s not found for job %s", job.DocumentID, job.TaskID)
 		f.metrics.recordError(ctx)
-		return
+		return fmt.Errorf("document %s not found for job %s", job.DocumentID, job.TaskID)
 	}
 
 	switch job.Status {
 	case domain.JobStatusCompleted:
-		f.scheduleNext(ctx, job, doc)
+		return f.scheduleNext(ctx, job, doc)
 	case domain.JobStatusFailed:
-		f.markFailed(ctx, job, doc)
+		return f.markFailed(ctx, job, doc)
 	}
+
+	return nil
 }
 
-func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob, doc *domain.Document) {
+func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob, doc *domain.Document) error {
 	if doc.Status == domain.DocumentStatusFailed {
-		return
+		return nil
 	}
 
 	switch job.Stage {
@@ -139,7 +141,7 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 		}.ToMap()
 		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
 		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
-			f.logf("job-follower: enqueue convert for %s: %v", doc.ID, err)
+			return fmt.Errorf("enqueue convert for %s: %w", doc.ID, err)
 		}
 	case domain.JobStageConvertToMarkdown:
 		payload := domain.PublishPayload{
@@ -159,23 +161,28 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 		}.ToMap()
 		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: publish"}
 		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
-			f.logf("job-follower: enqueue publish for %s: %v", doc.ID, err)
+			return fmt.Errorf("enqueue publish for %s: %w", doc.ID, err)
 		}
 	}
+
+	return nil
 }
 
-func (f *JobFollower) markFailed(ctx context.Context, job domain.ProcessingJob, doc *domain.Document) {
+func (f *JobFollower) markFailed(ctx context.Context, job domain.ProcessingJob, doc *domain.Document) error {
 	reason := fmt.Sprintf("stage %s failed", job.Stage)
 	if lastError, ok := job.Payload["last_error"].(string); ok && lastError != "" {
 		reason = fmt.Sprintf("%s: %s", reason, lastError)
 	}
 
 	if _, err := f.repo.UpdateStatus(ctx, doc.ID, domain.DocumentStatusFailed, reason, reason, nil); err != nil {
-		f.logf("job-follower: mark failed document %s: %v", doc.ID, err)
-		return
+		return fmt.Errorf("mark failed document %s: %w", doc.ID, err)
 	}
 
-	_, _ = f.repo.UpdateProcessingJob(ctx, job.TaskID, job.Status, nil, false, job.Payload, &domain.JobEvent{EventType: "handled", Message: "marked document failed"})
+	if _, err := f.repo.UpdateProcessingJob(ctx, job.TaskID, job.Status, nil, false, job.Payload, &domain.JobEvent{EventType: "handled", Message: "marked document failed"}); err != nil {
+		return fmt.Errorf("update failed job %s: %w", job.TaskID, err)
+	}
+
+	return nil
 }
 
 func pickCommitMessage(doc *domain.Document, defaults PublishDefaults) string {

@@ -23,6 +23,7 @@ import (
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
+	"golang.org/x/sync/errgroup"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -131,8 +132,6 @@ func main() {
 		cfg.Reconciler.MinUploadedAge,
 	)
 
-	go reconciler.Run(ctx, cfg.Reconciler.Interval)
-
 	processingReconciler := docservice.NewProcessingReconciler(
 		repo,
 		cfg.StageWorker.BatchSize,
@@ -140,15 +139,9 @@ func main() {
 		cfg.StageWorker.GracePeriod,
 	)
 
-	go processingReconciler.Run(ctx, cfg.StageWorker.Interval)
-
 	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.ConvertBatchSize, cfg.StageWorker.RetryDelay)
 	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-
-	go storeWorker.Run(ctx, cfg.StageWorker.Interval)
-	go convertWorker.Run(ctx, cfg.StageWorker.Interval)
-	go publishWorker.Run(ctx, cfg.StageWorker.Interval)
 
 	publishDefaults := docservice.PublishDefaults{
 		CommitMessage: cfg.Github.CommitMessage,
@@ -165,11 +158,29 @@ func main() {
 		publishDefaults,
 	)
 
-	go jobFollower.Run(ctx, cfg.JobFollower.Interval)
+	workers := []docservice.PeriodicWorker{
+		{Name: "upload-reconciler", Interval: cfg.Reconciler.Interval, Run: reconciler.Run},
+		{Name: "processing-reconciler", Interval: cfg.StageWorker.Interval, Run: processingReconciler.Run},
+		{Name: "stage-store", Interval: cfg.StageWorker.Interval, Run: storeWorker.Run},
+		{Name: "stage-convert", Interval: cfg.StageWorker.Interval, Run: convertWorker.Run},
+		{Name: "stage-publish", Interval: cfg.StageWorker.Interval, Run: publishWorker.Run},
+		{Name: "job-follower", Interval: cfg.JobFollower.Interval, Run: jobFollower.Run},
+	}
 
 	server := transport.NewServer(usecase)
-	if err := server.ListenAndServe(ctx, cfg.Server.Addr); err != nil {
-		log.Printf("server stopped: %v", err)
+
+	group, ctx := errgroup.WithContext(ctx)
+
+	group.Go(func() error {
+		return docservice.RunBackgroundWorkers(ctx, workers...)
+	})
+
+	group.Go(func() error {
+		return server.ListenAndServe(ctx, cfg.Server.Addr)
+	})
+
+	if err := group.Wait(); err != nil {
+		log.Printf("service stopped: %v", err)
 		os.Exit(1)
 	}
 }

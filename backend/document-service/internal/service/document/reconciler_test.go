@@ -112,7 +112,9 @@ func TestUploadReconcilerConfirmsExistingObjects(t *testing.T) {
 	reconciler := NewUploadReconciler(repo, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
-	reconciler.reconcile(context.Background())
+	if err := reconciler.reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	require.Equal(t, 1, confirm.calls)
 	require.Equal(t, doc.ID, confirm.lastInput.DocumentID)
@@ -132,7 +134,9 @@ func TestUploadReconcilerSkipsRecentDocuments(t *testing.T) {
 	reconciler := NewUploadReconciler(repo, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
-	reconciler.reconcile(context.Background())
+	if err := reconciler.reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	require.Zero(t, confirm.calls)
 }
@@ -151,7 +155,9 @@ func TestUploadReconcilerSkipsWhenNoObjectKey(t *testing.T) {
 	reconciler := NewUploadReconciler(repo, confirm, 10, time.Minute)
 	reconciler.now = func() time.Time { return fixed }
 
-	reconciler.reconcile(context.Background())
+	if err := reconciler.reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	require.Zero(t, confirm.calls)
 }
@@ -170,7 +176,9 @@ func TestProcessingReconcilerReturnsStaleJobsToPending(t *testing.T) {
 	reconciler := NewProcessingReconciler(repo, 5, 30*time.Second, 15*time.Second)
 	reconciler.now = func() time.Time { return fixed }
 
-	reconciler.reconcile(context.Background(), time.Minute)
+	if err := reconciler.reconcile(context.Background(), time.Minute); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	require.Equal(t, domain.JobStatusPending, repo.jobs[0].Status)
 	require.Equal(t, 2, repo.jobs[0].Attempts)

@@ -28,7 +28,9 @@ func TestProcessingReconciler_RetryTemporaryFailures(t *testing.T) {
 	reconciler.sleep = func(context.Context, time.Duration) {}
 	reconciler.now = func() time.Time { return time.Unix(0, 0) }
 
-	reconciler.reconcile(context.Background(), time.Second)
+	if err := reconciler.reconcile(context.Background(), time.Second); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
 
 	if repo.calls != len(repo.responses) {
 		t.Fatalf("expected %d calls to repo, got %d", len(repo.responses), repo.calls)
@@ -84,29 +86,23 @@ func TestProcessingReconciler_CooldownAfterMaxRetries(t *testing.T) {
 	var sleeps []time.Duration
 	reconciler.sleep = func(ctx context.Context, d time.Duration) {
 		sleeps = append(sleeps, d)
-		if len(sleeps) == 3 {
-			repo.recovered = true
-		}
 	}
 
-	reconciler.reconcile(context.Background(), 50*time.Millisecond)
+	err := reconciler.reconcile(context.Background(), 50*time.Millisecond)
+	if !errors.Is(err, driver.ErrBadConn) {
+		t.Fatalf("expected error after retries, got %v", err)
+	}
 
 	if repo.calls != 3 {
 		t.Fatalf("expected 3 attempts before cooldown, got %d", repo.calls)
 	}
 
 	if len(sleeps) != 3 {
-		t.Fatalf("expected 3 sleep calls (2 retries + cooldown), got %d", len(sleeps))
+		t.Fatalf("expected retries with cooldown, got %d sleeps", len(sleeps))
 	}
 
 	if sleeps[2] < 50*time.Millisecond {
 		t.Fatalf("expected cooldown to be at least the interval, got %s", sleeps[2])
-	}
-
-	reconciler.reconcile(context.Background(), 50*time.Millisecond)
-
-	if !repo.finished {
-		t.Fatalf("expected reconciler to continue after recovering from bad connection")
 	}
 }
 

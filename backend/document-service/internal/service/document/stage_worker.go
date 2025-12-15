@@ -60,7 +60,7 @@ func NewStageWorker(repo Repository, activities *Activities, stage domain.JobSta
 	}
 }
 
-func (w *StageWorker) Run(ctx context.Context, interval time.Duration) {
+func (w *StageWorker) Run(ctx context.Context, interval time.Duration) error {
 	handler := func(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
 		start := time.Now()
 		result, err := w.handleJob(ctx, job)
@@ -72,11 +72,10 @@ func (w *StageWorker) Run(ctx context.Context, interval time.Duration) {
 	}
 
 	if w.maxBatches == 1 {
-		w.service.RunWithBatchLimit(ctx, w.stage, interval, w.batchSize, w.maxBatches, handler, w.metrics.observeBatch)
-		return
+		return w.service.RunWithBatchLimit(ctx, w.stage, interval, w.batchSize, w.maxBatches, handler, w.metrics.observeBatch)
 	}
 
-	w.service.Run(ctx, w.stage, interval, w.batchSize, handler, w.metrics.observeBatch)
+	return w.service.Run(ctx, w.stage, interval, w.batchSize, handler, w.metrics.observeBatch)
 }
 
 func (w *StageWorker) handleJob(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
