@@ -31,6 +31,7 @@ job_follower:
 stage_worker:
   interval: 5s
   batch_size: 5
+  convert_batch_size: 1
   retry_delay: 1m
   grace_period: 15s
   wait_markdown: true
