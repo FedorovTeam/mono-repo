@@ -1,20 +1,20 @@
-#apiVersion: argoproj.io/v1alpha1
-#kind: Application
-#metadata:
-#  name: outline-vpn
-#  namespace: argocd
-#spec:
-#  project: default
-#  source:
-#    repoURL: git@github.com:FedorovTeam/mono-repo.git
-#    targetRevision: main
-#    path: infra/manifests/outline-vpn
-#  destination:
-#    server: https://kubernetes.default.svc
-#    namespace: outline-vpn
-#  syncPolicy:
-#    automated:
-#      prune: true
-#      selfHeal: true
-#    syncOptions:
-#      - CreateNamespace=true
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: outline-vpn
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:FedorovTeam/mono-repo.git
+    targetRevision: HEAD
+    path: infra/manifests/outline-vpn
+  destination:
+    server: https://10.96.0.1
+    namespace: outline-vpn
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
