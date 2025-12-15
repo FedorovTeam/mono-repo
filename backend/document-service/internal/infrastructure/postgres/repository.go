@@ -170,7 +170,6 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *domain.Document, v
 		return nil, err
 	}
 
-	doc.ActualStatus = doc.Status
 	return doc, nil
 }
 
@@ -184,8 +183,6 @@ FROM documents WHERE id=$1
 	if err := row.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
-	doc.ActualStatus = doc.Status
-
 	versions, err := r.fetchVersions(ctx, id)
 	if err != nil {
 		return nil, err
@@ -254,7 +251,6 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 			return nil, err
 		}
-		doc.ActualStatus = doc.Status
 		if err := r.attachActiveJob(ctx, &doc); err != nil {
 			return nil, err
 		}
@@ -378,7 +374,6 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to domain.Docu
 		return nil, err
 	}
 
-	doc.ActualStatus = doc.Status
 	if err := r.attachActiveJob(ctx, &doc); err != nil {
 		return nil, err
 	}
@@ -422,7 +417,6 @@ func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string
 		return nil, err
 	}
 
-	doc.ActualStatus = doc.Status
 	if err := r.attachActiveJob(ctx, &doc); err != nil {
 		return nil, err
 	}

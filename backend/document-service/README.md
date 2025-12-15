@@ -27,6 +27,7 @@
 
 ## Статусы и повторная обработка
 - Жизненный цикл документа фиксируется в статусах `UPLOADED → STORED_ORIGINAL → CONVERTED_TO_MARKDOWN → PUBLISHED_TO_GITHUB` с отдельным состоянием `FAILED`. Источник правды — таблица `documents`.
+- В gRPC/DTO не передаётся дублирующее поле `actual_status`: `status` из таблицы `documents` используется как единственный источник правды, а восстановление после `FAILED` опирается на историю переходов в `document_status_logs`.
 - Каждая стадия обработки («сохранить оригинал», «конвертировать», «опубликовать в GitHub») заводится в очереди `processing_jobs` со стадией (`job_stage`) и статусом (`job_status`), а все попытки фиксируются в `job_events`.
 - Крон-воркеры выбирают готовые к исполнению задачи через `SELECT ... FOR UPDATE SKIP LOCKED` с фильтром по `status = 'pending'` и `next_run_at <= now()`, опираясь на индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run`.
 - При успешном завершении задача переводится в `status = 'completed'`, документ в `documents` переключается на следующий статус. Проверки наличия файлов или публикаций выполняют профильные сервисы; document-service лишь фиксирует статусы и ошибки, полученные по gRPC. `ConfirmUpload` не меняет статус сам по себе — он планирует задачу `store_original`, а переход в `StoredOriginal` выполняет stage worker после валидации через gRPC `storage-service`.

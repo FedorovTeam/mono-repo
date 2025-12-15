@@ -21,6 +21,8 @@ message Document {
   string repository = 3;
   string branch = 4;
   string path = 5;
+  // status — единственный источник правды о текущем этапе документа.
+  // Failed фиксирует саму ошибку; восстановление после неё идёт через логи статусов, но статус остаётся единым.
   DocumentStatus status = 6;
   string workflow_id = 7;
   string error = 8;
@@ -34,7 +36,9 @@ message Document {
   string base_branch = 16;
   bool create_pr = 17;
   string job_id = 18;
-  DocumentStatus actual_status = 19;
+  // Бывшее поле actual_status больше не используется, номер и имя зарезервированы для обратной совместимости.
+  reserved 19;
+  reserved "actual_status";
 }
 
 message CreateDocumentRequest {

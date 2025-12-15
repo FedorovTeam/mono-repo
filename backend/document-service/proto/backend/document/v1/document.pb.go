@@ -81,12 +81,14 @@ func (DocumentStatus) EnumDescriptor() ([]byte, []int) {
 }
 
 type Document struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	FileName          string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
-	Repository        string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
-	Branch            string                 `protobuf:"bytes,4,opt,name=branch,proto3" json:"branch,omitempty"`
-	Path              string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Id         string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	FileName   string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	Repository string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
+	Branch     string                 `protobuf:"bytes,4,opt,name=branch,proto3" json:"branch,omitempty"`
+	Path       string                 `protobuf:"bytes,5,opt,name=path,proto3" json:"path,omitempty"`
+	// status — единственный источник правды о текущем этапе документа.
+	// Failed фиксирует саму ошибку; восстановление после неё идёт через логи статусов, но статус остаётся единым.
 	Status            DocumentStatus         `protobuf:"varint,6,opt,name=status,proto3,enum=backend.document.v1.DocumentStatus" json:"status,omitempty"`
 	WorkflowId        string                 `protobuf:"bytes,7,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
 	Error             string                 `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
@@ -100,7 +102,6 @@ type Document struct {
 	BaseBranch        string                 `protobuf:"bytes,16,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
 	CreatePr          bool                   `protobuf:"varint,17,opt,name=create_pr,json=createPr,proto3" json:"create_pr,omitempty"`
 	JobId             string                 `protobuf:"bytes,18,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	ActualStatus      DocumentStatus         `protobuf:"varint,19,opt,name=actual_status,json=actualStatus,proto3,enum=backend.document.v1.DocumentStatus" json:"actual_status,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -259,13 +260,6 @@ func (x *Document) GetJobId() string {
 		return x.JobId
 	}
 	return ""
-}
-
-func (x *Document) GetActualStatus() DocumentStatus {
-	if x != nil {
-		return x.ActualStatus
-	}
-	return DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED
 }
 
 type CreateDocumentRequest struct {
@@ -720,7 +714,7 @@ var File_backend_document_v1_document_proto protoreflect.FileDescriptor
 
 const file_backend_document_v1_document_proto_rawDesc = "" +
 	"\n" +
-	"\"backend/document/v1/document.proto\x12\x13backend.document.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcc\x05\n" +
+	"\"backend/document/v1/document.proto\x12\x13backend.document.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x97\x05\n" +
 	"\bDocument\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1e\n" +
@@ -746,8 +740,7 @@ const file_backend_document_v1_document_proto_rawDesc = "" +
 	"\vbase_branch\x18\x10 \x01(\tR\n" +
 	"baseBranch\x12\x1b\n" +
 	"\tcreate_pr\x18\x11 \x01(\bR\bcreatePr\x12\x15\n" +
-	"\x06job_id\x18\x12 \x01(\tR\x05jobId\x12H\n" +
-	"\ractual_status\x18\x13 \x01(\x0e2#.backend.document.v1.DocumentStatusR\factualStatus\"\xf8\x03\n" +
+	"\x06job_id\x18\x12 \x01(\tR\x05jobIdJ\x04\b\x13\x10\x14R\ractual_status\"\xf8\x03\n" +
 	"\x15CreateDocumentRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1e\n" +
@@ -832,25 +825,24 @@ var file_backend_document_v1_document_proto_depIdxs = []int32{
 	0,  // 0: backend.document.v1.Document.status:type_name -> backend.document.v1.DocumentStatus
 	8,  // 1: backend.document.v1.Document.created_at:type_name -> google.protobuf.Timestamp
 	8,  // 2: backend.document.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 3: backend.document.v1.Document.actual_status:type_name -> backend.document.v1.DocumentStatus
-	0,  // 4: backend.document.v1.ListDocumentsRequest.status_filter:type_name -> backend.document.v1.DocumentStatus
-	1,  // 5: backend.document.v1.ListDocumentsResponse.documents:type_name -> backend.document.v1.Document
-	0,  // 6: backend.document.v1.UpdateDocumentStatusRequest.status:type_name -> backend.document.v1.DocumentStatus
-	2,  // 7: backend.document.v1.DocumentService.CreateDocument:input_type -> backend.document.v1.CreateDocumentRequest
-	3,  // 8: backend.document.v1.DocumentService.GetDocument:input_type -> backend.document.v1.GetDocumentRequest
-	4,  // 9: backend.document.v1.DocumentService.ListDocuments:input_type -> backend.document.v1.ListDocumentsRequest
-	6,  // 10: backend.document.v1.DocumentService.UpdateDocumentStatus:input_type -> backend.document.v1.UpdateDocumentStatusRequest
-	7,  // 11: backend.document.v1.DocumentService.ConfirmUpload:input_type -> backend.document.v1.ConfirmUploadRequest
-	1,  // 12: backend.document.v1.DocumentService.CreateDocument:output_type -> backend.document.v1.Document
-	1,  // 13: backend.document.v1.DocumentService.GetDocument:output_type -> backend.document.v1.Document
-	5,  // 14: backend.document.v1.DocumentService.ListDocuments:output_type -> backend.document.v1.ListDocumentsResponse
-	1,  // 15: backend.document.v1.DocumentService.UpdateDocumentStatus:output_type -> backend.document.v1.Document
-	1,  // 16: backend.document.v1.DocumentService.ConfirmUpload:output_type -> backend.document.v1.Document
-	12, // [12:17] is the sub-list for method output_type
-	7,  // [7:12] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	0,  // 3: backend.document.v1.ListDocumentsRequest.status_filter:type_name -> backend.document.v1.DocumentStatus
+	1,  // 4: backend.document.v1.ListDocumentsResponse.documents:type_name -> backend.document.v1.Document
+	0,  // 5: backend.document.v1.UpdateDocumentStatusRequest.status:type_name -> backend.document.v1.DocumentStatus
+	2,  // 6: backend.document.v1.DocumentService.CreateDocument:input_type -> backend.document.v1.CreateDocumentRequest
+	3,  // 7: backend.document.v1.DocumentService.GetDocument:input_type -> backend.document.v1.GetDocumentRequest
+	4,  // 8: backend.document.v1.DocumentService.ListDocuments:input_type -> backend.document.v1.ListDocumentsRequest
+	6,  // 9: backend.document.v1.DocumentService.UpdateDocumentStatus:input_type -> backend.document.v1.UpdateDocumentStatusRequest
+	7,  // 10: backend.document.v1.DocumentService.ConfirmUpload:input_type -> backend.document.v1.ConfirmUploadRequest
+	1,  // 11: backend.document.v1.DocumentService.CreateDocument:output_type -> backend.document.v1.Document
+	1,  // 12: backend.document.v1.DocumentService.GetDocument:output_type -> backend.document.v1.Document
+	5,  // 13: backend.document.v1.DocumentService.ListDocuments:output_type -> backend.document.v1.ListDocumentsResponse
+	1,  // 14: backend.document.v1.DocumentService.UpdateDocumentStatus:output_type -> backend.document.v1.Document
+	1,  // 15: backend.document.v1.DocumentService.ConfirmUpload:output_type -> backend.document.v1.Document
+	11, // [11:16] is the sub-list for method output_type
+	6,  // [6:11] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_backend_document_v1_document_proto_init() }
