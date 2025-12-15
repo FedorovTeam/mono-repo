@@ -162,8 +162,18 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		ContentType:     contentType,
 		SourceBucket:    sourceBucket,
 		SourceObjectKey: sourceObjectKey,
+		SourceEndpoint:  task.SourceEndpoint,
+		SourceAccessKey: task.SourceAccessKey,
+		SourceSecretKey: task.SourceSecretKey,
+		SourceUseSSL:    task.SourceUseSSL,
+		SourceRegion:    task.SourceRegion,
 		TargetBucket:    task.MarkdownBucket,
 		TargetObjectKey: task.MarkdownObjectKey,
+		TargetEndpoint:  task.TargetEndpoint,
+		TargetAccessKey: task.TargetAccessKey,
+		TargetSecretKey: task.TargetSecretKey,
+		TargetUseSSL:    task.TargetUseSSL,
+		TargetRegion:    task.TargetRegion,
 	}
 
 	jobID, err := e.conv.Submit(submitCtx, convertReq)

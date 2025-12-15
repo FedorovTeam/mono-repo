@@ -47,6 +47,9 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		ctx, correlationID = telemetry.EnsureCorrelationID(ctx)
 	}
 
+	sourceUseSSL := req.SourceUseSsl
+	targetUseSSL := req.TargetUseSsl
+
 	s.logger.Info("ConvertDocumentToMarkdown started", zap.String("correlation_id", correlationID),
 		zap.String("document_id", req.GetDocumentId()),
 		zap.String("original_bucket", req.GetOriginalBucket()),
@@ -71,8 +74,18 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		SourceBucket:      req.GetSourceBucket(),
 		SourceObjectKey:   req.GetSourceObjectKey(),
 		SourceURL:         req.GetSourceUrl(),
+		SourceEndpoint:    req.GetSourceEndpoint(),
+		SourceAccessKey:   req.GetSourceAccessKey(),
+		SourceSecretKey:   req.GetSourceSecretKey(),
+		SourceUseSSL:      sourceUseSSL,
+		SourceRegion:      req.GetSourceRegion(),
 		MarkdownBucket:    req.GetMarkdownBucket(),
 		MarkdownObjectKey: req.GetMarkdownObjectKey(),
+		TargetEndpoint:    req.GetTargetEndpoint(),
+		TargetAccessKey:   req.GetTargetAccessKey(),
+		TargetSecretKey:   req.GetTargetSecretKey(),
+		TargetUseSSL:      targetUseSSL,
+		TargetRegion:      req.GetTargetRegion(),
 		FilenameExtension: req.GetFilenameExtension(),
 		CorrelationID:     correlationID,
 	})

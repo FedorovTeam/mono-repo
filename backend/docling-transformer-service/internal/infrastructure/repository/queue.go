@@ -40,7 +40,7 @@ func NewQueueRepository(pool *pgxpool.Pool) *PostgresQueueRepository {
 // При отсутствии записей возвращает (nil, nil).
 func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
 	const query = `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, source_endpoint, source_access_key, source_secret_key, source_use_ssl, source_region, markdown_bucket, markdown_object_key, target_endpoint, target_access_key, target_secret_key, target_use_ssl, target_region, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE document_id = $1
 ORDER BY created_at DESC
@@ -62,7 +62,7 @@ LIMIT 1`
 // GetByID возвращает задачу очереди по идентификатору.
 func (r *PostgresQueueRepository) GetByID(ctx context.Context, id uuid.UUID) (*TransformationTask, error) {
 	const query = `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, source_endpoint, source_access_key, source_secret_key, source_use_ssl, source_region, markdown_bucket, markdown_object_key, target_endpoint, target_access_key, target_secret_key, target_use_ssl, target_region, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE id = $1`
 
@@ -85,11 +85,16 @@ func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueuePar
 
 	query := `
 INSERT INTO transformations_queue (
- id, status, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, correlation_id, docling_poll_count, next_poll_at
- ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12, 0, NULL)
+ id, status, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, source_endpoint, source_access_key, source_secret_key, source_use_ssl, source_region, markdown_bucket, markdown_object_key, target_endpoint, target_access_key, target_secret_key, target_use_ssl, target_region, filename_extension, created_at, correlation_id, docling_poll_count, next_poll_at
+ ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW(), $22, 0, NULL)
 `
 
-	_, err := r.pool.Exec(ctx, query, id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey, params.SourceBucket, params.SourceObjectKey, params.SourceURL, params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt, params.CorrelationID)
+	_, err := r.pool.Exec(ctx, query,
+		id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey,
+		params.SourceBucket, params.SourceObjectKey, params.SourceURL, params.SourceEndpoint, params.SourceAccessKey, params.SourceSecretKey, params.SourceUseSSL, params.SourceRegion,
+		params.MarkdownBucket, params.MarkdownObjectKey, params.TargetEndpoint, params.TargetAccessKey, params.TargetSecretKey, params.TargetUseSSL, params.TargetRegion,
+		normalizedExt, params.CorrelationID,
+	)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("enqueue transformation: %w", err)
 	}
@@ -171,7 +176,7 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 
 func (r *PostgresQueueRepository) selectNextTasks(ctx context.Context, tx pgx.Tx, limit int) ([]*TransformationTask, error) {
 	tasks, err := r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, source_endpoint, source_access_key, source_secret_key, source_use_ssl, source_region, markdown_bucket, markdown_object_key, target_endpoint, target_access_key, target_secret_key, target_use_ssl, target_region, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'pending'
 ORDER BY created_at
@@ -185,7 +190,7 @@ FOR UPDATE SKIP LOCKED`, limit)
 	}
 
 	tasks, err = r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, source_endpoint, source_access_key, source_secret_key, source_use_ssl, source_region, markdown_bucket, markdown_object_key, target_endpoint, target_access_key, target_secret_key, target_use_ssl, target_region, filename_extension, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
@@ -519,6 +524,16 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		sourceBucket    sql.NullString
 		sourceObjectKey sql.NullString
 		sourceURL       sql.NullString
+		sourceEndpoint  sql.NullString
+		sourceAccessKey sql.NullString
+		sourceSecretKey sql.NullString
+		sourceUseSSL    sql.NullBool
+		sourceRegion    sql.NullString
+		targetEndpoint  sql.NullString
+		targetAccessKey sql.NullString
+		targetSecretKey sql.NullString
+		targetUseSSL    sql.NullBool
+		targetRegion    sql.NullString
 	)
 
 	if err := row.Scan(
@@ -534,8 +549,18 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&sourceBucket,
 		&sourceObjectKey,
 		&sourceURL,
+		&sourceEndpoint,
+		&sourceAccessKey,
+		&sourceSecretKey,
+		&sourceUseSSL,
+		&sourceRegion,
 		&dto.MarkdownBucket,
 		&dto.MarkdownObjectKey,
+		&targetEndpoint,
+		&targetAccessKey,
+		&targetSecretKey,
+		&targetUseSSL,
+		&targetRegion,
 		&dto.FilenameExtension,
 		&dto.CreatedAt,
 		&dto.StartedAt,
@@ -554,6 +579,38 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	dto.SourceBucket = sourceBucket.String
 	dto.SourceObjectKey = sourceObjectKey.String
 	dto.SourceURL = sourceURL.String
+	if sourceEndpoint.Valid {
+		dto.SourceEndpoint = sourceEndpoint.String
+	}
+	if sourceAccessKey.Valid {
+		dto.SourceAccessKey = sourceAccessKey.String
+	}
+	if sourceSecretKey.Valid {
+		dto.SourceSecretKey = sourceSecretKey.String
+	}
+	if sourceUseSSL.Valid {
+		value := sourceUseSSL.Bool
+		dto.SourceUseSSL = &value
+	}
+	if sourceRegion.Valid {
+		dto.SourceRegion = sourceRegion.String
+	}
+	if targetEndpoint.Valid {
+		dto.TargetEndpoint = targetEndpoint.String
+	}
+	if targetAccessKey.Valid {
+		dto.TargetAccessKey = targetAccessKey.String
+	}
+	if targetSecretKey.Valid {
+		dto.TargetSecretKey = targetSecretKey.String
+	}
+	if targetUseSSL.Valid {
+		value := targetUseSSL.Bool
+		dto.TargetUseSSL = &value
+	}
+	if targetRegion.Valid {
+		dto.TargetRegion = targetRegion.String
+	}
 
 	return dto.ToDomain(), nil
 }
