@@ -15,6 +15,8 @@ scheduler:
   cleanup_retention: 24h
   failed_retry_delay: 5m
   max_failed_retries: 3
+  docling_requeue_delay: 1m
+  docling_max_restarts: 3
 
 postgres:
   dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/docling_adapter?sslmode=disable"

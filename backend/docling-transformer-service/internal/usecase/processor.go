@@ -30,6 +30,8 @@ type Config struct {
 	DoclingBackoffFactor   float64
 	DoclingMaxAttempts     int
 	DoclingMaxLifetime     time.Duration
+	DoclingRequeueDelay    time.Duration
+	DoclingMaxRestarts     int
 	UseSourceAsync         bool
 }
 
@@ -53,6 +55,8 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 		MaxInterval:     normalized.DoclingMaxInterval,
 		BackoffFactor:   normalized.DoclingBackoffFactor,
 		MaxAttempts:     normalized.DoclingMaxAttempts,
+		RequeueDelay:    normalized.DoclingRequeueDelay,
+		MaxRestarts:     normalized.DoclingMaxRestarts,
 	})
 
 	executor := NewConversionExecutor(repository, conv, storage, poller, workerMetrics, logger, ConversionExecutorConfig{
@@ -116,6 +120,12 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.DoclingMaxInterval <= 0 {
 		cfg.DoclingMaxInterval = 30 * time.Minute
+	}
+	if cfg.DoclingRequeueDelay <= 0 {
+		cfg.DoclingRequeueDelay = cfg.PollInterval
+	}
+	if cfg.DoclingMaxRestarts <= 0 {
+		cfg.DoclingMaxRestarts = 3
 	}
 
 	return cfg

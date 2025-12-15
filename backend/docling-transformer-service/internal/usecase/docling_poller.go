@@ -21,6 +21,8 @@ type DoclingPollerConfig struct {
 	MaxInterval     time.Duration
 	BackoffFactor   float64
 	MaxAttempts     int
+	RequeueDelay    time.Duration
+	MaxRestarts     int
 }
 
 type DoclingPoller struct {
@@ -169,18 +171,40 @@ func (p *DoclingPoller) isWaitingLimitReached(pollCount int) bool {
 func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transformations.TransformationTask, reason string) error {
 	jobID := task.DoclingJobID
 
-	if err := p.repo.RequeueDoclingWaiting(ctx, task.ID); err != nil {
+	var nextPollAt *time.Time
+	if p.shouldDelayRestart(task) && p.cfg.RequeueDelay > 0 {
+		delayed := time.Now().Add(p.cfg.RequeueDelay)
+		nextPollAt = &delayed
+	}
+
+	if err := p.repo.RequeueDoclingWaiting(ctx, task.ID, nextPollAt); err != nil {
 		return fmt.Errorf("requeue docling waiting: %w", err)
 	}
 
 	task.DoclingJobID = ""
 	task.DoclingPollCount = 0
-	task.NextPollAt = nil
+	task.NextPollAt = nextPollAt
+	task.RetryCount++
 
 	if p.metrics != nil {
 		p.metrics.RecordDoclingRequeued(ctx)
 	}
-	p.logger.Warn("docling job requeued", zap.String("queue_id", task.ID.String()), zap.String("docling_job_id", jobID), zap.String("reason", reason))
+
+	logger := p.logger.With(
+		zap.String("queue_id", task.ID.String()),
+		zap.String("docling_job_id", jobID),
+		zap.String("reason", reason),
+	)
+
+	if nextPollAt != nil {
+		logger = logger.With(zap.Time("next_poll_at", *nextPollAt))
+	}
+
+	logger.Warn("docling job requeued")
 
 	return nil
+}
+
+func (p *DoclingPoller) shouldDelayRestart(task *transformations.TransformationTask) bool {
+	return p.cfg.MaxRestarts > 0 && task.RetryCount >= p.cfg.MaxRestarts
 }

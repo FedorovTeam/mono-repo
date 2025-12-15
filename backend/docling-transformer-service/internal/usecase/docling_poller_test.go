@@ -16,13 +16,14 @@ func TestDoclingPollerRequeuesAfterWaitingLimit(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	conv := &converterWithTemporaryError{}
 	workerMetrics := metrics.NewWorkerMetrics(zap.NewNop())
-	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{MaxAttempts: 2, InitialInterval: time.Second})
+	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{MaxAttempts: 2, InitialInterval: time.Second, RequeueDelay: time.Minute, MaxRestarts: 2})
 
 	task := &transformations.TransformationTask{
 		ID:               uuid.New(),
 		Status:           transformations.StatusProcessing,
 		DoclingJobID:     "job-1",
 		DoclingPollCount: 1,
+		RetryCount:       2,
 	}
 
 	result, err := poller.Poll(context.Background(), task)
@@ -42,7 +43,11 @@ func TestDoclingPollerRequeuesAfterWaitingLimit(t *testing.T) {
 	if task.DoclingJobID != "" || task.DoclingPollCount != 0 {
 		t.Fatalf("expected docling data to be cleared, got id=%s polls=%d", task.DoclingJobID, task.DoclingPollCount)
 	}
-	if task.NextPollAt != nil {
-		t.Fatalf("expected next poll to be reset, got %v", task.NextPollAt)
+	if task.NextPollAt == nil {
+		t.Fatalf("expected next poll to be set after restart limit, got nil")
+	}
+	delay := time.Until(*task.NextPollAt)
+	if delay < time.Minute-2*time.Second || delay > time.Minute+2*time.Second {
+		t.Fatalf("expected next poll around 1m, got %s", delay)
 	}
 }
