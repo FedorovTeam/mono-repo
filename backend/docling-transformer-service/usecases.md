@@ -8,11 +8,23 @@
   - `filename_extension` берётся из запроса или вычисляется из `original_object_key`; поддерживаются только `doc` / `docx` / `pdf` (иначе `InvalidArgument`).
   - `markdown_bucket` берётся из запроса или из конфигурации; если оба пустые — `InvalidArgument`.
   - При превышении лимита очереди (`pending`/`processing`/`waiting_docling` >= `service.queue_limit`, если он задан) возвращается `ResourceExhausted`.
+- **Поведение:** если уже есть последняя задача для `document_id` не в статусе `failed`, она возвращается как результат вызова без создания новой записи; выходные bucket/object_key берутся из задачи или из запроса/конфига.
 - **Шаги:**
-  1. Принять gRPC вызов `ConvertDocumentToMarkdown` с обязательными `document_id`, `original_bucket`, `original_object_key`, опциональными `markdown_bucket`, `markdown_object_key`, `filename_extension`; `x-correlation-id` читается из метаданных или генерируется заново.
+  1. Принять gRPC вызов `ConvertDocumentToMarkdown` с обязательными `document_id`, `original_bucket`, `original_object_key`, опциональными `markdown_bucket`, `markdown_object_key`, `filename_extension`, флагом `wait_for_result`; `x-correlation-id` читается из метаданных или генерируется заново.
   2. Нормализовать расширение и вычислить `markdown_object_key`, если не передан (замена исходного расширения на `.md`).
   3. Создать запись в таблице `transformations_queue` со статусом `pending`, путём исходника и результата, нормализованным расширением и прокинутым `correlation_id`.
-  4. Вернуть `queue_id`, `status=pending`, а также фактические `markdown_bucket` и `markdown_object_key` в ответе; само преобразование выполняется фоном.
+  4. Вернуть `queue_id`, `status` текущей задачи, а также фактические `markdown_bucket` и `markdown_object_key`. При `wait_for_result=true` use case дожидается `done`/`failed` с backoff-политикой `docling.status_*` и возвращает данные существующей задачи, либо `DeadlineExceeded`/`ResultNotReady` при исчерпании попыток.
+
+## Синхронная конвертация DOCX
+- **Акторы:** Gateway-service (gRPC клиент).
+- **Валидация:**
+  - Ровно один из `docx_content` или `docx_url` должен быть заполнен.
+  - Если передан `docx_url`, он скачивается HTTP‑клиентом; любые не‑2xx ответы или пустое тело — `InvalidArgument`.
+  - `filename` опционален; при отсутствии берётся из URL либо `document.docx`.
+- **Шаги:**
+  1. Принять gRPC вызов `ConvertDocxToMarkdown` с контентом файла или ссылкой и опциональным именем.
+  2. Определить `Content-Type` по имени файла, отправить документ в Docling (`Submit`) и опрашивать статус (`CheckStatus`) с backoff `docling.status_*` до готовности.
+  3. Вернуть готовый Markdown (`markdown`), `media_type` и `charset`; ошибки Docling или тайм-ауты пробрасываются вызывающей стороне.
 
 ## Фоновая обработка очереди
 - **Акторы:** Воркер сервиса (`internal/worker`).
@@ -38,4 +50,5 @@
 - **Шаги:**
   1. При старте и далее по расписанию обрабатывать зависшие `processing` задачи по `service.processing_timeout`: если превышены лимиты `scheduler.max_processing_retries` или `docling.status_max_attempts`, они получают статус `failed`, иначе возвращаются в `pending`.
   2. Периодически активировать просроченные `waiting_docling` задачи (по `next_poll_at` или превышению `docling.max_job_lifetime`).
-  3. Удалять завершённые задачи (`done`/`failed`) старше периода хранения (`cleanup_retention`).
+  3. Повторно ставить в очередь завершившиеся с ошибкой задачи старше `failed_retry_delay`, пока число попыток меньше `scheduler.max_failed_retries`; исчерпавшие лимит остаются в `failed` с расширенным описанием ошибки.
+  4. Удалять завершённые задачи (`done`/`failed`) старше периода хранения (`cleanup_retention`).
