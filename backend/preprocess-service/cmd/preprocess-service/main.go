@@ -1,29 +1,32 @@
 package main
 
 import (
-    "context"
-    "log"
-    "os"
-    "os/signal"
-    "syscall"
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
-    "preprocess-service/internal/app"
-    "preprocess-service/internal/config"
+	"preprocess-service/internal/app"
+	"preprocess-service/internal/config"
 )
 
 func main() {
-    cfgPath := os.Getenv("CONFIG_PATH")
-    cfg, err := config.Load(cfgPath)
-    if err != nil {
-        log.Fatalf("failed to load config: %v", err)
-    }
+	cfgPath := os.Getenv("CONFIG_PATH")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 
-    application := app.New(cfg)
+	application, err := app.New(cfg)
+	if err != nil {
+		log.Fatalf("failed to init app: %v", err)
+	}
 
-    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-    defer stop()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-    if err := application.Run(ctx); err != nil {
-        log.Fatalf("application stopped with error: %v", err)
-    }
+	if err := application.Run(ctx); err != nil {
+		log.Fatalf("application stopped with error: %v", err)
+	}
 }

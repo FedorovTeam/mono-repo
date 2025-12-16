@@ -24,10 +24,20 @@
 
 ## Конфигурация
 Ключевые параметры лежат в `config/config.yaml`:
+- `service.port` и `service.grpc_port` — HTTP и gRPC порты сервиса.
+- `postgres.dsn` — строка подключения для хранения метаданных задач предобработки.
+- `minio.endpoint`/`access_key`/`secret_key` — параметры подключения к MinIO для чтения исходных файлов и загрузки артефактов.
 - `preprocess.libreoffice_path` — путь к бинарю LibreOffice (например, `/usr/bin/libreoffice`).
 - `preprocess.working_dir` и `preprocess.output_dir` — каталоги для временных файлов и результатов.
-- `preprocess.minio` — параметры подключения к бакету артефактов.
+- `preprocess.source_bucket` и `preprocess.target_bucket` — бакеты для чтения исходных документов и сохранения результатов.
 - `logging.level` — уровень логирования (info/debug).
+
+## Поток Submit → очередь → воркер → MinIO → статус
+1. Клиент вызывает `SubmitPreprocess` (gRPC), передавая координаты исходного объекта в MinIO, `document_id` и `correlation_id`.
+2. Хендлер проверяет наличие задачи с теми же `source_bucket`/`source_key`/`source_etag` и при совпадении возвращает существующие `job_id` и статус без создания нового задания.
+3. Новая задача помещается в очередь (в дальнейшем — через PostgreSQL) и отдаёт `job_id` со статусом `PENDING`.
+4. Воркеры извлекают задания из очереди, загружают исходный файл из MinIO, прогоняют LibreOffice и сохраняют результат в `preprocess.target_bucket`.
+5. После успешной записи в MinIO или возникновения ошибки статус обновляется, и `GetPreprocessStatus` возвращает клиенту итоговое состояние.
 
 ## Требования
 - Go 1.23+

@@ -1,22 +1,45 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+
+	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
+)
 
 type PreprocessJob struct {
-    DocumentID   string
-    SourceObject string
-    TargetObject string
+	ID            string
+	DocumentID    string
+	SourceBucket  string
+	SourceKey     string
+	SourceETag    string
+	TargetBucket  string
+	TargetKey     string
+	CallbackURL   string
+	CorrelationID string
+	Status        preprocessv1.PreprocessStatus
+	ErrorMessage  string
+	UpdatedAt     time.Time
 }
 
 func (j PreprocessJob) Validate() error {
-    if j.DocumentID == "" {
-        return fmt.Errorf("document id is required")
-    }
-    if j.SourceObject == "" {
-        return fmt.Errorf("source object is required")
-    }
-    if j.TargetObject == "" {
-        return fmt.Errorf("target object is required")
-    }
-    return nil
+	if j.DocumentID == "" {
+		return fmt.Errorf("document id is required")
+	}
+	if j.SourceBucket == "" {
+		return fmt.Errorf("source bucket is required")
+	}
+	if j.SourceKey == "" {
+		return fmt.Errorf("source key is required")
+	}
+	if j.SourceETag == "" {
+		return fmt.Errorf("source etag is required")
+	}
+	if j.TargetBucket == "" {
+		return fmt.Errorf("target bucket is required")
+	}
+	if j.TargetKey == "" {
+		return fmt.Errorf("target key is required")
+	}
+	return nil
 }

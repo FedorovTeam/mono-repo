@@ -4,17 +4,22 @@ service:
   grpc_port: 9082
   region: ru-msk-1
 
+postgres:
+  dsn: postgres://preprocess:preprocess_password@postgres:5432/preprocess?sslmode=disable
+
+minio:
+  endpoint: minio.moiqr.localhost:80
+  access_key: PREPROCESS_MINIO_KEY
+  secret_key: PREPROCESS_MINIO_SECRET
+  ssl: false
+  region: us-east-1
+
 preprocess:
   libreoffice_path: /usr/bin/libreoffice
   working_dir: /tmp/preprocess-service/work
   output_dir: /tmp/preprocess-service/output
-  minio:
-    endpoint: minio.moiqr.localhost:80
-    access_key: PREPROCESS_MINIO_KEY
-    secret_key: PREPROCESS_MINIO_SECRET
-    bucket: preprocess-artifacts
-    ssl: false
-    region: us-east-1
+  source_bucket: preprocess-source
+  target_bucket: preprocess-artifacts
 
 logging:
   level: info
