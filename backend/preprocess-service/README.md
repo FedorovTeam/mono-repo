@@ -68,3 +68,17 @@
 - Go 1.23+
 - LibreOffice установлен в системе исполнения сервиса.
 - Доступ к MinIO или совместимому S3‑хранилищу и PostgreSQL.
+
+## CI/CD через Argo Workflows
+Для сборки и выката образа используется WorkflowTemplate `preprocess-service` в `cicd/argo-workflows/workflow.yaml`:
+
+1. Запустить пайплайн, передав SHA коммита:
+   ```bash
+   argo submit --from workflowtemplate/preprocess-service -p git_sha=$(git rev-parse HEAD)
+   ```
+2. Шаги пайплайна:
+   - `clone` — sparse-checkout только каталога `backend/preprocess-service` из репозитория `mono-repo`.
+   - `test` — запуск `go test ./...` для сервиса с кешем `/go` (без `-tags integration`).
+   - `build-image` — сборка образа `harbor.tech.fedorov-team.tech/backend/preprocess-service:<git_sha>` (и `:latest`) через Kaniko.
+   - `deploy` — обновление Argo CD приложения `app-preprocess-service` с новым тегом Helm-параметра `image.tag` и ожидание синхронизации/здоровья.
+3. Секреты, ожидаемые воркфлоу: `github-secret` (доступ к репозиторию), `harbor-docker-config` (pull/push в Harbor), `argocd-token` (токен для Argo CD).
