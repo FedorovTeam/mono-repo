@@ -13,7 +13,7 @@ import (
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/observability"
-	"preprocess-service/internal/storage/memory"
+	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
 	"preprocess-service/internal/worker"
 )
@@ -41,7 +41,7 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
 
-	repo := memory.NewJobRepository()
+	repo := postgres.NewJobRepository(dbpool)
 	handler := transport.NewPreprocessHandler(repo)
 
 	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler, telemetry.Meter(), logger)
