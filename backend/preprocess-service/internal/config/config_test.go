@@ -57,4 +57,8 @@ logging:
 	if cfg.Preprocess.TargetBucket != "preprocess-target" {
 		t.Fatalf("unexpected target bucket: %s", cfg.Preprocess.TargetBucket)
 	}
+
+	if cfg.Preprocess.OutputDir != "/tmp/out" {
+		t.Fatalf("unexpected output dir: %s", cfg.Preprocess.OutputDir)
+	}
 }
