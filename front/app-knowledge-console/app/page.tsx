@@ -25,7 +25,7 @@ export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [repository, setRepository] = useState('docs');
   const [branch, setBranch] = useState('main');
-  const [path, setPath] = useState('docs/test.md');
+  const [path, setPath] = useState('overview/docs/test.md');
 
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
