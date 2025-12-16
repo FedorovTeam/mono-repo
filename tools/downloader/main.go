@@ -61,6 +61,23 @@ type PlenarySession struct {
 	Newsletter     string `json:"newsletter"`
 }
 
+type FileResult struct {
+	SessionID   int64  `json:"sessionId"`
+	SessionName string `json:"sessionName"`
+	Label       string `json:"label"`
+	Source      string `json:"source"`
+	OutputPath  string `json:"outputPath,omitempty"`
+	Success     bool   `json:"success"`
+	Error       string `json:"error,omitempty"`
+}
+
+type DownloadReport struct {
+	GeneratedAt time.Time    `json:"generatedAt"`
+	Successes   int          `json:"successes"`
+	Failures    int          `json:"failures"`
+	Results     []FileResult `json:"results"`
+}
+
 // ---------- helpers ----------
 var invalidFS = regexp.MustCompile(`[\\/:*?"<>|]+`)
 var spaces = regexp.MustCompile(`\s+`)
@@ -196,6 +213,14 @@ func downloadToFile(ctx context.Context, client *http.Client, u, outPath string)
 		return err
 	}
 	return nil
+}
+
+func writeReport(report DownloadReport) error {
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(OutRoot, "report.json"), data, 0o644)
 }
 
 func pickBackoff(backoff []time.Duration, attempt int) time.Duration {
@@ -380,13 +405,21 @@ func downloadKnownOrSearch(
 	for _, cand := range cands {
 		for _, c := range order {
 			u := containerDownloadURL(c, cand)
+			if *verboseFlag {
+				fmt.Printf("    container=%s cand=%s url=%s\n", c, cand, u)
+			}
 			err := withRetry(ctx, attempts, retryBackoffSeq, func(retryNum int) error {
 				if *verboseFlag {
 					fmt.Printf("    [%s] attempt %d/%d for %s\n", c, retryNum, attempts, cand)
 				}
 				dlErr := downloadToFile(ctx, client, u, targetPath)
 				if dlErr != nil && *verboseFlag {
-					fmt.Printf("    [%s] attempt %d failed: %v\n", c, retryNum, dlErr)
+					var statusErr *httpStatusError
+					if errors.As(dlErr, &statusErr) {
+						fmt.Printf("    [%s] attempt %d failed: http %d (%s)\n", c, retryNum, statusErr.Code, statusErr.Body)
+					} else {
+						fmt.Printf("    [%s] attempt %d failed: %v\n", c, retryNum, dlErr)
+					}
 				}
 				return dlErr
 			})
@@ -431,6 +464,10 @@ func main() {
 
 	preferredContainers := []string{"docfiles", "attachments", "plenarysessions"}
 
+	var results []FileResult
+	successCount := 0
+	failureCount := 0
+
 	for i, ps := range sessions {
 		datePrefix := pickDatePrefix(ps.Date)
 		folderName := safeName(strings.TrimSpace(strings.Join([]string{datePrefix, ps.Name}, " ")))
@@ -462,15 +499,55 @@ func main() {
 			if strings.TrimSpace(f.Value) == "" {
 				continue
 			}
-			_, err := downloadKnownOrSearch(ctx, client, f.Value, outDir, f.Label, containers, preferredContainers)
+			outPath, err := downloadKnownOrSearch(ctx, client, f.Value, outDir, f.Label, containers, preferredContainers)
 			if err != nil {
 				// не падаем — просто логируем
 				fmt.Printf("  - FAIL %s (%s): %v\n", f.Label, f.Value, err)
+				failureCount++
+				results = append(results, FileResult{
+					SessionID:   ps.ID,
+					SessionName: ps.Name,
+					Label:       f.Label,
+					Source:      f.Value,
+					Success:     false,
+					Error:       err.Error(),
+				})
 			} else {
 				fmt.Printf("  - OK   %s\n", f.Label)
+				successCount++
+				results = append(results, FileResult{
+					SessionID:   ps.ID,
+					SessionName: ps.Name,
+					Label:       f.Label,
+					Source:      f.Value,
+					OutputPath:  outPath,
+					Success:     true,
+				})
 			}
 			time.Sleep(RateDelay)
 		}
+	}
+
+	report := DownloadReport{
+		GeneratedAt: time.Now().UTC(),
+		Successes:   successCount,
+		Failures:    failureCount,
+		Results:     results,
+	}
+
+	fmt.Printf("Summary: success=%d failures=%d\n", successCount, failureCount)
+	if failureCount > 0 {
+		fmt.Println("Failed files:")
+		for _, r := range results {
+			if r.Success {
+				continue
+			}
+			fmt.Printf("  - session %d (%s) %s (%s): %s\n", r.SessionID, r.SessionName, r.Label, r.Source, r.Error)
+		}
+	}
+
+	if err := writeReport(report); err != nil {
+		fmt.Fprintln(os.Stderr, "report error:", err)
 	}
 
 	fmt.Println("Done.")
