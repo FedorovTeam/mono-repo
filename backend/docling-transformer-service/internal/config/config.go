@@ -57,6 +57,7 @@ type DoclingConfig struct {
 	DefaultLanguage       string               `yaml:"default_language"`
 	PDFDefaultLanguage    string               `yaml:"pdf_default_language"`
 	PDFEnableOCR          bool                 `yaml:"pdf_enable_ocr"`
+	PDFBackend            string               `yaml:"pdf_backend"`
 	Mode                  string               `yaml:"mode"`
 	Storage               DoclingStorageConfig `yaml:"storage"`
 	StatusInitialInterval time.Duration        `yaml:"status_initial_interval"`
@@ -206,6 +207,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("docling.storage configuration is required for source_async mode")
 		}
 	}
+	if c.Docling.PDFEnableOCR && c.Docling.PDFBackend == "" {
+		return fmt.Errorf("docling.pdf_backend is required when pdf_enable_ocr is enabled")
+	}
 
 	if err := c.StatusBackoffPolicy().Validate(); err != nil {
 		return fmt.Errorf("docling status backoff: %w", err)
@@ -222,6 +226,10 @@ func (c *Config) applyDefaults() {
 
 	if c.Docling.Mode == "" {
 		c.Docling.Mode = "upload_file"
+	}
+
+	if c.Docling.PDFBackend == "" {
+		c.Docling.PDFBackend = "pypdfium2"
 	}
 
 	if c.Docling.Storage.Endpoint == "" && c.Docling.Storage.AccessKey == "" && c.Docling.Storage.SecretKey == "" && c.Docling.Storage.Bucket == "" {

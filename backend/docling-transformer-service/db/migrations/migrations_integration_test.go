@@ -52,21 +52,27 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 
 	assertTableExists(t, ctx, db, "transformations_queue")
 
-	columns := []struct {
-		table  string
-		column string
-	}{
-		{"transformations_queue", "id"},
-		{"transformations_queue", "status"},
-		{"transformations_queue", "document_id"},
-		{"transformations_queue", "original_bucket"},
-		{"transformations_queue", "original_object_key"},
-		{"transformations_queue", "markdown_bucket"},
-		{"transformations_queue", "markdown_object_key"},
-		{"transformations_queue", "filename_extension"},
-		{"transformations_queue", "created_at"},
-		{"transformations_queue", "started_at"},
-		{"transformations_queue", "finished_at"},
+columns := []struct {
+table  string
+column string
+}{
+{"transformations_queue", "id"},
+{"transformations_queue", "status"},
+{"transformations_queue", "document_id"},
+{"transformations_queue", "original_bucket"},
+{"transformations_queue", "original_object_key"},
+{"transformations_queue", "source_bucket"},
+{"transformations_queue", "source_object_key"},
+{"transformations_queue", "source_url"},
+{"transformations_queue", "markdown_bucket"},
+{"transformations_queue", "markdown_object_key"},
+{"transformations_queue", "filename_extension"},
+{"transformations_queue", "ocr_enabled"},
+{"transformations_queue", "ocr_lang"},
+{"transformations_queue", "pdf_backend"},
+{"transformations_queue", "created_at"},
+{"transformations_queue", "started_at"},
+{"transformations_queue", "finished_at"},
 		{"transformations_queue", "error"},
 		{"transformations_queue", "retry_count"},
 		{"transformations_queue", "correlation_id"},

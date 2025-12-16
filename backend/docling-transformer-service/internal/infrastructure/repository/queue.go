@@ -40,7 +40,7 @@ func NewQueueRepository(pool *pgxpool.Pool) *PostgresQueueRepository {
 // При отсутствии записей возвращает (nil, nil).
 func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
 	const query = `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, ocr_enabled, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE document_id = $1
 ORDER BY created_at DESC
@@ -62,7 +62,7 @@ LIMIT 1`
 // GetByID возвращает задачу очереди по идентификатору.
 func (r *PostgresQueueRepository) GetByID(ctx context.Context, id uuid.UUID) (*TransformationTask, error) {
 	const query = `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, ocr_enabled, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE id = $1`
 
@@ -83,16 +83,21 @@ func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueuePar
 	id := uuid.New()
 	normalizedExt := strings.TrimPrefix(strings.ToLower(params.FilenameExtension), ".")
 
+	var ocrEnabled interface{}
+	if params.OCREnabled != nil {
+		ocrEnabled = *params.OCREnabled
+	}
+
 	query := `
 INSERT INTO transformations_queue (
- id, status, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, correlation_id, docling_poll_count, next_poll_at
- ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12, 0, NULL)
+ id, status, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, ocr_enabled, ocr_lang, pdf_backend, created_at, correlation_id, docling_poll_count, next_poll_at
+ ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, 0, NULL)
 `
 
 	_, err := r.pool.Exec(ctx, query,
 		id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey,
 		params.SourceBucket, params.SourceObjectKey, params.SourceURL, params.MarkdownBucket, params.MarkdownObjectKey,
-		normalizedExt, params.CorrelationID,
+		normalizedExt, ocrEnabled, params.OCRLanguage, params.PDFBackend, params.CorrelationID,
 	)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("enqueue transformation: %w", err)
@@ -164,7 +169,7 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 
 func (r *PostgresQueueRepository) selectNextTasks(ctx context.Context, tx pgx.Tx, limit int) ([]*TransformationTask, error) {
 	tasks, err := r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, ocr_enabled, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
@@ -186,7 +191,7 @@ FOR UPDATE SKIP LOCKED`, 1)
 	}
 
 	tasks, err = r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, ocr_enabled, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'pending' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
@@ -550,6 +555,9 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		sourceBucket    sql.NullString
 		sourceObjectKey sql.NullString
 		sourceURL       sql.NullString
+		ocrEnabled      sql.NullBool
+		ocrLang         sql.NullString
+		pdfBackend      sql.NullString
 	)
 
 	if err := row.Scan(
@@ -568,6 +576,9 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&dto.MarkdownBucket,
 		&dto.MarkdownObjectKey,
 		&dto.FilenameExtension,
+		&ocrEnabled,
+		&ocrLang,
+		&pdfBackend,
 		&dto.CreatedAt,
 		&dto.StartedAt,
 		&dto.FinishedAt,
@@ -585,6 +596,12 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	dto.SourceBucket = sourceBucket.String
 	dto.SourceObjectKey = sourceObjectKey.String
 	dto.SourceURL = sourceURL.String
+	if ocrEnabled.Valid {
+		val := ocrEnabled.Bool
+		dto.OCREnabled = &val
+	}
+	dto.OCRLanguage = ocrLang.String
+	dto.PDFBackend = pdfBackend.String
 
 	return dto.ToDomain(), nil
 }

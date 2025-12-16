@@ -102,6 +102,7 @@ func main() {
 		DefaultLanguage:    cfg.Docling.DefaultLanguage,
 		PDFDefaultLanguage: cfg.Docling.PDFDefaultLanguage,
 		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
+		PDFBackend:         cfg.Docling.PDFBackend,
 		Mode:               cfg.Docling.Mode,
 		Storage: converter.StorageConfig{
 			Endpoint:  cfg.Docling.Storage.Endpoint,
@@ -116,10 +117,13 @@ func main() {
 	statusPolicy := cfg.StatusBackoffPolicy()
 
 	transformUC := usecase.NewTransformerService(queueRepo, conv, usecase.TransformationConfig{
-		MarkdownBucket: cfg.Minio.Bucket,
-		QueueLimit:     cfg.Service.QueueLimit,
-		StatusBackoff:  statusPolicy,
-		UseSourceAsync: cfg.Docling.Mode == "source_async",
+		MarkdownBucket:    cfg.Minio.Bucket,
+		QueueLimit:        cfg.Service.QueueLimit,
+		StatusBackoff:     statusPolicy,
+		UseSourceAsync:    cfg.Docling.Mode == "source_async",
+		DefaultOCREnabled: cfg.Docling.PDFEnableOCR,
+		DefaultOCRLang:    cfg.Docling.PDFDefaultLanguage,
+		DefaultPDFBackend: cfg.Docling.PDFBackend,
 	}, logger, &http.Client{Timeout: 30 * time.Second})
 
 	workerProcessor := usecase.NewProcessor(queueRepo, conv, storageClient, logger, usecase.Config{
@@ -143,6 +147,9 @@ func main() {
 		DoclingRequeueDelay:    cfg.Scheduler.DoclingRequeueDelay,
 		DoclingMaxRestarts:     cfg.Scheduler.DoclingMaxRestarts,
 		UseSourceAsync:         cfg.Docling.Mode == "source_async",
+		DefaultOCREnabled:      cfg.Docling.PDFEnableOCR,
+		DefaultOCRLang:         cfg.Docling.PDFDefaultLanguage,
+		DefaultPDFBackend:      cfg.Docling.PDFBackend,
 	})
 
 	workerDone := make(chan struct{})
