@@ -17,7 +17,7 @@ spec:
 
   arguments:
     parameters:
-      - name: git_sha        # SHA передаётся при submit
+      - name: git_sha # SHA передаётся при submit
 
   templates:
     - name: build
@@ -31,6 +31,7 @@ spec:
               parameters:
                 - name: git_sha
                   value: "{{inputs.parameters.git_sha}}"
+
         - - name: build-image
             template: kaniko-build
             arguments:
@@ -40,6 +41,7 @@ spec:
               artifacts:
                 - name: source
                   from: "{{steps.clone.outputs.artifacts.source}}"
+
         - - name: deploy
             template: argocd-deploy
             arguments:
@@ -61,7 +63,8 @@ spec:
         args:
           - |
             set -e
-            ulimit -n 1048576
+            ulimit -n 1048576 || true
+
             REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
             git clone --depth 1 --sparse "$REPO" /workspace
             cd /workspace
@@ -90,7 +93,7 @@ spec:
             path: /workspace
       container:
         image: gcr.io/kaniko-project/executor:v1.22.0
-        command: [ "/kaniko/executor" ]
+        command: ["/kaniko/executor"]
         args:
           - --dockerfile=/workspace/front/app-knowledge-console/Dockerfile
           - --context=/workspace/front/app-knowledge-console
@@ -103,12 +106,14 @@ spec:
           - name: DOCKER_CONFIG
             value: /kaniko/.docker
         volumeMounts:
+          # если secret типа kubernetes.io/dockerconfigjson и ключ .dockerconfigjson:
           - name: docker-config
             mountPath: /kaniko/.docker/config.json
             subPath: .dockerconfigjson
         securityContext:
           runAsUser: 0
           privileged: true
+
     - name: argocd-deploy
       inputs:
         parameters:
@@ -120,21 +125,34 @@ spec:
           - |
             set -euo pipefail
             : "${ARGOCD_TOKEN:?ARGOCD_TOKEN is not set}"
-            # поднять лимит открытых файлов для этого шага
+
+            # поднять лимит открытых файлов для этого шага (может не подняться выше hard limit контейнера/ноды)
             ulimit -n 1048576 || true
 
             APP="app-app-knowledge-console"
             SERVER="argocd.analytics.moiqr.ru"
 
-            # 1) убеждаемся, что приложение существует
-            argocd app get "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web >/dev/null
+            # Важно: используем grpc-web везде, и НЕ делаем argocd login (он не нужен при --auth-token)
+            argocd app get "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web >/dev/null
 
-            # 2) ждём, пока не будет активных операций (если автосинк/другой пайплайн уже что-то крутит)
-            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --operation --timeout 600
+            # ждём, пока не будет активных операций
+            argocd app wait "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --operation \
+              --timeout 600
 
-            # 3) выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
+            # выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
             set +e
-            argocd app set "$APP" --helm-set image.tag={{inputs.parameters.git_sha}} --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web
+            argocd app set "$APP" \
+              --helm-set image.tag={{inputs.parameters.git_sha}} \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web
             RC=$?
             set -e
             if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
@@ -142,9 +160,15 @@ spec:
               exit "$RC"
             fi
 
-            # 4) запускаем sync (можно async + ожидание)
+            # запускаем sync
             set +e
-            argocd app sync "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --timeout 600 --prune --retry-limit 1
+            argocd app sync "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --timeout 600 \
+              --prune \
+              --retry-limit 1
             RC=$?
             set -e
             if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
@@ -152,8 +176,14 @@ spec:
               exit "$RC"
             fi
 
-            # 5) ждём синхронизации и здоровья
-            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --sync --health --timeout 600
+            # ждём синхронизации и здоровья
+            argocd app wait "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --sync \
+              --health \
+              --timeout 600
         env:
           - name: ARGOCD_TOKEN
             valueFrom:
