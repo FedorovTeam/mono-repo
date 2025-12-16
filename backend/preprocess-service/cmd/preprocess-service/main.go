@@ -22,6 +22,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to init app: %v", err)
 	}
+	defer application.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
