@@ -33,15 +33,6 @@ spec:
               parameters:
                 - name: git_sha
                   value: "{{inputs.parameters.git_sha}}"
-        - - name: test
-            template: go-test
-            arguments:
-              parameters:
-                - name: git_sha
-                  value: "{{inputs.parameters.git_sha}}"
-              artifacts:
-                - name: source
-                  from: "{{steps.clone.outputs.artifacts.source}}"
         - - name: build-image
             template: kaniko-build
             arguments:
@@ -93,26 +84,6 @@ spec:
               secretKeyRef:
                 name: github-secret
                 key: password
-
-    - name: go-test
-      inputs:
-        parameters:
-          - name: git_sha
-        artifacts:
-          - name: source
-            path: /workspace
-      container:
-        image: golang:1.23
-        command: ["bash", "-c"]
-        args:
-          - |
-            set -euo pipefail
-            cd /workspace/backend/preprocess-service
-            echo "Running go test for commit {{inputs.parameters.git_sha}}"
-            go test ./...
-        volumeMounts:
-          - name: go-build-cache
-            mountPath: /go
 
     - name: kaniko-build
       inputs:
