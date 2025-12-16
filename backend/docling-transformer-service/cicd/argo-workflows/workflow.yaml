@@ -99,7 +99,7 @@ spec:
           - --dockerfile=/workspace/backend/docling-transformer-service/Dockerfile
           - --context=/workspace/backend/docling-transformer-service
           - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:{{inputs.parameters.git_sha}}
-#          - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:latest
+          - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:latest
           - --cache=true
           - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
           - --verbosity=debug
@@ -151,7 +151,7 @@ spec:
             # выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
             set +e
             argocd app set "$APP" \
-              --helm-set-string image.tag={{inputs.parameters.git_sha}} \
+              --helm-set image.tag={{inputs.parameters.git_sha}} \
               --server "$SERVER" \
               --auth-token "$ARGOCD_TOKEN" \
               --grpc-web
