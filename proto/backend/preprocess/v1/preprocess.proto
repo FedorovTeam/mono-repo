@@ -51,6 +51,8 @@ message GetPreprocessStatusResponse {
   string error_message = 8;
   string correlation_id = 9;
   google.protobuf.Timestamp updated_at = 10;
+  string error_code = 11;
+  map<string, string> error_details = 12;
 }
 
 enum PreprocessStatus {

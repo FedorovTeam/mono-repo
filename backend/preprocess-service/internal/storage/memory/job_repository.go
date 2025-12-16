@@ -25,7 +25,7 @@ func (r *JobRepository) Save(_ context.Context, job domain.PreprocessJob) error 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.jobs[job.ID] = job
+	r.jobs[job.ID] = cloneJob(job)
 	r.bySource[r.sourceKey(job.SourceBucket, job.SourceKey, job.SourceETag)] = job.ID
 
 	return nil
@@ -45,7 +45,7 @@ func (r *JobRepository) FindBySource(_ context.Context, bucket, key, etag string
 		return domain.PreprocessJob{}, false, fmt.Errorf("job %s not found for index", jobID)
 	}
 
-	return job, true, nil
+	return cloneJob(job), true, nil
 }
 
 func (r *JobRepository) Get(_ context.Context, id string) (domain.PreprocessJob, bool, error) {
@@ -57,9 +57,25 @@ func (r *JobRepository) Get(_ context.Context, id string) (domain.PreprocessJob,
 		return domain.PreprocessJob{}, false, nil
 	}
 
-	return job, true, nil
+	return cloneJob(job), true, nil
 }
 
 func (r *JobRepository) sourceKey(bucket, key, etag string) string {
 	return fmt.Sprintf("%s|%s|%s", bucket, key, etag)
+}
+
+func cloneJob(job domain.PreprocessJob) domain.PreprocessJob {
+	if job.ErrorDetails == nil {
+		job.ErrorDetails = map[string]string{}
+		return job
+	}
+
+	details := make(map[string]string, len(job.ErrorDetails))
+	for k, v := range job.ErrorDetails {
+		details[k] = v
+	}
+
+	job.ErrorDetails = details
+
+	return job
 }
