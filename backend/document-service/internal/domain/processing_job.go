@@ -61,6 +61,7 @@ type ConvertPayload struct {
 	MarkdownObjectKey string
 	QueueID           string
 	Status            string
+	OCREnabled        *bool
 }
 
 // PublishPayload описывает данные для шага публикации в GitHub.
@@ -143,6 +144,9 @@ func (p ConvertPayload) ToMap() map[string]any {
 	if p.Status != "" {
 		res["status"] = p.Status
 	}
+	if p.OCREnabled != nil {
+		res["ocr_enabled"] = *p.OCREnabled
+	}
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }
@@ -157,6 +161,7 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		MarkdownObjectKey:  stringFromMap(payload, "markdown_object_key"),
 		QueueID:            stringFromMap(payload, "queue_id"),
 		Status:             stringFromMap(payload, "status"),
+		OCREnabled:         boolFromMap(payload, "ocr_enabled"),
 	}
 }
 
@@ -238,4 +243,16 @@ func stringFromMap(payload map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+func boolFromMap(payload map[string]any, key string) *bool {
+	if payload == nil {
+		return nil
+	}
+	if val, ok := payload[key]; ok {
+		if b, ok := val.(bool); ok {
+			return &b
+		}
+	}
+	return nil
 }

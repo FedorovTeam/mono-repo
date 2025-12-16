@@ -137,9 +137,10 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 			OriginalObjectKey:  doc.OriginalObjectKey,
 			MarkdownBucket:     doc.MarkdownBucket,
 			MarkdownObjectKey:  doc.MarkdownObjectKey,
+			OCREnabled:         boolPtr(doc.OCREnabled),
 			JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
 		}.ToMap()
-		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
+		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert", Payload: map[string]any{"ocr_enabled": doc.OCREnabled}}
 		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 			return fmt.Errorf("enqueue convert for %s: %w", doc.ID, err)
 		}

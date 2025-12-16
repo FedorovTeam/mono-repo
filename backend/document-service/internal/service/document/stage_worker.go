@@ -131,6 +131,13 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
 
+	ocrEnabled := doc.OCREnabled
+	if payload.OCREnabled != nil {
+		ocrEnabled = *payload.OCREnabled
+	} else {
+		payload.OCREnabled = boolPtr(ocrEnabled)
+	}
+
 	input := convertInput{
 		DocumentID:        job.DocumentID,
 		OriginalBucket:    payload.OriginalBucket,
@@ -138,6 +145,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		OriginalObjectKey: payload.OriginalObjectKey,
 		MarkdownObjectKey: payload.MarkdownObjectKey,
 		Version:           latestVersion(doc).Version + 1,
+		OCREnabled:        ocrEnabled,
 	}
 
 	convCtx := w.jobContext(ctx, payload.CorrelationID)
