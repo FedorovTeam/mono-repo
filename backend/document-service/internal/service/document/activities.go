@@ -36,6 +36,7 @@ type convertInput struct {
 	MarkdownObjectKey string
 	Version           int32
 	OCREnabled        bool
+	FilenameExtension string
 }
 
 type publishInput struct {
@@ -143,6 +144,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		OriginalObjectKey: input.OriginalObjectKey,
 		MarkdownBucket:    input.MarkdownBucket,
 		MarkdownObjectKey: input.MarkdownObjectKey,
+		FilenameExtension: input.FilenameExtension,
 		WaitForResult:     false,
 		CorrelationId:     correlationID,
 		OcrEnabled:        boolPtr(input.OCREnabled),

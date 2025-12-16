@@ -399,7 +399,7 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 func TestHandleConvertPropagatesOCREnabled(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-ocr",
-		Name:              "Doc",
+		Name:              "Doc.pdf",
 		Owner:             "owner",
 		Repository:        "repo",
 		Branch:            "main",
@@ -407,10 +407,10 @@ func TestHandleConvertPropagatesOCREnabled(t *testing.T) {
 		Path:              "docs/doc.md",
 		Status:            domain.DocumentStatusStoredOriginal,
 		OriginalBucket:    "orig-bucket",
-		OriginalObjectKey: "path/doc.docx",
+		OriginalObjectKey: "path/doc",
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "path/doc.md",
-		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc.docx", MarkdownObjectKey: "path/doc.md"}},
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc", MarkdownObjectKey: "path/doc.md"}},
 		OCREnabled:        true,
 	}
 
@@ -427,10 +427,16 @@ func TestHandleConvertPropagatesOCREnabled(t *testing.T) {
 	if transformer.lastRequest == nil || !transformer.lastRequest.GetOcrEnabled() {
 		t.Fatalf("expected OCR flag to be propagated to transformer, got %#v", transformer.lastRequest)
 	}
+	if transformer.lastRequest.GetFilenameExtension() != "pdf" {
+		t.Fatalf("expected filename extension to be propagated, got %v", transformer.lastRequest.GetFilenameExtension())
+	}
 
 	payload := domain.ConvertPayloadFromMap(result.Payload)
 	if payload.OCREnabled == nil || !*payload.OCREnabled {
 		t.Fatalf("expected OCR flag in payload, got %v", result.Payload)
+	}
+	if payload.FilenameExtension != "pdf" {
+		t.Fatalf("expected filename extension in payload, got %v", result.Payload)
 	}
 }
 
