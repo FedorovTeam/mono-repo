@@ -22,6 +22,7 @@ type Document struct {
 	Status          DocumentStatus
 	JobID           *string
 	Error           *string
+	EnablePdfOcr    bool
 }
 
 // DocumentFilter задает параметры фильтрации документов.

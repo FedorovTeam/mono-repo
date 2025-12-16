@@ -10,7 +10,7 @@ import (
 func TestMapDocument(t *testing.T) {
 	owner := "org"
 	job := "job-1"
-	doc := mapDocument(&domain.Document{ID: "1", FileName: "file", Repository: "org/repo", RepositoryOwner: &owner, Branch: "main", Path: "docs/file", Status: domain.DocumentStatusConvertedToMarkdown, JobID: &job})
+	doc := mapDocument(&domain.Document{ID: "1", FileName: "file", Repository: "org/repo", RepositoryOwner: &owner, Branch: "main", Path: "docs/file", Status: domain.DocumentStatusConvertedToMarkdown, JobID: &job, EnablePdfOcr: true})
 
 	if doc == nil || doc.ID != "1" {
 		t.Fatalf("expected document mapped")
@@ -23,6 +23,9 @@ func TestMapDocument(t *testing.T) {
 	}
 	if doc.JobID == nil || *doc.JobID != job {
 		t.Fatalf("job id not mapped")
+	}
+	if !doc.EnablePDFOcr {
+		t.Fatalf("enablePdfOcr not mapped")
 	}
 }
 
