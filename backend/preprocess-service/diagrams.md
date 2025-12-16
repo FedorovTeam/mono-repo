@@ -3,23 +3,33 @@
 ## Компоненты
 ```mermaid
 flowchart LR
-    Client[[Cron / gRPC клиент]] -->|отправка задания| HTTP[HTTP API / Health]
-    HTTP --> App[App слой]
-    App --> Domain[Domain]
-    App --> Preprocess[LibreOffice Runner]
-    Preprocess --> MinIO[(MinIO bucket preprocess-artifacts)]
+    Client[[gRPC клиент / Cron]] -->|SubmitPreprocess| GRPC[Preprocess gRPC API]
+    GRPC --> Handler[Preprocess Handler]
+    Handler --> Repo[(Очередь в PostgreSQL)]
+    Worker[Воркеры LibreOffice] --> Repo
+    Worker --> MinIO[(MinIO bucket preprocess-artifacts)]
+    Worker --> Callback[[callback_url]]
+    MinIO --> Downstream[[docling / следующий сервис]]
 ```
 
-## Поток предобработки (укороченный)
+## Последовательность Submit → очередь → воркер → MinIO → callback
 ```mermaid
 sequenceDiagram
-    participant W as Worker/Cron
-    participant P as preprocess-service
-    participant L as LibreOffice
-    participant M as MinIO
+    participant Client
+    participant GRPC as preprocess-service (gRPC)
+    participant Queue as Очередь/БД
+    participant Worker as Воркер LibreOffice
+    participant MinIO
+    participant Callback as callback_url
 
-    W->>P: Задание с объектом исходного файла
-    P->>L: Конвертация входного файла во временном каталоге
-    L-->>P: PDF/HTML результат
-    P->>M: Загрузка результата в bucket preprocess-artifacts
+    Client->>GRPC: SubmitPreprocess(source_bucket, source_key, callback_url)
+    GRPC-->>Client: job_id, статус PENDING
+    GRPC->>Queue: Сохраняет задание
+    Worker->>Queue: Забирает PENDING
+    Worker->>MinIO: Читает source_bucket/source_key
+    Worker->>MinIO: Записывает target_bucket/target_key (docx)
+    Worker->>Queue: Обновляет статус COMPLETED/FAILED
+    Client->>GRPC: GetPreprocessStatus(job_id)
+    GRPC-->>Client: Статус + координаты результата
+    Worker-->>Callback: POST с job_id, статусом и путём в MinIO
 ```
