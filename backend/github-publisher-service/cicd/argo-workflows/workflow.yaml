@@ -126,20 +126,34 @@ spec:
           - |
             set -euo pipefail
             : "${ARGOCD_TOKEN:?ARGOCD_TOKEN is not set}"
+            
+            # поднять лимит открытых файлов для этого шага (может не подняться выше hard limit контейнера/ноды)
             ulimit -n 1048576 || true
 
             APP="app-github-publisher-service"
-            SERVER="argocd-server.argocd.svc.cluster.local:443"
+            SERVER="argocd.tech.fedorov-team.tech"
 
-            # 1) убеждаемся, что приложение существует
-            argocd app get "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web >/dev/null
+            # Важно: используем grpc-web везде, и НЕ делаем argocd login (он не нужен при --auth-token)
+            argocd app get "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web >/dev/null
 
-            # 2) ждём, пока не будет активных операций
-            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --operation --timeout 600
+            # ждём, пока не будет активных операций
+            argocd app wait "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --operation \
+              --timeout 600
 
-            # 3) выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
+            # выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
             set +e
-            argocd app set "$APP" --helm-set image.tag={{inputs.parameters.git_sha}} --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web
+            argocd app set "$APP" \
+              --helm-set image.tag={{inputs.parameters.git_sha}} \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web
             RC=$?
             set -e
             if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
@@ -147,9 +161,15 @@ spec:
               exit "$RC"
             fi
 
-            # 4) запускаем sync
+            # запускаем sync
             set +e
-            argocd app sync "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --timeout 600 --prune --retry-limit 1
+            argocd app sync "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --timeout 600 \
+              --prune \
+              --retry-limit 1
             RC=$?
             set -e
             if [ "$RC" != "0" ] && [ "$RC" != "20" ]; then
@@ -157,8 +177,14 @@ spec:
               exit "$RC"
             fi
 
-            # 5) ждём синхронизации и здоровья
-            argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --sync --health --timeout 600
+            # ждём синхронизации и здоровья
+            argocd app wait "$APP" \
+              --server "$SERVER" \
+              --auth-token "$ARGOCD_TOKEN" \
+              --grpc-web \
+              --sync \
+              --health \
+              --timeout 600
         env:
           - name: ARGOCD_TOKEN
             valueFrom:
