@@ -34,6 +34,29 @@
 - `preprocess.libreoffice_path` — путь до бинаря LibreOffice, `working_dir`/`output_dir` — рабочие каталоги, `worker_concurrency` — число воркеров, `convert_timeout`/`backoff`/`poll_interval` — тайминги обработки и повтора, `target_media_type`/`target_bucket`/`source_bucket` — ключевые бакеты и медиатип.
 - `logging.level` — уровень логов (`debug|info|warn|error`).
 
+В контейнерном образе пример `config/config.yaml` уже скопирован в `/app/config/config.yaml`, рабочие каталоги `/tmp/preprocess-service/work` и `/tmp/preprocess-service/output` созданы и доступны для записи. Значения MinIO и PostgreSQL можно переопределить через переменные окружения `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_REGION`, `MINIO_SSL` и `POSTGRES_DSN`, либо подменить весь конфиг файлом, смонтированным по `CONFIG_PATH`.
+
+## Запуск в Docker
+1. Соберите образ:
+   ```bash
+   docker build -t preprocess-service:local .
+   ```
+2. Запустите контейнер, передав параметры подключения к PostgreSQL и MinIO через переменные окружения или собственный конфиг:
+   ```bash
+   docker run --rm \
+     -p 8082:8082 -p 9082:9082 \
+     -e CONFIG_PATH=/app/config/config.yaml \
+     -e POSTGRES_DSN="postgres://preprocess:preprocess_password@postgres:5432/preprocess?sslmode=disable" \
+     -e MINIO_ENDPOINT="minio.moiqr.localhost:80" \
+     -e MINIO_ACCESS_KEY="PREPROCESS_MINIO_KEY" \
+     -e MINIO_SECRET_KEY="PREPROCESS_MINIO_SECRET" \
+     -e MINIO_REGION="us-east-1" \
+     -e MINIO_SSL="false" \
+     -v $(pwd)/config/config.yaml:/app/config/config.yaml:ro \
+     preprocess-service:local
+   ```
+   При желании можно заменить файл конфигурации на другой путь, передав `-e CONFIG_PATH=/app/config/custom.yaml` и примонтировав соответствующий volume.
+
 ## Поток Submit → очередь → воркер → MinIO → callback
 1. Клиент вызывает `SubmitPreprocess` (gRPC), передавая координаты исходного объекта в MinIO, `document_id`, `correlation_id` и при необходимости `callback_url`.
 2. Хендлер проверяет дубликаты по `source_bucket`/`source_key`/`source_etag`, возвращает существующий `job_id` или ставит новое задание в очередь.

@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -67,6 +69,30 @@ func Load(path string) (Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	if dsn := os.Getenv("POSTGRES_DSN"); dsn != "" {
+		cfg.Postgres.DSN = dsn
+	}
+
+	if minioEndpoint := os.Getenv("MINIO_ENDPOINT"); minioEndpoint != "" {
+		cfg.Minio.Endpoint = minioEndpoint
+	}
+	if minioAccessKey := os.Getenv("MINIO_ACCESS_KEY"); minioAccessKey != "" {
+		cfg.Minio.AccessKey = minioAccessKey
+	}
+	if minioSecretKey := os.Getenv("MINIO_SECRET_KEY"); minioSecretKey != "" {
+		cfg.Minio.SecretKey = minioSecretKey
+	}
+	if minioRegion := os.Getenv("MINIO_REGION"); minioRegion != "" {
+		cfg.Minio.Region = minioRegion
+	}
+	if minioSSL := strings.TrimSpace(os.Getenv("MINIO_SSL")); minioSSL != "" {
+		parsed, err := strconv.ParseBool(minioSSL)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse MINIO_SSL: %w", err)
+		}
+		cfg.Minio.SSL = parsed
 	}
 
 	return cfg, nil
