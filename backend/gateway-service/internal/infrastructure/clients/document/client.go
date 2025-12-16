@@ -41,7 +41,6 @@ func (c *GRPCClient) CreateDocument(ctx context.Context, req domain.CreateDocume
 		Id:                req.ID,
 		FileName:          req.FileName,
 		Repository:        req.Repository,
-		RepositoryOwner:   valueOrEmpty(req.RepositoryOwner),
 		Branch:            req.Branch,
 		Path:              req.Path,
 		CorrelationId:     req.CorrelationID,
@@ -50,7 +49,8 @@ func (c *GRPCClient) CreateDocument(ctx context.Context, req domain.CreateDocume
 		UploadObjectKey:   req.UploadObjectKey,
 		MarkdownBucket:    req.MarkdownBucket,
 		MarkdownObjectKey: req.MarkdownObjectKey,
-		EnablePdfOcr:      req.EnablePdfOcr,
+		Owner:             valueOrEmpty(req.RepositoryOwner),
+		OcrEnabled:        req.EnablePdfOcr,
 	})
 	if err != nil {
 		return nil, err

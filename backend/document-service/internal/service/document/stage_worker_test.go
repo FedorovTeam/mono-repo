@@ -166,11 +166,12 @@ func (s *staticPublisher) PublishMarkdown(ctx context.Context, in *githubpublish
 }
 
 type staticTransformer struct {
-	resp *transformerv1.ConvertDocumentToMarkdownResponse
+	resp        *transformerv1.ConvertDocumentToMarkdownResponse
+	lastRequest *transformerv1.ConvertDocumentToMarkdownRequest
 }
 
 func (s *staticTransformer) ConvertDocumentToMarkdown(ctx context.Context, in *transformerv1.ConvertDocumentToMarkdownRequest, opts ...grpc.CallOption) (*transformerv1.ConvertDocumentToMarkdownResponse, error) {
-	_ = in
+	s.lastRequest = in
 	return s.resp, nil
 }
 
@@ -392,6 +393,44 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	}
 	if convertPayload.Status != "pending" {
 		t.Fatalf("expected transformer status in payload, got %v", result.Payload)
+	}
+}
+
+func TestHandleConvertPropagatesOCREnabled(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-ocr",
+		Name:              "Doc",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc.docx",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc.docx", MarkdownObjectKey: "path/doc.md"}},
+		OCREnabled:        true,
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ocr", Status: "done", MarkdownObjectKey: "path/doc.md"}}
+	activities := NewActivities(repo, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-ocr", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if transformer.lastRequest == nil || !transformer.lastRequest.GetOcrEnabled() {
+		t.Fatalf("expected OCR flag to be propagated to transformer, got %#v", transformer.lastRequest)
+	}
+
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if payload.OCREnabled == nil || !*payload.OCREnabled {
+		t.Fatalf("expected OCR flag in payload, got %v", result.Payload)
 	}
 }
 

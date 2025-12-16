@@ -25,7 +25,7 @@ func TestCreateDocument(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO documents")).
-		WithArgs(sqlmock.AnyArg(), "file.docx", "", "", "", "", "", string(domain.DocumentStatusUploaded), "", "orig", "orig/key", "md", "md/key", "", false, false, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "file.docx", "", "", "", "", "", string(domain.DocumentStatusUploaded), "", "orig", "orig/key", "md", "md/key", "", false, true, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO document_versions")).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -40,6 +40,7 @@ func TestCreateDocument(t *testing.T) {
 		OriginalObjectKey: "orig/key",
 		MarkdownBucket:    "md",
 		MarkdownObjectKey: "md/key",
+		OCREnabled:        true,
 	}
 	version := &domain.DocumentVersion{Version: 1, OriginalObjectKey: "orig/key", MarkdownObjectKey: "md/key"}
 	log := &domain.DocumentStatusLog{ToStatus: domain.DocumentStatusUploaded}
