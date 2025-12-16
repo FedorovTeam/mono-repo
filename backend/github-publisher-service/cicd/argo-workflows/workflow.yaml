@@ -159,9 +159,9 @@ spec:
 
             # 5) ждём синхронизации и здоровья
             argocd app wait "$APP" --server "$SERVER" --auth-token "$ARGOCD_TOKEN" --grpc-web --sync --health --timeout 600
-      env:
-        - name: ARGOCD_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: argocd-token
-              key: token
+        env:
+          - name: ARGOCD_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: argocd-token
+                key: token
