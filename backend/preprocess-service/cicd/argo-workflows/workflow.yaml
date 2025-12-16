@@ -1,3 +1,4 @@
+# backend/preprocess-service/cicd/argo-workflows/workflow.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -18,7 +19,7 @@ spec:
 
   arguments:
     parameters:
-      - name: git_sha
+      - name: git_sha        # SHA передаётся при submit
 
   templates:
     - name: build
@@ -32,7 +33,6 @@ spec:
               parameters:
                 - name: git_sha
                   value: "{{inputs.parameters.git_sha}}"
-
         - - name: build-image
             template: kaniko-build
             arguments:
@@ -42,7 +42,6 @@ spec:
               artifacts:
                 - name: source
                   from: "{{steps.clone.outputs.artifacts.source}}"
-
         - - name: deploy
             template: argocd-deploy
             arguments:
@@ -64,7 +63,7 @@ spec:
         args:
           - |
             set -e
-            ulimit -n 1048576 || true
+            ulimit -n 1048576
             REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
 
             echo "Cloning https://github.com/FedorovTeam/mono-repo.git @ {{inputs.parameters.git_sha}}"
@@ -95,20 +94,15 @@ spec:
             path: /workspace
       container:
         image: gcr.io/kaniko-project/executor:v1.22.0
-        # важно: запускаем через shell, чтобы выставить ulimit ДО канико
-        command: ["/busybox/sh", "-c"]
+        command: [ "/kaniko/executor" ]
         args:
-          - |
-            set -e
-            ulimit -n 1048576 || true
-            exec /kaniko/executor \
-              --dockerfile=/workspace/backend/preprocess-service/Dockerfile \
-              --context=/workspace/backend/preprocess-service \
-              --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:{{inputs.parameters.git_sha}} \
-              --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:latest \
-              --cache=true \
-              --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache \
-              --verbosity=debug
+          - --dockerfile=/workspace/backend/preprocess-service/Dockerfile
+          - --context=/workspace/backend/preprocess-service
+          - --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:{{inputs.parameters.git_sha}}
+          - --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:latest
+          - --cache=true
+          - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
+          - --verbosity=debug
         env:
           - name: DOCKER_CONFIG
             value: /kaniko/.docker
@@ -134,16 +128,19 @@ spec:
             set -euo pipefail
             : "${ARGOCD_TOKEN:?ARGOCD_TOKEN is not set}"
 
+            # поднять лимит открытых файлов для этого шага (может не подняться выше hard limit контейнера/ноды)
             ulimit -n 1048576 || true
 
             APP="app-preprocess-service"
             SERVER="argocd.tech.fedorov-team.tech"
 
+            # Важно: используем grpc-web везде, и НЕ делаем argocd login (он не нужен при --auth-token)
             argocd app get "$APP" \
               --server "$SERVER" \
               --auth-token "$ARGOCD_TOKEN" \
               --grpc-web >/dev/null
 
+            # ждём, пока не будет активных операций
             argocd app wait "$APP" \
               --server "$SERVER" \
               --auth-token "$ARGOCD_TOKEN" \
@@ -151,6 +148,7 @@ spec:
               --operation \
               --timeout 600
 
+            # выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
             set +e
             argocd app set "$APP" \
               --helm-set image.tag={{inputs.parameters.git_sha}} \
@@ -164,6 +162,7 @@ spec:
               exit "$RC"
             fi
 
+            # запускаем sync
             set +e
             argocd app sync "$APP" \
               --server "$SERVER" \
@@ -179,6 +178,7 @@ spec:
               exit "$RC"
             fi
 
+            # ждём синхронизации и здоровья
             argocd app wait "$APP" \
               --server "$SERVER" \
               --auth-token "$ARGOCD_TOKEN" \
