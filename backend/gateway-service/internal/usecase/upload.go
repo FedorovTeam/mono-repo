@@ -59,6 +59,10 @@ func (s *UploadService) UploadKnowledgeDocument(ctx context.Context, input Uploa
 
 	ctx, correlationID := ctxutils.EnsureCorrelationID(ctx)
 	documentID := uuid.NewString()
+	path := strings.TrimSpace(input.Path)
+	if path == "" {
+		path = defaultDocumentPath(documentID)
+	}
 
 	uploadURL, err := s.storage.GenerateUploadURL(ctx, domain.GenerateUploadURLRequest{
 		DocumentID:       documentID,
@@ -80,7 +84,7 @@ func (s *UploadService) UploadKnowledgeDocument(ctx context.Context, input Uploa
 		FileName:          input.FileName,
 		Repository:        input.Repository,
 		Branch:            input.Branch,
-		Path:              input.Path,
+		Path:              path,
 		CorrelationID:     correlationID,
 		ContentLength:     input.FileSizeBytes,
 		UploadBucket:      uploadURL.Bucket,
@@ -107,13 +111,14 @@ func validateUploadInput(input UploadInput) error {
 	if strings.TrimSpace(input.Branch) == "" {
 		return errors.New("branch is required")
 	}
-	if strings.TrimSpace(input.Path) == "" {
-		return errors.New("path is required")
-	}
 	if input.FileSizeBytes <= 0 {
 		return errors.New("fileSizeBytes must be positive")
 	}
 	return nil
+}
+
+func defaultDocumentPath(id string) string {
+	return fmt.Sprintf("knowledge/docs/%s.md", id)
 }
 
 func validateUploadURL(uploadURL *domain.UploadURL) error {

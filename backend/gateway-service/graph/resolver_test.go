@@ -55,7 +55,8 @@ func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
 	mr := &mutationResolver{resolver}
 
 	ctx := ctxutils.WithAPIKey(context.Background(), "secret")
-	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", FileSizeBytes: 100})
+	path := strPtr("docs/file.md")
+	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: path, FileSizeBytes: 100})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,4 +115,8 @@ func TestKnowledgeDocumentMapping(t *testing.T) {
 	if len(list.Nodes) != 1 || list.TotalCount != 1 {
 		t.Fatalf("unexpected list: %+v", list)
 	}
+}
+
+func strPtr(value string) *string {
+	return &value
 }
