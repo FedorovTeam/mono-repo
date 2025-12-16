@@ -40,6 +40,7 @@ const (
 type Config struct {
 	LibreOfficePath string
 	WorkingDir      string
+	OutputDir       string
 	TargetBucket    string
 	TargetMediaType string
 	Concurrency     int64
@@ -69,6 +70,10 @@ type Worker struct {
 	sem       *semaphore.Weighted
 	logger    *slog.Logger
 	waitGroup sync.WaitGroup
+
+	downloadSourceFn func(ctx context.Context, job QueueJob, dir string) (string, error)
+	convertFn        func(ctx context.Context, sourcePath, outDir string) error
+	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
 }
 
 type callbackPayload struct {
@@ -115,15 +120,24 @@ func New(db *pgxpool.Pool, minioCfg config.MinioConfig, cfg Config, logger *slog
 	if err := os.MkdirAll(normalizedCfg.WorkingDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create working dir: %w", err)
 	}
+	if err := os.MkdirAll(normalizedCfg.OutputDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create output dir: %w", err)
+	}
 
-	return &Worker{
+	w := &Worker{
 		db:     db,
 		minio:  minioClient,
 		cfg:    normalizedCfg,
 		http:   &http.Client{Timeout: 15 * time.Second},
 		sem:    semaphore.NewWeighted(normalizedCfg.Concurrency),
 		logger: logger,
-	}, nil
+	}
+
+	w.downloadSourceFn = w.downloadSource
+	w.convertFn = w.convertToDocx
+	w.uploadResultFn = w.uploadResult
+
+	return w, nil
 }
 
 func normalizeConfig(cfg Config) Config {
@@ -145,8 +159,23 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.WorkingDir == "" {
 		cfg.WorkingDir = filepath.Join(os.TempDir(), "preprocess")
 	}
+	if cfg.OutputDir == "" {
+		cfg.OutputDir = filepath.Join(cfg.WorkingDir, "output")
+	}
 
 	return cfg
+}
+
+func (w *Worker) ensureFunctions() {
+	if w.downloadSourceFn == nil {
+		w.downloadSourceFn = w.downloadSource
+	}
+	if w.convertFn == nil {
+		w.convertFn = w.convertToDocx
+	}
+	if w.uploadResultFn == nil {
+		w.uploadResultFn = w.uploadResult
+	}
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -266,22 +295,29 @@ func (w *Worker) processJob(ctx context.Context, job QueueJob) {
 }
 
 func (w *Worker) handleJob(ctx context.Context, job *QueueJob) error {
+	w.ensureFunctions()
+
 	tmpDir, err := os.MkdirTemp(w.cfg.WorkingDir, fmt.Sprintf("job-%s-", job.JobID))
 	if err != nil {
 		return permanentError("tmp_dir", fmt.Errorf("create temp dir: %w", err))
 	}
 	defer os.RemoveAll(tmpDir)
 
-	sourcePath, err := w.downloadSource(ctx, *job, tmpDir)
+	outputDir := filepath.Join(w.cfg.OutputDir, job.JobID)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return permanentError("output_dir", fmt.Errorf("prepare output dir: %w", err))
+	}
+
+	sourcePath, err := w.downloadSourceFn(ctx, *job, tmpDir)
 	if err != nil {
 		return err
 	}
 
-	if err := w.convertToDocx(ctx, sourcePath, tmpDir); err != nil {
+	if err := w.convertFn(ctx, sourcePath, outputDir); err != nil {
 		return err
 	}
 
-	outputPath := w.outputFilePath(sourcePath, tmpDir)
+	outputPath := w.outputFilePath(sourcePath, outputDir)
 	if _, statErr := os.Stat(outputPath); statErr != nil {
 		return permanentError("convert_missing_output", fmt.Errorf("output file not found: %w", statErr))
 	}
@@ -300,7 +336,7 @@ func (w *Worker) handleJob(ctx context.Context, job *QueueJob) error {
 		return permanentError("target_key_missing", errors.New("target key is required"))
 	}
 
-	if err := w.uploadResult(ctx, targetBucket, job.TargetKey, outputPath); err != nil {
+	if err := w.uploadResultFn(ctx, targetBucket, job.TargetKey, outputPath); err != nil {
 		return err
 	}
 

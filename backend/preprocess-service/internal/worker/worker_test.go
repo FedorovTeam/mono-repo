@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -120,5 +122,64 @@ func TestNotifyCallbackRetry(t *testing.T) {
 
 	if payloads[1].Error == nil || payloads[1].Error.Code != errInfo.Code || payloads[1].Error.Message != errInfo.Message {
 		t.Fatalf("unexpected error payload: %+v", payloads[1].Error)
+	}
+}
+
+func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
+	t.Helper()
+
+	workingDir := t.TempDir()
+	outputDir := t.TempDir()
+
+	w := &Worker{
+		cfg: Config{
+			WorkingDir:      workingDir,
+			OutputDir:       outputDir,
+			TargetBucket:    "default-target",
+			TargetMediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	w.downloadSourceFn = func(ctx context.Context, job QueueJob, dir string) (string, error) {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+		sourcePath := filepath.Join(dir, "input.txt")
+		return sourcePath, os.WriteFile(sourcePath, []byte("test"), 0o644)
+	}
+
+	var uploadedPath string
+	w.convertFn = func(ctx context.Context, sourcePath, outDir string) error {
+		if err := os.MkdirAll(outDir, 0o755); err != nil {
+			return err
+		}
+		outputPath := w.outputFilePath(sourcePath, outDir)
+		return os.WriteFile(outputPath, []byte("converted"), 0o644)
+	}
+
+	w.uploadResultFn = func(ctx context.Context, bucket, key, path string) error {
+		uploadedPath = path
+		return nil
+	}
+
+	job := QueueJob{
+		JobID:        "job-42",
+		SourceBucket: "source",
+		SourceKey:    "input.txt",
+		TargetKey:    "output/doc.docx",
+	}
+
+	if err := w.handleJob(context.Background(), &job); err != nil {
+		t.Fatalf("handleJob returned error: %v", err)
+	}
+
+	expectedOutput := filepath.Join(outputDir, job.JobID, "input.docx")
+	if _, err := os.Stat(expectedOutput); err != nil {
+		t.Fatalf("expected output file at %s: %v", expectedOutput, err)
+	}
+
+	if uploadedPath != expectedOutput {
+		t.Fatalf("unexpected uploaded path: %s", uploadedPath)
 	}
 }

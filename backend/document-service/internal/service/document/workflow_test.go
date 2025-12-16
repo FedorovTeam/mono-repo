@@ -246,6 +246,46 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	}
 }
 
+func TestConvertToMarkdownFillsExtensionFromDocument(t *testing.T) {
+	repo := &fakeRepo{doc: &domain.Document{
+		ID:                "doc-ext",
+		Status:            domain.DocumentStatusStoredOriginal,
+		Versions:          []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "path/doc-ext.md"}},
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc-ext",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc-ext.md",
+		Name:              "doc-ext.PDF",
+		OCREnabled:        true,
+	}}
+	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ext", Status: "pending"}}
+
+	activities := NewActivities(repo, transformer, fakePublisher{})
+
+	_, err := activities.ConvertToMarkdown(context.Background(), convertInput{
+		DocumentID:        repo.doc.ID,
+		OriginalBucket:    repo.doc.OriginalBucket,
+		MarkdownBucket:    repo.doc.MarkdownBucket,
+		OriginalObjectKey: repo.doc.OriginalObjectKey,
+		MarkdownObjectKey: repo.doc.MarkdownObjectKey,
+		Version:           2,
+		OCREnabled:        repo.doc.OCREnabled,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if transformer.lastRequest == nil {
+		t.Fatalf("expected transformer request")
+	}
+	if transformer.lastRequest.GetFilenameExtension() != "pdf" {
+		t.Fatalf("expected filename extension to be derived from document, got %q", transformer.lastRequest.GetFilenameExtension())
+	}
+	if !transformer.lastRequest.GetOcrEnabled() {
+		t.Fatalf("expected OCR flag to be propagated to transformer request")
+	}
+}
+
 func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-1",
