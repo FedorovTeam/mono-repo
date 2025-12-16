@@ -94,15 +94,23 @@ spec:
             path: /workspace
       container:
         image: gcr.io/kaniko-project/executor:v1.22.0
-        command: [ "/kaniko/executor" ]
+        command: [ "/bin/sh", "-c" ]
         args:
-          - --dockerfile=/workspace/backend/preprocess-service/Dockerfile
-          - --context=/workspace/backend/preprocess-service
-          - --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:{{inputs.parameters.git_sha}}
-          - --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:latest
-          - --cache=true
-          - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
-          - --verbosity=debug
+          - |
+            set -e
+            echo "nofile before: soft=$(ulimit -Sn) hard=$(ulimit -Hn)"
+            ulimit -n 1048576 || true
+            echo "nofile after : soft=$(ulimit -Sn) hard=$(ulimit -Hn)"
+            
+            exec /kaniko/executor \
+              --dockerfile=/workspace/backend/preprocess-service/Dockerfile \
+              --context=/workspace/backend/preprocess-service \
+              --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:{{inputs.parameters.git_sha}} \
+              --destination=harbor.tech.fedorov-team.tech/backend/preprocess-service:latest \
+              --cache=true \
+              --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache \
+              --single-snapshot \
+              --verbosity=debug
         env:
           - name: DOCKER_CONFIG
             value: /kaniko/.docker
