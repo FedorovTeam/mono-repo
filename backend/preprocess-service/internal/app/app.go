@@ -2,35 +2,77 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/storage/memory"
 	"preprocess-service/internal/transport"
+	"preprocess-service/internal/worker"
 )
 
 type App struct {
 	cfg        config.Config
 	httpServer *transport.HTTPServer
 	grpcServer *transport.GRPCServer
+	worker     *worker.Worker
+	db         *pgxpool.Pool
+	logger     *slog.Logger
 }
 
 func New(cfg config.Config) (*App, error) {
+	logger := newLogger(cfg.Logging.Level)
+
+	dbpool, err := pgxpool.New(context.Background(), cfg.Postgres.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("connect postgres: %w", err)
+	}
+
 	repo := memory.NewJobRepository()
 	handler := transport.NewPreprocessHandler(repo)
 
 	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler)
 	if err != nil {
+		dbpool.Close()
 		return nil, err
 	}
 
-	return &App{cfg: cfg, httpServer: transport.NewHTTPServer(cfg.Service.Port), grpcServer: grpcServer}, nil
+	workerCfg := worker.Config{
+		LibreOfficePath: cfg.Preprocess.LibreOfficePath,
+		WorkingDir:      cfg.Preprocess.WorkingDir,
+		TargetBucket:    cfg.Preprocess.TargetBucket,
+		TargetMediaType: cfg.Preprocess.TargetMediaType,
+		Concurrency:     cfg.Preprocess.WorkerConcurrency,
+		ConvertTimeout:  cfg.Preprocess.ConvertTimeout,
+		Backoff:         cfg.Preprocess.Backoff,
+		PollInterval:    cfg.Preprocess.PollInterval,
+	}
+
+	wrk, err := worker.New(dbpool, cfg.Minio, workerCfg, logger)
+	if err != nil {
+		dbpool.Close()
+		return nil, err
+	}
+
+	return &App{
+		cfg:        cfg,
+		httpServer: transport.NewHTTPServer(cfg.Service.Port),
+		grpcServer: grpcServer,
+		worker:     wrk,
+		db:         dbpool,
+		logger:     logger,
+	}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
 	fmt.Printf("starting %s on port %d (grpc: %d)\n", a.cfg.Service.Name, a.cfg.Service.Port, a.cfg.Service.GRPCPort)
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 
 	go func() {
 		errCh <- a.httpServer.Start(ctx)
@@ -40,11 +82,36 @@ func (a *App) Run(ctx context.Context) error {
 		errCh <- a.grpcServer.Start(ctx)
 	}()
 
-	for i := 0; i < 2; i++ {
-		if err := <-errCh; err != nil {
+	go func() {
+		errCh <- a.worker.Run(ctx)
+	}()
+
+	for i := 0; i < cap(errCh); i++ {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func (a *App) Close() {
+	if a.db != nil {
+		a.db.Close()
+	}
+}
+
+func newLogger(level string) *slog.Logger {
+	slogLevel := slog.LevelInfo
+	switch strings.ToLower(level) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "warn", "warning":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})
+	return slog.New(handler)
 }

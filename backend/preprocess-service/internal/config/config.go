@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,11 +30,16 @@ type PostgresConfig struct {
 }
 
 type PreprocessConfig struct {
-	LibreOfficePath string `yaml:"libreoffice_path"`
-	WorkingDir      string `yaml:"working_dir"`
-	OutputDir       string `yaml:"output_dir"`
-	SourceBucket    string `yaml:"source_bucket"`
-	TargetBucket    string `yaml:"target_bucket"`
+	LibreOfficePath   string        `yaml:"libreoffice_path"`
+	WorkingDir        string        `yaml:"working_dir"`
+	OutputDir         string        `yaml:"output_dir"`
+	SourceBucket      string        `yaml:"source_bucket"`
+	TargetBucket      string        `yaml:"target_bucket"`
+	TargetMediaType   string        `yaml:"target_media_type"`
+	WorkerConcurrency int64         `yaml:"worker_concurrency"`
+	ConvertTimeout    time.Duration `yaml:"convert_timeout"`
+	Backoff           time.Duration `yaml:"backoff"`
+	PollInterval      time.Duration `yaml:"poll_interval"`
 }
 
 type LoggingConfig struct {

@@ -30,6 +30,11 @@
 - `preprocess.libreoffice_path` — путь к бинарю LibreOffice (например, `/usr/bin/libreoffice`).
 - `preprocess.working_dir` и `preprocess.output_dir` — каталоги для временных файлов и результатов.
 - `preprocess.source_bucket` и `preprocess.target_bucket` — бакеты для чтения исходных документов и сохранения результатов.
+- `preprocess.target_media_type` — медиатип результирующего файла (по умолчанию docx).
+- `preprocess.worker_concurrency` — максимальное количество параллельных заданий воркера.
+- `preprocess.convert_timeout` — таймаут конвертации LibreOffice для одного задания.
+- `preprocess.backoff` — базовый backoff между повторными попытками после временной ошибки.
+- `preprocess.poll_interval` — пауза между циклами выборки задач из очереди.
 - `logging.level` — уровень логирования (info/debug).
 
 ## Поток Submit → очередь → воркер → MinIO → статус
