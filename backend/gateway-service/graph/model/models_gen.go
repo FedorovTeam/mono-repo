@@ -50,9 +50,9 @@ type UploadKnowledgeDocumentInput struct {
 	FileName      string `json:"fileName"`
 	FileSizeBytes int    `json:"fileSizeBytes"`
 	// Имя репозитория GitHub: допускается `<repo>` или `<owner>/<repo>`.
-	Repository string `json:"repository"`
-	Branch     string `json:"branch"`
-	Path       string `json:"path"`
+	Repository string  `json:"repository"`
+	Branch     string  `json:"branch"`
+	Path       *string `json:"path,omitempty"`
 }
 
 type UploadKnowledgeDocumentPayload struct {

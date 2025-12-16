@@ -389,7 +389,7 @@ input UploadKnowledgeDocumentInput {
   """Имя репозитория GitHub: допускается ` + "`" + `<repo>` + "`" + ` или ` + "`" + `<owner>/<repo>` + "`" + `."""
   repository: String!
   branch: String!
-  path: String!
+  path: String
 }
 
 input KnowledgeDocumentFilter {
@@ -2786,7 +2786,7 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 			it.Branch = data
 		case "path":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("path"))
-			data, err := ec.unmarshalNString2string(ctx, v)
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}

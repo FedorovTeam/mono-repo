@@ -51,7 +51,7 @@ input UploadKnowledgeDocumentInput {
   """Имя репозитория GitHub: допускается `<repo>` или `<owner>/<repo>`."""
   repository: String!
   branch: String!
-  path: String!
+  path: String
 }
 
 input KnowledgeDocumentFilter {

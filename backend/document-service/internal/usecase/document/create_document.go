@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -85,7 +86,7 @@ func (uc *CreateDocument) Execute(ctx context.Context, in CreateDocumentInput) (
 	}
 	path := strings.TrimSpace(in.Path)
 	if path == "" {
-		path = in.FileName
+		path = defaultDocumentPath(in.ID)
 	}
 
 	originalKey := strings.TrimSpace(in.UploadObjectKey)
@@ -119,4 +120,8 @@ func (uc *CreateDocument) Execute(ctx context.Context, in CreateDocumentInput) (
 		return nil, err
 	}
 	return created, nil
+}
+
+func defaultDocumentPath(id string) string {
+	return fmt.Sprintf("knowledge/docs/%s.md", id)
 }
