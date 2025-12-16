@@ -1,57 +1,22 @@
 # Основные потоки preprocess-service
 
+## Бизнес-поток: .doc → .docx
+1. Клиент загружает исходный `.doc`/`.pdf`/`.docx` в MinIO (bucket `preprocess-source`).
+2. Через gRPC метод `SubmitPreprocess` передаются координаты файла, `document_id`, `correlation_id` и желаемый `target_key`.
+3. Сервис кладёт задание в очередь (PostgreSQL) со статусом `PREPROCESS_STATUS_PENDING` и возвращает `job_id`.
+4. Воркер скачивает исходный файл, запускает LibreOffice (`preprocess.libreoffice_path`) и конвертирует в docx в `working_dir`.
+5. Готовый docx сохраняется в `preprocess.target_bucket` под переданным `target_key`, статус обновляется на `PREPROCESS_STATUS_COMPLETED`.
+6. Клиент либо получает финальный ответ через `GetPreprocessStatus`, либо дожидается POST на `callback_url`.
+
 ## Polling через `GetPreprocessStatus`
-1. Клиент создаёт задание gRPC вызовом `SubmitPreprocess`, передавая источник в MinIO и координаты, куда сложить результат.
-   ```bash
-   grpcurl -plaintext -d '{
-     "source_bucket": "preprocess-source",
-     "source_key": "incoming/sample.pdf",
-     "source_etag": "etag-123",
-     "target_bucket": "preprocess-artifacts",
-     "target_key": "converted/sample.docx",
-     "document_id": "doc-123",
-     "correlation_id": "corr-123"
-   }' \
-     localhost:9082 backend.preprocess.v1.PreprocessService/SubmitPreprocess
-   ```
-2. Полученный `job_id` используется для опроса статуса. Пока воркер не закончит работу, статус остаётся `PREPROCESS_STATUS_PENDING` или `PREPROCESS_STATUS_PROCESSING`.
-   ```bash
-   grpcurl -plaintext -d '{"job_id": "<JOB_ID_FROM_STEP_1>"}' \
-     localhost:9082 backend.preprocess.v1.PreprocessService/GetPreprocessStatus
-   ```
-3. Финальный ответ содержит таргет-координаты и ошибку (если есть):
-   ```json
-   {
-     "job_id": "...",
-     "target_bucket": "preprocess-artifacts",
-     "target_key": "converted/sample.docx",
-     "status": "PREPROCESS_STATUS_COMPLETED",
-     "error_code": "",
-     "error_message": "",
-     "error_details": {}
-   }
-   ```
+1. Создать задание `SubmitPreprocess` без `callback_url`.
+2. Опросить статус по `job_id` на gRPC порту 9082 (интервалы можно синхронизировать с `preprocess.poll_interval`).
+3. В ответе появятся координаты результирующего docx и возможные коды ошибок (`error_code`, `error_message`).
 
 ## Webhook c `callback_url`
-1. Поднимите тестовый приёмник, например echo-сервер:
-   ```bash
-   docker run --rm -p 8090:80 mendhak/http-https-echo:30
-   ```
-2. Передайте `callback_url` в `SubmitPreprocess` — воркер отправит POST после завершения (успех или остановка по ошибке):
-   ```bash
-   grpcurl -plaintext -d '{
-     "source_bucket": "preprocess-source",
-     "source_key": "incoming/sample.pdf",
-     "source_etag": "etag-456",
-     "target_bucket": "preprocess-artifacts",
-     "target_key": "converted/sample.docx",
-     "document_id": "doc-456",
-     "correlation_id": "corr-456",
-     "callback_url": "http://localhost:8090/hooks/preprocess"
-   }' \
-     localhost:9082 backend.preprocess.v1.PreprocessService/SubmitPreprocess
-   ```
-3. Пример payload’а вебхука при успехе:
+1. Поднять HTTP endpoint, принимающий POST с JSON.
+2. Передать `callback_url` в `SubmitPreprocess` — воркер отправит уведомление при успехе или ошибке. Повторы ограничены тремя попытками с задержкой `preprocess.backoff`.
+3. Пример полезной нагрузки:
    ```json
    {
      "job_id": "...",
@@ -60,15 +25,3 @@
      "target_key": "converted/sample.docx"
    }
    ```
-4. Пример при ошибке (статус `stopped`):
-   ```json
-   {
-     "job_id": "...",
-     "status": "stopped",
-     "error": {
-       "code": "convert_failed",
-       "message": "libreoffice error: ..."
-     }
-   }
-   ```
-5. Если вебхук вернул 5xx или произошла сетевая ошибка, воркер повторит доставку до 3 раз с паузой `preprocess.backoff` между попытками.

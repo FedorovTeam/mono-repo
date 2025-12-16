@@ -1,0 +1,5 @@
+apiVersion: v2
+name: preprocess-service
+version: 0.1.0
+description: preprocess-service для конвертации doc/docx/pdf в docx
+appVersion: "1.0.0"
