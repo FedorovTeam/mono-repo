@@ -29,6 +29,9 @@ type ConversionExecutorConfig struct {
 	FastOperationTimeout time.Duration
 	HTTPClient           HTTPClient
 	UseSourceAsync       bool
+	DefaultOCREnabled    bool
+	DefaultOCRLang       string
+	DefaultPDFBackend    string
 }
 
 type ConversionExecutor struct {
@@ -125,6 +128,22 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, err
 	}
 
+	enableOCR := e.cfg.DefaultOCREnabled
+	if task.OCREnabled != nil {
+		enableOCR = *task.OCREnabled
+	}
+	if contentType != "application/pdf" {
+		enableOCR = false
+	}
+	ocrLang := e.cfg.DefaultOCRLang
+	if task.OCRLanguage != "" {
+		ocrLang = task.OCRLanguage
+	}
+	pdfBackend := e.cfg.DefaultPDFBackend
+	if task.PDFBackend != "" {
+		pdfBackend = task.PDFBackend
+	}
+
 	var sourceContent []byte
 	if !useSourceAsync {
 		downloadCtx, cancelDownload := e.fastPhaseContext(ctx)
@@ -167,7 +186,12 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		SourceObjectKey: sourceObjectKey,
 		TargetBucket:    task.MarkdownBucket,
 		TargetObjectKey: task.MarkdownObjectKey,
+		EnableOCR:       boolPtr(enableOCR),
+		OCRLanguage:     ocrLang,
+		PDFBackend:      pdfBackend,
 	}
+
+	e.metrics.RecordDoclingSubmit(ctx, enableOCR, ocrLang, pdfBackend)
 
 	jobID, err := e.conv.Submit(submitCtx, convertReq)
 	if err != nil {
@@ -187,7 +211,8 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	task.DoclingPollCount = 0
 	task.NextPollAt = &nextPoll
 
-	e.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll))
+	e.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll),
+		zap.Bool("ocr_enabled", enableOCR), zap.String("ocr_lang", ocrLang), zap.String("pdf_backend", pdfBackend))
 
 	return StateWaitingDocling, nil
 }

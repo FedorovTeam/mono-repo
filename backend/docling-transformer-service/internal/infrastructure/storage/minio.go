@@ -1,14 +1,14 @@
 package storage
 
 import (
-        "bytes"
-        "context"
-        "fmt"
-        "io"
-        "time"
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"time"
 
-        "github.com/minio/minio-go/v7"
-        "github.com/mono-repo/docling-transformer-service/internal/domain"
+	"github.com/minio/minio-go/v7"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 )
 
 type ObjectStorage = domain.ObjectStorage

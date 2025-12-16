@@ -28,10 +28,13 @@ var (
 )
 
 type TransformationConfig struct {
-	MarkdownBucket string
-	QueueLimit     int
-	StatusBackoff  backoff.Policy
-	UseSourceAsync bool
+	MarkdownBucket    string
+	QueueLimit        int
+	StatusBackoff     backoff.Policy
+	UseSourceAsync    bool
+	DefaultOCREnabled bool
+	DefaultOCRLang    string
+	DefaultPDFBackend string
 }
 
 type SubmitConversionRequest struct {
@@ -44,6 +47,9 @@ type SubmitConversionRequest struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
+	OCREnabled        *bool
+	OCRLanguage       string
+	PDFBackend        string
 	CorrelationID     string
 }
 
@@ -115,6 +121,21 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		markdownKey = domain.BuildMarkdownKey(params.OriginalObjectKey)
 	}
 
+	ocrEnabled := params.OCREnabled
+	if ocrEnabled == nil {
+		ocrEnabled = boolPtr(uc.cfg.DefaultOCREnabled)
+	}
+
+	ocrLang := params.OCRLanguage
+	if ocrLang == "" {
+		ocrLang = uc.cfg.DefaultOCRLang
+	}
+
+	pdfBackend := params.PDFBackend
+	if pdfBackend == "" {
+		pdfBackend = uc.cfg.DefaultPDFBackend
+	}
+
 	existingTask, err := uc.repo.GetLatestByDocument(ctx, params.DocumentID)
 	if err != nil {
 		return SubmitConversionResult{}, fmt.Errorf("fetch latest task: %w", err)
@@ -148,6 +169,9 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		FilenameExtension: fileExt,
+		OCREnabled:        ocrEnabled,
+		OCRLanguage:       ocrLang,
+		PDFBackend:        pdfBackend,
 		CorrelationID:     params.CorrelationID,
 	})
 	if err != nil {
@@ -163,6 +187,9 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 			SourceBucket:      params.SourceBucket,
 			SourceObjectKey:   params.SourceObjectKey,
 			SourceURL:         params.SourceURL,
+			OCREnabled:        ocrEnabled,
+			OCRLanguage:       ocrLang,
+			PDFBackend:        pdfBackend,
 		},
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
@@ -207,6 +234,10 @@ func (uc *TransformerService) WaitForResult(ctx context.Context, queueID uuid.UU
 	}
 
 	return nil, ErrResultNotReady
+}
+
+func boolPtr(val bool) *bool {
+	return &val
 }
 
 func (uc *TransformerService) ConvertDocxContent(ctx context.Context, filename string, content []byte) (domain.ConvertResult, error) {

@@ -25,6 +25,9 @@ type TransformationDTO struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
+	OCREnabled        *bool
+	OCRLanguage       string
+	PDFBackend        string
 	CreatedAt         time.Time
 	StartedAt         *time.Time
 	FinishedAt        *time.Time
@@ -49,6 +52,9 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		MarkdownBucket:    dto.MarkdownBucket,
 		MarkdownObjectKey: dto.MarkdownObjectKey,
 		FilenameExtension: dto.FilenameExtension,
+		OCREnabled:        dto.OCREnabled,
+		OCRLanguage:       dto.OCRLanguage,
+		PDFBackend:        dto.PDFBackend,
 		CreatedAt:         dto.CreatedAt,
 		StartedAt:         dto.StartedAt,
 		FinishedAt:        dto.FinishedAt,
@@ -67,7 +73,7 @@ type QueueRepository interface {
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
 	MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPollAt time.Time) error
-        RequeueDoclingWaiting(ctx context.Context, id uuid.UUID, nextPollAt *time.Time) error
+	RequeueDoclingWaiting(ctx context.Context, id uuid.UUID, nextPollAt *time.Time) error
 	ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error)
 	RestoreProcessing(ctx context.Context) (int, error)
 	RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error)

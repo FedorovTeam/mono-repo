@@ -33,6 +33,9 @@ type Config struct {
 	DoclingRequeueDelay    time.Duration
 	DoclingMaxRestarts     int
 	UseSourceAsync         bool
+	DefaultOCREnabled      bool
+	DefaultOCRLang         string
+	DefaultPDFBackend      string
 }
 
 type Processor struct {
@@ -63,6 +66,9 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 		MarkdownBucket:       normalized.MarkdownBucket,
 		FastOperationTimeout: normalized.FastOperationTimeout,
 		UseSourceAsync:       normalized.UseSourceAsync,
+		DefaultOCREnabled:    normalized.DefaultOCREnabled,
+		DefaultOCRLang:       normalized.DefaultOCRLang,
+		DefaultPDFBackend:    normalized.DefaultPDFBackend,
 	})
 
 	queueWorker := NewQueueWorker(repository, executor, workerMetrics, logger, QueueWorkerConfig{
@@ -126,6 +132,10 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.DoclingMaxRestarts <= 0 {
 		cfg.DoclingMaxRestarts = 3
+	}
+
+	if cfg.DefaultPDFBackend == "" {
+		cfg.DefaultPDFBackend = "pypdfium2"
 	}
 
 	return cfg

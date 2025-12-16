@@ -170,55 +170,55 @@ func TestConvertDocumentToMarkdownValidation(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	_, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{})
-if status.Code(err) != codes.InvalidArgument {
-t.Fatalf("expected invalid argument, got %v", err)
-}
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
 
-_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
-DocumentId:        "doc-source-conflict",
-OriginalBucket:    "bucket",
-OriginalObjectKey: "file.docx",
-SourceBucket:      "source",
-SourceUrl:         "https://example.com/file.docx",
-})
+	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-source-conflict",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.docx",
+		SourceBucket:      "source",
+		SourceUrl:         "https://example.com/file.docx",
+	})
 
-if status.Code(err) != codes.InvalidArgument {
-t.Fatalf("expected invalid argument for conflicting sources, got %v", err)
-}
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected invalid argument for conflicting sources, got %v", err)
+	}
 
-_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
-DocumentId:        "doc-source-missing",
-OriginalBucket:    "bucket",
-OriginalObjectKey: "file.docx",
-SourceBucket:      "source-only",
-})
+	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-source-missing",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.docx",
+		SourceBucket:      "source-only",
+	})
 
-if status.Code(err) != codes.InvalidArgument {
-t.Fatalf("expected invalid argument for incomplete source, got %v", err)
-}
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected invalid argument for incomplete source, got %v", err)
+	}
 
-resp, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
-DocumentId:        "doc-success",
-OriginalBucket:    "bucket",
-OriginalObjectKey: "file.docx",
-SourceBucket:      "source",
-SourceObjectKey:   "incoming/file.docx",
-})
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if resp.GetQueueId() == "" {
-t.Fatalf("expected queue id in response")
-}
-if uc.lastSubmit.SourceBucket != "source" || uc.lastSubmit.SourceObjectKey != "incoming/file.docx" {
-t.Fatalf("source fields were not propagated: %+v", uc.lastSubmit)
-}
+	resp, err := client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-success",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.docx",
+		SourceBucket:      "source",
+		SourceObjectKey:   "incoming/file.docx",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.GetQueueId() == "" {
+		t.Fatalf("expected queue id in response")
+	}
+	if uc.lastSubmit.SourceBucket != "source" || uc.lastSubmit.SourceObjectKey != "incoming/file.docx" {
+		t.Fatalf("source fields were not propagated: %+v", uc.lastSubmit)
+	}
 
-_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
-DocumentId:        "doc-queue-limit",
-OriginalBucket:    "bucket",
-OriginalObjectKey: "file.docx",
-})
+	_, err = client.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
+		DocumentId:        "doc-queue-limit",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.docx",
+	})
 
 	if status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("expected resource exhausted, got %v", err)

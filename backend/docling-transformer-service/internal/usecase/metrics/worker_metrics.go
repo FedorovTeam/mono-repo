@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
@@ -27,6 +28,7 @@ type WorkerMetrics struct {
 	doclingWaitHist  metric.Float64Histogram
 	doclingPolls     metric.Int64Histogram
 	batchHist        metric.Int64Histogram
+	doclingSubmit    metric.Int64Counter
 	mu               sync.Mutex
 	lastPending      int64
 	lastProcessing   int64
@@ -105,6 +107,10 @@ func NewWorkerMetrics(logger *zap.Logger) *WorkerMetrics {
 	m.batchHist, err = meter.Int64Histogram("docling_transformer_queue_batch_size")
 	if err != nil && logger != nil {
 		logger.Warn("failed to create batch size histogram", zap.Error(err))
+	}
+	m.doclingSubmit, err = meter.Int64Counter("docling_transformer_docling_submitted")
+	if err != nil && logger != nil {
+		logger.Warn("failed to create docling submit counter", zap.Error(err))
 	}
 
 	observables := make([]metric.Observable, 0, 3)
@@ -191,6 +197,22 @@ func (m *WorkerMetrics) RecordOutcome(ctx context.Context, success bool) {
 	case !success && m.failedCounter != nil:
 		m.failedCounter.Add(ctx, 1)
 	}
+}
+
+func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, enableOCR bool, ocrLang, pdfBackend string) {
+	if m == nil || m.doclingSubmit == nil {
+		return
+	}
+
+	attrs := []attribute.KeyValue{attribute.Bool("ocr_enabled", enableOCR)}
+	if ocrLang != "" {
+		attrs = append(attrs, attribute.String("ocr_lang", ocrLang))
+	}
+	if pdfBackend != "" {
+		attrs = append(attrs, attribute.String("pdf_backend", pdfBackend))
+	}
+
+	m.doclingSubmit.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
 func (m *WorkerMetrics) RecordDuration(ctx context.Context, durationMs float64) {
