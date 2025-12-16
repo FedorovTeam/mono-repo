@@ -16,6 +16,7 @@ type CreateDocumentRequest struct {
 	UploadObjectKey   string
 	MarkdownBucket    string
 	MarkdownObjectKey string
+	EnablePdfOcr      bool
 }
 
 // ConfirmUploadRequest описывает входные данные подтверждения загрузки.

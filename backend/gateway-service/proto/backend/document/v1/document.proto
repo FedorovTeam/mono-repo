@@ -33,6 +33,7 @@ message Document {
   google.protobuf.Timestamp updated_at = 14;
   string job_id = 16;
   DocumentStatus actual_status = 17;
+  bool enable_pdf_ocr = 18;
 }
 
 message CreateDocumentRequest {
@@ -48,6 +49,7 @@ message CreateDocumentRequest {
   string upload_object_key = 9;
   string markdown_bucket = 10;
   string markdown_object_key = 11;
+  bool enable_pdf_ocr = 13;
 }
 
 message GetDocumentRequest {

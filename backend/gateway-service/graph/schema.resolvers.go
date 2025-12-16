@@ -32,6 +32,7 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		Branch:        input.Branch,
 		Path:          path,
 		FileSizeBytes: int64(input.FileSizeBytes),
+		EnablePdfOcr:  derefBool(input.EnablePDFOcr),
 	}
 
 	result, err := r.DocumentUploader.UploadKnowledgeDocument(ctx, uploadInput)
@@ -39,7 +40,12 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		return nil, err
 	}
 
-	return &model.UploadKnowledgeDocumentPayload{Document: mapDocument(result.Document), UploadURL: result.UploadURL, UploadMethod: result.UploadMethod}, nil
+	return &model.UploadKnowledgeDocumentPayload{
+		Document:     mapDocument(result.Document),
+		UploadURL:    result.UploadURL,
+		UploadMethod: result.UploadMethod,
+		EnablePDFOcr: result.EnablePdfOcr,
+	}, nil
 }
 
 // KnowledgeDocument is the resolver for the knowledgeDocument field.

@@ -13,9 +13,11 @@ interface UploadResponse {
         repository: string;
         branch: string;
         path: string;
+        enablePdfOcr: boolean;
       };
       uploadUrl: string;
       uploadMethod: string;
+      enablePdfOcr: boolean;
     };
   };
   errors?: { message: string }[];
@@ -26,6 +28,7 @@ export default function HomePage() {
   const [repository, setRepository] = useState('docs');
   const [branch, setBranch] = useState('main');
   const [path, setPath] = useState('knowledge/docs/test.md');
+  const [enablePdfOcr, setEnablePdfOcr] = useState(false);
 
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -33,6 +36,9 @@ export default function HomePage() {
 
   const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
   const apiKey = process.env.NEXT_PUBLIC_API_KEY;
+
+  const formatMessageWithOcr = (text: string, ocrEnabled = enablePdfOcr) =>
+      `${text} (OCR ${ocrEnabled ? 'включен' : 'выключен'})`;
 
   console.log('GATEWAY URL:', gatewayUrl);
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,11 +51,15 @@ export default function HomePage() {
     setMessage(null);
 
     if (!file) {
-      setMessage('Выберите файл');
+      setMessage(formatMessageWithOcr('Выберите файл'));
       return;
     }
     if (!gatewayUrl || !apiKey) {
-      setMessage('NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы');
+      setMessage(
+          formatMessageWithOcr(
+              'NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы',
+          ),
+      );
       return;
     }
 
@@ -72,9 +82,11 @@ export default function HomePage() {
               repository
               branch
               path
+              enablePdfOcr
             }
             uploadUrl
             uploadMethod
+            enablePdfOcr
           }
         }
       `;
@@ -86,6 +98,7 @@ export default function HomePage() {
           repository,
           branch,
           path,
+          enablePdfOcr,
         },
       };
 
@@ -110,7 +123,8 @@ export default function HomePage() {
         throw new Error('Пустой ответ uploadKnowledgeDocument');
       }
 
-      const { document, uploadUrl, uploadMethod } = payload;
+      const { document, uploadUrl, uploadMethod, enablePdfOcr: payloadOcrFlag } = payload;
+      const effectiveOcr = document.enablePdfOcr ?? payloadOcrFlag ?? enablePdfOcr;
       setDocumentId(document.id);
 
       if (!uploadUrl) {
@@ -142,13 +156,16 @@ export default function HomePage() {
 
       setStatus('done');
       setMessage(
-          `Файл загружен. Document ID: ${document.id}, статус: ${document.status}`,
+          formatMessageWithOcr(
+              `Файл загружен. Document ID: ${document.id}, статус: ${document.status}`,
+              effectiveOcr,
+          ),
       );
     } catch (err: unknown) {
       console.error(err);
       setStatus('error');
       const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
-      setMessage(errorMessage);
+      setMessage(formatMessageWithOcr(errorMessage));
     }
   };
 
@@ -206,6 +223,23 @@ export default function HomePage() {
                     onChange={(e) => setPath(e.target.value)}
                     className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                 />
+              </div>
+              <div className="flex items-start gap-2">
+                <input
+                    id="enable-ocr"
+                    type="checkbox"
+                    checked={enablePdfOcr}
+                    onChange={(e) => setEnablePdfOcr(e.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
+                />
+                <div>
+                  <label htmlFor="enable-ocr" className="block text-sm font-medium">
+                    Включить OCR для PDF
+                  </label>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Помогает извлекать таблицы и отметки в PDF, но может занять больше времени.
+                  </p>
+                </div>
               </div>
             </div>
 

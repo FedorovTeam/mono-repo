@@ -50,13 +50,13 @@ func TestUploadRequiresAPIKey(t *testing.T) {
 }
 
 func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
-	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded}, UploadURL: "http://upload", UploadMethod: "PUT"}}
+	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded, EnablePdfOcr: true}, UploadURL: "http://upload", UploadMethod: "PUT", EnablePdfOcr: true}}
 	resolver := &Resolver{DocumentUploader: uploader, DocumentService: &stubProvider{}, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	ctx := ctxutils.WithAPIKey(context.Background(), "secret")
 	path := strPtr("docs/file.md")
-	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: path, FileSizeBytes: 100})
+	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: path, FileSizeBytes: 100, EnablePDFOcr: boolPtr(true)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,6 +67,13 @@ func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
 
 	if payload.Document == nil || payload.Document.ID != "doc-1" {
 		t.Fatalf("document not mapped: %+v", payload.Document)
+	}
+
+	if !payload.EnablePDFOcr {
+		t.Fatalf("expected enablePdfOcr propagated to payload")
+	}
+	if !uploader.input.EnablePdfOcr {
+		t.Fatalf("expected enablePdfOcr propagated to usecase input")
 	}
 
 	if ctxutils.CorrelationID(uploader.lastCtx) == "" {
@@ -118,5 +125,9 @@ func TestKnowledgeDocumentMapping(t *testing.T) {
 }
 
 func strPtr(value string) *string {
+	return &value
+}
+
+func boolPtr(value bool) *bool {
 	return &value
 }
