@@ -1,0 +1,20 @@
+service:
+  name: preprocess-service
+  port: 8082
+  grpc_port: 9082
+  region: ru-msk-1
+
+preprocess:
+  libreoffice_path: /usr/bin/libreoffice
+  working_dir: /tmp/preprocess-service/work
+  output_dir: /tmp/preprocess-service/output
+  minio:
+    endpoint: minio.moiqr.localhost:80
+    access_key: PREPROCESS_MINIO_KEY
+    secret_key: PREPROCESS_MINIO_SECRET
+    bucket: preprocess-artifacts
+    ssl: false
+    region: us-east-1
+
+logging:
+  level: info
