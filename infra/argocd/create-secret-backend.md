@@ -14,11 +14,11 @@ kubectl create secret generic regcred --from-file=.dockerconfigjson=./dockerconf
 ```
 
 ```shell
-kubectl delete secret regcred -n app-knowledge-console
+kubectl delete secret regcred -n preprocess-service
 ```
 
 kubectl get secret regcred -n argocd -o yaml \
-  | sed 's/namespace: argocd/namespace: storage-service/' \
+  | sed 's/namespace: argocd/namespace: preprocess-service/' \
   | sed '/^\s*uid:/d' \
   | sed '/^\s*resourceVersion:/d' \
   | sed '/^\s*creationTimestamp:/d' \
