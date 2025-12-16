@@ -17,11 +17,17 @@
 ## Troubleshooting
 - Если после удаления helm_release CRD остались — удалите их вручную только если миграция невозможна.
 - Все логи и диагностика — через стандартные средства Kubernetes и Argo Workflows.
+- Нужно удалить CRD:
+```shell
+# Остановить лишний контроллер:
+kubectl -n argo scale deploy/argo-workflows-crds-workflow-controller --replicas=0
 
-## Документация
-- [Argo Workflows Helm Chart](https://github.com/argoproj/argo-helm/tree/main/charts/argo-workflows)
-- [Argo Workflows RBAC](https://github.com/argoproj/argo-workflows/tree/master/manifests/base/rbac)
-- [Официальная документация](https://argo-workflows.readthedocs.io/en/stable/)
+# Убедиться, что остался один
+kubectl -n argo get pod | grep -i workflow-controller
+
+# Перезапустить нормальный контроллер (чтобы он точно подхватил config)
+kubectl -n argo rollout restart deploy/argo-workflows-workflow-controller
+```
 
 ## Переменные модуля
 
