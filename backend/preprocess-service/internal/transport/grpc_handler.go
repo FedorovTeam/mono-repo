@@ -1,0 +1,103 @@
+package transport
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"preprocess-service/internal/domain"
+	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
+)
+
+type PreprocessHandler struct {
+	preprocessv1.UnimplementedPreprocessServiceServer
+	repo domain.JobRepository
+}
+
+func NewPreprocessHandler(repo domain.JobRepository) *PreprocessHandler {
+	return &PreprocessHandler{repo: repo}
+}
+
+func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preprocessv1.SubmitPreprocessRequest) (*preprocessv1.SubmitPreprocessResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+
+	existing, found, err := h.repo.FindBySource(ctx, req.GetSourceBucket(), req.GetSourceKey(), req.GetSourceEtag())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "find job: %v", err)
+	}
+
+	if found {
+		return &preprocessv1.SubmitPreprocessResponse{
+			JobId:         existing.ID,
+			Status:        existing.Status,
+			ErrorMessage:  existing.ErrorMessage,
+			CorrelationId: req.GetCorrelationId(),
+		}, nil
+	}
+
+	job := domain.PreprocessJob{
+		ID:            uuid.NewString(),
+		DocumentID:    req.GetDocumentId(),
+		SourceBucket:  req.GetSourceBucket(),
+		SourceKey:     req.GetSourceKey(),
+		SourceETag:    req.GetSourceEtag(),
+		TargetBucket:  req.GetTargetBucket(),
+		TargetKey:     req.GetTargetKey(),
+		CallbackURL:   req.GetCallbackUrl(),
+		CorrelationID: req.GetCorrelationId(),
+		Status:        preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING,
+		UpdatedAt:     time.Now().UTC(),
+	}
+
+	if err := job.Validate(); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	if err := h.repo.Save(ctx, job); err != nil {
+		return nil, status.Errorf(codes.Internal, "save job: %v", err)
+	}
+
+	return &preprocessv1.SubmitPreprocessResponse{
+		JobId:         job.ID,
+		Status:        job.Status,
+		CorrelationId: job.CorrelationID,
+	}, nil
+}
+
+func (h *PreprocessHandler) GetPreprocessStatus(ctx context.Context, req *preprocessv1.GetPreprocessStatusRequest) (*preprocessv1.GetPreprocessStatusResponse, error) {
+	if req == nil || req.GetJobId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "job_id is required")
+	}
+
+	job, found, err := h.repo.Get(ctx, req.GetJobId())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get job: %v", err)
+	}
+	if !found {
+		return nil, status.Error(codes.NotFound, "job not found")
+	}
+
+	correlationID := req.GetCorrelationId()
+	if correlationID == "" {
+		correlationID = job.CorrelationID
+	}
+
+	return &preprocessv1.GetPreprocessStatusResponse{
+		JobId:         job.ID,
+		DocumentId:    job.DocumentID,
+		SourceBucket:  job.SourceBucket,
+		SourceKey:     job.SourceKey,
+		TargetBucket:  job.TargetBucket,
+		TargetKey:     job.TargetKey,
+		Status:        job.Status,
+		ErrorMessage:  job.ErrorMessage,
+		CorrelationId: correlationID,
+		UpdatedAt:     timestamppb.New(job.UpdatedAt),
+	}, nil
+}

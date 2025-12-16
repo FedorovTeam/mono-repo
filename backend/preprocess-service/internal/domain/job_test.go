@@ -3,18 +3,25 @@ package domain
 import "testing"
 
 func TestPreprocessJobValidate(t *testing.T) {
-    job := PreprocessJob{
-        DocumentID:   "123",
-        SourceObject: "source.docx",
-        TargetObject: "output.pdf",
-    }
+	job := PreprocessJob{
+		ID:           "job-1",
+		DocumentID:   "doc-1",
+		SourceBucket: "source",
+		SourceKey:    "docx/file.docx",
+		SourceETag:   "etag-1",
+		TargetBucket: "target",
+		TargetKey:    "out/file.pdf",
+	}
 
-    if err := job.Validate(); err != nil {
-        t.Fatalf("expected valid job, got error: %v", err)
-    }
+	if err := job.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
 
-    invalid := PreprocessJob{}
-    if err := invalid.Validate(); err == nil {
-        t.Fatalf("expected validation error for empty job")
-    }
+func TestPreprocessJobValidateMissingFields(t *testing.T) {
+	job := PreprocessJob{}
+
+	if err := job.Validate(); err == nil {
+		t.Fatal("expected validation error for empty job")
+	}
 }
