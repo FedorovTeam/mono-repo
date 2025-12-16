@@ -130,7 +130,7 @@ spec:
             ulimit -n 1048576 || true
 
             APP="app-app-knowledge-console"
-            SERVER="argocd.analytics.moiqr.ru"
+            SERVER="argocd.tech.fedorov-team.tech"
 
             # Важно: используем grpc-web везде, и НЕ делаем argocd login (он не нужен при --auth-token)
             argocd app get "$APP" \
