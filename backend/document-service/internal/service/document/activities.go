@@ -124,6 +124,15 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		return convertResult{}, err
 	}
 
+	filenameExtension := strings.TrimSpace(input.FilenameExtension)
+	if filenameExtension == "" {
+		filenameExtension = firstNonEmpty(
+			fileExtension(input.OriginalObjectKey),
+			fileExtension(doc.OriginalObjectKey),
+			fileExtension(doc.Name),
+		)
+	}
+
 	currentStatus, err := a.statuses.ResolveCurrentStatus(ctx, doc)
 	if err != nil {
 		return convertResult{}, err
@@ -144,7 +153,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		OriginalObjectKey: input.OriginalObjectKey,
 		MarkdownBucket:    input.MarkdownBucket,
 		MarkdownObjectKey: input.MarkdownObjectKey,
-		FilenameExtension: input.FilenameExtension,
+		FilenameExtension: filenameExtension,
 		WaitForResult:     false,
 		CorrelationId:     correlationID,
 		OcrEnabled:        boolPtr(input.OCREnabled),
