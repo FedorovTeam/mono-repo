@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,12 +11,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/observability"
 	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
 	"preprocess-service/internal/worker"
+	"preprocess-service/migrations"
 )
 
 type App struct {
@@ -34,6 +37,10 @@ func New(cfg config.Config) (*App, error) {
 	telemetry, err := observability.Setup(context.Background(), cfg.Service.Name)
 	if err != nil {
 		return nil, fmt.Errorf("init telemetry: %w", err)
+	}
+
+	if err := runMigrations(context.Background(), cfg.Postgres.DSN, logger); err != nil {
+		return nil, err
 	}
 
 	dbpool, err := pgxpool.New(context.Background(), cfg.Postgres.DSN)
@@ -132,4 +139,19 @@ func newLogger(level string) *slog.Logger {
 
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})
 	return slog.New(handler)
+}
+
+func runMigrations(ctx context.Context, dsn string, logger *slog.Logger) error {
+	sqlDB, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return fmt.Errorf("open postgres connection: %w", err)
+	}
+	defer sqlDB.Close()
+
+	if err := migrations.Up(ctx, sqlDB); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+
+	logger.Info("migrations applied")
+	return nil
 }
