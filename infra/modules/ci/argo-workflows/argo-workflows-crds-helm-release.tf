@@ -29,6 +29,12 @@ resource "helm_release" "argo_workflows_crds" {
       executor = {
         enabled = false
       }
+      workflow = {
+        enabled = false
+      }
+      controller = {
+        replicaCount = 0
+      }
     })
   ]
   
