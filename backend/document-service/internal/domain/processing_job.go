@@ -62,6 +62,7 @@ type ConvertPayload struct {
 	QueueID           string
 	Status            string
 	OCREnabled        *bool
+	FilenameExtension string
 }
 
 // PublishPayload описывает данные для шага публикации в GitHub.
@@ -147,6 +148,9 @@ func (p ConvertPayload) ToMap() map[string]any {
 	if p.OCREnabled != nil {
 		res["ocr_enabled"] = *p.OCREnabled
 	}
+	if p.FilenameExtension != "" {
+		res["filename_extension"] = p.FilenameExtension
+	}
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }
@@ -162,6 +166,7 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		QueueID:            stringFromMap(payload, "queue_id"),
 		Status:             stringFromMap(payload, "status"),
 		OCREnabled:         boolFromMap(payload, "ocr_enabled"),
+		FilenameExtension:  stringFromMap(payload, "filename_extension"),
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path"
 	"strings"
 	"time"
 
@@ -127,6 +128,12 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
 	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, doc.MarkdownBucket)
 	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.FilenameExtension = firstNonEmpty(
+		payload.FilenameExtension,
+		fileExtension(payload.OriginalObjectKey),
+		fileExtension(doc.OriginalObjectKey),
+		fileExtension(doc.Name),
+	)
 	if payload.CorrelationID == "" {
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
@@ -144,6 +151,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		MarkdownBucket:    payload.MarkdownBucket,
 		OriginalObjectKey: payload.OriginalObjectKey,
 		MarkdownObjectKey: payload.MarkdownObjectKey,
+		FilenameExtension: payload.FilenameExtension,
 		Version:           latestVersion(doc).Version + 1,
 		OCREnabled:        ocrEnabled,
 	}
@@ -358,6 +366,12 @@ func (w *StageWorker) jobContext(ctx context.Context, correlationID string) cont
 
 func metadataAppend(ctx context.Context, correlationID string) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, correlationID)
+}
+
+func fileExtension(name string) string {
+	ext := path.Ext(name)
+	ext = strings.TrimPrefix(ext, ".")
+	return strings.ToLower(ext)
 }
 
 func firstNonEmpty(values ...string) string {
