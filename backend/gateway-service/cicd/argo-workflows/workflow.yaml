@@ -65,7 +65,7 @@ spec:
             ulimit -n 1048576
             REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
 
-            echo "Cloning $REPO @ {{inputs.parameters.git_sha}}"
+            echo "Cloning https://github.com/FedorovTeam/mono-repo.git @ {{inputs.parameters.git_sha}}"
             git clone --depth 1 --sparse "$REPO" /workspace
             cd /workspace
             git sparse-checkout init --cone

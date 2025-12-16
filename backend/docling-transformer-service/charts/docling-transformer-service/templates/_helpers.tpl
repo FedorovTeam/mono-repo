@@ -1,3 +1,4 @@
+{{/* backend/docling-transformer-service/charts/docling-transformer-service/templates/_helpers.tpl */}}
 {{- define "docling-transformer-service.name" -}}
 {{- default .Chart.Name .Values.nameOverride -}}
 {{- end -}}

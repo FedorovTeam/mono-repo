@@ -1,3 +1,4 @@
+# backend/docling-transformer-service/cicd/argo-workflows/workflow.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -65,7 +66,7 @@ spec:
             ulimit -n 1048576
             REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
 
-            echo "Cloning $REPO @ {{inputs.parameters.git_sha}}"
+            echo "Cloning https://github.com/FedorovTeam/mono-repo.git @ {{inputs.parameters.git_sha}}"
             git clone --depth 1 --sparse "$REPO" /workspace
             cd /workspace
             git sparse-checkout init --cone
@@ -98,7 +99,7 @@ spec:
           - --dockerfile=/workspace/backend/docling-transformer-service/Dockerfile
           - --context=/workspace/backend/docling-transformer-service
           - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:{{inputs.parameters.git_sha}}
-          - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:latest
+#          - --destination=harbor.tech.fedorov-team.tech/backend/docling-transformer-service:latest
           - --cache=true
           - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
           - --verbosity=debug
@@ -150,7 +151,7 @@ spec:
             # выставляем тег; код 20 = "ничего не изменилось" — НЕ ошибка
             set +e
             argocd app set "$APP" \
-              --helm-set image.tag={{inputs.parameters.git_sha}} \
+              --helm-set-string image.tag={{inputs.parameters.git_sha}} \
               --server "$SERVER" \
               --auth-token "$ARGOCD_TOKEN" \
               --grpc-web

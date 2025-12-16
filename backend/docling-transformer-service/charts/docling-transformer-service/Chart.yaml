@@ -1,3 +1,4 @@
+# backend/docling-transformer-service/charts/docling-transformer-service/Chart.yaml
 apiVersion: v2
 name: docling-transformer-service
 version: 0.1.0
