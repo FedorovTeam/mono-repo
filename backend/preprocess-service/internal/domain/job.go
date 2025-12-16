@@ -19,6 +19,8 @@ type PreprocessJob struct {
 	CorrelationID string
 	Status        preprocessv1.PreprocessStatus
 	ErrorMessage  string
+	ErrorCode     string
+	ErrorDetails  map[string]string
 	UpdatedAt     time.Time
 }
 

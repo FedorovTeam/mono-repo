@@ -75,6 +75,18 @@ func TestGetPreprocessStatus(t *testing.T) {
         t.Fatalf("unexpected job id: %s", statusResp.GetJobId())
     }
 
+    if statusResp.GetTargetBucket() != "target" || statusResp.GetTargetKey() != "out/file.pdf" {
+        t.Fatalf("unexpected target: %s/%s", statusResp.GetTargetBucket(), statusResp.GetTargetKey())
+    }
+
+    if statusResp.GetErrorCode() != "" {
+        t.Fatalf("unexpected error code: %s", statusResp.GetErrorCode())
+    }
+
+    if len(statusResp.GetErrorDetails()) != 0 {
+        t.Fatalf("expected empty error details, got %#v", statusResp.GetErrorDetails())
+    }
+
     if statusResp.GetUpdatedAt().AsTime().After(time.Now().Add(1 * time.Minute)) {
         t.Fatalf("updated_at is in the future: %v", statusResp.GetUpdatedAt())
     }

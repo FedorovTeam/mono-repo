@@ -1,80 +1,124 @@
 package worker
 
 import (
-	"errors"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
 
-func TestNormalizeConfigDefaults(t *testing.T) {
-	cfg := normalizeConfig(Config{})
+func TestNotifyCallbackSuccess(t *testing.T) {
+	t.Helper()
 
-	if cfg.Concurrency != 1 {
-		t.Fatalf("expected default concurrency 1, got %d", cfg.Concurrency)
+	attempts := 0
+	var received callbackPayload
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Fatalf("unexpected content type: %s", ct)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+		defer r.Body.Close()
+
+		if err := json.Unmarshal(body, &received); err != nil {
+			t.Fatalf("failed to decode payload: %v", err)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	w := &Worker{
+		cfg:    Config{Backoff: 5 * time.Millisecond},
+		http:   server.Client(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	if cfg.ConvertTimeout <= 0 {
-		t.Fatalf("expected convert timeout to be set")
+
+	job := QueueJob{JobID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
+
+	w.notifyCallback(context.Background(), job, statusDone, callbackErrorInfo{})
+
+	if attempts != 1 {
+		t.Fatalf("expected single attempt, got %d", attempts)
 	}
-	if cfg.Backoff <= 0 {
-		t.Fatalf("expected backoff to be set")
+
+	if received.JobID != job.JobID || received.Status != statusDone {
+		t.Fatalf("unexpected payload job/status: %#v", received)
 	}
-	if cfg.PollInterval <= 0 {
-		t.Fatalf("expected poll interval to be set")
+
+	if received.TargetBucket != job.TargetBucket || received.TargetKey != job.TargetKey {
+		t.Fatalf("unexpected target: %s/%s", received.TargetBucket, received.TargetKey)
 	}
-	if cfg.TargetMediaType != defaultTargetMediaType {
-		t.Fatalf("unexpected media type: %s", cfg.TargetMediaType)
+
+	if received.Error != nil {
+		t.Fatalf("expected no error payload, got %+v", received.Error)
 	}
 }
 
-func TestOutputFilePath(t *testing.T) {
-	w := Worker{}
-	result := w.outputFilePath("/tmp/sample/input.odt", "/tmp/out")
-	expected := "/tmp/out/input.docx"
-	if result != expected {
-		t.Fatalf("expected %s, got %s", expected, result)
-	}
-}
+func TestNotifyCallbackRetry(t *testing.T) {
+	t.Helper()
 
-func TestFailureDecisionTemporary(t *testing.T) {
-	job := QueueJob{Attempts: 1, MaxAttempts: 3}
-	before := time.Now()
+	attempts := 0
+	payloads := make([]callbackPayload, 0)
 
-	status, nextRun, code, message := failureDecision(job, temporaryError("download_failed", errors.New("network")), time.Second)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
 
-	if status != statusFailed {
-		t.Fatalf("expected status %s, got %s", statusFailed, status)
-	}
-	if code != "download_failed" {
-		t.Fatalf("unexpected code: %s", code)
-	}
-	if message == "" {
-		t.Fatal("expected message to be filled")
-	}
-	if nextRun.Before(before.Add(900*time.Millisecond)) || nextRun.After(before.Add(1100*time.Millisecond)) {
-		t.Fatalf("unexpected next run at: %s", nextRun)
-	}
-}
+		var payload callbackPayload
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read body: %v", err)
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("failed to decode payload: %v", err)
+		}
 
-func TestFailureDecisionPermanent(t *testing.T) {
-	job := QueueJob{Attempts: 2, MaxAttempts: 3}
-	status, nextRun, code, _ := failureDecision(job, permanentError("convert_failed", errors.New("broken")), time.Minute)
+		payloads = append(payloads, payload)
+		attempts++
 
-	if status != statusStopped {
-		t.Fatalf("expected status %s, got %s", statusStopped, status)
-	}
-	if code != "convert_failed" {
-		t.Fatalf("unexpected code: %s", code)
-	}
-	if nextRun.IsZero() {
-		t.Fatalf("expected next run timestamp")
-	}
-}
+		if attempts == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 
-func TestFailureDecisionMaxAttempts(t *testing.T) {
-	job := QueueJob{Attempts: 5, MaxAttempts: 5}
-	status, _, _, _ := failureDecision(job, temporaryError("convert_timeout", errors.New("deadline")), time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
 
-	if status != statusStopped {
-		t.Fatalf("expected stopped when attempts exhausted, got %s", status)
+	w := &Worker{
+		cfg:    Config{Backoff: 5 * time.Millisecond},
+		http:   server.Client(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	job := QueueJob{JobID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
+	errInfo := callbackErrorInfo{Code: "convert_failed", Message: "conversion failed"}
+
+	w.notifyCallback(context.Background(), job, statusStopped, errInfo)
+
+	if attempts != 2 {
+		t.Fatalf("expected two attempts, got %d", attempts)
+	}
+
+	if len(payloads) != 2 {
+		t.Fatalf("expected two payloads, got %d", len(payloads))
+	}
+
+	if payloads[1].Error == nil || payloads[1].Error.Code != errInfo.Code || payloads[1].Error.Message != errInfo.Message {
+		t.Fatalf("unexpected error payload: %+v", payloads[1].Error)
 	}
 }

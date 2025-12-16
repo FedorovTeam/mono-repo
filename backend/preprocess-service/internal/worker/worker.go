@@ -1,9 +1,13 @@
 package worker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +32,8 @@ const (
 	statusPending          = "pending"
 	statusProcessing       = "processing"
 	statusStopped          = "stopped"
+
+	callbackMaxAttempts = 3
 )
 
 // Config описывает настройки воркера предобработки.
@@ -59,9 +65,28 @@ type Worker struct {
 	db        *pgxpool.Pool
 	minio     *minio.Client
 	cfg       Config
+	http      *http.Client
 	sem       *semaphore.Weighted
 	logger    *slog.Logger
 	waitGroup sync.WaitGroup
+}
+
+type callbackPayload struct {
+	JobID        string                `json:"job_id"`
+	Status       string                `json:"status"`
+	TargetBucket string                `json:"target_bucket,omitempty"`
+	TargetKey    string                `json:"target_key,omitempty"`
+	Error        *callbackErrorPayload `json:"error,omitempty"`
+}
+
+type callbackErrorPayload struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type callbackErrorInfo struct {
+	Code    string
+	Message string
 }
 
 func New(db *pgxpool.Pool, minioCfg config.MinioConfig, cfg Config, logger *slog.Logger) (*Worker, error) {
@@ -95,6 +120,7 @@ func New(db *pgxpool.Pool, minioCfg config.MinioConfig, cfg Config, logger *slog
 		db:     db,
 		minio:  minioClient,
 		cfg:    normalizedCfg,
+		http:   &http.Client{Timeout: 15 * time.Second},
 		sem:    semaphore.NewWeighted(normalizedCfg.Concurrency),
 		logger: logger,
 	}, nil
@@ -216,28 +242,37 @@ func (w *Worker) processJob(ctx context.Context, job QueueJob) {
 	logger := w.logger.With("job_id", job.JobID, "correlation_id", job.CorrelationID)
 	logger.Info("start processing job")
 
-	if err := w.handleJob(ctx, job); err != nil {
+	jobState := job
+
+	if err := w.handleJob(ctx, &jobState); err != nil {
 		logger.Error("job failed", "error", err)
-		if updateErr := w.markFailed(ctx, job, err); updateErr != nil {
+		status, code, message, updateErr := w.markFailed(ctx, jobState, err)
+		if updateErr != nil {
 			logger.Error("failed to update job status", "error", updateErr)
+		}
+		if status == statusStopped {
+			w.notifyCallback(ctx, jobState, status, callbackErrorInfo{Code: code, Message: message})
 		}
 		return
 	}
 
 	logger.Info("job completed successfully")
-	if err := w.markDone(ctx, job); err != nil {
+	if err := w.markDone(ctx, jobState); err != nil {
 		logger.Error("failed to mark job done", "error", err)
+		return
 	}
+
+	w.notifyCallback(ctx, jobState, statusDone, callbackErrorInfo{})
 }
 
-func (w *Worker) handleJob(ctx context.Context, job QueueJob) error {
+func (w *Worker) handleJob(ctx context.Context, job *QueueJob) error {
 	tmpDir, err := os.MkdirTemp(w.cfg.WorkingDir, fmt.Sprintf("job-%s-", job.JobID))
 	if err != nil {
 		return permanentError("tmp_dir", fmt.Errorf("create temp dir: %w", err))
 	}
 	defer os.RemoveAll(tmpDir)
 
-	sourcePath, err := w.downloadSource(ctx, job, tmpDir)
+	sourcePath, err := w.downloadSource(ctx, *job, tmpDir)
 	if err != nil {
 		return err
 	}
@@ -255,6 +290,8 @@ func (w *Worker) handleJob(ctx context.Context, job QueueJob) error {
 	if targetBucket == "" {
 		targetBucket = w.cfg.TargetBucket
 	}
+
+	job.TargetBucket = targetBucket
 
 	if targetBucket == "" {
 		return permanentError("target_bucket_missing", errors.New("target bucket is required"))
@@ -338,25 +375,39 @@ func (w *Worker) markDone(ctx context.Context, job QueueJob) error {
 	finishedAt := time.Now().UTC()
 	_, err := w.db.Exec(ctx, `
         UPDATE preprocess_queue
-        SET status = $2, finished_at = $3, updated_at = $3, target_media_type = $4, error_code = NULL, error_message = NULL
+        SET status = $2, finished_at = $3, updated_at = $3, target_bucket = $4, target_key = $5,
+            target_media_type = $6, error_code = NULL, error_message = NULL, error_details = '{}'::jsonb
         WHERE job_id = $1
-    `, job.JobID, statusDone, finishedAt, w.cfg.TargetMediaType)
+    `, job.JobID, statusDone, finishedAt, job.TargetBucket, job.TargetKey, w.cfg.TargetMediaType)
 	return err
 }
 
-func (w *Worker) markFailed(ctx context.Context, job QueueJob, jobErr error) error {
+func (w *Worker) markFailed(ctx context.Context, job QueueJob, jobErr error) (string, string, string, error) {
 	finishedAt := time.Now().UTC()
-	status, nextRunAt, code, message := failureDecision(job, jobErr, w.cfg.Backoff)
-	_, err := w.db.Exec(ctx, `
+	status, nextRunAt, code, message, permanent := failureDecision(job, jobErr, w.cfg.Backoff)
+
+	details := map[string]any{
+		"code":      code,
+		"permanent": permanent,
+		"attempt":   job.Attempts,
+	}
+
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		w.logger.Error("failed to marshal error details", "error", err)
+	}
+
+	_, err = w.db.Exec(ctx, `
         UPDATE preprocess_queue
         SET status = $2, next_run_at = $3, finished_at = CASE WHEN $2 = $5 THEN $4 ELSE finished_at END,
-            error_code = $6, error_message = $7, updated_at = $4
+            error_code = $6, error_message = $7, error_details = COALESCE($8::jsonb, '{}'::jsonb),
+            target_bucket = COALESCE($9, target_bucket), target_key = COALESCE($10, target_key), updated_at = $4
         WHERE job_id = $1
-    `, job.JobID, status, nextRunAt, finishedAt, statusStopped, code, message)
-	return err
+    `, job.JobID, status, nextRunAt, finishedAt, statusStopped, code, message, string(detailsJSON), nullableString(job.TargetBucket), nullableString(job.TargetKey))
+	return status, code, message, err
 }
 
-func failureDecision(job QueueJob, err error, backoff time.Duration) (string, time.Time, string, string) {
+func failureDecision(job QueueJob, err error, backoff time.Duration) (string, time.Time, string, string, bool) {
 	var typed jobError
 	code := "processing_error"
 	permanent := false
@@ -370,7 +421,7 @@ func failureDecision(job QueueJob, err error, backoff time.Duration) (string, ti
 	message := err.Error()
 
 	if permanent || job.Attempts >= job.MaxAttempts {
-		return statusStopped, time.Now().UTC(), code, message
+		return statusStopped, time.Now().UTC(), code, message, permanent
 	}
 
 	delay := backoff * time.Duration(job.Attempts)
@@ -378,7 +429,82 @@ func failureDecision(job QueueJob, err error, backoff time.Duration) (string, ti
 		delay = backoff
 	}
 
-	return statusFailed, time.Now().Add(delay).UTC(), code, message
+	return statusFailed, time.Now().Add(delay).UTC(), code, message, permanent
+}
+
+func (w *Worker) notifyCallback(ctx context.Context, job QueueJob, status string, errInfo callbackErrorInfo) {
+	if job.CallbackURL == "" || w.http == nil {
+		return
+	}
+
+	payload := callbackPayload{
+		JobID:        job.JobID,
+		Status:       status,
+		TargetBucket: job.TargetBucket,
+		TargetKey:    job.TargetKey,
+	}
+
+	if errInfo.Code != "" || errInfo.Message != "" {
+		payload.Error = &callbackErrorPayload{Code: errInfo.Code, Message: errInfo.Message}
+	}
+
+	backoff := w.cfg.Backoff
+	if backoff <= 0 {
+		backoff = time.Second
+	}
+
+	for attempt := 1; attempt <= callbackMaxAttempts; attempt++ {
+		temporary, err := w.sendCallbackRequest(ctx, job.CallbackURL, payload)
+		if err == nil {
+			return
+		}
+
+		w.logger.Error("callback delivery failed", "attempt", attempt, "temporary", temporary, "error", err, "callback_url", job.CallbackURL)
+
+		if !temporary || attempt == callbackMaxAttempts {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+	}
+}
+
+func (w *Worker) sendCallbackRequest(ctx context.Context, url string, payload callbackPayload) (bool, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("marshal callback payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return false, fmt.Errorf("build callback request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := w.http.Do(req)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false, err
+		}
+		return true, fmt.Errorf("send callback: %w", err)
+	}
+	defer resp.Body.Close()
+
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return false, nil
+	}
+
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return true, fmt.Errorf("callback responded with status %d", resp.StatusCode)
+	}
+
+	return false, fmt.Errorf("callback responded with status %d", resp.StatusCode)
 }
 
 func (w *Worker) outputFilePath(sourcePath, outDir string) string {
@@ -389,4 +515,11 @@ func (w *Worker) outputFilePath(sourcePath, outDir string) string {
 		name = base
 	}
 	return filepath.Join(outDir, name+".docx")
+}
+
+func nullableString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
