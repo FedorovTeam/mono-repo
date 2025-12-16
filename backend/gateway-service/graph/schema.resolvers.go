@@ -21,11 +21,16 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	}
 
 	ctx, _ = ctxutils.EnsureCorrelationID(ctx)
+	path := ""
+	if input.Path != nil {
+		path = *input.Path
+	}
+
 	uploadInput := usecase.UploadInput{
 		FileName:      input.FileName,
 		Repository:    input.Repository,
 		Branch:        input.Branch,
-		Path:          input.Path,
+		Path:          path,
 		FileSizeBytes: int64(input.FileSizeBytes),
 	}
 
