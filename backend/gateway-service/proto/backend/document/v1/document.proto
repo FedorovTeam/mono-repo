@@ -19,9 +19,10 @@ message Document {
   string id = 1;
   string file_name = 2;
   string repository = 3;
-  string repository_owner = 15;
   string branch = 4;
   string path = 5;
+  // status — единственный источник правды о текущем этапе документа.
+  // Failed фиксирует саму ошибку; восстановление после неё идёт через логи статусов, но статус остаётся единым.
   DocumentStatus status = 6;
   string workflow_id = 7;
   string error = 8;
@@ -31,16 +32,20 @@ message Document {
   string markdown_object_key = 12;
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp updated_at = 14;
-  string job_id = 16;
-  DocumentStatus actual_status = 17;
-  bool enable_pdf_ocr = 18;
+  string owner = 15;
+  string base_branch = 16;
+  bool create_pr = 17;
+  string job_id = 18;
+  bool ocr_enabled = 20;
+  // Бывшее поле actual_status больше не используется, номер и имя зарезервированы для обратной совместимости.
+  reserved 19;
+  reserved "actual_status";
 }
 
 message CreateDocumentRequest {
   string id = 1;
   string file_name = 2;
   string repository = 3;
-  string repository_owner = 12;
   string branch = 4;
   string path = 5;
   string correlation_id = 6;
@@ -49,7 +54,13 @@ message CreateDocumentRequest {
   string upload_object_key = 9;
   string markdown_bucket = 10;
   string markdown_object_key = 11;
-  bool enable_pdf_ocr = 13;
+  string owner = 12;
+  string base_branch = 13;
+  bool create_pr = 14;
+  bool ocr_enabled = 16;
+
+  reserved 15;
+  reserved "entity_specific_path";
 }
 
 message GetDocumentRequest {

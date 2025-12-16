@@ -145,7 +145,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		MarkdownObjectKey: input.MarkdownObjectKey,
 		WaitForResult:     false,
 		CorrelationId:     correlationID,
-		OcrEnabled:        input.OCREnabled,
+		OcrEnabled:        boolPtr(input.OCREnabled),
 	})
 	if err != nil {
 		return convertResult{}, err

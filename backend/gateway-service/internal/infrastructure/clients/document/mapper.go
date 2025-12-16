@@ -10,23 +10,18 @@ func mapDocument(doc *pb.Document) *domain.Document {
 		return nil
 	}
 
-	status := doc.GetActualStatus()
-	if status == pb.DocumentStatus_DOCUMENT_STATUS_UNSPECIFIED {
-		status = doc.GetStatus()
-	}
-
 	result := &domain.Document{
 		ID:           doc.GetId(),
 		FileName:     doc.GetFileName(),
 		Repository:   doc.GetRepository(),
 		Branch:       doc.GetBranch(),
 		Path:         doc.GetPath(),
-		Status:       domainStatusFromProto(status),
-		EnablePdfOcr: doc.GetEnablePdfOcr(),
+		Status:       domainStatusFromProto(doc.GetStatus()),
+		EnablePdfOcr: doc.GetOcrEnabled(),
 	}
 
-	if doc.GetRepositoryOwner() != "" {
-		owner := doc.GetRepositoryOwner()
+	if doc.GetOwner() != "" {
+		owner := doc.GetOwner()
 		result.RepositoryOwner = &owner
 	}
 
