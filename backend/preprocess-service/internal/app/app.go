@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"preprocess-service/internal/config"
-	"preprocess-service/internal/storage/memory"
+	"preprocess-service/internal/observability"
+	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
 	"preprocess-service/internal/worker"
 )
@@ -22,21 +24,27 @@ type App struct {
 	grpcServer *transport.GRPCServer
 	worker     *worker.Worker
 	db         *pgxpool.Pool
+	telemetry  *observability.Telemetry
 	logger     *slog.Logger
 }
 
 func New(cfg config.Config) (*App, error) {
 	logger := newLogger(cfg.Logging.Level)
 
+	telemetry, err := observability.Setup(context.Background(), cfg.Service.Name)
+	if err != nil {
+		return nil, fmt.Errorf("init telemetry: %w", err)
+	}
+
 	dbpool, err := pgxpool.New(context.Background(), cfg.Postgres.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
 
-	repo := memory.NewJobRepository()
+	repo := postgres.NewJobRepository(dbpool)
 	handler := transport.NewPreprocessHandler(repo)
 
-	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler)
+	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler, telemetry.Meter(), logger)
 	if err != nil {
 		dbpool.Close()
 		return nil, err
@@ -61,10 +69,11 @@ func New(cfg config.Config) (*App, error) {
 
 	return &App{
 		cfg:        cfg,
-		httpServer: transport.NewHTTPServer(cfg.Service.Port),
+		httpServer: transport.NewHTTPServer(cfg.Service.Port, dbpool, telemetry.MetricsHandler, telemetry.Meter(), logger),
 		grpcServer: grpcServer,
 		worker:     wrk,
 		db:         dbpool,
+		telemetry:  telemetry,
 		logger:     logger,
 	}, nil
 }
@@ -98,6 +107,14 @@ func (a *App) Run(ctx context.Context) error {
 func (a *App) Close() {
 	if a.db != nil {
 		a.db.Close()
+	}
+
+	if a.telemetry != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.telemetry.Shutdown(shutdownCtx); err != nil {
+			a.logger.Error("shutdown telemetry", "error", err)
+		}
 	}
 }
 
