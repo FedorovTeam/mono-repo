@@ -17,7 +17,7 @@ minio:
 preprocess:
   libreoffice_path: /usr/bin/libreoffice
   working_dir: /tmp/preprocess-service/work
-  output_dir: /tmp/preprocess-service/output
+  output_dir: /tmp/preprocess-service/output # итоговый DOCX сохраняется здесь, воркер использует подкаталог с job_id
   source_bucket: preprocess-source
   target_bucket: preprocess-artifacts
   target_media_type: application/vnd.openxmlformats-officedocument.wordprocessingml.document

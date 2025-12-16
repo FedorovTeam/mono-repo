@@ -53,6 +53,7 @@ func New(cfg config.Config) (*App, error) {
 	workerCfg := worker.Config{
 		LibreOfficePath: cfg.Preprocess.LibreOfficePath,
 		WorkingDir:      cfg.Preprocess.WorkingDir,
+		OutputDir:       cfg.Preprocess.OutputDir,
 		TargetBucket:    cfg.Preprocess.TargetBucket,
 		TargetMediaType: cfg.Preprocess.TargetMediaType,
 		Concurrency:     cfg.Preprocess.WorkerConcurrency,
