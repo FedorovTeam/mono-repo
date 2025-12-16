@@ -134,6 +134,7 @@ type Config struct {
 	PDFBackend         string
 	Mode               string
 	Storage            StorageConfig
+	TraceHttpRequest   bool
 }
 
 // StorageConfig описывает настройки доступа Docling к MinIO/S3.
@@ -313,6 +314,12 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 	if pdfBackend == "" {
 		pdfBackend = "pypdfium2"
 	}
+	httpClient := &http.Client{
+		Timeout: 60 * time.Second,
+	}
+	if cfg.TraceHttpRequest {
+		httpClient.Transport = newLoggingTransport(httpClient.Transport, logger)
+	}
 
 	return &DoclingConverter{
 		endpoint:           strings.TrimRight(cfg.Endpoint, "/"),
@@ -323,10 +330,8 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		pdfBackend:         pdfBackend,
 		mode:               mode,
 		storage:            storage,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
-		logger: logger,
+		client:             httpClient,
+		logger:             logger,
 	}
 }
 

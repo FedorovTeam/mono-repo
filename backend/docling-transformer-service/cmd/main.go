@@ -104,6 +104,7 @@ func main() {
 		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
 		PDFBackend:         cfg.Docling.PDFBackend,
 		Mode:               cfg.Docling.Mode,
+		TraceHttpRequest:   cfg.Observability.LoggingEnabled,
 		Storage: converter.StorageConfig{
 			Endpoint:  cfg.Docling.Storage.Endpoint,
 			AccessKey: cfg.Docling.Storage.AccessKey,
