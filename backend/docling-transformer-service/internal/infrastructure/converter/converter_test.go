@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,11 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Fatalf("failed to parse submit form: %v", err)
+			}
+
+			formats := r.MultipartForm.Value["to_formats"]
+			if len(formats) != 1 || formats[0] != "json,md" {
+				t.Fatalf("unexpected to_formats: %+v", formats)
 			}
 
 			receivedCorrelationSubmit = r.Header.Get(correlationIDHeader)
@@ -251,6 +257,10 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 	}
 	if receivedRequest.Target.Endpoint != "minio:9000" || receivedRequest.Target.AccessKey != "acc" || receivedRequest.Target.SecretKey != "sec" || receivedRequest.Target.Region != "us-east-1" || !receivedRequest.Target.VerifySSL {
 		t.Fatalf("unexpected target credentials: %+v", receivedRequest.Target)
+	}
+
+	if !reflect.DeepEqual(receivedRequest.Options.ToFormats, []string{"json", "md"}) {
+		t.Fatalf("unexpected to_formats: %+v", receivedRequest.Options.ToFormats)
 	}
 
 	if receivedRequest.Options.Language != "ru" || receivedRequest.Options.OCR == nil || !*receivedRequest.Options.OCR {
