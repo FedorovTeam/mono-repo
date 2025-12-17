@@ -336,11 +336,6 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		mode = doclingModeUploadFile
 	}
 
-	storage := cfg.Storage
-	if storage.Bucket == "" {
-		storage.Bucket = cfg.Storage.Bucket
-	}
-
 	pdfBackend := strings.TrimSpace(cfg.PDFBackend)
 	if pdfBackend == "" {
 		pdfBackend = "pypdfium2"
@@ -361,7 +356,7 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		forceOCR:           cfg.ForceOCR,
 		pdfBackend:         pdfBackend,
 		mode:               mode,
-		storage:            storage,
+		storage:            cfg.Storage,
 		client:             httpClient,
 		logger:             logger,
 		render:             normalizeRenderConfig(cfg.Render),
