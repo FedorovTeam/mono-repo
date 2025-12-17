@@ -55,11 +55,11 @@ func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) e
 	return nil
 }
 func (p *pollingRepoStub) MarkFailed(context.Context, uuid.UUID, string) error { return nil }
-func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
+func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, string, int) error {
 	p.updateInfoCalls++
 	return nil
 }
-func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UUID, jobID string, pollCount int, nextPoll time.Time) error {
+func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UUID, _, _ string, pollCount int, nextPoll time.Time) error {
 	p.markWaitingCalls++
 	p.lastWaitingNextPoll = nextPoll
 	return nil
@@ -187,8 +187,8 @@ func TestConversionExecutorRestartsAfterDoclingRequeue(t *testing.T) {
 	if state != StateWaitingDocling {
 		t.Fatalf("expected waiting state after resubmit, got %s", state)
 	}
-	if task.DoclingJobID != "job-new" {
-		t.Fatalf("expected new docling job id, got %s", task.DoclingJobID)
+	if task.DoclingTaskID != "job-new" {
+		t.Fatalf("expected new docling task id, got %s", task.DoclingTaskID)
 	}
 	if storage.downloadCalls != 0 {
 		t.Fatalf("expected no downloads on resubmit, got %d", storage.downloadCalls)
@@ -402,19 +402,19 @@ func TestDoclingPollerTreats404AsTemporary(t *testing.T) {
 
 type converterWithTemporaryError struct{}
 
-func (c *converterWithTemporaryError) Submit(context.Context, domain.ConvertRequest) (string, error) {
-	return "job", nil
+func (c *converterWithTemporaryError) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
+	return domain.DoclingIdentifiers{TaskID: "job"}, nil
 }
-func (c *converterWithTemporaryError) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+func (c *converterWithTemporaryError) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{}, temporaryStatusError{}
 }
 
 type staticResultConverter struct{}
 
-func (c *staticResultConverter) Submit(context.Context, domain.ConvertRequest) (string, error) {
-	return "", nil
+func (c *staticResultConverter) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
+	return domain.DoclingIdentifiers{TaskID: "id"}, nil
 }
-func (c *staticResultConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+func (c *staticResultConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{Status: "ok", Result: &domain.ConvertResult{Content: []byte("result"), MediaType: "text/md"}}, nil
 }
 
@@ -468,23 +468,23 @@ type submitOnlyConverter struct {
 	lastRequest  domain.ConvertRequest
 }
 
-func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertRequest) (string, error) {
+func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
 	c.submitCalled = true
 	c.lastRequest = req
 	if c.submitErr != nil {
-		return "", c.submitErr
+		return domain.DoclingIdentifiers{}, c.submitErr
 	}
 	if c.jobID == "" {
 		c.jobID = "job-from-submit"
 	}
 	if req.ContentType == "" {
-		return "", errors.New("content type is empty")
+		return domain.DoclingIdentifiers{}, errors.New("content type is empty")
 	}
 
-	return c.jobID, nil
+	return domain.DoclingIdentifiers{TaskID: c.jobID}, nil
 }
 
-func (c *submitOnlyConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+func (c *submitOnlyConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
 	c.checkCalled = true
 	return domain.StatusCheckResult{}, errors.New("status should not be called")
 }
@@ -493,7 +493,7 @@ type restartingConverter struct {
 	submitOnlyConverter
 }
 
-func (c *restartingConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+func (c *restartingConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{}, temporaryStatusError{}
 }
 

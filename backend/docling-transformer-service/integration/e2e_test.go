@@ -136,15 +136,16 @@ func (s *stubQueueRepo) RetryFailed(context.Context, time.Time, int) (int, int, 
 	return 0, 0, nil
 }
 
-func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
+func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, string, int) error {
 	return nil
 }
 
-func (s *stubQueueRepo) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, jobID string, pollCount int, _ time.Time) error {
+func (s *stubQueueRepo) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, taskID, jobID string, pollCount int, _ time.Time) error {
 	if s.currentTask != nil {
 		clone := *s.currentTask
 		clone.StartedAt = nil
 		clone.Status = repository.StatusDocling
+		clone.DoclingTaskID = taskID
 		clone.DoclingJobID = jobID
 		clone.DoclingPollCount = pollCount
 		s.acquireTasks = append(s.acquireTasks, &clone)

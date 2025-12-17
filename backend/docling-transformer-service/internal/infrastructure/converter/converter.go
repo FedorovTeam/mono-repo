@@ -409,13 +409,13 @@ func (c *DoclingConverter) selectLanguage(contentType string) string {
 	return c.defaultLanguage
 }
 
-// Submit отправляет документ в Docling и возвращает идентификатор задачи.
-func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest) (string, error) {
+// Submit отправляет документ в Docling и возвращает идентификаторы задачи.
+func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
 	contentType, fileExt, err := resolveContentTypeAndExt(req.ContentType, req.FileName)
 	if err != nil {
-		return "", err
+		return domain.DoclingIdentifiers{}, err
 	}
 
 	filename := req.FileName
@@ -427,47 +427,59 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 
 	switch c.mode {
 	case doclingModeSourceAsync:
-		jobID, err := c.submitSourceAsyncWithRetry(ctx, correlationID, filename, contentType, fileExt, req)
+		ids, err := c.submitSourceAsyncWithRetry(ctx, correlationID, filename, contentType, fileExt, req)
 		if err != nil {
-			return "", err
+			return domain.DoclingIdentifiers{}, err
 		}
 
 		c.logger.Info("docling submit accepted",
-			zap.String("job_id", jobID),
+			zap.String("task_id", ids.TaskID),
+			zap.String("job_id", ids.JobID),
+			zap.String("primary_docling_id", ids.PrimaryID()),
 			zap.String("correlation_id", correlationID),
 			zap.String("content_type", contentType),
 			zap.String("file_ext", fileExt),
 		)
 
-		return jobID, nil
+		return ids, nil
 	default:
 		if len(req.Content) == 0 {
-			return "", errors.New("empty document")
+			return domain.DoclingIdentifiers{}, errors.New("empty document")
 		}
 
-		jobID, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content, enableOCR, forceOCR, ocrLang, pdfBackend)
+		ids, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content, enableOCR, forceOCR, ocrLang, pdfBackend)
 		if err != nil {
-			return "", err
+			return domain.DoclingIdentifiers{}, err
 		}
 
 		c.logger.Info("docling submit accepted",
-			zap.String("job_id", jobID),
+			zap.String("task_id", ids.TaskID),
+			zap.String("job_id", ids.JobID),
+			zap.String("primary_docling_id", ids.PrimaryID()),
 			zap.String("correlation_id", correlationID),
 			zap.String("content_type", contentType),
 			zap.String("file_ext", fileExt),
 		)
 
-		return jobID, nil
+		return ids, nil
 	}
 }
 
 // CheckStatus делает одиночный запрос статуса Docling и возвращает результат при готовности.
-func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (domain.StatusCheckResult, error) {
+func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
+	jobID := ids.PrimaryID()
 	if jobID == "" {
-		return domain.StatusCheckResult{}, errors.New("empty job id")
+		return domain.StatusCheckResult{}, errors.New("empty docling id")
 	}
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
+
+	logFields := []zap.Field{
+		zap.String("task_id", ids.TaskID),
+		zap.String("job_id", ids.JobID),
+		zap.String("primary_docling_id", jobID),
+		zap.String("correlation_id", correlationID),
+	}
 
 	statusResp, body, err := c.fetchStatus(ctx, correlationID, jobID)
 	if err != nil {
@@ -479,10 +491,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (domai
 
 	if normalizedStatus == "" {
 		normalizedStatus = "pending"
-		c.logger.Warn("docling status missing, defaulting to pending",
-			zap.String("job_id", jobID),
-			zap.String("correlation_id", correlationID),
-		)
+		c.logger.Warn("docling status missing, defaulting to pending", logFields...)
 	}
 
 	switch {
@@ -497,10 +506,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (domai
 			return domain.StatusCheckResult{}, fmt.Errorf("docling result: %w", buildErr)
 		}
 
-		c.logger.Info("docling conversion completed",
-			zap.String("job_id", jobID),
-			zap.String("correlation_id", correlationID),
-		)
+		c.logger.Info("docling conversion completed", logFields...)
 
 		return domain.StatusCheckResult{
 			Status: normalizedStatus,
@@ -508,48 +514,34 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, jobID string) (domai
 		}, nil
 
 	case isPendingStatus(normalizedStatus):
-		c.logger.Debug("docling still processing",
-			zap.String("job_id", jobID),
-			zap.String("correlation_id", correlationID),
-			zap.String("status", normalizedStatus),
-		)
+		c.logger.Debug("docling still processing", append(logFields, zap.String("status", normalizedStatus))...)
 		return domain.StatusCheckResult{
 			Status: normalizedStatus,
 			Result: nil,
 		}, nil
 
 	default:
-		c.logger.Warn("docling reported failure status",
-			zap.String("job_id", jobID),
-			zap.String("correlation_id", correlationID),
+		c.logger.Warn("docling reported failure status", append(logFields,
 			zap.String("status", rawStatus),
 			zap.String("status_body", responseSnippet(body)),
-		)
+		)...)
 
 		if resultResp, resultBody, resErr := c.fetchResult(ctx, correlationID, jobID); resErr == nil {
 			if len(resultResp.Errors) > 0 {
 				for _, e := range resultResp.Errors {
-					c.logger.Error("docling conversion error detail",
-						zap.String("job_id", jobID),
-						zap.String("correlation_id", correlationID),
+					c.logger.Error("docling conversion error detail", append(logFields,
 						zap.String("component_type", e.ComponentType),
 						zap.String("module_name", e.ModuleName),
 						zap.String("error_message", e.ErrorMessage),
-					)
+					)...)
 				}
 			} else {
-				c.logger.Warn("docling result on failure has no errors",
-					zap.String("job_id", jobID),
-					zap.String("correlation_id", correlationID),
+				c.logger.Warn("docling result on failure has no errors", append(logFields,
 					zap.String("result_body", responseSnippet(resultBody)),
-				)
+				)...)
 			}
 		} else {
-			c.logger.Warn("docling result fetch on failure errored",
-				zap.String("job_id", jobID),
-				zap.String("correlation_id", correlationID),
-				zap.Error(resErr),
-			)
+			c.logger.Warn("docling result fetch on failure errored", append(logFields, zap.Error(resErr))...)
 		}
 
 		return domain.StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
@@ -564,13 +556,13 @@ func (c *DoclingConverter) submitWithRetry(
 	content []byte,
 	enableOCR, forceOCR bool,
 	ocrLang, pdfBackend string,
-) (string, error) {
+) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
-		jobID, err := c.submit(ctx, correlationID, filename, contentType, fileExt, content, enableOCR, forceOCR, ocrLang, pdfBackend)
+		ids, err := c.submit(ctx, correlationID, filename, contentType, fileExt, content, enableOCR, forceOCR, ocrLang, pdfBackend)
 		if err == nil {
-			return jobID, nil
+			return ids, nil
 		}
 
 		lastErr = err
@@ -590,7 +582,7 @@ func (c *DoclingConverter) submitWithRetry(
 
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return domain.DoclingIdentifiers{}, ctx.Err()
 			case <-time.After(delay):
 			}
 		} else {
@@ -599,23 +591,23 @@ func (c *DoclingConverter) submitWithRetry(
 	}
 
 	if isTemporary, _ := isTemporaryDoclingError(lastErr); isTemporary {
-		return "", &domain.TemporarySubmitRetryExhaustedError{Err: lastErr}
+		return domain.DoclingIdentifiers{}, &domain.TemporarySubmitRetryExhaustedError{Err: lastErr}
 	}
 
-	return "", lastErr
+	return domain.DoclingIdentifiers{}, lastErr
 }
 
 func (c *DoclingConverter) submitSourceAsyncWithRetry(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
-) (string, error) {
+) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
-		jobID, err := c.submitSourceAsync(ctx, correlationID, filename, contentType, fileExt, req)
+		ids, err := c.submitSourceAsync(ctx, correlationID, filename, contentType, fileExt, req)
 		if err == nil {
-			return jobID, nil
+			return ids, nil
 		}
 
 		lastErr = err
@@ -635,7 +627,7 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return domain.DoclingIdentifiers{}, ctx.Err()
 			case <-time.After(delay):
 			}
 		} else {
@@ -644,10 +636,10 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 	}
 
 	if isTemporary, _ := isTemporaryDoclingError(lastErr); isTemporary {
-		return "", &domain.TemporarySubmitRetryExhaustedError{Err: lastErr}
+		return domain.DoclingIdentifiers{}, &domain.TemporarySubmitRetryExhaustedError{Err: lastErr}
 	}
 
-	return "", lastErr
+	return domain.DoclingIdentifiers{}, lastErr
 }
 
 // writeDoclingOptions — формирует form-data поля с опциями Docling Serve.
@@ -778,12 +770,12 @@ func (c *DoclingConverter) submit(
 	content []byte,
 	enableOCR, forceOCR bool,
 	ocrLang, pdfBackend string,
-) (string, error) {
+) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
 
 	submitURL, err := url.Parse(endpoint)
 	if err != nil {
-		return "", fmt.Errorf("parse docling submit endpoint: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("parse docling submit endpoint: %w", err)
 	}
 
 	query := submitURL.Query()
@@ -803,7 +795,7 @@ func (c *DoclingConverter) submit(
 		"filename": filename,
 	})
 	if contentDisposition == "" {
-		return "", fmt.Errorf("build docling multipart: could not format content disposition")
+		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling multipart: could not format content disposition")
 	}
 
 	partHeaders := textproto.MIMEHeader{}
@@ -815,21 +807,21 @@ func (c *DoclingConverter) submit(
 		_, err = part.Write(content)
 	}
 	if err != nil {
-		return "", fmt.Errorf("build docling multipart: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling multipart: %w", err)
 	}
 
 	// Опции Docling Serve (форматы, OCR, язык, pdf_backend и т.п.)
 	if err = c.writeDoclingOptions(writer, contentType, fileExt, enableOCR, forceOCR, ocrLang, pdfBackend); err != nil {
-		return "", err
+		return domain.DoclingIdentifiers{}, err
 	}
 
 	if err = writer.Close(); err != nil {
-		return "", fmt.Errorf("build docling multipart: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling multipart: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, submitURL.String(), payload)
 	if err != nil {
-		return "", fmt.Errorf("build docling request: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
@@ -844,54 +836,55 @@ func (c *DoclingConverter) submit(
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("call docling submit: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("call docling submit: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		return "", fmt.Errorf("read docling submit response: %w", readErr)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("read docling submit response: %w", readErr)
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		baseErr := fmt.Errorf("docling submit returned status %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			return "", &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
+			return domain.DoclingIdentifiers{}, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
 		}
 
-		return "", baseErr
+		return domain.DoclingIdentifiers{}, baseErr
 	}
 
 	var submitResp doclingSubmitResponse
 	if err := json.Unmarshal(body, &submitResp); err != nil {
-		return "", fmt.Errorf("unmarshal docling submit response: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("unmarshal docling submit response: %w", err)
 	}
 
-	jobID := submitResp.JobID
-	if jobID == "" {
-		jobID = submitResp.TaskID
-	}
-	if jobID == "" {
-		return "", errors.New("docling submit response has empty job_id")
+	ids := domain.DoclingIdentifiers{TaskID: submitResp.TaskID, JobID: submitResp.JobID}
+	if ids.PrimaryID() == "" {
+		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty identifiers")
 	}
 
-	return jobID, nil
+	if ids.TaskID == "" {
+		ids.TaskID = ids.JobID
+	}
+
+	return ids, nil
 }
 
 func (c *DoclingConverter) submitSourceAsync(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
-) (string, error) {
+) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
 	sourceStorage, err := c.resolveSourceStorage(req)
 	if err != nil {
-		return "", err
+		return domain.DoclingIdentifiers{}, err
 	}
 
 	targetStorage, err := c.resolveTargetStorage(req)
 	if err != nil {
-		return "", err
+		return domain.DoclingIdentifiers{}, err
 	}
 
 	enableOCR, forceOCR, ocrLang, pdfBackend := c.resolveOCROptions(contentType, req)
@@ -927,12 +920,12 @@ func (c *DoclingConverter) submitSourceAsync(
 
 	payload, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal docling source request: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("marshal docling source request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return "", fmt.Errorf("build docling source request: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling source request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -947,38 +940,38 @@ func (c *DoclingConverter) submitSourceAsync(
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("call docling source submit: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("call docling source submit: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		return "", fmt.Errorf("read docling source submit response: %w", readErr)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("read docling source submit response: %w", readErr)
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		baseErr := fmt.Errorf("docling submit returned status %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			return "", &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
+			return domain.DoclingIdentifiers{}, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
 		}
 
-		return "", baseErr
+		return domain.DoclingIdentifiers{}, baseErr
 	}
 
 	var submitResp doclingSubmitResponse
 	if err := json.Unmarshal(body, &submitResp); err != nil {
-		return "", fmt.Errorf("unmarshal docling submit response: %w", err)
+		return domain.DoclingIdentifiers{}, fmt.Errorf("unmarshal docling submit response: %w", err)
 	}
 
-	jobID := submitResp.JobID
-	if jobID == "" {
-		jobID = submitResp.TaskID
+	ids := domain.DoclingIdentifiers{TaskID: submitResp.TaskID, JobID: submitResp.JobID}
+	if ids.PrimaryID() == "" {
+		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty identifiers")
 	}
-	if jobID == "" {
-		return "", errors.New("docling submit response has empty job_id")
+	if ids.TaskID == "" {
+		ids.TaskID = ids.JobID
 	}
 
-	return jobID, nil
+	return ids, nil
 }
 
 // fetchStatus читает TaskStatusResponse из /v1/status/poll/{task_id}

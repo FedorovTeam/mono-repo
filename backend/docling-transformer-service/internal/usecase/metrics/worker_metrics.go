@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -199,12 +200,18 @@ func (m *WorkerMetrics) RecordOutcome(ctx context.Context, success bool) {
 	}
 }
 
-func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, forceOCR bool, ocrLang, pdfBackend string) {
+func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, ids domain.DoclingIdentifiers, forceOCR bool, ocrLang, pdfBackend string) {
 	if m == nil || m.doclingSubmit == nil {
 		return
 	}
 
 	attrs := []attribute.KeyValue{attribute.Bool("force_ocr", forceOCR)}
+	if ids.TaskID != "" {
+		attrs = append(attrs, attribute.String("task_id", ids.TaskID))
+	}
+	if ids.JobID != "" {
+		attrs = append(attrs, attribute.String("job_id", ids.JobID))
+	}
 	if ocrLang != "" {
 		attrs = append(attrs, attribute.String("ocr_lang", ocrLang))
 	}
