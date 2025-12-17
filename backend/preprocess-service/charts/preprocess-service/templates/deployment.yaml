@@ -1,3 +1,4 @@
+# backend/preprocess-service/charts/preprocess-service/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,18 +37,5 @@ spec:
               value: {{ .Values.env.GRPC_PORT | quote }}
             - name: SERVICE_REGION
               value: {{ .Values.env.SERVICE_REGION | quote }}
-            - name: CONFIG_PATH
-              value: {{ .Values.env.CONFIG_PATH | quote }}
-          volumeMounts:
-            - name: config
-              mountPath: {{ .Values.config.mountPath | quote }}
-              subPath: {{ .Values.config.key | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      volumes:
-        - name: config
-          secret:
-            secretName: {{ .Values.config.secretName }}
-            items:
-              - key: {{ .Values.config.key }}
-                path: {{ .Values.config.key }}

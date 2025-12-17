@@ -1,3 +1,4 @@
+{{/* backend/preprocess-service/charts/preprocess-service/templates/_helpers.tpl */}}
 {{- define "preprocess-service.name" -}}
 {{- default .Chart.Name .Values.nameOverride -}}
 {{- end -}}

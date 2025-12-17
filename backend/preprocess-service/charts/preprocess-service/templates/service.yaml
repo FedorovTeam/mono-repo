@@ -1,13 +1,10 @@
+# backend/preprocess-service/charts/preprocess-service/templates/service.yaml
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "preprocess-service.fullname" . }}
   labels:
     {{- include "preprocess-service.labels" . | nindent 4 }}
-  {{- with .Values.service.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports:

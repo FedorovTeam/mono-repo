@@ -1,5 +1,6 @@
+# backend/preprocess-service/charts/preprocess-service/values.yaml
 replicaCount: 1
-fullnameOverride: preprocess
+fullnameOverride: preprocess-service
 
 image:
   repository: harbor.tech.fedorov-team.tech/backend/preprocess-service
@@ -11,16 +12,14 @@ imagePullSecrets:
 
 service:
   type: ClusterIP
-  port: 8082
-  grpcPort: 9082
-  annotations: {}
+  port: 8080
+  grpcPort: 9090
 
 env:
   SERVICE_NAME: preprocess-service
-  SERVICE_PORT: 8082
-  GRPC_PORT: 9082
+  SERVICE_PORT: 8080
+  GRPC_PORT: 9090
   SERVICE_REGION: local
-  CONFIG_PATH: /app/config/config.yaml
 
 resources:
   requests:

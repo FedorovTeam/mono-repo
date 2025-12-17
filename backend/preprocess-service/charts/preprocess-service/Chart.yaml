@@ -1,3 +1,4 @@
+# backend/preprocess-service/charts/preprocess-service/Chart.yaml
 apiVersion: v2
 name: preprocess-service
 version: 0.1.0

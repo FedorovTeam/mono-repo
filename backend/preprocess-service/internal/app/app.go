@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"preprocess-service/db/migrations"
 	"strings"
 	"time"
 
@@ -18,7 +19,6 @@ import (
 	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
 	"preprocess-service/internal/worker"
-	"preprocess-service/migrations"
 )
 
 type App struct {
