@@ -125,6 +125,79 @@ func TestMergeVotingTablesFillsEmptyCells(t *testing.T) {
 	}
 }
 
+func TestMergeVotingTablesChoosesBestMatchingCandidate(t *testing.T) {
+	passA := []Table{
+		{
+			Rows: []TableRow{
+				{Cells: []TableCell{{Text: "№"}, {Text: "ФИО"}, {Text: "За"}, {Text: "Против"}}},
+				{Cells: []TableCell{{Text: "1"}, {Text: "Петров Петр"}, {Text: ""}, {Text: ""}}},
+			},
+		},
+		{
+			Rows: []TableRow{
+				{Cells: []TableCell{{Text: "№"}, {Text: "ФИО"}, {Text: "Комментарий"}}},
+				{Cells: []TableCell{{Text: "1"}, {Text: "Наблюдатель"}, {Text: ""}}},
+			},
+		},
+	}
+
+	passB := []Table{
+		{
+			Rows: []TableRow{
+				{Cells: []TableCell{{Text: "№"}, {Text: "ФИО"}, {Text: "Комментарий"}}},
+				{Cells: []TableCell{{Text: "1"}, {Text: "Наблюдатель"}, {Text: "есть"}}},
+			},
+		},
+		{
+			Rows: []TableRow{
+				{Cells: []TableCell{{Text: "№"}, {Text: "Фамилия Имя"}, {Text: "За"}, {Text: "Против"}}},
+				{Cells: []TableCell{{Text: "1"}, {Text: "Петров Петр"}, {Text: "10"}, {Text: "0"}}},
+			},
+		},
+	}
+
+	merged, stats := MergeVotingTables(passA, passB, 0.6)
+	if stats.MergedRows == 0 {
+		t.Fatalf("expected at least one merged row, got %+v", stats)
+	}
+
+	if got := strings.TrimSpace(merged[0].Rows[1].Cells[2].Text); got != "10" {
+		t.Fatalf("expected voting result to come from matching table, got %s", got)
+	}
+	if got := strings.TrimSpace(merged[1].Rows[1].Cells[2].Text); got != "есть" {
+		t.Fatalf("expected comment table to match separately, got %s", got)
+	}
+}
+
+func TestMergeVotingTablesSkipsLowSimilarity(t *testing.T) {
+	passA := []Table{
+		{
+			Rows: []TableRow{
+				{Cells: []TableCell{{Text: "№"}, {Text: "ФИО"}, {Text: "За"}}},
+				{Cells: []TableCell{{Text: "1"}, {Text: "Иванов Иван"}, {Text: ""}}},
+			},
+		},
+	}
+
+	passB := []Table{
+		{
+			Rows: []TableRow{
+				{Cells: []TableCell{{Text: "Item"}, {Text: "Value"}}},
+				{Cells: []TableCell{{Text: "x"}, {Text: "y"}}},
+			},
+		},
+	}
+
+	merged, stats := MergeVotingTables(passA, passB, 0.6)
+	if stats.MergedRows != 0 || stats.MatchedRows != 0 {
+		t.Fatalf("expected no matches for unrelated tables, got %+v", stats)
+	}
+
+	if got := strings.TrimSpace(merged[0].Rows[1].Cells[2].Text); got != "" {
+		t.Fatalf("expected base table to stay unchanged, got %s", got)
+	}
+}
+
 func TestFillTablesMatchesByShape(t *testing.T) {
 	jsonContent := map[string]any{
 		"tables": []any{map[string]any{"id": "table-1", "markdown": "|H1|H2|\n|-|-|\n|New1|New2|"}},

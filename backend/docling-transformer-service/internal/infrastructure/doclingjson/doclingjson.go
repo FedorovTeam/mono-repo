@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const defaultTableSimilarityThreshold = 0.45
+
 // Document описывает часть JSON-ответа Docling, содержащую таблицы и отметки для них.
 type Document struct {
 	Tables []Table `json:"tables"`
@@ -467,8 +469,8 @@ func MergeVotingTables(passATables, passBTables []Table, similarityThreshold flo
 			continue
 		}
 
-		matchedTableB, numB, fioB := findMatchingTable(passBTables)
-		if matchedTableB == nil {
+		matchedTableB, numB, fioB, tableScore := findMatchingTable(tableA, passBTables, defaultTableSimilarityThreshold)
+		if matchedTableB == nil || tableScore < defaultTableSimilarityThreshold {
 			merged = append(merged, tableA)
 			continue
 		}
@@ -571,16 +573,158 @@ func buildRowIndex(table Table, numIdx, fioIdx int) map[string][]indexedRow {
 	return index
 }
 
-func findMatchingTable(candidates []Table) (*Table, int, int) {
-	for _, candidate := range candidates {
-		numIdx, fioIdx := detectVotingColumns(candidate)
+func findMatchingTable(base Table, candidates []Table, minScore float64) (*Table, int, int, float64) {
+	bestScore := 0.0
+	bestNum := -1
+	bestFio := -1
+	var best *Table
+
+	for i := range candidates {
+		candidate := &candidates[i]
+
+		numIdx, fioIdx := detectVotingColumns(*candidate)
 		if numIdx == -1 || fioIdx == -1 {
 			continue
 		}
-		return &candidate, numIdx, fioIdx
+
+		score := tableSimilarity(base, *candidate)
+		if score > bestScore {
+			bestScore = score
+			best = candidate
+			bestNum = numIdx
+			bestFio = fioIdx
+		}
 	}
 
-	return nil, -1, -1
+	if bestScore < minScore {
+		return nil, -1, -1, 0
+	}
+
+	return best, bestNum, bestFio, bestScore
+}
+
+func tableSimilarity(base, candidate Table) float64 {
+	headersA := normalizedHeaders(base)
+	headersB := normalizedHeaders(candidate)
+
+	headerScore := headerSimilarityScore(headersA, headersB)
+	rowsScore := rowCountScore(len(base.Rows), len(candidate.Rows))
+	keywordScore := votingKeywordScore(headersA, headersB)
+
+	votingColumnsScore := 0.0
+	if hasVotingColumns(base) && hasVotingColumns(candidate) {
+		votingColumnsScore = 1
+	}
+
+	return headerScore*0.55 + rowsScore*0.2 + keywordScore*0.2 + votingColumnsScore*0.05
+}
+
+func normalizedHeaders(table Table) []string {
+	if len(table.Rows) == 0 {
+		return nil
+	}
+
+	headers := make([]string, 0, len(table.Rows[0].Cells))
+	for _, cell := range table.Rows[0].Cells {
+		headers = append(headers, normalizeHeader(cell.Text))
+	}
+
+	return headers
+}
+
+func normalizeHeader(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(
+		"|", " ",
+		",", " ",
+		".", " ",
+		";", " ",
+		":", " ",
+	)
+	value = replacer.Replace(value)
+	value = strings.Join(strings.Fields(value), " ")
+	return value
+}
+
+func headerSimilarityScore(headersA, headersB []string) float64 {
+	if len(headersA) == 0 || len(headersB) == 0 {
+		return 0
+	}
+
+	total := 0.0
+	for _, headerA := range headersA {
+		best := 0.0
+		for _, headerB := range headersB {
+			if score := similarityScore(headerA, headerB); score > best {
+				best = score
+			}
+		}
+		total += best
+	}
+
+	return total / float64(len(headersA))
+}
+
+func rowCountScore(rowsA, rowsB int) float64 {
+	if rowsA == 0 && rowsB == 0 {
+		return 0
+	}
+
+	diff := rowsA - rowsB
+	if diff < 0 {
+		diff = -diff
+	}
+
+	max := rowsA
+	if rowsB > max {
+		max = rowsB
+	}
+
+	if max == 0 {
+		return 0
+	}
+
+	return 1 - float64(diff)/float64(max)
+}
+
+func votingKeywordScore(headersA, headersB []string) float64 {
+	keywordsA := collectVotingKeywords(headersA)
+	keywordsB := collectVotingKeywords(headersB)
+
+	if len(keywordsA) == 0 || len(keywordsB) == 0 {
+		return 0
+	}
+
+	matches := 0
+	for kw := range keywordsA {
+		if _, ok := keywordsB[kw]; ok {
+			matches++
+		}
+	}
+
+	return float64(matches) / float64(len(keywordsA))
+}
+
+func collectVotingKeywords(headers []string) map[string]struct{} {
+	keywords := []string{
+		"за", "против", "воздерж", "присутств", "отсутств", "голоса", "итог", "for", "against", "abstain", "present",
+	}
+
+	normalized := make(map[string]struct{})
+	for _, header := range headers {
+		for _, kw := range keywords {
+			if strings.Contains(header, kw) {
+				normalized[kw] = struct{}{}
+			}
+		}
+	}
+
+	return normalized
+}
+
+func hasVotingColumns(table Table) bool {
+	numIdx, fioIdx := detectVotingColumns(table)
+	return numIdx != -1 && fioIdx != -1
 }
 
 func safeCellText(cells []TableCell, idx int) string {

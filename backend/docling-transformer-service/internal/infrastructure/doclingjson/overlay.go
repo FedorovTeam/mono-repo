@@ -97,8 +97,8 @@ func OverlayVotingTablesInMarkdown(baseMD, ocrMD string, matchRate float64) (str
 			continue
 		}
 
-		matchB, numB, fioB := findMatchingTable(ocrTables)
-		if matchB == nil {
+		matchB, numB, fioB, tableScore := findMatchingTable(block.Table, ocrTables, defaultTableSimilarityThreshold)
+		if matchB == nil || tableScore < defaultTableSimilarityThreshold {
 			continue
 		}
 
