@@ -212,8 +212,18 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	task.DoclingPollCount = 0
 	task.NextPollAt = &nextPoll
 
-	e.logger.Info("docling job submitted", zap.String("task_id", ids.TaskID), zap.String("job_id", ids.JobID), zap.Time("next_poll_at", nextPoll),
-		zap.Bool("force_ocr", forceOCR), zap.String("ocr_lang", ocrLang), zap.String("pdf_backend", pdfBackend))
+	logFields := []zap.Field{
+		zap.String("docling_task_id", ids.TaskID),
+		zap.Time("next_poll_at", nextPoll),
+		zap.Bool("force_ocr", forceOCR),
+		zap.String("ocr_lang", ocrLang),
+		zap.String("pdf_backend", pdfBackend),
+	}
+	if ids.JobID != "" {
+		logFields = append(logFields, zap.String("docling_job_id", ids.JobID))
+	}
+
+	e.logger.Info("docling job submitted", logFields...)
 
 	return StateWaitingDocling, nil
 }
@@ -309,15 +319,19 @@ func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, tas
 		statusCode = coder.StatusCode()
 	}
 
-	e.logger.Warn("docling submit temporary error, rescheduled",
+	fields := []zap.Field{
 		zap.String("queue_id", task.ID.String()),
-		zap.String("task_id", task.DoclingTaskID),
-		zap.String("job_id", task.DoclingJobID),
+		zap.String("docling_task_id", task.DoclingTaskID),
 		zap.Int("retry_attempt", retryIndex),
 		zap.Int("status_code", statusCode),
 		zap.Time("next_poll_at", nextPoll),
 		zap.Error(err),
-	)
+	}
+	if task.DoclingJobID != "" {
+		fields = append(fields, zap.String("docling_job_id", task.DoclingJobID))
+	}
+
+	e.logger.Warn("docling submit temporary error, rescheduled", fields...)
 
 	return StateWaitingDocling, nil, true
 }

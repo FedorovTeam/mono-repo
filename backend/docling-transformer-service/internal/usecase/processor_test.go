@@ -406,7 +406,7 @@ type converterWithTemporaryError struct{}
 func (c *converterWithTemporaryError) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
 	return domain.DoclingIdentifiers{TaskID: "job"}, nil
 }
-func (c *converterWithTemporaryError) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
+func (c *converterWithTemporaryError) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{}, temporaryStatusError{}
 }
 
@@ -415,7 +415,7 @@ type staticResultConverter struct{}
 func (c *staticResultConverter) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
 	return domain.DoclingIdentifiers{TaskID: "id"}, nil
 }
-func (c *staticResultConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
+func (c *staticResultConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{Status: "ok", Result: &domain.ConvertResult{Content: []byte("result"), MediaType: "text/md"}}, nil
 }
 
@@ -485,7 +485,7 @@ func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertReques
 	return domain.DoclingIdentifiers{TaskID: c.jobID}, nil
 }
 
-func (c *submitOnlyConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
+func (c *submitOnlyConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	c.checkCalled = true
 	return domain.StatusCheckResult{}, errors.New("status should not be called")
 }
@@ -494,7 +494,7 @@ type restartingConverter struct {
 	submitOnlyConverter
 }
 
-func (c *restartingConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
+func (c *restartingConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{}, temporaryStatusError{}
 }
 

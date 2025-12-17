@@ -110,7 +110,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 		t.Fatalf("unexpected ids: %+v", ids)
 	}
 
-	status, err := conv.CheckStatus(ctx, ids)
+	status, err := conv.CheckStatus(ctx, ids.TaskID)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 		t.Fatalf("unexpected ids: %+v", ids)
 	}
 
-	status, err := conv.CheckStatus(ctx, ids)
+	status, err := conv.CheckStatus(ctx, ids.TaskID)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 		t.Fatalf("unexpected submit error after retry: %v", err)
 	}
 
-	status, err := conv.CheckStatus(ctx, ids)
+	status, err := conv.CheckStatus(ctx, ids.TaskID)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(ctx, ids)
+	status, err := conv.CheckStatus(ctx, ids.TaskID)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestCheckStatusMarks5xxAsTemporary(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-        _, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{TaskID: "job-5xx", JobID: "job-5xx"})
+	_, err := conv.CheckStatus(context.Background(), "job-5xx")
 	if err == nil {
 		t.Fatal("expected error from status check")
 	}
@@ -397,7 +397,7 @@ func TestCheckStatusMarks404AsTemporary(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-        _, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{TaskID: "job-404", JobID: "job-404"})
+	_, err := conv.CheckStatus(context.Background(), "job-404")
 	if err == nil {
 		t.Fatal("expected error from status check")
 	}
@@ -443,7 +443,7 @@ func TestDoclingConverterCheckStatusTaskStatusField(t *testing.T) {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(context.Background(), ids)
+	status, err := conv.CheckStatus(context.Background(), ids.TaskID)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T)
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(context.Background(), ids)
+	status, err := conv.CheckStatus(context.Background(), ids.TaskID)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-    _, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{TaskID: "job-unknown", JobID: "job-unknown"})
+	_, err := conv.CheckStatus(context.Background(), "job-unknown")
 	if err == nil {
 		t.Fatal("expected error for unknown status")
 	}
@@ -586,7 +586,7 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 		t.Fatalf("jobID must be returned")
 	}
 
-	status, err := conv.CheckStatus(ctx, ids)
+	status, err := conv.CheckStatus(ctx, ids.TaskID)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 		t.Fatalf("expected retry, got %d attempts", attempts)
 	}
 
-	if _, err := conv.CheckStatus(context.Background(), ids); err != nil {
+	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
 }

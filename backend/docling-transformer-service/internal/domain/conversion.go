@@ -38,7 +38,7 @@ func (d DoclingIdentifiers) PrimaryID() string {
 
 type Converter interface {
 	Submit(ctx context.Context, req ConvertRequest) (DoclingIdentifiers, error)
-	CheckStatus(ctx context.Context, ids DoclingIdentifiers) (StatusCheckResult, error)
+	CheckStatus(ctx context.Context, taskID string) (StatusCheckResult, error)
 }
 
 type ObjectStorage interface {

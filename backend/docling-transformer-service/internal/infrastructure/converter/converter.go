@@ -432,14 +432,18 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			return domain.DoclingIdentifiers{}, err
 		}
 
-		c.logger.Info("docling submit accepted",
-			zap.String("task_id", ids.TaskID),
-			zap.String("job_id", ids.JobID),
+		logFields := []zap.Field{
+			zap.String("docling_task_id", ids.TaskID),
 			zap.String("primary_docling_id", ids.TaskID),
 			zap.String("correlation_id", correlationID),
 			zap.String("content_type", contentType),
 			zap.String("file_ext", fileExt),
-		)
+		}
+		if ids.JobID != "" {
+			logFields = append(logFields, zap.String("docling_job_id", ids.JobID))
+		}
+
+		c.logger.Info("docling submit accepted", logFields...)
 
 		return ids, nil
 	default:
@@ -452,22 +456,25 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			return domain.DoclingIdentifiers{}, err
 		}
 
-		c.logger.Info("docling submit accepted",
-			zap.String("task_id", ids.TaskID),
-			zap.String("job_id", ids.JobID),
+		logFields := []zap.Field{
+			zap.String("docling_task_id", ids.TaskID),
 			zap.String("primary_docling_id", ids.TaskID),
 			zap.String("correlation_id", correlationID),
 			zap.String("content_type", contentType),
 			zap.String("file_ext", fileExt),
-		)
+		}
+		if ids.JobID != "" {
+			logFields = append(logFields, zap.String("docling_job_id", ids.JobID))
+		}
+
+		c.logger.Info("docling submit accepted", logFields...)
 
 		return ids, nil
 	}
 }
 
 // CheckStatus делает одиночный запрос статуса Docling и возвращает результат при готовности.
-func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
-	taskID := ids.TaskID
+func (c *DoclingConverter) CheckStatus(ctx context.Context, taskID string) (domain.StatusCheckResult, error) {
 	if taskID == "" {
 		return domain.StatusCheckResult{}, errors.New("empty docling task id")
 	}
@@ -475,8 +482,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingId
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
 	logFields := []zap.Field{
-		zap.String("task_id", ids.TaskID),
-		zap.String("job_id", ids.JobID),
+		zap.String("docling_task_id", taskID),
 		zap.String("primary_docling_id", taskID),
 		zap.String("correlation_id", correlationID),
 	}

@@ -51,8 +51,11 @@ func (p *DoclingPoller) NextPollTime(now time.Time, pollCount int) time.Time {
 }
 
 func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.TransformationTask) (*domain.ConvertResult, error) {
-	ids := domain.DoclingIdentifiers{TaskID: task.DoclingTaskID, JobID: task.DoclingJobID}
-	taskID := ids.TaskID
+	taskID := task.DoclingTaskID
+	if taskID == "" {
+		taskID = task.DoclingJobID
+	}
+	ids := domain.DoclingIdentifiers{TaskID: taskID, JobID: task.DoclingJobID}
 	pollOffset := task.DoclingPollCount
 
 	if taskID == "" {
@@ -67,11 +70,16 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 		return nil, ErrDoclingWaiting
 	}
 
-	statusResult, err := p.conv.CheckStatus(ctx, ids)
+	statusResult, err := p.conv.CheckStatus(ctx, taskID)
 	newPollCount := pollOffset + 1
 	task.DoclingTaskID = ids.TaskID
 	task.DoclingJobID = ids.JobID
 	task.DoclingPollCount = newPollCount
+
+	logIDs := []zap.Field{zap.String("docling_task_id", ids.TaskID)}
+	if ids.JobID != "" {
+		logIDs = append(logIDs, zap.String("docling_job_id", ids.JobID))
+	}
 
 	if err := p.repo.UpdateDoclingInfo(ctx, task.ID, ids.TaskID, ids.JobID, newPollCount); err != nil {
 		return nil, fmt.Errorf("store docling polling progress: %w", err)
@@ -97,12 +105,13 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 			}
 
 			p.metrics.RecordTemporaryRetry(ctx, 1)
-			p.logger.Warn("docling temporary error, will retry", zap.String("task_id", ids.TaskID), zap.String("job_id", ids.JobID), zap.Int("docling_polls", newPollCount), zap.Int("status_code", statusCode), zap.Time("next_poll_at", nextPoll), zap.Error(err))
+			fields := append(logIDs, zap.Int("docling_polls", newPollCount), zap.Int("status_code", statusCode), zap.Time("next_poll_at", nextPoll), zap.Error(err))
+			p.logger.Warn("docling temporary error, will retry", fields...)
 
 			return nil, ErrDoclingWaiting
 		}
 
-		p.logger.Error("docling status check failed", zap.String("task_id", ids.TaskID), zap.String("job_id", ids.JobID), zap.Int("docling_polls", newPollCount), zap.Error(err))
+		p.logger.Error("docling status check failed", append(logIDs, zap.Int("docling_polls", newPollCount), zap.Error(err))...)
 
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			if p.isWaitingLimitReached(newPollCount) {
@@ -121,7 +130,7 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 			}
 
 			task.NextPollAt = &nextPoll
-			p.logger.Info("docling still processing", zap.String("task_id", ids.TaskID), zap.String("job_id", ids.JobID), zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))
+			p.logger.Info("docling still processing", append(logIDs, zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))...)
 
 			return nil, ErrDoclingWaiting
 		}
@@ -130,7 +139,7 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 	}
 
 	p.metrics.RecordDoclingPolls(ctx, 1)
-	p.logger.Info("docling status checked", zap.String("task_id", ids.TaskID), zap.String("job_id", ids.JobID), zap.String("status", statusResult.Status), zap.Int("docling_polls", newPollCount))
+	p.logger.Info("docling status checked", append(logIDs, zap.String("status", statusResult.Status), zap.Int("docling_polls", newPollCount))...)
 
 	if statusResult.Result == nil {
 		if p.isWaitingLimitReached(newPollCount) {
@@ -147,7 +156,7 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 		}
 
 		task.NextPollAt = &nextPoll
-		p.logger.Info("docling still processing", zap.String("task_id", ids.TaskID), zap.String("job_id", ids.JobID), zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))
+		p.logger.Info("docling still processing", append(logIDs, zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))...)
 
 		return nil, ErrDoclingWaiting
 	}
@@ -200,12 +209,12 @@ func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transforma
 		p.metrics.RecordDoclingRequeued(ctx)
 	}
 
-	logger := p.logger.With(
-		zap.String("queue_id", task.ID.String()),
-		zap.String("task_id", taskID),
-		zap.String("docling_job_id", jobID),
-		zap.String("reason", reason),
-	)
+	fields := []zap.Field{zap.String("queue_id", task.ID.String()), zap.String("docling_task_id", taskID), zap.String("reason", reason)}
+	if jobID != "" {
+		fields = append(fields, zap.String("docling_job_id", jobID))
+	}
+
+	logger := p.logger.With(fields...)
 
 	if nextPollAt != nil {
 		logger = logger.With(zap.Time("next_poll_at", *nextPollAt))
