@@ -13,11 +13,11 @@ interface UploadResponse {
         repository: string;
         branch: string;
         path: string;
-        enablePdfOcr: boolean;
+        forcePdfOcr: boolean;
       };
       uploadUrl: string;
       uploadMethod: string;
-      enablePdfOcr: boolean;
+      forcePdfOcr: boolean;
     };
   };
   errors?: { message: string }[];
@@ -28,7 +28,7 @@ export default function HomePage() {
   const [repository, setRepository] = useState('docs');
   const [branch, setBranch] = useState('main');
   const [path, setPath] = useState('knowledge/docs/test.md');
-  const [enablePdfOcr, setEnablePdfOcr] = useState(false);
+  const [forcePdfOcr, setForcePdfOcr] = useState(false);
 
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -37,8 +37,8 @@ export default function HomePage() {
   const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
   const apiKey = process.env.NEXT_PUBLIC_API_KEY;
 
-  const formatMessageWithOcr = (text: string, ocrEnabled = enablePdfOcr) =>
-      `${text} (OCR ${ocrEnabled ? 'включен' : 'выключен'})`;
+  const formatMessageWithOcr = (text: string, ocrEnabled = forcePdfOcr) =>
+      `${text} (OCR для PDF ${ocrEnabled ? 'форсируется' : 'не форсируется'})`;
 
   console.log('GATEWAY URL:', gatewayUrl);
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,11 +82,11 @@ export default function HomePage() {
               repository
               branch
               path
-              enablePdfOcr
+              forcePdfOcr
             }
             uploadUrl
             uploadMethod
-            enablePdfOcr
+            forcePdfOcr
           }
         }
       `;
@@ -98,7 +98,7 @@ export default function HomePage() {
           repository,
           branch,
           path,
-          enablePdfOcr,
+          forcePdfOcr,
         },
       };
 
@@ -123,8 +123,8 @@ export default function HomePage() {
         throw new Error('Пустой ответ uploadKnowledgeDocument');
       }
 
-      const { document, uploadUrl, uploadMethod, enablePdfOcr: payloadOcrFlag } = payload;
-      const effectiveOcr = document.enablePdfOcr ?? payloadOcrFlag ?? enablePdfOcr;
+      const { document, uploadUrl, uploadMethod, forcePdfOcr: payloadOcrFlag } = payload;
+      const effectiveOcr = document.forcePdfOcr ?? payloadOcrFlag ?? forcePdfOcr;
       setDocumentId(document.id);
 
       if (!uploadUrl) {
@@ -228,16 +228,16 @@ export default function HomePage() {
                 <input
                     id="enable-ocr"
                     type="checkbox"
-                    checked={enablePdfOcr}
-                    onChange={(e) => setEnablePdfOcr(e.target.checked)}
+                    checked={forcePdfOcr}
+                    onChange={(e) => setForcePdfOcr(e.target.checked)}
                     className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
                 />
                 <div>
                   <label htmlFor="enable-ocr" className="block text-sm font-medium">
-                    Включить OCR для PDF
+                    Форсировать OCR для PDF
                   </label>
                   <p className="mt-1 text-xs text-slate-400">
-                    Помогает извлекать таблицы и отметки в PDF, но может занять больше времени.
+                    Принудительно запускает OCR для PDF: помогает извлекать таблицы и отметки, но может занять больше времени.
                   </p>
                 </div>
               </div>
