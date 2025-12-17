@@ -21,6 +21,7 @@ type Config struct {
 	Service       ServiceConfig       `yaml:"service"`
 	Scheduler     SchedulerConfig     `yaml:"scheduler"`
 	Docling       DoclingConfig       `yaml:"docling"`
+	DoclingRender DoclingRenderConfig `yaml:"docling_render"`
 	Minio         MinioConfig         `yaml:"minio"`
 	Postgres      PostgresConfig      `yaml:"postgres"`
 	Observability ObservabilityConfig `yaml:"observability"`
@@ -66,6 +67,14 @@ type DoclingConfig struct {
 	StatusMaxInterval     time.Duration        `yaml:"status_max_interval"`
 	StatusMaxAttempts     int                  `yaml:"status_max_attempts"`
 	MaxJobLifetime        time.Duration        `yaml:"max_job_lifetime"`
+}
+
+// DoclingRenderConfig управляет выбором источника данных и стратегией merge для Docling.
+type DoclingRenderConfig struct {
+	PreferJSON         *bool   `yaml:"prefer_json"`
+	TwoPassVotingMerge bool    `yaml:"two_pass_voting_merge"`
+	VotingTableMinRows int     `yaml:"voting_table_min_rows"`
+	PassBTableCoverage float64 `yaml:"pass_b_table_coverage"`
 }
 
 type DoclingStorageConfig struct {
@@ -215,6 +224,13 @@ func (c *Config) Validate() error {
 	if err := c.StatusBackoffPolicy().Validate(); err != nil {
 		return fmt.Errorf("docling status backoff: %w", err)
 	}
+
+	if c.DoclingRender.VotingTableMinRows < 0 {
+		return fmt.Errorf("docling_render.voting_table_min_rows cannot be negative")
+	}
+	if c.DoclingRender.PassBTableCoverage < 0 || c.DoclingRender.PassBTableCoverage > 1 {
+		return fmt.Errorf("docling_render.pass_b_table_coverage must be between 0 and 1")
+	}
 	return nil
 }
 
@@ -258,6 +274,20 @@ func (c *Config) applyDefaults() {
 		if c.Docling.Storage.Region == "" {
 			c.Docling.Storage.Region = c.Minio.Region
 		}
+	}
+
+	if c.DoclingRender.PreferJSON == nil {
+		defaultPreferJSON := true
+		c.DoclingRender.PreferJSON = &defaultPreferJSON
+	}
+	if c.DoclingRender.VotingTableMinRows <= 0 {
+		c.DoclingRender.VotingTableMinRows = 1
+	}
+	if c.DoclingRender.PassBTableCoverage < 0 {
+		c.DoclingRender.PassBTableCoverage = 0
+	}
+	if c.DoclingRender.PassBTableCoverage > 1 {
+		c.DoclingRender.PassBTableCoverage = 1
 	}
 }
 
