@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # Собираем ПАКЕТ директории cmd, а не main.go файлом
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o preprocess-service ./cmd/preprocess-service
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o preprocess-service cmd/main.go
 
 # Шаг 2: рантайм образ
 FROM debian:bookworm-slim
