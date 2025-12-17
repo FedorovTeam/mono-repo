@@ -35,7 +35,7 @@ type convertInput struct {
 	OriginalObjectKey string
 	MarkdownObjectKey string
 	Version           int32
-	OCREnabled        bool
+	ForceOCR          bool
 	FilenameExtension string
 }
 
@@ -156,7 +156,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		FilenameExtension: filenameExtension,
 		WaitForResult:     false,
 		CorrelationId:     correlationID,
-		OcrEnabled:        boolPtr(input.OCREnabled),
+		OcrEnabled:        boolPtr(input.ForceOCR),
 	})
 	if err != nil {
 		return convertResult{}, err

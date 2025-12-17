@@ -1,15 +1,15 @@
 package document
 
 import (
-        "context"
+	"context"
 
-        "backend-document-service/internal/domain"
+	"backend-document-service/internal/domain"
 )
 
 // Repository описывает операции хранения, необходимые интеракторам документа.
 type Repository interface {
-        domain.DocumentRepository
-        domain.JobRepository
+	domain.DocumentRepository
+	domain.JobRepository
 }
 
 // Storage описывает операции проверки доступности объектов в файловом хранилище.
@@ -19,10 +19,10 @@ type Storage interface {
 
 // JobScheduler описывает операции для постановки следующего этапа обработки.
 type JobScheduler interface {
-        domain.JobRepository
+	domain.JobRepository
 }
 
 // StatusUpdater обновляет статус документа.
 type StatusUpdater interface {
-        UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error)
+	UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error)
 }

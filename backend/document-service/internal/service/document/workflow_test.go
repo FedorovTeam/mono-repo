@@ -256,7 +256,7 @@ func TestConvertToMarkdownFillsExtensionFromDocument(t *testing.T) {
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "path/doc-ext.md",
 		Name:              "doc-ext.PDF",
-		OCREnabled:        true,
+		ForceOCR:          true,
 	}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ext", Status: "pending"}}
 
@@ -269,7 +269,7 @@ func TestConvertToMarkdownFillsExtensionFromDocument(t *testing.T) {
 		OriginalObjectKey: repo.doc.OriginalObjectKey,
 		MarkdownObjectKey: repo.doc.MarkdownObjectKey,
 		Version:           2,
-		OCREnabled:        repo.doc.OCREnabled,
+		ForceOCR:          repo.doc.ForceOCR,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
