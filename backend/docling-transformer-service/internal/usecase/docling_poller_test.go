@@ -23,7 +23,7 @@ func TestDoclingPollerRequeuesAfterWaitingLimit(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	conv := &converterWithTemporaryError{}
 	workerMetrics := metrics.NewWorkerMetrics(zap.NewNop())
-	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{MaxAttempts: 2, InitialInterval: time.Second, RequeueDelay: time.Minute, MaxRestarts: 2})
+	poller := NewDoclingPoller(conv, conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{MaxAttempts: 2, InitialInterval: time.Second, RequeueDelay: time.Minute, MaxRestarts: 2})
 
 	task := &transformations.TransformationTask{
 		ID:               uuid.New(),
@@ -129,7 +129,7 @@ func TestDoclingPollerUsesTaskIDForStatusAndResult(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	workerMetrics := metrics.NewWorkerMetrics(zap.NewNop())
 	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, zap.NewNop())
-	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{InitialInterval: time.Second, MaxInterval: time.Second, MaxAttempts: 3})
+	poller := NewDoclingPoller(conv, conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{InitialInterval: time.Second, MaxInterval: time.Second, MaxAttempts: 3})
 
 	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{
 		FileName:    "document.docx",
