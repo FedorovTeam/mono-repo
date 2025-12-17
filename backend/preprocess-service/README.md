@@ -35,8 +35,10 @@
 - `service.name`, `service.port`, `service.grpc_port`, `service.region` — сетевые параметры и регион сервиса.
 - `postgres.dsn` — DSN для очереди/метаданных. Пинги БД используются в `readiness`.
 - `minio.endpoint`, `minio.access_key`, `minio.secret_key`, `minio.region`, `minio.ssl` — доступ к бакетам источника и результата.
-- `preprocess.libreoffice_path` — путь до бинаря LibreOffice, `working_dir` — временные файлы и загрузка исходников, `output_dir` — итоговые DOCX (воркер создаёт подкаталог с `job_id` и кладёт результат туда перед загрузкой в MinIO), `worker_concurrency` — число воркеров, `convert_timeout`/`backoff`/`poll_interval` — тайминги обработки и повтора, `target_media_type`/`target_bucket`/`source_bucket` — ключевые бакеты и медиатип.
+- `preprocess.libreoffice_path` — путь до бинаря LibreOffice, `working_dir` — временные файлы и загрузка исходников, `output_dir` — итоговые DOCX (воркер создаёт подкаталог с `job_id` и кладёт результат туда перед загрузкой в MinIO), `worker_concurrency` — число воркеров, `convert_timeout`/`backoff`/`poll_interval` — тайминги обработки и повтора, `target_media_type`/`target_bucket`/`source_bucket` — ключевые бакеты и медиатип, `target_key_prefix` — префикс для дефолтного `target_key`.
 - `logging.level` — уровень логов (`debug|info|warn|error`).
+
+Если клиент не передаёт `target_bucket`/`target_key` в запросе gRPC, сервис подставит значения из конфигурации: bucket возьмётся из `preprocess.target_bucket`, а ключ сформируется как `<target_key_prefix>/<document_id>.docx` (или просто `<document_id>.docx`, если префикс пустой).
 
 В контейнерном образе пример `config/config.yaml` уже скопирован в `/app/config/config.yaml`, рабочие каталоги `/tmp/preprocess-service/work` и `/tmp/preprocess-service/output` созданы и доступны для записи. Итоговый файл конвертации складывается в `output_dir` (подкаталог с `job_id`), откуда загружается в MinIO. Значения MinIO и PostgreSQL можно переопределить через переменные окружения `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_REGION`, `MINIO_SSL` и `POSTGRES_DSN`, либо подменить весь конфиг файлом, смонтированным по `CONFIG_PATH`.
 

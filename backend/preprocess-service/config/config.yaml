@@ -20,6 +20,7 @@ preprocess:
   output_dir: /tmp/preprocess-service/output # итоговый DOCX сохраняется здесь, воркер использует подкаталог с job_id
   source_bucket: preprocess-source
   target_bucket: preprocess-artifacts
+  target_key_prefix: converted
   target_media_type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
   worker_concurrency: 2
   convert_timeout: 2m

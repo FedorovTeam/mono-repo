@@ -37,6 +37,7 @@ type PreprocessConfig struct {
 	OutputDir         string        `yaml:"output_dir"`
 	SourceBucket      string        `yaml:"source_bucket"`
 	TargetBucket      string        `yaml:"target_bucket"`
+	TargetKeyPrefix   string        `yaml:"target_key_prefix"`
 	TargetMediaType   string        `yaml:"target_media_type"`
 	WorkerConcurrency int64         `yaml:"worker_concurrency"`
 	ConvertTimeout    time.Duration `yaml:"convert_timeout"`
