@@ -1,2 +1,3 @@
+# infra/manifests/docling/kustomization.yaml
 resources:
   - docling.yaml

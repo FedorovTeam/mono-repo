@@ -1,3 +1,4 @@
+# infra/manifests/docling/docling.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,8 +16,8 @@ spec:
     spec:
       containers:
         - name: docling-serve
-          image: quay.io/docling-project/docling-serve-cpu:latest
-          imagePullPolicy: IfNotPresent
+          image: harbor.tech.fedorov-team.tech/backend/docling-serve-cpu:with-rus
+          imagePullPolicy: Always
           env:
             - name: DOCLING_SERVE_ENABLE_UI
               value: "1"
