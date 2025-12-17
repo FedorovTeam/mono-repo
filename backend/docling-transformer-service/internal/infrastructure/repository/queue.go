@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
@@ -30,6 +31,24 @@ var _ repo.QueueRepository = (*PostgresQueueRepository)(nil)
 
 type PostgresQueueRepository struct {
 	pool *pgxpool.Pool
+}
+
+type submitLock struct {
+	tx       pgx.Tx
+	released bool
+}
+
+func (l *submitLock) Release(ctx context.Context) error {
+	if l == nil || l.tx == nil || l.released {
+		return nil
+	}
+
+	l.released = true
+	if err := l.tx.Commit(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+		return fmt.Errorf("release submit lock: %w", err)
+	}
+
+	return nil
 }
 
 func NewQueueRepository(pool *pgxpool.Pool) *PostgresQueueRepository {
@@ -185,6 +204,26 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 	return tasks, nil
 }
 
+func (r *PostgresQueueRepository) AcquireSubmitLock(ctx context.Context) (repo.SubmitLock, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin submit lock tx: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `SELECT token FROM docling_submit_lock WHERE token = 'docling_submit' FOR UPDATE NOWAIT`); err != nil {
+		_ = tx.Rollback(ctx)
+
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+			return nil, repo.ErrSubmitLockBusy
+		}
+
+		return nil, fmt.Errorf("acquire submit lock: %w", err)
+	}
+
+	return &submitLock{tx: tx}, nil
+}
+
 // КЛЮЧЕВОЕ: строгая сериализация Docling.
 // 1) сначала берём waiting_docling, у которых next_poll_at <= now()
 // 2) если waiting_docling вообще есть (но ещё рано поллить) — НЕ берём pending (блокируем очередь)
@@ -223,6 +262,7 @@ FOR UPDATE SKIP LOCKED`, baseSelectFields)
 SELECT %s
 FROM transformations_queue
 WHERE status = 'pending'
+  AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY created_at
 LIMIT $1
 FOR UPDATE SKIP LOCKED`, baseSelectFields)
@@ -374,6 +414,26 @@ WHERE id = $1 AND status = 'waiting_docling'`
 	if _, err := r.pool.Exec(ctx, query, id, nextPollAt); err != nil {
 		return fmt.Errorf("requeue docling waiting: %w", err)
 	}
+	return nil
+}
+
+func (r *PostgresQueueRepository) ReschedulePending(ctx context.Context, id uuid.UUID, nextPollAt time.Time) error {
+	const query = `
+UPDATE transformations_queue
+SET status = 'pending',
+    started_at = NULL,
+    finished_at = NULL,
+    error = NULL,
+    docling_task_id = NULL,
+    docling_job_id = NULL,
+    docling_poll_count = 0,
+    next_poll_at = $2
+WHERE id = $1`
+
+	if _, err := r.pool.Exec(ctx, query, id, nextPollAt); err != nil {
+		return fmt.Errorf("reschedule pending: %w", err)
+	}
+
 	return nil
 }
 

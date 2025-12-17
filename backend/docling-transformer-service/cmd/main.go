@@ -178,6 +178,7 @@ func main() {
 		FastOperationTimeout:   cfg.Service.IOTimeout,
 		MaxProcessingRetries:   cfg.Scheduler.MaxProcessingRetries,
 		RetryBackoff:           cfg.Scheduler.RetryBackoff,
+		SubmitLockDelay:        cfg.Scheduler.RetryBackoff,
 		CleanupInterval:        cfg.Scheduler.MaintenanceInterval,
 		CleanupRetention:       cfg.Scheduler.CleanupRetention,
 		FailedRetryDelay:       cfg.Scheduler.FailedRetryDelay,

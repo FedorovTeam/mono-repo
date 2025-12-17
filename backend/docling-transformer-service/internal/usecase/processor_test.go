@@ -31,6 +31,8 @@ type pollingRepoStub struct {
 	requeueCalls        int
 	lastRequeueID       uuid.UUID
 	lastRequeueNextPoll *time.Time
+	rescheduleCalls     int
+	lastRescheduleNext  time.Time
 }
 
 var _ repo.QueueRepository = (*pollingRepoStub)(nil)
@@ -43,6 +45,9 @@ func (p *pollingRepoStub) AcquireNext(context.Context) (*transformations.Transfo
 }
 func (p *pollingRepoStub) AcquireBatch(context.Context, int) ([]*transformations.TransformationTask, error) {
 	return nil, nil
+}
+func (p *pollingRepoStub) AcquireSubmitLock(context.Context) (repo.SubmitLock, error) {
+	return noopSubmitLock{}, nil
 }
 func (p *pollingRepoStub) GetLatestByDocument(context.Context, string) (*transformations.TransformationTask, error) {
 	return nil, nil
@@ -89,6 +94,15 @@ func (p *pollingRepoStub) CleanupFinished(context.Context, time.Duration) (int, 
 	return 0, nil
 }
 func (p *pollingRepoStub) CountByStatus(context.Context) (int, int, int, error) { return 0, 0, 0, nil }
+func (p *pollingRepoStub) ReschedulePending(_ context.Context, _ uuid.UUID, nextPollAt time.Time) error {
+	p.rescheduleCalls++
+	p.lastRescheduleNext = nextPollAt
+	return nil
+}
+
+type noopSubmitLock struct{}
+
+func (noopSubmitLock) Release(context.Context) error { return nil }
 
 func TestConversionExecutorSetsWaitingState(t *testing.T) {
 	repoStub := &pollingRepoStub{}
@@ -146,6 +160,102 @@ func TestConversionExecutorReschedulesAfterTemporarySubmitError(t *testing.T) {
 
 	if task.NextPollAt == nil {
 		t.Fatalf("expected next poll to be scheduled")
+	}
+}
+
+func TestConversionExecutorReschedulesWhenSubmitLockBusy(t *testing.T) {
+	repoStub := &lockingRepoStub{}
+	repoStub.locked.Store(true)
+	storage := &trackingStorage{}
+	conv := &submitOnlyConverter{jobID: "job-123"}
+	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md", SubmitLockDelay: time.Second})
+
+	task := &transformations.TransformationTask{
+		ID:                uuid.New(),
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file.docx",
+	}
+
+	state, err := executor.ProcessTask(context.Background(), task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if state != StateRescheduled {
+		t.Fatalf("expected task to be rescheduled, got %s", state)
+	}
+
+	if repoStub.rescheduleCalls != 1 {
+		t.Fatalf("expected single reschedule, got %d", repoStub.rescheduleCalls)
+	}
+
+	if task.NextPollAt == nil || task.NextPollAt.Before(time.Now()) {
+		t.Fatalf("expected next poll to be in the future")
+	}
+}
+
+func TestConversionExecutorSerializesConcurrentSubmits(t *testing.T) {
+	repoStub := &lockingRepoStub{}
+	storage := &trackingStorage{}
+	conv := newBlockingConverter()
+	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md", SubmitLockDelay: 50 * time.Millisecond})
+
+	firstTask := &transformations.TransformationTask{ID: uuid.New(), OriginalBucket: "orig", OriginalObjectKey: "path/first.pdf", FilenameExtension: "pdf"}
+	secondTask := &transformations.TransformationTask{ID: uuid.New(), OriginalBucket: "orig", OriginalObjectKey: "path/second.pdf", FilenameExtension: "pdf"}
+
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	var firstState TaskState
+	var firstErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		firstState, firstErr = executor.ProcessTask(ctx, firstTask)
+	}()
+
+	select {
+	case <-conv.blockCh:
+	case <-time.After(time.Second):
+		t.Fatalf("first submit did not start")
+	}
+
+	state, err := executor.ProcessTask(ctx, secondTask)
+	if err != nil {
+		t.Fatalf("unexpected error on concurrent submit: %v", err)
+	}
+
+	if state != StateRescheduled {
+		t.Fatalf("expected second task to be rescheduled, got %s", state)
+	}
+
+	if repoStub.rescheduleCalls == 0 {
+		t.Fatalf("expected reschedule call after locked submit")
+	}
+
+	if secondTask.NextPollAt == nil {
+		t.Fatalf("expected second task next poll to be set")
+	}
+
+	close(conv.releaseCh)
+	wg.Wait()
+
+	if firstErr != nil {
+		t.Fatalf("first task errored: %v", firstErr)
+	}
+
+	if firstState != StateWaitingDocling {
+		t.Fatalf("expected first task to reach waiting state, got %s", firstState)
+	}
+
+	if !conv.submitOnlyConverter.submitCalled {
+		t.Fatalf("expected converter submit to be called")
+	}
+
+	if repoStub.locked.Load() {
+		t.Fatalf("expected submit lock to be released")
 	}
 }
 
@@ -502,6 +612,34 @@ func (c *restartingConverter) CheckStatus(context.Context, string) (domain.Statu
 	return domain.StatusCheckResult{}, temporaryStatusError{}
 }
 
+type blockingConverter struct {
+	submitOnlyConverter
+	blockCh   chan struct{}
+	releaseCh chan struct{}
+}
+
+func newBlockingConverter() *blockingConverter {
+	return &blockingConverter{
+		blockCh:   make(chan struct{}, 1),
+		releaseCh: make(chan struct{}),
+	}
+}
+
+func (c *blockingConverter) Submit(ctx context.Context, req domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
+	select {
+	case c.blockCh <- struct{}{}:
+	default:
+	}
+
+	select {
+	case <-c.releaseCh:
+	case <-ctx.Done():
+		return domain.DoclingIdentifiers{}, ctx.Err()
+	}
+
+	return c.submitOnlyConverter.Submit(ctx, req)
+}
+
 type queueProcessorStub struct {
 	states []TaskState
 	calls  int
@@ -517,7 +655,7 @@ func (p *queueProcessorStub) ProcessTask(context.Context, *transformations.Trans
 }
 
 type queueRepoStub struct {
-	repo.QueueRepository
+	pollingRepoStub
 	batches [][]*transformations.TransformationTask
 }
 
@@ -529,6 +667,30 @@ func (r *queueRepoStub) AcquireBatch(context.Context, int) ([]*transformations.T
 	batch := r.batches[0]
 	r.batches = r.batches[1:]
 	return batch, nil
+}
+
+type lockingRepoStub struct {
+	pollingRepoStub
+	locked atomic.Bool
+}
+
+func (r *lockingRepoStub) AcquireSubmitLock(context.Context) (repo.SubmitLock, error) {
+	if r.locked.CompareAndSwap(false, true) {
+		return &stubSubmitLock{repo: r}, nil
+	}
+
+	return nil, repo.ErrSubmitLockBusy
+}
+
+type stubSubmitLock struct {
+	repo *lockingRepoStub
+}
+
+func (l *stubSubmitLock) Release(context.Context) error {
+	if l.repo != nil {
+		l.repo.locked.Store(false)
+	}
+	return nil
 }
 
 type sequentialQueueRepoStub struct {
@@ -732,6 +894,9 @@ func TestNormalizeConfigAppliesDefaults(t *testing.T) {
 	if normalized.RetryBackoff != normalized.PollInterval {
 		t.Fatalf("expected retry backoff to equal poll interval, got %s", normalized.RetryBackoff)
 	}
+	if normalized.SubmitLockDelay != normalized.PollInterval {
+		t.Fatalf("expected submit lock delay to equal poll interval, got %s", normalized.SubmitLockDelay)
+	}
 	if normalized.CleanupInterval != 30*time.Second {
 		t.Fatalf("expected default cleanup interval to be 30s, got %s", normalized.CleanupInterval)
 	}
@@ -759,6 +924,7 @@ func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
 		PollInterval:           2 * time.Second,
 		BatchSize:              10,
 		RetryBackoff:           3 * time.Second,
+		SubmitLockDelay:        4 * time.Second,
 		CleanupInterval:        time.Minute,
 		DoclingInitialInterval: 5 * time.Second,
 		DoclingBackoffFactor:   1.5,

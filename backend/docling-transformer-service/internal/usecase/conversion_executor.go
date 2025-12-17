@@ -28,6 +28,8 @@ type ConversionExecutorConfig struct {
 	DefaultOCRLang    string
 	DefaultPDFBackend string
 
+	SubmitLockDelay time.Duration
+
 	OverlayMatchRate float64
 }
 
@@ -68,6 +70,9 @@ func NewConversionExecutor(
 
 	if cfg.OverlayMatchRate <= 0 {
 		cfg.OverlayMatchRate = 0.6
+	}
+	if cfg.SubmitLockDelay <= 0 {
+		cfg.SubmitLockDelay = time.Second
 	}
 
 	return &ConversionExecutor{
@@ -298,6 +303,34 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		OCRLanguage:     ocrLang,
 		PDFBackend:      pdfBackend,
 	}
+
+	lock, err := e.repo.AcquireSubmitLock(ctx)
+	if errors.Is(err, repo.ErrSubmitLockBusy) {
+		nextPoll := time.Now().Add(e.cfg.SubmitLockDelay)
+		if rescheduleErr := e.repo.ReschedulePending(ctx, task.ID, nextPoll); rescheduleErr != nil {
+			return StateProcessing, fmt.Errorf("reschedule after submit lock: %w", rescheduleErr)
+		}
+
+		task.NextPollAt = &nextPoll
+
+		e.logger.Info("submit lock busy, task rescheduled",
+			zap.String("queue_id", task.ID.String()),
+			zap.Time("next_poll_at", nextPoll),
+		)
+
+		return StateRescheduled, nil
+	}
+	if err != nil {
+		return StateProcessing, fmt.Errorf("acquire submit lock: %w", err)
+	}
+	defer func() {
+		if releaseErr := lock.Release(ctx); releaseErr != nil {
+			e.logger.Error("failed to release submit lock",
+				zap.String("queue_id", task.ID.String()),
+				zap.Error(releaseErr),
+			)
+		}
+	}()
 
 	ids, err := conv.Submit(submitCtx, convertReq)
 	if err != nil {

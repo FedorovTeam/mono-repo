@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os/exec"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mono-repo/docling-transformer-service/db/migrations"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -406,4 +408,38 @@ INSERT INTO transformations_queue (
 	var delayedStatus TransformationStatus
 	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM transformations_queue WHERE id = $1`, delayedID).Scan(&delayedStatus))
 	require.Equal(t, StatusPending, delayedStatus)
+}
+
+func TestAcquireSubmitLockIsExclusive(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	queueRepo := NewQueueRepository(pool)
+
+	lock, err := queueRepo.AcquireSubmitLock(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, lock)
+
+	lockedResult := make(chan error, 1)
+
+	go func() {
+		_, err := queueRepo.AcquireSubmitLock(ctx)
+		if !errors.Is(err, repo.ErrSubmitLockBusy) {
+			lockedResult <- err
+			return
+		}
+		lockedResult <- nil
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(lockedResult) > 0
+	}, 2*time.Second, 50*time.Millisecond)
+
+	require.NoError(t, <-lockedResult)
+
+	require.NoError(t, lock.Release(ctx))
+
+	lockAgain, err := queueRepo.AcquireSubmitLock(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, lockAgain)
+	require.NoError(t, lockAgain.Release(ctx))
 }
