@@ -365,7 +365,7 @@ func TestCheckStatusMarks5xxAsTemporary(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	_, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{JobID: "job-5xx"})
+        _, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{TaskID: "job-5xx", JobID: "job-5xx"})
 	if err == nil {
 		t.Fatal("expected error from status check")
 	}
@@ -397,7 +397,7 @@ func TestCheckStatusMarks404AsTemporary(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	_, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{JobID: "job-404"})
+        _, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{TaskID: "job-404", JobID: "job-404"})
 	if err == nil {
 		t.Fatal("expected error from status check")
 	}
@@ -517,7 +517,7 @@ func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	_, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{JobID: "job-unknown"})
+    _, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{TaskID: "job-unknown", JobID: "job-unknown"})
 	if err == nil {
 		t.Fatal("expected error for unknown status")
 	}

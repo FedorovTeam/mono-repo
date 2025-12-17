@@ -52,11 +52,11 @@ func (p *DoclingPoller) NextPollTime(now time.Time, pollCount int) time.Time {
 
 func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.TransformationTask) (*domain.ConvertResult, error) {
 	ids := domain.DoclingIdentifiers{TaskID: task.DoclingTaskID, JobID: task.DoclingJobID}
-	jobID := ids.PrimaryID()
+	taskID := ids.TaskID
 	pollOffset := task.DoclingPollCount
 
-	if jobID == "" {
-		return nil, fmt.Errorf("docling identifiers are empty")
+	if taskID == "" {
+		return nil, fmt.Errorf("docling task identifier is empty")
 	}
 
 	if p.isWaitingLimitReached(pollOffset) {

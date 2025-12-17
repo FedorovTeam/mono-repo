@@ -33,11 +33,7 @@ type DoclingIdentifiers struct {
 }
 
 func (d DoclingIdentifiers) PrimaryID() string {
-	if d.TaskID != "" {
-		return d.TaskID
-	}
-
-	return d.JobID
+	return d.TaskID
 }
 
 type Converter interface {

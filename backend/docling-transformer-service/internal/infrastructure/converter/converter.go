@@ -435,7 +435,7 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 		c.logger.Info("docling submit accepted",
 			zap.String("task_id", ids.TaskID),
 			zap.String("job_id", ids.JobID),
-			zap.String("primary_docling_id", ids.PrimaryID()),
+			zap.String("primary_docling_id", ids.TaskID),
 			zap.String("correlation_id", correlationID),
 			zap.String("content_type", contentType),
 			zap.String("file_ext", fileExt),
@@ -455,7 +455,7 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 		c.logger.Info("docling submit accepted",
 			zap.String("task_id", ids.TaskID),
 			zap.String("job_id", ids.JobID),
-			zap.String("primary_docling_id", ids.PrimaryID()),
+			zap.String("primary_docling_id", ids.TaskID),
 			zap.String("correlation_id", correlationID),
 			zap.String("content_type", contentType),
 			zap.String("file_ext", fileExt),
@@ -467,9 +467,9 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 
 // CheckStatus делает одиночный запрос статуса Docling и возвращает результат при готовности.
 func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
-	jobID := ids.PrimaryID()
-	if jobID == "" {
-		return domain.StatusCheckResult{}, errors.New("empty docling id")
+	taskID := ids.TaskID
+	if taskID == "" {
+		return domain.StatusCheckResult{}, errors.New("empty docling task id")
 	}
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
@@ -477,11 +477,11 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingId
 	logFields := []zap.Field{
 		zap.String("task_id", ids.TaskID),
 		zap.String("job_id", ids.JobID),
-		zap.String("primary_docling_id", jobID),
+		zap.String("primary_docling_id", taskID),
 		zap.String("correlation_id", correlationID),
 	}
 
-	statusResp, body, err := c.fetchStatus(ctx, correlationID, jobID)
+	statusResp, body, err := c.fetchStatus(ctx, correlationID, taskID)
 	if err != nil {
 		return domain.StatusCheckResult{}, err
 	}
@@ -496,7 +496,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingId
 
 	switch {
 	case isSuccessStatus(normalizedStatus):
-		resultResp, resultBody, err := c.fetchResult(ctx, correlationID, jobID)
+		resultResp, resultBody, err := c.fetchResult(ctx, correlationID, taskID)
 		if err != nil {
 			return domain.StatusCheckResult{}, fmt.Errorf("docling result fetch failed: %w (body=%s)", err, responseSnippet(resultBody))
 		}
@@ -526,7 +526,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingId
 			zap.String("status_body", responseSnippet(body)),
 		)...)
 
-		if resultResp, resultBody, resErr := c.fetchResult(ctx, correlationID, jobID); resErr == nil {
+		if resultResp, resultBody, resErr := c.fetchResult(ctx, correlationID, taskID); resErr == nil {
 			if len(resultResp.Errors) > 0 {
 				for _, e := range resultResp.Errors {
 					c.logger.Error("docling conversion error detail", append(logFields,
@@ -544,7 +544,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, ids domain.DoclingId
 			c.logger.Warn("docling result fetch on failure errored", append(logFields, zap.Error(resErr))...)
 		}
 
-		return domain.StatusCheckResult{}, fmt.Errorf("docling status=%s for job %s: response=%s", rawStatus, jobID, responseSnippet(body))
+		return domain.StatusCheckResult{}, fmt.Errorf("docling status=%s for task %s: response=%s", rawStatus, taskID, responseSnippet(body))
 	}
 }
 
@@ -863,12 +863,8 @@ func (c *DoclingConverter) submit(
 	}
 
 	ids := domain.DoclingIdentifiers{TaskID: submitResp.TaskID, JobID: submitResp.JobID}
-	if ids.PrimaryID() == "" {
-		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty identifiers")
-	}
-
 	if ids.TaskID == "" {
-		ids.TaskID = ids.JobID
+		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty task identifier")
 	}
 
 	return ids, nil
@@ -967,19 +963,16 @@ func (c *DoclingConverter) submitSourceAsync(
 	}
 
 	ids := domain.DoclingIdentifiers{TaskID: submitResp.TaskID, JobID: submitResp.JobID}
-	if ids.PrimaryID() == "" {
-		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty identifiers")
-	}
 	if ids.TaskID == "" {
-		ids.TaskID = ids.JobID
+		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty task identifier")
 	}
 
 	return ids, nil
 }
 
 // fetchStatus читает TaskStatusResponse из /v1/status/poll/{task_id}
-func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID string) (taskStatusResponse, []byte, error) {
-	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingStatusPath, jobID)
+func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, taskID string) (taskStatusResponse, []byte, error) {
+	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingStatusPath, taskID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -1018,15 +1011,15 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, jobID
 	}
 
 	if statusResp.TaskID == "" {
-		statusResp.TaskID = jobID
+		statusResp.TaskID = taskID
 	}
 
 	return statusResp, body, nil
 }
 
 // fetchResult читает ConvertDocumentResponse / другие варианты из /v1/result/{task_id}
-func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, jobID string) (convertDocumentResponse, []byte, error) {
-	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingResultPath, jobID)
+func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, taskID string) (convertDocumentResponse, []byte, error) {
+	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingResultPath, taskID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
