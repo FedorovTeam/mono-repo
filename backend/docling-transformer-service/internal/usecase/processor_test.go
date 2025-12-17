@@ -64,6 +64,10 @@ func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UU
 	p.lastWaitingNextPoll = nextPoll
 	return nil
 }
+func (p *pollingRepoStub) PrepareOverlayOCRPhase(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+func (p *pollingRepoStub) ClearOverlayState(context.Context, uuid.UUID) error { return nil }
 func (p *pollingRepoStub) RequeueDoclingWaiting(_ context.Context, id uuid.UUID, nextPollAt *time.Time) error {
 	p.requeueCalls++
 	p.lastRequeueID = id
@@ -768,7 +772,7 @@ func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
 		DefaultForceOCR:        true,
 		DefaultOCRLang:         "fr",
 		DefaultPDFBackend:      "custom_backend",
-		OverlayMatchRate:       0.8,
+		OverlayMatchRate:       0.9,
 	}
 
 	normalized := normalizeConfig(cfg)
