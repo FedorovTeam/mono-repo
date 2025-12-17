@@ -34,7 +34,7 @@ type ConversionExecutorConfig struct {
 type ConversionExecutor struct {
 	repo       repo.QueueRepository
 	baseConv   domain.Converter // base: PreferJSON=false
-	ocrConv    domain.Converter // обычный
+	ocrConv    domain.Converter // ocr phase
 	storage    domain.ObjectStorage
 	poller     *DoclingPoller
 	metrics    *metrics.WorkerMetrics
@@ -276,6 +276,15 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, fmt.Errorf("source bucket/object key are required for source_async mode")
 	}
 
+	// overlay: base OCR off, ocr-phase OCR on
+	enableOCR := (*bool)(nil)
+	if isOverlay && task.OverlayStage != transformations.OverlayStageOCR {
+		enableOCR = boolPtr(false)
+	}
+	if isOverlay && task.OverlayStage == transformations.OverlayStageOCR {
+		enableOCR = boolPtr(true)
+	}
+
 	convertReq := domain.ConvertRequest{
 		FileName:        originalFileName,
 		Content:         sourceContent,
@@ -284,6 +293,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		SourceObjectKey: sourceObjectKey,
 		TargetBucket:    task.MarkdownBucket,
 		TargetObjectKey: task.MarkdownObjectKey,
+		EnableOCR:       enableOCR,
 		ForceOCR:        boolPtr(forceOCR),
 		OCRLanguage:     ocrLang,
 		PDFBackend:      pdfBackend,

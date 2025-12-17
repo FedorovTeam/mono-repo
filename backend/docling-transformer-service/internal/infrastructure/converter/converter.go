@@ -104,12 +104,10 @@ func isTemporaryDoclingStatus(statusCode int) bool {
 	if statusCode >= 500 && statusCode < 600 {
 		return true
 	}
-
 	switch statusCode {
 	case http.StatusNotFound, http.StatusTooEarly, http.StatusTooManyRequests:
 		return true
 	}
-
 	return false
 }
 
@@ -117,12 +115,10 @@ func responseSnippet(body []byte) string {
 	if len(body) == 0 {
 		return ""
 	}
-
 	snippet := strings.TrimSpace(string(body))
 	if len(snippet) > maxResponseSnippetLen {
 		return snippet[:maxResponseSnippetLen] + "..."
 	}
-
 	return snippet
 }
 
@@ -176,11 +172,18 @@ func normalizeRenderConfig(cfg RenderConfig) RenderConfig {
 	return cfg
 }
 
+type storageSettings struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	Region    string
+	UseSSL    bool
+}
+
 func (c *DoclingConverter) resolveSourceStorage(req domain.ConvertRequest) (storageSettings, error) {
 	if req.SourceBucket == "" || req.SourceObjectKey == "" {
 		return storageSettings{}, errors.New("source bucket/object key is required for source_async mode")
 	}
-
 	return c.storageFromConfig()
 }
 
@@ -188,7 +191,6 @@ func (c *DoclingConverter) resolveTargetStorage(req domain.ConvertRequest) (stor
 	if req.TargetBucket == "" && req.TargetObjectKey == "" {
 		return storageSettings{}, nil
 	}
-
 	return c.storageFromConfig()
 }
 
@@ -196,7 +198,6 @@ func (c *DoclingConverter) storageFromConfig() (storageSettings, error) {
 	if c.storage.Endpoint == "" || c.storage.AccessKey == "" || c.storage.SecretKey == "" {
 		return storageSettings{}, errors.New("docling storage config is incomplete")
 	}
-
 	return storageSettings{
 		Endpoint:  c.storage.Endpoint,
 		AccessKey: c.storage.AccessKey,
@@ -210,9 +211,9 @@ func normalizeStatus(status string) string {
 	return strings.ToLower(strings.TrimSpace(status))
 }
 
-// ----- Структуры под реальные ответы Docling Serve -----
+// ----- Реальные ответы Docling Serve -----
 
-// TaskStatusResponse из /v1/status/poll/{task_id}
+// /v1/status/poll/{task_id}
 type taskStatusResponse struct {
 	TaskID     string              `json:"task_id"`
 	TaskType   string              `json:"task_type"`
@@ -228,7 +229,7 @@ type taskProcessingMeta struct {
 	NumFailed    int `json:"num_failed"`
 }
 
-// ConvertDocumentResponse из /v1/result/{task_id}
+// /v1/result/{task_id}
 type convertDocumentResponse struct {
 	Document       exportDocumentResponse `json:"document"`
 	Status         string                 `json:"status"`
@@ -258,6 +259,7 @@ type doclingSubmitResponse struct {
 	TaskID string `json:"task_id"`
 }
 
+// /v1/convert/source/async
 type convertDocumentsRequest struct {
 	Sources []s3SourceRequest `json:"sources"`
 	Target  *s3TargetRequest  `json:"target,omitempty"`
@@ -286,23 +288,14 @@ type s3TargetRequest struct {
 	Region    string `json:"region,omitempty"`
 }
 
-type storageSettings struct {
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	Region    string
-	UseSSL    bool
-}
-
 type doclingOptions struct {
 	ToFormats         []string `json:"to_formats,omitempty"`
 	FromFormats       []string `json:"from_formats,omitempty"`
-	Language          string   `json:"language,omitempty"`
-	OCR               *bool    `json:"ocr,omitempty"`
+	Language          string   `json:"language,omitempty"` // оставляем для совместимости, но в upload_file мы не шлём
 	DoOCR             *bool    `json:"do_ocr,omitempty"`
 	ForceOCR          *bool    `json:"force_ocr,omitempty"`
 	OCREngine         string   `json:"ocr_engine,omitempty"`
-	OCRLang           string   `json:"ocr_lang,omitempty"`
+	OCRLang           []string `json:"ocr_lang,omitempty"` // <-- строго: массив
 	PDFBackend        string   `json:"pdf_backend,omitempty"`
 	TableMode         string   `json:"table_mode,omitempty"`
 	TableCellMatching *bool    `json:"table_cell_matching,omitempty"`
@@ -310,7 +303,7 @@ type doclingOptions struct {
 	Pipeline          string   `json:"pipeline,omitempty"`
 }
 
-// DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
+// DoclingConverter вызывает Docling Serve.
 type DoclingConverter struct {
 	endpoint           string
 	apiKey             string
@@ -326,7 +319,7 @@ type DoclingConverter struct {
 	render             RenderConfig
 }
 
-// NewDoclingConverter создаёт конвертер с параметрами по умолчанию.
+// NewDoclingConverter создаёт конвертер.
 func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -341,9 +334,8 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 	if pdfBackend == "" {
 		pdfBackend = "pypdfium2"
 	}
-	httpClient := &http.Client{
-		Timeout: 60 * time.Second,
-	}
+
+	httpClient := &http.Client{Timeout: 60 * time.Second}
 	if cfg.TraceHttpRequest {
 		httpClient.Transport = newLoggingTransport(httpClient.Transport, logger)
 	}
@@ -398,6 +390,7 @@ func (c *DoclingConverter) shouldEnableOCR(contentType string) bool {
 func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.ConvertRequest) (enableOCR, forceOCR bool, ocrLang, pdfBackend string) {
 	enableOCR = c.shouldEnableOCR(contentType)
 	forceOCR = c.forceOCR
+
 	if req.EnableOCR != nil {
 		enableOCR = *req.EnableOCR
 	}
@@ -434,7 +427,7 @@ func (c *DoclingConverter) selectLanguage(contentType string) string {
 	return c.defaultLanguage
 }
 
-// Submit отправляет документ в Docling и возвращает идентификаторы задачи.
+// Submit отправляет документ в Docling.
 func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 
@@ -457,7 +450,7 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			return domain.DoclingIdentifiers{}, err
 		}
 
-		logFields := []zap.Field{
+		fields := []zap.Field{
 			zap.String("docling_task_id", ids.TaskID),
 			zap.String("primary_docling_id", ids.TaskID),
 			zap.String("correlation_id", correlationID),
@@ -465,12 +458,12 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			zap.String("file_ext", fileExt),
 		}
 		if ids.JobID != "" {
-			logFields = append(logFields, zap.String("docling_job_id", ids.JobID))
+			fields = append(fields, zap.String("docling_job_id", ids.JobID))
 		}
-
-		c.logger.Info("docling submit accepted", logFields...)
+		c.logger.Info("docling submit accepted", fields...)
 
 		return ids, nil
+
 	default:
 		if len(req.Content) == 0 {
 			return domain.DoclingIdentifiers{}, errors.New("empty document")
@@ -481,7 +474,7 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			return domain.DoclingIdentifiers{}, err
 		}
 
-		logFields := []zap.Field{
+		fields := []zap.Field{
 			zap.String("docling_task_id", ids.TaskID),
 			zap.String("primary_docling_id", ids.TaskID),
 			zap.String("correlation_id", correlationID),
@@ -489,16 +482,15 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			zap.String("file_ext", fileExt),
 		}
 		if ids.JobID != "" {
-			logFields = append(logFields, zap.String("docling_job_id", ids.JobID))
+			fields = append(fields, zap.String("docling_job_id", ids.JobID))
 		}
-
-		c.logger.Info("docling submit accepted", logFields...)
+		c.logger.Info("docling submit accepted", fields...)
 
 		return ids, nil
 	}
 }
 
-// CheckStatus делает одиночный запрос статуса Docling и возвращает результат при готовности.
+// CheckStatus опрашивает статус Docling.
 func (c *DoclingConverter) CheckStatus(ctx context.Context, taskID string) (domain.StatusCheckResult, error) {
 	if taskID == "" {
 		return domain.StatusCheckResult{}, errors.New("empty docling task id")
@@ -519,7 +511,6 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, taskID string) (doma
 
 	rawStatus := strings.TrimSpace(statusResp.TaskStatus)
 	normalizedStatus := normalizeStatus(rawStatus)
-
 	if normalizedStatus == "" {
 		normalizedStatus = "pending"
 		c.logger.Warn("docling status missing, defaulting to pending", logFields...)
@@ -539,17 +530,11 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, taskID string) (doma
 
 		c.logger.Info("docling conversion completed", logFields...)
 
-		return domain.StatusCheckResult{
-			Status: normalizedStatus,
-			Result: &result,
-		}, nil
+		return domain.StatusCheckResult{Status: normalizedStatus, Result: &result}, nil
 
 	case isPendingStatus(normalizedStatus):
 		c.logger.Debug("docling still processing", append(logFields, zap.String("status", normalizedStatus))...)
-		return domain.StatusCheckResult{
-			Status: normalizedStatus,
-			Result: nil,
-		}, nil
+		return domain.StatusCheckResult{Status: normalizedStatus, Result: nil}, nil
 
 	default:
 		c.logger.Warn("docling reported failure status", append(logFields,
@@ -579,7 +564,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, taskID string) (doma
 	}
 }
 
-// --- внутренняя отправка задач и опции Docling ---
+// --- submit helpers ---
 
 func (c *DoclingConverter) submitWithRetry(
 	ctx context.Context,
@@ -610,7 +595,6 @@ func (c *DoclingConverter) submitWithRetry(
 		if attempt < submitRetryAttempts {
 			fields = append(fields, zap.Duration("retry_in", delay))
 			c.logger.Warn("docling submit failed", fields...)
-
 			select {
 			case <-ctx.Done():
 				return domain.DoclingIdentifiers{}, ctx.Err()
@@ -655,7 +639,6 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 		if attempt < submitRetryAttempts {
 			fields = append(fields, zap.Duration("retry_in", delay))
 			c.logger.Warn("docling submit failed", fields...)
-
 			select {
 			case <-ctx.Done():
 				return domain.DoclingIdentifiers{}, ctx.Err()
@@ -673,61 +656,50 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 	return domain.DoclingIdentifiers{}, lastErr
 }
 
-// writeDoclingOptions — формирует form-data поля с опциями Docling Serve.
+// writeDoclingOptions — строго: to_formats повторяющимися ключами, OCR управляем do_ocr/force_ocr.
 func (c *DoclingConverter) writeDoclingOptions(
 	writer *multipart.Writer,
-	contentType, fileExt string,
+	_ string, // contentType не используем для form
+	fileExt string,
 	enableOCR, forceOCR bool,
 	ocrLang, pdfBackend string,
 ) error {
-	// Всегда явно просим JSON; Markdown оставляем как запасной формат
-	if err := writer.WriteField("to_formats", "json,md"); err != nil {
-		return fmt.Errorf("write to_formats: %w", err)
+	// to_formats: array -> повторяем ключ
+	if err := writer.WriteField("to_formats", "json"); err != nil {
+		return fmt.Errorf("write to_formats json: %w", err)
+	}
+	if err := writer.WriteField("to_formats", "md"); err != nil {
+		return fmt.Errorf("write to_formats md: %w", err)
 	}
 
-	// Подсказываем тип входа (pdf/doc/docx) — опционально
+	// from_formats: array -> один элемент
 	if fileExt != "" {
 		if err := writer.WriteField("from_formats", fileExt); err != nil {
 			return fmt.Errorf("write from_formats: %w", err)
 		}
 	}
 
-	if lang := c.selectLanguage(contentType); lang != "" {
-		if err := writer.WriteField("language", lang); err != nil {
-			return fmt.Errorf("write language: %w", err)
+	// OCR: только do_ocr/force_ocr
+	// do_ocr задаём явно, чтобы base-фаза могла отключить OCR (EnableOCR=false).
+	if err := writer.WriteField("do_ocr", fmt.Sprintf("%t", enableOCR)); err != nil {
+		return fmt.Errorf("write do_ocr: %w", err)
+	}
+	if forceOCR {
+		if err := writer.WriteField("force_ocr", "true"); err != nil {
+			return fmt.Errorf("write force_ocr: %w", err)
 		}
 	}
 
-	// Опции для PDF + OCR
+	// Остальные OCR поля имеет смысл слать только если OCR включён
 	if enableOCR {
-		if err := writer.WriteField("ocr", "true"); err != nil {
-			return fmt.Errorf("write ocr: %w", err)
-		}
-
-		// Включаем OCR (Docling сам решит, когда его применять)
-		if err := writer.WriteField("do_ocr", "true"); err != nil {
-			return fmt.Errorf("write do_ocr: %w", err)
-		}
-
-		if forceOCR {
-			if err := writer.WriteField("force_ocr", "true"); err != nil {
-				return fmt.Errorf("write force_ocr: %w", err)
-			}
-		}
-
-		// Дадим Docling самому выбрать доступный движок
 		if err := writer.WriteField("ocr_engine", "tesseract"); err != nil {
 			return fmt.Errorf("write ocr_engine: %w", err)
 		}
-
-		// Язык OCR
 		if ocrLang != "" {
 			if err := writer.WriteField("ocr_lang", normalizeTesseractLang(ocrLang)); err != nil {
 				return fmt.Errorf("write ocr_lang: %w", err)
 			}
 		}
-
-		// Бэкенд парсера PDF
 		backend := pdfBackend
 		if backend == "" {
 			backend = "pypdfium2"
@@ -737,7 +709,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 		}
 	}
 
-	// Режим таблиц и картинок — дефолты, но укажем явно
+	// Таблицы/картинки/pipeline
 	if err := writer.WriteField("table_mode", "accurate"); err != nil {
 		return fmt.Errorf("write table_mode: %w", err)
 	}
@@ -747,7 +719,6 @@ func (c *DoclingConverter) writeDoclingOptions(
 	if err := writer.WriteField("image_export_mode", "embedded"); err != nil {
 		return fmt.Errorf("write image_export_mode: %w", err)
 	}
-	// Стандартный pipeline
 	if err := writer.WriteField("pipeline", "standard"); err != nil {
 		return fmt.Errorf("write pipeline: %w", err)
 	}
@@ -768,36 +739,32 @@ func (c *DoclingConverter) buildDoclingOptions(contentType, fileExt string, enab
 		opts.FromFormats = []string{fileExt}
 	}
 
+	// language оставляем в JSON-режиме как было (если сервер использует)
 	if lang := c.selectLanguage(contentType); lang != "" {
 		opts.Language = lang
-		if ocrLang == "" {
-			ocrLang = lang
-		}
+	}
+
+	opts.DoOCR = boolPtr(enableOCR)
+	if forceOCR {
+		opts.ForceOCR = boolPtr(true)
 	}
 
 	if enableOCR {
-		opts.OCR = boolPtr(true)
-		opts.DoOCR = boolPtr(true)
-		if forceOCR {
-			opts.ForceOCR = boolPtr(true)
-		}
+		opts.OCREngine = "tesseract"
 		if ocrLang != "" {
-			opts.OCRLang = ocrLang
+			opts.OCRLang = []string{normalizeTesseractLang(ocrLang)}
 		}
 		if pdfBackend != "" {
 			opts.PDFBackend = pdfBackend
 		} else {
 			opts.PDFBackend = "pypdfium2"
 		}
-		opts.OCREngine = "tesseract"
-		if ocrLang != "" {
-			opts.OCRLang = normalizeTesseractLang(ocrLang)
-		}
 	}
 
 	return opts
 }
 
+// submit: строго без query language/ocr.
 func (c *DoclingConverter) submit(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
@@ -811,15 +778,6 @@ func (c *DoclingConverter) submit(
 	if err != nil {
 		return domain.DoclingIdentifiers{}, fmt.Errorf("parse docling submit endpoint: %w", err)
 	}
-
-	query := submitURL.Query()
-	if lang := c.selectLanguage(contentType); lang != "" {
-		query.Set("language", lang)
-	}
-	if enableOCR {
-		query.Set("ocr", "true")
-	}
-	submitURL.RawQuery = query.Encode()
 
 	payload := &bytes.Buffer{}
 	writer := multipart.NewWriter(payload)
@@ -844,11 +802,9 @@ func (c *DoclingConverter) submit(
 		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling multipart: %w", err)
 	}
 
-	// Опции Docling Serve (форматы, OCR, язык, pdf_backend и т.п.)
 	if err = c.writeDoclingOptions(writer, contentType, fileExt, enableOCR, forceOCR, ocrLang, pdfBackend); err != nil {
 		return domain.DoclingIdentifiers{}, err
 	}
-
 	if err = writer.Close(); err != nil {
 		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling multipart: %w", err)
 	}
@@ -884,7 +840,6 @@ func (c *DoclingConverter) submit(
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 			return domain.DoclingIdentifiers{}, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
 		}
-
 		return domain.DoclingIdentifiers{}, baseErr
 	}
 
@@ -907,11 +862,11 @@ func (c *DoclingConverter) submitSourceAsync(
 	req domain.ConvertRequest,
 ) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
+
 	sourceStorage, err := c.resolveSourceStorage(req)
 	if err != nil {
 		return domain.DoclingIdentifiers{}, err
 	}
-
 	targetStorage, err := c.resolveTargetStorage(req)
 	if err != nil {
 		return domain.DoclingIdentifiers{}, err
@@ -984,7 +939,6 @@ func (c *DoclingConverter) submitSourceAsync(
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 			return domain.DoclingIdentifiers{}, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
 		}
-
 		return domain.DoclingIdentifiers{}, baseErr
 	}
 
@@ -1001,7 +955,6 @@ func (c *DoclingConverter) submitSourceAsync(
 	return ids, nil
 }
 
-// fetchStatus читает TaskStatusResponse из /v1/status/poll/{task_id}
 func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, taskID string) (taskStatusResponse, []byte, error) {
 	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingStatusPath, taskID)
 
@@ -1032,7 +985,6 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, taskI
 		if isTemporaryDoclingStatus(resp.StatusCode) {
 			return taskStatusResponse{}, body, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
 		}
-
 		return taskStatusResponse{}, body, baseErr
 	}
 
@@ -1048,7 +1000,6 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, taskI
 	return statusResp, body, nil
 }
 
-// fetchResult читает ConvertDocumentResponse / другие варианты из /v1/result/{task_id}
 func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, taskID string) (convertDocumentResponse, []byte, error) {
 	endpoint := fmt.Sprintf("%s%s%s", c.endpoint, doclingResultPath, taskID)
 
@@ -1086,7 +1037,6 @@ func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, taskI
 	return resultResp, body, nil
 }
 
-// buildConvertResult собирает domain.ConvertResult из ConvertDocumentResponse.
 func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (domain.ConvertResult, error) {
 	normalizedStatus := normalizeStatus(resp.Status)
 	if !isSuccessStatus(normalizedStatus) {
@@ -1094,7 +1044,6 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 	}
 
 	doc := resp.Document
-
 	charset := ""
 	if doc.Charset != nil {
 		charset = *doc.Charset
@@ -1118,8 +1067,13 @@ func (c *DoclingConverter) selectMarkdown(doc exportDocumentResponse) string {
 	rendered, ok, coverage, fillRate, mergeStats := c.renderMarkdown(doc)
 	mdContent := strings.TrimSpace(firstNonEmpty(doc.MdContent))
 
-	c.logger.Info("docling voting coverage", zap.Float64("table_coverage", coverage), zap.Float64("fill_rate", fillRate),
-		zap.Int("merge_total_rows", mergeStats.TotalRows), zap.Int("merge_matched_rows", mergeStats.MatchedRows), zap.Int("merge_filled_cells", mergeStats.MergedRows))
+	c.logger.Info("docling voting coverage",
+		zap.Float64("table_coverage", coverage),
+		zap.Float64("fill_rate", fillRate),
+		zap.Int("merge_total_rows", mergeStats.TotalRows),
+		zap.Int("merge_matched_rows", mergeStats.MatchedRows),
+		zap.Int("merge_filled_cells", mergeStats.MergedRows),
+	)
 
 	switch {
 	case c.render.PreferJSON && ok && rendered != "":
@@ -1146,16 +1100,11 @@ func (c *DoclingConverter) renderMarkdown(doc exportDocumentResponse) (string, b
 
 	coverage := calculateTableCoverage(parsed.Tables, c.render.VotingTableMinRows)
 	fillRate := doclingjson.CalculateVotingFillRate(parsed.Tables)
-	rendered, ok, conflicts := doclingjson.RenderMarkdownWithConflicts(parsed, doc.MdContent)
-	rendered = strings.TrimSpace(rendered)
-	for _, conflict := range conflicts {
-		c.logger.Warn("markdown table merge conflict",
-			zap.Int("markdown_table_index", conflict.MarkdownIndex),
-			zap.String("table_id", conflict.TableID),
-			zap.String("reason", conflict.Reason))
-	}
-	mergeStats := doclingjson.MergeStats{}
 
+	rendered, ok := doclingjson.RenderMarkdown(parsed, doc.MdContent)
+	rendered = strings.TrimSpace(rendered)
+
+	mergeStats := doclingjson.MergeStats{}
 	if c.render.TwoPassVotingMerge && fillRate < c.render.PassBTableCoverage {
 		baseRendered := rendered
 		passBTables := doclingjson.ParseMarkdownTables(mdString(doc.MdContent))
@@ -1164,14 +1113,8 @@ func (c *DoclingConverter) renderMarkdown(doc exportDocumentResponse) (string, b
 			mergeStats = stats
 			if stats.MergedRows > 0 || stats.MatchedRows > 0 {
 				parsed.Tables = mergedTables
-				rendered, ok, conflicts = doclingjson.RenderMarkdownWithConflicts(parsed, doc.MdContent)
+				rendered, ok = doclingjson.RenderMarkdown(parsed, doc.MdContent)
 				rendered = strings.TrimSpace(rendered)
-				for _, conflict := range conflicts {
-					c.logger.Warn("markdown table merge conflict",
-						zap.Int("markdown_table_index", conflict.MarkdownIndex),
-						zap.String("table_id", conflict.TableID),
-						zap.String("reason", conflict.Reason))
-				}
 				if rendered == "" {
 					rendered = baseRendered
 				}
@@ -1186,19 +1129,16 @@ func calculateTableCoverage(tables []doclingjson.Table, minRows int) float64 {
 	if minRows <= 0 {
 		minRows = 1
 	}
-
 	total := len(tables)
 	if total == 0 {
 		return 0
 	}
-
 	filled := 0
 	for _, table := range tables {
 		if len(table.Rows) >= minRows {
 			filled++
 		}
 	}
-
 	return float64(filled) / float64(total)
 }
 
@@ -1215,7 +1155,6 @@ func mdString(value *string) string {
 	if value == nil {
 		return ""
 	}
-
 	return *value
 }
 
@@ -1223,12 +1162,10 @@ func submitRetryDelay(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
-
 	delay := time.Duration(float64(submitRetryInitialWait) * math.Pow(submitRetryBackoff, float64(attempt-1)))
 	if delay > submitRetryMaxWait {
 		return submitRetryMaxWait
 	}
-
 	return delay
 }
 
@@ -1239,10 +1176,8 @@ func isTemporaryDoclingError(err error) (bool, int) {
 		if errors.As(err, &code) {
 			return true, code.StatusCode()
 		}
-
 		return true, 0
 	}
-
 	return false, 0
 }
 
@@ -1258,6 +1193,4 @@ func normalizeTesseractLang(lang string) string {
 	}
 }
 
-func boolPtr(v bool) *bool {
-	return &v
-}
+func boolPtr(v bool) *bool { return &v }
