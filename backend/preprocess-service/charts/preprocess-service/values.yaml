@@ -22,18 +22,6 @@ env:
   SERVICE_REGION: local
   CONFIG_PATH: /app/config/config.yaml
 
-config:
-  secretName: preprocess-service-config
-  key: config.yaml
-  mountPath: /app/config/config.yaml
-  description: "Secret должен содержать ключ config.yaml со всеми параметрами (PostgreSQL, MinIO, LibreOffice путь, воркеры, уровень логов)."
-
-secrets:
-  postgresSecret: preprocess-postgres-credentials # содержит DSN или пользователя/пароль PostgreSQL
-  minioAccessKeySecret: preprocess-minio-access   # access_key для MinIO
-  minioSecretKeySecret: preprocess-minio-secret   # secret_key для MinIO
-  notes: "Секреты используются для формирования config.yaml и доступа к БД/хранилищу; в чарте ожидается, что конфиг передаётся через secretName."
-
 resources:
   requests:
     cpu: 100m
