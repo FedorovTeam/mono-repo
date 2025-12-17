@@ -3,6 +3,7 @@ package doclingjson
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -44,6 +45,10 @@ type Mark struct {
 	Name     string         `json:"name"`
 	TargetID string         `json:"target_id"`
 	Target   map[string]any `json:"target"`
+}
+
+type TableConflict struct {
+	Reason string `json:"reason"`
 }
 
 // RenderMarkdown пытается собрать Markdown по таблицам из jsonContent.
@@ -108,6 +113,92 @@ func RenderMarkdown(jsonContent any, mdFallback *string) (string, bool) {
 	return rendered, rendered != ""
 }
 
+func RenderMarkdownWithConflicts(jsonContent any, mdFallback *string) (string, bool, []TableConflict) {
+	doc, err := Parse(jsonContent)
+	if err != nil {
+		return "", false, []TableConflict{{Reason: err.Error()}}
+	}
+
+	fallback := ""
+	if mdFallback != nil && mdFallback != (*string)(nil) {
+		fallback = strings.TrimSpace(*mdFallback)
+	}
+
+	if len(doc.Tables) == 0 {
+		return fallback, false, []TableConflict{{Reason: "no ocr tables"}}
+	}
+
+	if strings.TrimSpace(fallback) == "" {
+		rendered, ok := RenderMarkdown(jsonContent, nil)
+		return rendered, ok, nil
+	}
+
+	if strings.Contains(fallback, "{{") {
+		rendered, ok := RenderMarkdown(jsonContent, &fallback)
+		return rendered, ok, nil
+	}
+
+	blocks := ParseMarkdownTableBlocks(fallback)
+	if len(blocks) == 0 {
+		rendered, ok := RenderMarkdown(jsonContent, &fallback)
+		return rendered, ok, nil
+	}
+
+	lines := strings.Split(fallback, "\n")
+	used := make(map[int]bool)
+	var conflicts []TableConflict
+
+	for i := len(blocks) - 1; i >= 0; i-- {
+		block := blocks[i]
+		baseColumns := tableColumnCount(block.Table)
+
+		matchIdx := -1
+		for idx, tbl := range doc.Tables {
+			if used[idx] {
+				continue
+			}
+
+			ocrColumns := tableColumnCount(tbl)
+			if ocrColumns == 0 {
+				continue
+			}
+
+			if ocrColumns == baseColumns {
+				matchIdx = idx
+				break
+			}
+		}
+
+		if matchIdx == -1 {
+			conflicts = append(conflicts, TableConflict{Reason: fmt.Sprintf("shape mismatch: base_columns=%d", baseColumns)})
+			continue
+		}
+
+		replacement := strings.TrimSpace(tableMarkdown(doc.Tables[matchIdx]))
+		if replacement == "" {
+			conflicts = append(conflicts, TableConflict{Reason: "empty ocr table"})
+			continue
+		}
+
+		used[matchIdx] = true
+
+		repLines := strings.Split(replacement, "\n")
+		start, end := block.StartLine, block.EndLine
+		if start < 0 || end >= len(lines) || start > end {
+			continue
+		}
+
+		newLines := make([]string, 0, len(lines)-((end-start)+1)+len(repLines))
+		newLines = append(newLines, lines[:start]...)
+		newLines = append(newLines, repLines...)
+		newLines = append(newLines, lines[end+1:]...)
+		lines = newLines
+	}
+
+	rendered := strings.Join(lines, "\n")
+	return rendered, true, conflicts
+}
+
 // Parse пытается tolerant-распарсить json_content.
 func Parse(jsonContent any) (Document, error) {
 	var doc Document
@@ -139,6 +230,32 @@ func Parse(jsonContent any) (Document, error) {
 	}
 
 	return doc, nil
+}
+
+func tableMarkdown(tbl Table) string {
+	if md := strings.TrimSpace(tbl.Markdown); md != "" {
+		return md
+	}
+
+	return strings.TrimSpace(renderTableRows(tbl.Rows))
+}
+
+func tableColumnCount(tbl Table) int {
+	if len(tbl.Rows) > 0 && len(tbl.Rows[0].Cells) > 0 {
+		return len(tbl.Rows[0].Cells)
+	}
+
+	md := strings.TrimSpace(tbl.Markdown)
+	if md == "" {
+		return 0
+	}
+
+	parsed := ParseMarkdownTables(md)
+	if len(parsed) == 0 || len(parsed[0].Rows) == 0 {
+		return 0
+	}
+
+	return len(parsed[0].Rows[0].Cells)
 }
 
 func buildTableMarkdowns(tables []Table) map[string]string {

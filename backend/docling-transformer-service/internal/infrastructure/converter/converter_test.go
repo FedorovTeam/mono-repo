@@ -37,7 +37,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 			}
 
 			formats := r.MultipartForm.Value["to_formats"]
-			if len(formats) != 1 || formats[0] != "json,md" {
+			if !reflect.DeepEqual(formats, []string{"json", "md"}) {
 				t.Fatalf("unexpected to_formats: %+v", formats)
 			}
 
@@ -263,8 +263,28 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 		t.Fatalf("unexpected to_formats: %+v", receivedRequest.Options.ToFormats)
 	}
 
-	if receivedRequest.Options.Language != "ru" || receivedRequest.Options.OCR == nil || !*receivedRequest.Options.OCR {
-		t.Fatalf("expected language and ocr options, got %+v", receivedRequest.Options)
+	if receivedRequest.Options.DoOCR == nil || !*receivedRequest.Options.DoOCR {
+		t.Fatalf("expected do_ocr=true for pdf, got %+v", receivedRequest.Options.DoOCR)
+	}
+
+	if receivedRequest.Options.ForceOCR == nil || *receivedRequest.Options.ForceOCR {
+		t.Fatalf("expected force_ocr=false by default, got %+v", receivedRequest.Options.ForceOCR)
+	}
+
+	if !reflect.DeepEqual(receivedRequest.Options.OCRLang, []string{"rus", "eng", "osd"}) {
+		t.Fatalf("unexpected ocr_lang: %+v", receivedRequest.Options.OCRLang)
+	}
+
+	if receivedRequest.Options.PDFBackend != "dlparse_v4" {
+		t.Fatalf("expected default pdf_backend dlparse_v4, got %s", receivedRequest.Options.PDFBackend)
+	}
+
+	if receivedRequest.Options.DoTableStructure == nil || !*receivedRequest.Options.DoTableStructure {
+		t.Fatalf("expected do_table_structure to be true, got %+v", receivedRequest.Options.DoTableStructure)
+	}
+
+	if receivedRequest.Options.TableCellMatching == nil || *receivedRequest.Options.TableCellMatching {
+		t.Fatalf("expected table_cell_matching to be false, got %+v", receivedRequest.Options.TableCellMatching)
 	}
 }
 
@@ -543,7 +563,9 @@ func ptr[T any](v T) *T {
 
 func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 	var receivedQuery string
-	var receivedLanguageField, receivedOCRField string
+	var receivedLanguageField, receivedDoOCRField, receivedForceOCRField string
+	var receivedPDFBackend, receivedTableCellMatching, receivedTableStructure string
+	var receivedOCRLang []string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -555,7 +577,12 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 			}
 
 			receivedLanguageField = r.FormValue("language")
-			receivedOCRField = r.FormValue("ocr")
+			receivedDoOCRField = r.FormValue("do_ocr")
+			receivedForceOCRField = r.FormValue("force_ocr")
+			receivedPDFBackend = r.FormValue("pdf_backend")
+			receivedTableCellMatching = r.FormValue("table_cell_matching")
+			receivedTableStructure = r.FormValue("do_table_structure")
+			receivedOCRLang = r.MultipartForm.Value["ocr_lang"]
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
@@ -578,6 +605,7 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 	conv := NewDoclingConverter(Config{
 		Endpoint:           server.URL,
 		PDFEnableOCR:       true,
+		ForceOCR:           true,
 		DefaultLanguage:    "ru",
 		PDFDefaultLanguage: "sah",
 	}, zap.NewNop())
@@ -618,13 +646,45 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 		t.Fatalf("expected language form field, got %s", receivedLanguageField)
 	}
 
-	if receivedOCRField != "true" {
-		t.Fatalf("expected ocr form field, got %s", receivedOCRField)
+	if receivedDoOCRField != "true" {
+		t.Fatalf("expected do_ocr form field, got %s", receivedDoOCRField)
+	}
+
+	if receivedForceOCRField != "true" {
+		t.Fatalf("expected force_ocr form field, got %s", receivedForceOCRField)
+	}
+
+	if receivedPDFBackend != "dlparse_v4" {
+		t.Fatalf("expected pdf_backend dlparse_v4, got %s", receivedPDFBackend)
+	}
+
+	if receivedTableStructure != "true" {
+		t.Fatalf("expected do_table_structure form field to be true, got %s", receivedTableStructure)
+	}
+
+	if receivedTableCellMatching != "false" {
+		t.Fatalf("expected table_cell_matching form field to be false, got %s", receivedTableCellMatching)
+	}
+
+	if len(receivedOCRLang) != 3 {
+		t.Fatalf("expected three ocr_lang entries, got %v", receivedOCRLang)
+	}
+
+	langSet := map[string]bool{}
+	for _, lang := range receivedOCRLang {
+		langSet[lang] = true
+	}
+
+	for _, expected := range []string{"rus", "eng", "osd"} {
+		if !langSet[expected] {
+			t.Fatalf("expected ocr_lang to contain %s, got %v", expected, receivedOCRLang)
+		}
 	}
 }
 
 func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 	var attempts int32
+	var receivedOptions doclingOptions
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -633,6 +693,12 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 				http.Error(w, "unavailable", http.StatusBadGateway)
 				return
 			}
+
+			var reqBody convertDocumentsRequest
+			if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+				t.Fatalf("failed to decode request: %v", err)
+			}
+			receivedOptions = reqBody.Options
 
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "retry-task"})
@@ -666,6 +732,30 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 
 	if attempts != 2 {
 		t.Fatalf("expected retry, got %d attempts", attempts)
+	}
+
+	if receivedOptions.DoOCR == nil || *receivedOptions.DoOCR {
+		t.Fatalf("expected do_ocr to be false for docx, got %+v", receivedOptions.DoOCR)
+	}
+
+	if receivedOptions.ForceOCR == nil || *receivedOptions.ForceOCR {
+		t.Fatalf("expected force_ocr to be false, got %+v", receivedOptions.ForceOCR)
+	}
+
+	if receivedOptions.PDFBackend != "dlparse_v4" {
+		t.Fatalf("expected default pdf_backend dlparse_v4, got %s", receivedOptions.PDFBackend)
+	}
+
+	if receivedOptions.DoTableStructure == nil || !*receivedOptions.DoTableStructure {
+		t.Fatalf("expected do_table_structure to be true, got %+v", receivedOptions.DoTableStructure)
+	}
+
+	if receivedOptions.TableCellMatching == nil || *receivedOptions.TableCellMatching {
+		t.Fatalf("expected table_cell_matching to be false, got %+v", receivedOptions.TableCellMatching)
+	}
+
+	if len(receivedOptions.OCRLang) != 0 {
+		t.Fatalf("expected no ocr_lang entries for non-ocr request, got %v", receivedOptions.OCRLang)
 	}
 
 	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {
