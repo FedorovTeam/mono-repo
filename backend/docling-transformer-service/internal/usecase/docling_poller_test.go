@@ -169,3 +169,52 @@ func TestDoclingPollerUsesTaskIDForStatusAndResult(t *testing.T) {
 		t.Fatalf("expected no job-based polling, got status=%d result=%d", jobStatusCalls, jobResultCalls)
 	}
 }
+
+func TestDoclingPollerRequeuesAfterRepeatedStatusErrors(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/status/poll/"):
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, "not found", http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, nil)
+	config := DoclingPollerConfig{InitialInterval: 10 * time.Millisecond, MaxInterval: time.Second, BackoffFactor: 2, MaxAttempts: 5}
+	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, config)
+
+	task := &transformations.TransformationTask{ID: uuid.New(), DoclingTaskID: "job-404", DoclingJobID: "job-404", CreatedAt: time.Now().Add(-time.Minute)}
+
+	if _, err := poller.Poll(context.Background(), task); !errors.Is(err, ErrDoclingWaiting) {
+		t.Fatalf("expected waiting error, got %v", err)
+	}
+
+	if repoStub.requeueCalls != 0 {
+		t.Fatalf("expected no requeue after first error, got %d", repoStub.requeueCalls)
+	}
+	if repoStub.markWaitingCalls != 1 {
+		t.Fatalf("expected mark waiting call, got %d", repoStub.markWaitingCalls)
+	}
+
+	result, err := poller.Poll(context.Background(), task)
+	if !errors.Is(err, ErrDoclingWaiting) {
+		t.Fatalf("expected waiting error, got %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected no result on repeated error")
+	}
+
+	if repoStub.requeueCalls != 1 {
+		t.Fatalf("expected single requeue after repeated errors, got %d", repoStub.requeueCalls)
+	}
+	if task.DoclingTaskID != "" || task.DoclingJobID != "" {
+		t.Fatalf("expected docling identifiers to be cleared after requeue, got task=%s job=%s", task.DoclingTaskID, task.DoclingJobID)
+	}
+	if task.DoclingPollCount != 0 {
+		t.Fatalf("expected poll count reset after requeue, got %d", task.DoclingPollCount)
+	}
+}
