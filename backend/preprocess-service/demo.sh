@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROTO_DIR="${ROOT_DIR}/proto"
 TESTDATA_DIR="${ROOT_DIR}/testdata"
-SAMPLE_FILE="${TESTDATA_DIR}/sample.docx"
+SAMPLE_FILE="${TESTDATA_DIR}/sample.doc"
+SAMPLE_FILE_NAME="$(basename "${SAMPLE_FILE}")"
 MINIO_MC_IMAGE="${MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-06-11T03-13-30Z}"
 GRPCURL_IMAGE="${GRPCURL_IMAGE:-fullstorydev/grpcurl:v1.9.1}"
 
@@ -21,7 +22,7 @@ docker run --rm --network host \
   mc alias set local http://localhost:9000 PREPROCESS_MINIO_KEY PREPROCESS_MINIO_SECRET && \
   mc mb -p local/preprocess-source || true && \
   mc mb -p local/preprocess-artifacts || true && \
-  mc cp /data/sample.docx local/preprocess-source/incoming/demo.docx"
+  mc cp "/data/${SAMPLE_FILE_NAME}" local/preprocess-source/incoming/demo.doc"
 
 echo "Отправляем SubmitPreprocess через grpcurl..."
 docker run --rm --network host \
@@ -32,7 +33,7 @@ docker run --rm --network host \
   -proto /proto/preprocess.proto \
   -d '{
     "source_bucket": "preprocess-source",
-    "source_key": "incoming/demo.docx",
+    "source_key": "incoming/demo.doc",
     "source_etag": "etag-demo-1",
     "target_bucket": "preprocess-artifacts",
     "target_key": "converted/demo.docx",

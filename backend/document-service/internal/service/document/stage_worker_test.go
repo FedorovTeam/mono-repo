@@ -396,7 +396,7 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	}
 }
 
-func TestHandleConvertPropagatesOCREnabled(t *testing.T) {
+func TestHandleConvertPropagatesForceOCR(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-ocr",
 		Name:              "Doc.pdf",
@@ -411,7 +411,7 @@ func TestHandleConvertPropagatesOCREnabled(t *testing.T) {
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "path/doc.md",
 		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc", MarkdownObjectKey: "path/doc.md"}},
-		OCREnabled:        true,
+		ForceOCR:          true,
 	}
 
 	repo := &publishRepoStub{doc: doc}
@@ -432,7 +432,7 @@ func TestHandleConvertPropagatesOCREnabled(t *testing.T) {
 	}
 
 	payload := domain.ConvertPayloadFromMap(result.Payload)
-	if payload.OCREnabled == nil || !*payload.OCREnabled {
+	if payload.ForceOCR == nil || !*payload.ForceOCR {
 		t.Fatalf("expected OCR flag in payload, got %v", result.Payload)
 	}
 	if payload.FilenameExtension != "pdf" {

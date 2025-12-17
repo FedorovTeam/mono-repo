@@ -17,7 +17,7 @@ func mapDocument(doc *pb.Document) *domain.Document {
 		Branch:      doc.GetBranch(),
 		Path:        doc.GetPath(),
 		Status:      domainStatusFromProto(doc.GetStatus()),
-		ForcePdfOcr: doc.GetOcrEnabled(),
+		ForcePdfOcr: doc.GetForceOcr(),
 	}
 
 	if doc.GetOwner() != "" {

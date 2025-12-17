@@ -110,7 +110,7 @@ func toProto(doc *domain.Document) *documentv1.Document {
 		MarkdownBucket:    doc.MarkdownBucket,
 		MarkdownObjectKey: doc.MarkdownObjectKey,
 		CreatePr:          doc.CreatePR,
-		OcrEnabled:        doc.OCREnabled,
+		ForceOcr:          doc.ForceOCR,
 		CreatedAt:         timestamppb.New(doc.CreatedAt),
 		UpdatedAt:         timestamppb.New(doc.UpdatedAt),
 		JobId:             doc.ActiveJobID,

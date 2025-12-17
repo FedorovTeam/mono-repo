@@ -85,7 +85,7 @@
    make demo
    ```
    
-   Скрипт дождётся готовности MinIO и сервиса, загрузит пример `testdata/sample.docx` в `preprocess-source/incoming/demo.docx` и выполнит gRPC‑вызов на `localhost:9082` через `grpcurl`. Чтобы прогнать конвертацию на стороннем файле (например, `*.doc` из интернета), передайте `DEMO_SOURCE_URL` и при необходимости `DEMO_SOURCE_FILE_NAME`/`DEMO_SOURCE_KEY`:
+   Скрипт дождётся готовности MinIO и сервиса, загрузит пример `testdata/sample.doc` в `preprocess-source/incoming/demo.doc` и выполнит gRPC‑вызов на `localhost:9082` через `grpcurl`. Чтобы прогнать конвертацию на стороннем файле (например, `*.doc` из интернета), передайте `DEMO_SOURCE_URL` и при необходимости `DEMO_SOURCE_FILE_NAME`/`DEMO_SOURCE_KEY`:
    ```bash
    DEMO_SOURCE_URL="https://file-examples.com/storage/fe4fbfdb5f6e1f040b04f3c/file-sample_100kB.doc" make demo
    ```

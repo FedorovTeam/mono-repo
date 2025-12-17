@@ -19,7 +19,7 @@ type createDocumentDTO struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	CreatePR          bool
-	OCREnabled        bool
+	ForceOCR          bool
 }
 
 type updateDocumentStatusDTO struct {
@@ -58,7 +58,7 @@ func fromCreateDocumentRequest(req *documentv1.CreateDocumentRequest) createDocu
 		MarkdownBucket:    req.GetMarkdownBucket(),
 		MarkdownObjectKey: req.GetMarkdownObjectKey(),
 		CreatePR:          req.GetCreatePr(),
-		OCREnabled:        req.GetOcrEnabled(),
+		ForceOCR:          req.GetForceOcr(),
 	}
 }
 
@@ -76,7 +76,7 @@ func toCreateDocumentCommand(dto createDocumentDTO) document.CreateDocumentInput
 		MarkdownBucket:    dto.MarkdownBucket,
 		MarkdownObjectKey: dto.MarkdownObjectKey,
 		CreatePR:          dto.CreatePR,
-		OCREnabled:        dto.OCREnabled,
+		ForceOCR:          dto.ForceOCR,
 	}
 }
 

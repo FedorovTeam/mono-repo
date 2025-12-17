@@ -59,7 +59,7 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 	assertColumnExists(t, ctx, db, "documents", "path")
 	assertColumnExists(t, ctx, db, "documents", "error_reason")
 	assertColumnExists(t, ctx, db, "documents", "workflow_id")
-	assertColumnExists(t, ctx, db, "documents", "ocr_enabled")
+	assertColumnExists(t, ctx, db, "documents", "force_ocr")
 	assertColumnExists(t, ctx, db, "document_status_logs", "workflow_id")
 }
 
