@@ -45,7 +45,7 @@ docling:
     use_ssl: true
 
 docling_render:
-  prefer_json: true
+  prefer_json: false
   two_pass_voting_merge: false
   voting_table_min_rows: 1
   pass_b_table_coverage: 0.5
