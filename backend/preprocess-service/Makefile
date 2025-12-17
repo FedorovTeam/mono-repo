@@ -2,8 +2,10 @@ APP_NAME=preprocess-service
 IMAGE?=$(APP_NAME):local
 CONFIG_PATH?=$(PWD)/config/config.yaml
 GOOSE?=go run github.com/pressly/goose/v3/cmd/goose@v3.22.3
+MINIO_MC_IMAGE?=minio/mc:RELEASE.2024-06-11T03-13-30Z
+GRPCURL_IMAGE?=fullstorydev/grpcurl:v1.9.1
 
-.PHONY: build run test docker-build docker-run migrate
+.PHONY: build run test docker-build docker-run migrate demo
 
 build:
 	go build -o bin/$(APP_NAME) ./cmd/preprocess-service/main.go

@@ -8,6 +8,31 @@
    curl -f http://localhost:8082/ready
    curl -f http://localhost:8082/metrics | head -n 5
    ```
+## Демонстрация через docker-compose
+1. Запустить стенд: `docker compose up -d` (PostgreSQL, MinIO и preprocess-service).
+2. Проверить готовность:
+   ```bash
+   docker compose ps
+   curl -f http://localhost:8082/health
+   curl -f http://localhost:8082/ready
+   ```
+3. Сгенерировать тестовый объект и отправить задачу на предобработку:
+   ```bash
+   make demo
+   ```
+   В MinIO появится `preprocess-source/incoming/demo.docx`, а в выводе команды — `job_id`.
+4. Опросить статус задачи, подставив полученный идентификатор:
+   ```bash
+   docker run --rm --network host \
+     -v $(pwd)/proto:/proto \
+     fullstorydev/grpcurl:v1.9.1 \
+     -plaintext \
+     -import-path /proto \
+     -proto /proto/preprocess.proto \
+     -d '{"job_id": "<JOB_ID>"}' \
+     localhost:9082 backend.preprocess.v1.PreprocessService/GetPreprocessStatus
+   ```
+5. Ожидаемый финал: `status=PREPROCESS_STATUS_COMPLETED`, заполнены `target_bucket`/`target_key`, ошибок нет.
 
 ## Polling сценарий (.doc → .docx)
 1. Подготовить исходник в MinIO: `preprocess-source/incoming/manual.doc`.

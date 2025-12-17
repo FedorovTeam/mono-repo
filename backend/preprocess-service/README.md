@@ -68,6 +68,35 @@
    ```
    При желании можно заменить файл конфигурации на другой путь, передав `-e CONFIG_PATH=/app/config/custom.yaml` и примонтировав соответствующий volume.
 
+## Быстрый стенд через docker-compose
+1. Поднимите инфраструктуру и сервис из корня каталога:
+   ```bash
+   docker compose up -d
+   ```
+   В состав стенда входят PostgreSQL (порт 5432), MinIO (9000/9001) и `preprocess-service` (8082/9082). Консоль MinIO доступна на `http://localhost:9001` с учетными данными `PREPROCESS_MINIO_KEY/PREPROCESS_MINIO_SECRET`.
+2. Убедитесь, что контейнеры здоровы, а сервис перешел в состояние `healthy`:
+   ```bash
+   docker compose ps
+   curl -f http://localhost:8082/health
+   curl -f http://localhost:8082/ready
+   ```
+3. Сформируйте тестовый объект в `preprocess-source` и отправьте `SubmitPreprocess` с готовыми параметрами:
+   ```bash
+   make demo
+   ```
+   Скрипт загрузит пример `testdata/sample.docx` в `preprocess-source/incoming/demo.docx` и выполнит gRPC‑вызов на `localhost:9082` через `grpcurl`.
+4. Возьмите `job_id` из ответа и проверьте статус выполнения, например:
+   ```bash
+   docker run --rm --network host \
+     -v $(pwd)/proto:/proto \
+     fullstorydev/grpcurl:v1.9.1 \
+     -plaintext \
+     -import-path /proto \
+     -proto /proto/preprocess.proto \
+     -d '{"job_id": "<JOB_ID>"}' \
+     localhost:9082 backend.preprocess.v1.PreprocessService/GetPreprocessStatus
+   ```
+
 ## Поток Submit → очередь → воркер → MinIO → callback
 1. Клиент вызывает `SubmitPreprocess` (gRPC), передавая координаты исходного объекта в MinIO, `document_id`, `correlation_id` и при необходимости `callback_url`.
 2. Хендлер проверяет дубликаты по `source_bucket`/`source_key`/`source_etag`, возвращает существующий `job_id` или ставит новое задание в очередь.

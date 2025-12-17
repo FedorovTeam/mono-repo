@@ -1,0 +1,82 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: preprocess-postgres
+    environment:
+      POSTGRES_USER: preprocess
+      POSTGRES_PASSWORD: preprocess_password
+      POSTGRES_DB: preprocess
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U preprocess -d preprocess"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2024-06-11T03-13-30Z
+    container_name: preprocess-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: PREPROCESS_MINIO_KEY
+      MINIO_ROOT_PASSWORD: PREPROCESS_MINIO_SECRET
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-06-11T03-13-30Z
+    container_name: preprocess-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >-
+      /bin/sh -c "
+      mc alias set local http://minio:9000 PREPROCESS_MINIO_KEY PREPROCESS_MINIO_SECRET &&
+      mc mb -p local/preprocess-source || true &&
+      mc mb -p local/preprocess-artifacts || true
+      "
+    restart: "no"
+
+  preprocess-service:
+    build: .
+    container_name: preprocess-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      CONFIG_PATH: /app/config/config.yaml
+      POSTGRES_DSN: postgres://preprocess:preprocess_password@postgres:5432/preprocess?sslmode=disable
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: PREPROCESS_MINIO_KEY
+      MINIO_SECRET_KEY: PREPROCESS_MINIO_SECRET
+      MINIO_REGION: us-east-1
+      MINIO_SSL: "false"
+    ports:
+      - "8082:8082"
+      - "9082:9082"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  postgres-data:
+  minio-data:
