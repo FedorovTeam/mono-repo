@@ -693,13 +693,13 @@ func (c *DoclingConverter) writeDoclingOptions(
 		}
 
 		// Дадим Docling самому выбрать доступный движок
-		if err := writer.WriteField("ocr_engine", "auto"); err != nil {
+		if err := writer.WriteField("ocr_engine", "tesseract"); err != nil {
 			return fmt.Errorf("write ocr_engine: %w", err)
 		}
 
 		// Язык OCR
 		if ocrLang != "" {
-			if err := writer.WriteField("ocr_lang", ocrLang); err != nil {
+			if err := writer.WriteField("ocr_lang", normalizeTesseractLang(ocrLang)); err != nil {
 				return fmt.Errorf("write ocr_lang: %w", err)
 			}
 		}
@@ -766,7 +766,10 @@ func (c *DoclingConverter) buildDoclingOptions(contentType, fileExt string, enab
 		} else {
 			opts.PDFBackend = "pypdfium2"
 		}
-		opts.OCREngine = "auto"
+		opts.OCREngine = "tesseract"
+		if ocrLang != "" {
+			opts.OCRLang = normalizeTesseractLang(ocrLang)
+		}
 	}
 
 	return opts
@@ -1127,6 +1130,18 @@ func isTemporaryDoclingError(err error) (bool, int) {
 	}
 
 	return false, 0
+}
+
+func normalizeTesseractLang(lang string) string {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	switch lang {
+	case "ru":
+		return "rus"
+	case "en":
+		return "eng"
+	default:
+		return lang
+	}
 }
 
 func boolPtr(v bool) *bool {
