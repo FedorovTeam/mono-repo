@@ -20,7 +20,7 @@ scheduler:
 
 postgres:
   dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/docling_adapter?sslmode=disable"
-  max_connections: 5
+  max_connections: 10
 
 docling:
   endpoint: https://docling.tech.fedorov-team.tech

@@ -1,4 +1,3 @@
-// backend/docling-transformer-service/internal/infrastructure/repository/queue.go
 package repository
 
 import (
@@ -56,6 +55,7 @@ ORDER BY created_at DESC
 LIMIT 1`, baseSelectFields)
 
 	row := r.pool.QueryRow(ctx, query, documentID)
+
 	task, err := scanTask(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -74,6 +74,7 @@ FROM transformations_queue
 WHERE id = $1`, baseSelectFields)
 
 	row := r.pool.QueryRow(ctx, query, id)
+
 	task, err := scanTask(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -184,16 +185,23 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 	return tasks, nil
 }
 
+// КЛЮЧЕВОЕ: строгая сериализация Docling.
+// 1) сначала берём waiting_docling, у которых next_poll_at <= now()
+// 2) если waiting_docling вообще есть (но ещё рано поллить) — НЕ берём pending (блокируем очередь)
+// 3) pending берём только если waiting_docling вообще нет
 func (r *PostgresQueueRepository) selectNextTasks(ctx context.Context, tx pgx.Tx, limit int) ([]*TransformationTask, error) {
-	query := fmt.Sprintf(`
+	// 1) Сначала берём готовые к поллингу waiting_docling
+	queryWaitingReady := fmt.Sprintf(`
 SELECT %s
 FROM transformations_queue
-WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
-ORDER BY COALESCE(next_poll_at, created_at), created_at
+WHERE status = 'waiting_docling'
+  AND next_poll_at IS NOT NULL
+  AND next_poll_at <= NOW()
+ORDER BY next_poll_at, created_at
 LIMIT $1
 FOR UPDATE SKIP LOCKED`, baseSelectFields)
 
-	tasks, err := r.fetchTasks(ctx, tx, query, 1)
+	tasks, err := r.fetchTasks(ctx, tx, queryWaitingReady, 1)
 	if err == nil && len(tasks) > 0 {
 		return tasks, nil
 	}
@@ -201,20 +209,44 @@ FOR UPDATE SKIP LOCKED`, baseSelectFields)
 		return nil, err
 	}
 
-	query = fmt.Sprintf(`
+	// 2) Если есть любые waiting_docling (даже не ready) — блокируем pending
+	hasWaiting, err := r.hasWaitingDocling(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if hasWaiting {
+		return nil, pgx.ErrNoRows
+	}
+
+	// 3) waiting_docling нет — можно брать pending (и только один/limit)
+	queryPending := fmt.Sprintf(`
 SELECT %s
 FROM transformations_queue
-WHERE status = 'pending' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
-ORDER BY COALESCE(next_poll_at, created_at), created_at
+WHERE status = 'pending'
+ORDER BY created_at
 LIMIT $1
 FOR UPDATE SKIP LOCKED`, baseSelectFields)
 
-	tasks, err = r.fetchTasks(ctx, tx, query, limit)
+	tasks, err = r.fetchTasks(ctx, tx, queryPending, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	return tasks, nil
+}
+
+func (r *PostgresQueueRepository) hasWaitingDocling(ctx context.Context, tx pgx.Tx) (bool, error) {
+	const query = `SELECT 1 FROM transformations_queue WHERE status = 'waiting_docling' LIMIT 1`
+
+	var marker int
+	switch err := tx.QueryRow(ctx, query).Scan(&marker); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	default:
+		return false, fmt.Errorf("check waiting docling: %w", err)
+	}
 }
 
 func (r *PostgresQueueRepository) fetchTasks(ctx context.Context, tx pgx.Tx, query string, limit int) ([]*TransformationTask, error) {
@@ -382,6 +414,9 @@ WHERE id = $1`
 	return nil
 }
 
+// ВАЖНО: ActivateWaiting больше НЕ переводит waiting_docling->pending.
+// Теперь он только “протухшие” помечает failed.
+// Сериализация достигается тем, что пока есть waiting_docling — pending не выдаём.
 func (r *PostgresQueueRepository) ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -394,16 +429,12 @@ func (r *PostgresQueueRepository) ActivateWaiting(ctx context.Context, now time.
 		return 0, 0, err
 	}
 
-	ready, err := r.releaseWaiting(ctx, tx, now)
-	if err != nil {
-		return 0, 0, err
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, fmt.Errorf("commit activate waiting: %w", err)
 	}
 
-	return ready, expired, nil
+	// activated всегда 0 (мы ничего не “активируем”)
+	return 0, expired, nil
 }
 
 func (r *PostgresQueueRepository) failExpiredWaiting(ctx context.Context, tx pgx.Tx, now time.Time, maxDoclingLifetime time.Duration) (int, error) {
@@ -420,22 +451,6 @@ RETURNING 1`
 	rows, err := tx.Query(ctx, query, now.Add(-maxDoclingLifetime))
 	if err != nil {
 		return 0, fmt.Errorf("expire waiting: %w", err)
-	}
-	defer rows.Close()
-
-	return countRows(rows)
-}
-
-func (r *PostgresQueueRepository) releaseWaiting(ctx context.Context, tx pgx.Tx, now time.Time) (int, error) {
-	const query = `
-UPDATE transformations_queue
-SET status = 'pending', started_at = NULL, next_poll_at = NULL, error = NULL
-WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= $1)
-RETURNING 1`
-
-	rows, err := tx.Query(ctx, query, now)
-	if err != nil {
-		return 0, fmt.Errorf("release waiting: %w", err)
 	}
 	defer rows.Close()
 
