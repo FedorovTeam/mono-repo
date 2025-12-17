@@ -159,6 +159,7 @@ func TestConversionExecutorRestartsAfterDoclingRequeue(t *testing.T) {
 	task := &transformations.TransformationTask{
 		ID:                uuid.New(),
 		Status:            transformations.StatusProcessing,
+		DoclingTaskID:     "old-task",
 		DoclingJobID:      "old-job",
 		DoclingPollCount:  1,
 		OriginalBucket:    "orig",
@@ -343,7 +344,7 @@ func TestDoclingPollerTemporaryErrorReturnsWaiting(t *testing.T) {
 	conv := &converterWithTemporaryError{}
 	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{MaxAttempts: 3})
 
-	task := &transformations.TransformationTask{ID: uuid.New(), DoclingJobID: "job-1", CreatedAt: time.Now().Add(-time.Minute)}
+	task := &transformations.TransformationTask{ID: uuid.New(), DoclingTaskID: "job-1", DoclingJobID: "job-1", CreatedAt: time.Now().Add(-time.Minute)}
 
 	_, err := poller.Poll(context.Background(), task)
 	if !errors.Is(err, ErrDoclingWaiting) {
@@ -375,7 +376,7 @@ func TestDoclingPollerTreats404AsTemporary(t *testing.T) {
 	config := DoclingPollerConfig{InitialInterval: 10 * time.Millisecond, MaxInterval: time.Second, BackoffFactor: 2, MaxAttempts: 5}
 	poller := NewDoclingPoller(conv, repoStub, nil, nil, config)
 
-	task := &transformations.TransformationTask{ID: uuid.New(), DoclingJobID: "job-404", CreatedAt: time.Now().Add(-time.Minute)}
+	task := &transformations.TransformationTask{ID: uuid.New(), DoclingTaskID: "job-404", DoclingJobID: "job-404", CreatedAt: time.Now().Add(-time.Minute)}
 
 	result, err := poller.Poll(context.Background(), task)
 	if !errors.Is(err, ErrDoclingWaiting) {

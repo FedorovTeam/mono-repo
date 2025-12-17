@@ -21,6 +21,7 @@ func TestDoclingPollerRequeuesAfterWaitingLimit(t *testing.T) {
 	task := &transformations.TransformationTask{
 		ID:               uuid.New(),
 		Status:           transformations.StatusProcessing,
+		DoclingTaskID:    "task-1",
 		DoclingJobID:     "job-1",
 		DoclingPollCount: 1,
 		RetryCount:       2,
@@ -40,8 +41,8 @@ func TestDoclingPollerRequeuesAfterWaitingLimit(t *testing.T) {
 	if repoStub.lastRequeueID != task.ID {
 		t.Fatalf("expected requeue for task %s, got %s", task.ID, repoStub.lastRequeueID)
 	}
-	if task.DoclingJobID != "" || task.DoclingPollCount != 0 {
-		t.Fatalf("expected docling data to be cleared, got id=%s polls=%d", task.DoclingJobID, task.DoclingPollCount)
+	if task.DoclingTaskID != "" || task.DoclingJobID != "" || task.DoclingPollCount != 0 {
+		t.Fatalf("expected docling data to be cleared, got task_id=%s job_id=%s polls=%d", task.DoclingTaskID, task.DoclingJobID, task.DoclingPollCount)
 	}
 	if task.NextPollAt == nil {
 		t.Fatalf("expected next poll to be set after restart limit, got nil")

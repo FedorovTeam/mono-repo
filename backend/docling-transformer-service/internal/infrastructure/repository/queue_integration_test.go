@@ -172,6 +172,45 @@ INSERT INTO transformations_queue (
 	require.Equal(t, StatusFailed, expiredStatus)
 }
 
+func TestQueueRepositoryPersistsDoclingIdentifiers(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	repo := NewQueueRepository(pool)
+
+	queueID, err := repo.Enqueue(ctx, transformations.EnqueueParams{
+		DocumentID:        "doc-id",
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "dest/file.md",
+		FilenameExtension: "docx",
+		CorrelationID:     "corr-123",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, repo.UpdateDoclingInfo(ctx, queueID, "task-123", "job-456", 2))
+
+	task, err := repo.GetByID(ctx, queueID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Equal(t, "task-123", task.DoclingTaskID)
+	require.Equal(t, "job-456", task.DoclingJobID)
+	require.Equal(t, 2, task.DoclingPollCount)
+
+	nextPoll := time.Now().Add(time.Minute)
+	require.NoError(t, repo.MarkDoclingWaiting(ctx, queueID, "task-123", "job-456", 3, nextPoll))
+
+	task, err = repo.GetByID(ctx, queueID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Equal(t, StatusDocling, task.Status)
+	require.Equal(t, "task-123", task.DoclingTaskID)
+	require.Equal(t, "job-456", task.DoclingJobID)
+	require.Equal(t, 3, task.DoclingPollCount)
+	require.NotNil(t, task.NextPollAt)
+	require.WithinDuration(t, nextPoll, *task.NextPollAt, time.Second)
+}
+
 func TestRestoreProcessingMovesTasksToPendingOnStartup(t *testing.T) {
 	ctx, pool := startPostgresContainer(t)
 
