@@ -39,7 +39,7 @@ func (c *checkingConverter) Submit(context.Context, domain.ConvertRequest) (doma
 	return domain.DoclingIdentifiers{TaskID: "job"}, nil
 }
 
-func (c *checkingConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
+func (c *checkingConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	c.calls++
 	if c.calls-1 < len(c.statuses) {
 		return c.statuses[c.calls-1], nil

@@ -312,7 +312,7 @@ func (uc *TransformerService) pollUntilReady(ctx context.Context, ids domain.Doc
 	}
 
 	for attempt := 1; attempt <= uc.cfg.StatusBackoff.MaxAttempts; attempt++ {
-		statusResult, err := uc.conv.CheckStatus(ctx, ids)
+		statusResult, err := uc.conv.CheckStatus(ctx, ids.PrimaryID())
 		if err != nil {
 			return domain.ConvertResult{}, err
 		}

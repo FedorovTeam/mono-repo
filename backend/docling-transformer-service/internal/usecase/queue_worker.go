@@ -106,7 +106,17 @@ func (w *QueueWorker) handleSingle(ctx context.Context, task *transformations.Tr
 		w.logger.Info("transformation completed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", duration))
 	default:
 		w.metrics.RecordOutcome(taskCtx, false)
-		w.logger.Error("task processing failed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.String("docling_job_id", task.DoclingJobID), zap.Int("polls", task.DoclingPollCount), zap.Error(err))
+		fields := []zap.Field{
+			zap.String("queue_id", task.ID.String()),
+			zap.String("correlation_id", correlationID),
+			zap.String("docling_task_id", task.DoclingTaskID),
+			zap.Int("polls", task.DoclingPollCount),
+			zap.Error(err),
+		}
+		if task.DoclingJobID != "" {
+			fields = append(fields, zap.String("docling_job_id", task.DoclingJobID))
+		}
+		w.logger.Error("task processing failed", fields...)
 		if markErr := w.repo.MarkFailed(ctx, task.ID, buildFailureMessage(err, task)); markErr != nil {
 			w.logger.Error("mark failed errored", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Error(markErr))
 		}
