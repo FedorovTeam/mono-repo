@@ -28,9 +28,13 @@ func TestRenderMarkdownReplacesMarks(t *testing.T) {
 
 	fallback := "Intro\n\n{{table-1}}\n\nOutro"
 
-	got, ok := RenderMarkdown(jsonContent, &fallback)
+	got, ok, conflicts := RenderMarkdownWithConflicts(jsonContent, &fallback)
 	if !ok {
 		t.Fatalf("expected markdown rendered from JSON content")
+	}
+
+	if len(conflicts) > 0 {
+		t.Fatalf("expected no conflicts, got %v", conflicts)
 	}
 
 	expected := "| H1 | H2 |\n| --- | --- |\n| C1 | C2 |"
@@ -56,9 +60,13 @@ func TestRenderMarkdownWithoutFallback(t *testing.T) {
 		},
 	}
 
-	got, ok := RenderMarkdown(jsonContent, nil)
+	got, ok, conflicts := RenderMarkdownWithConflicts(jsonContent, nil)
 	if !ok {
 		t.Fatalf("expected markdown rendered from JSON content")
+	}
+
+	if len(conflicts) > 0 {
+		t.Fatalf("expected no conflicts, got %v", conflicts)
 	}
 
 	if got != "|X|Y|\n|-|-|\n|7|8|" {
@@ -114,5 +122,93 @@ func TestMergeVotingTablesFillsEmptyCells(t *testing.T) {
 
 	if got := merged[0].Rows[1].Cells[2].Text; strings.TrimSpace(got) != "42" {
 		t.Fatalf("expected merged value from pass B, got %s", got)
+	}
+}
+
+func TestFillTablesMatchesByShape(t *testing.T) {
+	jsonContent := map[string]any{
+		"tables": []any{map[string]any{"id": "table-1", "markdown": "|H1|H2|\n|-|-|\n|New1|New2|"}},
+	}
+
+	fallback := "|H1|H2|\n|-|-|\n|Old1|Old2|"
+
+	rendered, ok, conflicts := RenderMarkdownWithConflicts(jsonContent, &fallback)
+	if !ok {
+		t.Fatalf("expected markdown rendered from JSON content")
+	}
+	if len(conflicts) > 0 {
+		t.Fatalf("expected no conflicts, got %v", conflicts)
+	}
+
+	if strings.Contains(rendered, "Old1") {
+		t.Fatalf("expected original table to be replaced, got %s", rendered)
+	}
+	if !strings.Contains(rendered, "New1") {
+		t.Fatalf("expected new content to appear, got %s", rendered)
+	}
+}
+
+func TestFillTablesHandlesShiftedHeaders(t *testing.T) {
+	jsonContent := map[string]any{
+		"tables": []any{map[string]any{"id": "stable", "markdown": "|Имя|Голоса|\n|-|-|\n|Иван|10|"}},
+	}
+
+	fallback := "|Голоса|Имя|\n|-|-|\n|5|Пётр|"
+
+	rendered, ok, conflicts := RenderMarkdownWithConflicts(jsonContent, &fallback)
+	if !ok {
+		t.Fatalf("expected markdown rendered from JSON content")
+	}
+	if len(conflicts) > 0 {
+		t.Fatalf("expected no conflicts, got %v", conflicts)
+	}
+
+	if !strings.Contains(rendered, "|Имя|Голоса|") {
+		t.Fatalf("expected header order from OCR table, got %s", rendered)
+	}
+	if !strings.Contains(rendered, "Иван") {
+		t.Fatalf("expected OCR row to be used, got %s", rendered)
+	}
+}
+
+func TestFillTablesReportsShapeConflict(t *testing.T) {
+	jsonContent := map[string]any{
+		"tables": []any{map[string]any{"id": "different", "markdown": "|A|B|\n|-|-|\n|1|2|"}},
+	}
+
+	fallback := "|A|B|C|\n|-|-|-|\n|1|2|3|"
+
+	rendered, ok, conflicts := RenderMarkdownWithConflicts(jsonContent, &fallback)
+	if !ok {
+		t.Fatalf("expected markdown rendered from JSON content")
+	}
+
+	if len(conflicts) == 0 || !strings.Contains(conflicts[0].Reason, "shape mismatch") {
+		t.Fatalf("expected shape mismatch conflict, got %v", conflicts)
+	}
+
+	if !strings.Contains(rendered, "|A|B|C|") {
+		t.Fatalf("expected original table to remain, got %s", rendered)
+	}
+	if strings.Contains(rendered, "|A|B|\n|-|-|\n|1|2|") {
+		t.Fatalf("expected conflicting table not to be appended")
+	}
+}
+
+func TestFillTablesMissingOcrTable(t *testing.T) {
+	jsonContent := map[string]any{"tables": []any{}}
+	fallback := "|H1|H2|\n|-|-|\n|x|y|"
+
+	rendered, ok, conflicts := RenderMarkdownWithConflicts(jsonContent, &fallback)
+	if ok {
+		t.Fatalf("expected fallback without OCR tables")
+	}
+
+	if len(conflicts) == 0 {
+		t.Fatalf("expected conflict for missing OCR tables")
+	}
+
+	if rendered != strings.TrimSpace(fallback) {
+		t.Fatalf("expected original markdown untouched, got %s", rendered)
 	}
 }

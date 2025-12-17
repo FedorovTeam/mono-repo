@@ -3,6 +3,7 @@ package doclingjson
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -19,6 +20,13 @@ type Table struct {
 	Caption  string     `json:"caption"`
 	Markdown string     `json:"markdown"`
 	Rows     []TableRow `json:"rows"`
+}
+
+// TableConflict описывает проблему при сопоставлении таблиц.
+type TableConflict struct {
+	MarkdownIndex int
+	TableID       string
+	Reason        string
 }
 
 // MergeStats содержит метрики объединения таблиц между проходами.
@@ -49,14 +57,15 @@ type Mark struct {
 // RenderMarkdown пытается собрать Markdown по таблицам из jsonContent.
 // Возвращает сгенерированный Markdown и признак того, что он получен из JSON.
 func RenderMarkdown(jsonContent any, mdFallback *string) (string, bool) {
+	rendered, ok, _ := RenderMarkdownWithConflicts(jsonContent, mdFallback)
+	return rendered, ok
+}
+
+// RenderMarkdownWithConflicts возвращает Markdown, признак использования JSON и конфликты сопоставления.
+func RenderMarkdownWithConflicts(jsonContent any, mdFallback *string) (string, bool, []TableConflict) {
 	doc, err := Parse(jsonContent)
 	if err != nil {
-		return "", false
-	}
-
-	tableMarkdowns := buildTableMarkdowns(doc.Tables)
-	if len(tableMarkdowns) == 0 {
-		return "", false
+		return "", false, nil
 	}
 
 	markdown := ""
@@ -64,48 +73,22 @@ func RenderMarkdown(jsonContent any, mdFallback *string) (string, bool) {
 		markdown = strings.TrimSpace(*mdFallback)
 	}
 
+	tableMarkdowns := buildTableMarkdowns(doc.Tables)
+	if len(tableMarkdowns) == 0 {
+		if markdown != "" {
+			return markdown, false, []TableConflict{{Reason: "no tables available for replacement"}}
+		}
+		return "", false, nil
+	}
+
 	if markdown != "" {
-		used := map[string]bool{}
-		for _, mark := range doc.Marks {
-			id := normalizeIdentifier(resolveMarkTarget(mark))
-			tableMD, ok := tableMarkdowns[id]
-			if !ok {
-				continue
-			}
+		filled, conflicts := fillTables(markdown, doc, tableMarkdowns)
 
-			replaced := false
-			for _, placeholder := range markPlaceholders(mark) {
-				if placeholder == "" {
-					continue
-				}
-
-				if strings.Contains(markdown, placeholder) {
-					markdown = strings.ReplaceAll(markdown, placeholder, tableMD)
-					replaced = true
-				}
-			}
-
-			if replaced {
-				used[id] = true
-			}
-		}
-
-		for id, tableMD := range tableMarkdowns {
-			if used[id] {
-				continue
-			}
-
-			if markdown != "" {
-				markdown += "\n\n"
-			}
-			markdown += tableMD
-		}
-
-		return markdown, true
+		return filled, true, conflicts
 	}
 
 	rendered := renderTablesInOrder(doc.Marks, tableMarkdowns)
-	return rendered, rendered != ""
+	return rendered, rendered != "", nil
 }
 
 // Parse пытается tolerant-распарсить json_content.
@@ -308,8 +291,249 @@ func unique(items []string) []string {
 
 // ParseMarkdownTables пытается извлечь таблицы из Markdown для использования во втором проходе.
 func ParseMarkdownTables(md string) []Table {
+	parsed := parseMarkdownTablesWithSpans(md)
+	tables := make([]Table, 0, len(parsed))
+	for _, item := range parsed {
+		tables = append(tables, item.Table)
+	}
+
+	return tables
+}
+
+type markdownTable struct {
+	Table     Table
+	startLine int
+	endLine   int
+}
+
+func fillTables(markdown string, doc Document, tableMarkdowns map[string]string) (string, []TableConflict) {
+	mdTables := parseMarkdownTablesWithSpans(markdown)
+	used := map[string]bool{}
+	blocked := map[string]bool{}
+	conflicts := []TableConflict{}
+
+	replacements := map[int]string{}
+	orderHints := markOrder(doc.Marks)
+
+	for idx, mdTable := range mdTables {
+		matchID, conflict := findBestTableMatch(mdTable, doc.Tables, tableMarkdowns, used, orderHints, idx)
+		if conflict != nil {
+			conflicts = append(conflicts, *conflict)
+			if conflict.TableID != "" {
+				blocked[conflict.TableID] = true
+			}
+			continue
+		}
+
+		if matchID == "" {
+			conflicts = append(conflicts, TableConflict{MarkdownIndex: idx, Reason: "no matching table found"})
+			continue
+		}
+
+		used[matchID] = true
+		replacements[idx] = tableMarkdowns[matchID]
+	}
+
+	markdown = replaceMarkdownTables(markdown, mdTables, replacements)
+
+	markdown, placeholderConflicts := replacePlaceholders(markdown, doc.Marks, tableMarkdowns, used)
+	conflicts = append(conflicts, placeholderConflicts...)
+
+	for id, tableMD := range tableMarkdowns {
+		if used[id] || blocked[id] {
+			continue
+		}
+
+		if markdown != "" {
+			markdown += "\n\n"
+		}
+		markdown += tableMD
+	}
+
+	return markdown, conflicts
+}
+
+func replacePlaceholders(markdown string, marks []Mark, tableMarkdowns map[string]string, used map[string]bool) (string, []TableConflict) {
+	conflicts := []TableConflict{}
+
+	for _, mark := range marks {
+		id := normalizeIdentifier(resolveMarkTarget(mark))
+		if id == "" {
+			continue
+		}
+
+		tableMD, ok := tableMarkdowns[id]
+		if !ok {
+			conflicts = append(conflicts, TableConflict{TableID: id, Reason: "table markdown not found"})
+			continue
+		}
+
+		replaced := false
+		for _, placeholder := range markPlaceholders(mark) {
+			if placeholder == "" {
+				continue
+			}
+
+			if strings.Contains(markdown, placeholder) {
+				markdown = strings.ReplaceAll(markdown, placeholder, tableMD)
+				replaced = true
+			}
+		}
+
+		if replaced {
+			used[id] = true
+		}
+	}
+
+	return markdown, conflicts
+}
+
+func replaceMarkdownTables(markdown string, tables []markdownTable, replacements map[int]string) string {
+	if len(replacements) == 0 {
+		return markdown
+	}
+
+	lines := strings.Split(markdown, "\n")
+
+	for i := len(tables) - 1; i >= 0; i-- {
+		table := tables[i]
+		replacement, ok := replacements[i]
+		if !ok {
+			continue
+		}
+
+		replacementLines := strings.Split(strings.TrimSpace(replacement), "\n")
+		start := table.startLine
+		end := table.endLine
+		if start < 0 || end >= len(lines) || start > end {
+			continue
+		}
+
+		lines = append(lines[:start], append(replacementLines, lines[end+1:]...)...)
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func findBestTableMatch(mdTable markdownTable, candidates []Table, tableMarkdowns map[string]string, used map[string]bool, orderHints map[string]int, mdIndex int) (string, *TableConflict) {
+	bestIdx := -1
+	bestScore := 0.0
+
+	for idx, candidate := range candidates {
+		candidateID := normalizeIdentifier(firstNonEmpty(candidate.ID, candidate.Name))
+		if candidateID == "" || used[candidateID] {
+			continue
+		}
+
+		if _, ok := tableMarkdowns[candidateID]; !ok {
+			continue
+		}
+
+		order := idx
+		if hint, ok := orderHints[candidateID]; ok {
+			order = hint
+		}
+
+		score := scoreTableCandidate(mdTable.Table, candidate, mdIndex, order)
+		if score > bestScore {
+			bestScore = score
+			bestIdx = idx
+		}
+	}
+
+	if bestIdx == -1 || bestScore == 0 {
+		return "", nil
+	}
+
+	candidate := candidates[bestIdx]
+	candidateID := normalizeIdentifier(firstNonEmpty(candidate.ID, candidate.Name))
+	if !sameShape(mdTable.Table, candidate) {
+		mdRows, mdCols := tableShape(mdTable.Table)
+		candRows, candCols := tableShape(candidate)
+		reason := fmt.Sprintf("table shape mismatch: md %dx%d vs json %dx%d", mdRows, mdCols, candRows, candCols)
+		return "", &TableConflict{MarkdownIndex: mdIndex, TableID: candidateID, Reason: reason}
+	}
+
+	return candidateID, nil
+}
+
+func scoreTableCandidate(mdTable Table, candidate Table, mdIndex int, order int) float64 {
+	score := 0.0
+
+	mdRows, mdCols := tableShape(mdTable)
+	candRows, candCols := tableShape(candidate)
+
+	switch {
+	case mdRows == candRows:
+		score += 2
+	case abs(mdRows-candRows) == 1:
+		score += 1
+	}
+
+	switch {
+	case mdCols == candCols:
+		score += 2
+	case abs(mdCols-candCols) == 1:
+		score += 1
+	}
+
+	score += headerOverlapScore(mdTable, candidate)
+
+	if order >= 0 {
+		distance := abs(order - mdIndex)
+		score += 1.0 / float64(distance+1)
+	}
+
+	return score
+}
+
+func headerOverlapScore(mdTable Table, candidate Table) float64 {
+	mdHeaders := normalizeHeaders(mdTable)
+	candidateHeaders := normalizeHeaders(candidate)
+
+	if len(mdHeaders) == 0 || len(candidateHeaders) == 0 {
+		return 0
+	}
+
+	matches := 0
+	for header := range mdHeaders {
+		if _, ok := candidateHeaders[header]; ok {
+			matches++
+		}
+	}
+
+	maxHeaders := len(mdHeaders)
+	if len(candidateHeaders) > maxHeaders {
+		maxHeaders = len(candidateHeaders)
+	}
+
+	if maxHeaders == 0 {
+		return 0
+	}
+
+	return float64(matches) / float64(maxHeaders)
+}
+
+func normalizeHeaders(table Table) map[string]struct{} {
+	headers := map[string]struct{}{}
+	if len(table.Rows) == 0 || len(table.Rows[0].Cells) == 0 {
+		return headers
+	}
+
+	for _, cell := range table.Rows[0].Cells {
+		header := strings.ToLower(strings.TrimSpace(cell.Text))
+		if header == "" {
+			continue
+		}
+		headers[header] = struct{}{}
+	}
+
+	return headers
+}
+
+func parseMarkdownTablesWithSpans(md string) []markdownTable {
 	lines := strings.Split(md, "\n")
-	var tables []Table
+	var tables []markdownTable
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
@@ -326,7 +550,9 @@ func ParseMarkdownTables(md string) []Table {
 			continue
 		}
 
+		start := i
 		rows := []TableRow{{Cells: wrapCells(header)}}
+		end := i
 
 		for j := i + 2; j < len(lines); j++ {
 			rowLine := strings.TrimSpace(lines[j])
@@ -339,13 +565,62 @@ func ParseMarkdownTables(md string) []Table {
 				continue
 			}
 			rows = append(rows, TableRow{Cells: wrapCells(cells)})
+			end = j
 			i = j
 		}
 
-		tables = append(tables, Table{Rows: rows})
+		tables = append(tables, markdownTable{Table: Table{Rows: rows}, startLine: start, endLine: end})
 	}
 
 	return tables
+}
+
+func tableShape(table Table) (int, int) {
+	rows := len(table.Rows)
+	cols := 0
+	if len(table.Rows) > 0 {
+		cols = len(table.Rows[0].Cells)
+		return rows, cols
+	}
+
+	md := strings.TrimSpace(table.Markdown)
+	if md != "" {
+		parsed := ParseMarkdownTables(md)
+		if len(parsed) > 0 {
+			return tableShape(parsed[0])
+		}
+	}
+	return rows, cols
+}
+
+func sameShape(a Table, b Table) bool {
+	rowsA, colsA := tableShape(a)
+	rowsB, colsB := tableShape(b)
+	return rowsA == rowsB && colsA == colsB
+}
+
+func markOrder(marks []Mark) map[string]int {
+	order := map[string]int{}
+
+	for idx, mark := range marks {
+		id := normalizeIdentifier(resolveMarkTarget(mark))
+		if id == "" {
+			continue
+		}
+		if _, ok := order[id]; ok {
+			continue
+		}
+		order[id] = idx
+	}
+
+	return order
+}
+
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // MergeVotingTables заполняет таблицы Pass A данными Pass B на основании номера и ФИО.

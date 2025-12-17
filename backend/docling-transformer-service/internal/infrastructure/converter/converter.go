@@ -1146,8 +1146,14 @@ func (c *DoclingConverter) renderMarkdown(doc exportDocumentResponse) (string, b
 
 	coverage := calculateTableCoverage(parsed.Tables, c.render.VotingTableMinRows)
 	fillRate := doclingjson.CalculateVotingFillRate(parsed.Tables)
-	rendered, ok := doclingjson.RenderMarkdown(parsed, doc.MdContent)
+	rendered, ok, conflicts := doclingjson.RenderMarkdownWithConflicts(parsed, doc.MdContent)
 	rendered = strings.TrimSpace(rendered)
+	for _, conflict := range conflicts {
+		c.logger.Warn("markdown table merge conflict",
+			zap.Int("markdown_table_index", conflict.MarkdownIndex),
+			zap.String("table_id", conflict.TableID),
+			zap.String("reason", conflict.Reason))
+	}
 	mergeStats := doclingjson.MergeStats{}
 
 	if c.render.TwoPassVotingMerge && fillRate < c.render.PassBTableCoverage {
@@ -1158,8 +1164,14 @@ func (c *DoclingConverter) renderMarkdown(doc exportDocumentResponse) (string, b
 			mergeStats = stats
 			if stats.MergedRows > 0 || stats.MatchedRows > 0 {
 				parsed.Tables = mergedTables
-				rendered, ok = doclingjson.RenderMarkdown(parsed, doc.MdContent)
+				rendered, ok, conflicts = doclingjson.RenderMarkdownWithConflicts(parsed, doc.MdContent)
 				rendered = strings.TrimSpace(rendered)
+				for _, conflict := range conflicts {
+					c.logger.Warn("markdown table merge conflict",
+						zap.Int("markdown_table_index", conflict.MarkdownIndex),
+						zap.String("table_id", conflict.TableID),
+						zap.String("reason", conflict.Reason))
+				}
 				if rendered == "" {
 					rendered = baseRendered
 				}
