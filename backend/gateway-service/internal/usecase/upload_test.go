@@ -18,7 +18,7 @@ type stubDocumentClient struct {
 func (s *stubDocumentClient) CreateDocument(_ context.Context, req domain.CreateDocumentRequest) (*domain.Document, error) {
 	s.lastRequest = req
 	status := domain.DocumentStatusUploaded
-	return &domain.Document{ID: req.ID, FileName: req.FileName, Repository: req.Repository, Branch: req.Branch, Path: req.Path, Status: status, EnablePdfOcr: req.EnablePdfOcr}, nil
+	return &domain.Document{ID: req.ID, FileName: req.FileName, Repository: req.Repository, Branch: req.Branch, Path: req.Path, Status: status, ForcePdfOcr: req.ForcePdfOcr}, nil
 }
 
 func (s *stubDocumentClient) GetDocument(context.Context, string) (*domain.Document, error) {
@@ -60,7 +60,7 @@ func TestUploadKnowledgeDocument_DefaultPathGenerated(t *testing.T) {
 		Branch:        "main",
 		Path:          "  ",
 		FileSizeBytes: 256,
-		EnablePdfOcr:  true,
+		ForcePdfOcr:   true,
 	})
 
 	require.NoError(t, err)
@@ -69,6 +69,6 @@ func TestUploadKnowledgeDocument_DefaultPathGenerated(t *testing.T) {
 	require.True(t, strings.HasPrefix(docClient.lastRequest.Path, "knowledge/docs/"))
 	require.True(t, strings.HasSuffix(docClient.lastRequest.Path, ".md"))
 	require.Equal(t, docClient.lastRequest.Path, result.Document.Path)
-	require.True(t, docClient.lastRequest.EnablePdfOcr)
-	require.True(t, result.EnablePdfOcr)
+	require.True(t, docClient.lastRequest.ForcePdfOcr)
+	require.True(t, result.ForcePdfOcr)
 }

@@ -20,7 +20,7 @@ type UploadInput struct {
 	Branch        string
 	Path          string
 	FileSizeBytes int64
-	EnablePdfOcr  bool
+	ForcePdfOcr   bool
 }
 
 // UploadResult описывает результат сценария загрузки документа.
@@ -28,7 +28,7 @@ type UploadResult struct {
 	Document     *domain.Document
 	UploadURL    string
 	UploadMethod string
-	EnablePdfOcr bool
+	ForcePdfOcr  bool
 }
 
 // UploadConfig содержит настройки сценария загрузки.
@@ -93,7 +93,7 @@ func (s *UploadService) UploadKnowledgeDocument(ctx context.Context, input Uploa
 		UploadObjectKey:   uploadURL.ObjectKey,
 		MarkdownBucket:    uploadURL.MarkdownBucket,
 		MarkdownObjectKey: uploadURL.MarkdownObjectKey,
-		EnablePdfOcr:      input.EnablePdfOcr,
+		ForcePdfOcr:       input.ForcePdfOcr,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cannot create document: %w", err)
@@ -103,7 +103,7 @@ func (s *UploadService) UploadKnowledgeDocument(ctx context.Context, input Uploa
 		Document:     created,
 		UploadURL:    uploadURL.URL,
 		UploadMethod: http.MethodPut,
-		EnablePdfOcr: input.EnablePdfOcr,
+		ForcePdfOcr:  input.ForcePdfOcr,
 	}, nil
 }
 

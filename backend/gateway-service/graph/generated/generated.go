@@ -48,9 +48,9 @@ type DirectiveRoot struct {
 type ComplexityRoot struct {
 	KnowledgeDocument struct {
 		Branch          func(childComplexity int) int
-		EnablePDFOcr    func(childComplexity int) int
 		Error           func(childComplexity int) int
 		FileName        func(childComplexity int) int
+		ForcePDFOcr     func(childComplexity int) int
 		ID              func(childComplexity int) int
 		JobID           func(childComplexity int) int
 		Path            func(childComplexity int) int
@@ -75,7 +75,7 @@ type ComplexityRoot struct {
 
 	UploadKnowledgeDocumentPayload struct {
 		Document     func(childComplexity int) int
-		EnablePDFOcr func(childComplexity int) int
+		ForcePDFOcr  func(childComplexity int) int
 		UploadMethod func(childComplexity int) int
 		UploadURL    func(childComplexity int) int
 	}
@@ -114,12 +114,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.Branch(childComplexity), true
-	case "KnowledgeDocument.enablePdfOcr":
-		if e.complexity.KnowledgeDocument.EnablePDFOcr == nil {
-			break
-		}
-
-		return e.complexity.KnowledgeDocument.EnablePDFOcr(childComplexity), true
 	case "KnowledgeDocument.error":
 		if e.complexity.KnowledgeDocument.Error == nil {
 			break
@@ -132,6 +126,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.FileName(childComplexity), true
+	case "KnowledgeDocument.forcePdfOcr":
+		if e.complexity.KnowledgeDocument.ForcePDFOcr == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.ForcePDFOcr(childComplexity), true
 	case "KnowledgeDocument.id":
 		if e.complexity.KnowledgeDocument.ID == nil {
 			break
@@ -223,12 +223,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.UploadKnowledgeDocumentPayload.Document(childComplexity), true
-	case "UploadKnowledgeDocumentPayload.enablePdfOcr":
-		if e.complexity.UploadKnowledgeDocumentPayload.EnablePDFOcr == nil {
+	case "UploadKnowledgeDocumentPayload.forcePdfOcr":
+		if e.complexity.UploadKnowledgeDocumentPayload.ForcePDFOcr == nil {
 			break
 		}
 
-		return e.complexity.UploadKnowledgeDocumentPayload.EnablePDFOcr(childComplexity), true
+		return e.complexity.UploadKnowledgeDocumentPayload.ForcePDFOcr(childComplexity), true
 	case "UploadKnowledgeDocumentPayload.uploadMethod":
 		if e.complexity.UploadKnowledgeDocumentPayload.UploadMethod == nil {
 			break
@@ -368,7 +368,7 @@ type UploadKnowledgeDocumentPayload {
   document: KnowledgeDocument!
   uploadUrl: String!
   uploadMethod: String!
-  enablePdfOcr: Boolean!
+  forcePdfOcr: Boolean!
 }
 
 type KnowledgeDocumentConnection {
@@ -388,7 +388,7 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
-  enablePdfOcr: Boolean!
+  forcePdfOcr: Boolean!
 }
 
 enum KnowledgeDocumentStatus {
@@ -406,7 +406,7 @@ input UploadKnowledgeDocumentInput {
   repository: String!
   branch: String!
   path: String
-  enablePdfOcr: Boolean = false
+  forcePdfOcr: Boolean = false
 }
 
 input KnowledgeDocumentFilter {
@@ -788,14 +788,14 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_error(_ context.Conte
 	return fc, nil
 }
 
-func (ec *executionContext) _KnowledgeDocument_enablePdfOcr(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+func (ec *executionContext) _KnowledgeDocument_forcePdfOcr(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
 		ec.OperationContext,
 		field,
-		ec.fieldContext_KnowledgeDocument_enablePdfOcr,
+		ec.fieldContext_KnowledgeDocument_forcePdfOcr,
 		func(ctx context.Context) (any, error) {
-			return obj.EnablePDFOcr, nil
+			return obj.ForcePDFOcr, nil
 		},
 		nil,
 		ec.marshalNBoolean2bool,
@@ -804,7 +804,7 @@ func (ec *executionContext) _KnowledgeDocument_enablePdfOcr(ctx context.Context,
 	)
 }
 
-func (ec *executionContext) fieldContext_KnowledgeDocument_enablePdfOcr(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_KnowledgeDocument_forcePdfOcr(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "KnowledgeDocument",
 		Field:      field,
@@ -859,8 +859,8 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
-			case "enablePdfOcr":
-				return ec.fieldContext_KnowledgeDocument_enablePdfOcr(ctx, field)
+			case "forcePdfOcr":
+				return ec.fieldContext_KnowledgeDocument_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -928,8 +928,8 @@ func (ec *executionContext) fieldContext_Mutation_uploadKnowledgeDocument(ctx co
 				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadUrl(ctx, field)
 			case "uploadMethod":
 				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadMethod(ctx, field)
-			case "enablePdfOcr":
-				return ec.fieldContext_UploadKnowledgeDocumentPayload_enablePdfOcr(ctx, field)
+			case "forcePdfOcr":
+				return ec.fieldContext_UploadKnowledgeDocumentPayload_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type UploadKnowledgeDocumentPayload", field.Name)
 		},
@@ -991,8 +991,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
-			case "enablePdfOcr":
-				return ec.fieldContext_KnowledgeDocument_enablePdfOcr(ctx, field)
+			case "forcePdfOcr":
+				return ec.fieldContext_KnowledgeDocument_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -1208,8 +1208,8 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
-			case "enablePdfOcr":
-				return ec.fieldContext_KnowledgeDocument_enablePdfOcr(ctx, field)
+			case "forcePdfOcr":
+				return ec.fieldContext_KnowledgeDocument_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -1275,14 +1275,14 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_uploadMe
 	return fc, nil
 }
 
-func (ec *executionContext) _UploadKnowledgeDocumentPayload_enablePdfOcr(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
+func (ec *executionContext) _UploadKnowledgeDocumentPayload_forcePdfOcr(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
 		ec.OperationContext,
 		field,
-		ec.fieldContext_UploadKnowledgeDocumentPayload_enablePdfOcr,
+		ec.fieldContext_UploadKnowledgeDocumentPayload_forcePdfOcr,
 		func(ctx context.Context) (any, error) {
-			return obj.EnablePDFOcr, nil
+			return obj.ForcePDFOcr, nil
 		},
 		nil,
 		ec.marshalNBoolean2bool,
@@ -1291,7 +1291,7 @@ func (ec *executionContext) _UploadKnowledgeDocumentPayload_enablePdfOcr(ctx con
 	)
 }
 
-func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_enablePdfOcr(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_forcePdfOcr(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "UploadKnowledgeDocumentPayload",
 		Field:      field,
@@ -2832,11 +2832,11 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 		asMap[k] = v
 	}
 
-	if _, present := asMap["enablePdfOcr"]; !present {
-		asMap["enablePdfOcr"] = false
+	if _, present := asMap["forcePdfOcr"]; !present {
+		asMap["forcePdfOcr"] = false
 	}
 
-	fieldsInOrder := [...]string{"fileName", "fileSizeBytes", "repository", "branch", "path", "enablePdfOcr"}
+	fieldsInOrder := [...]string{"fileName", "fileSizeBytes", "repository", "branch", "path", "forcePdfOcr"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -2878,13 +2878,13 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 				return it, err
 			}
 			it.Path = data
-		case "enablePdfOcr":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enablePdfOcr"))
+		case "forcePdfOcr":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("forcePdfOcr"))
 			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
 			if err != nil {
 				return it, err
 			}
-			it.EnablePDFOcr = data
+			it.ForcePDFOcr = data
 		}
 	}
 
@@ -2946,8 +2946,8 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			out.Values[i] = ec._KnowledgeDocument_jobId(ctx, field, obj)
 		case "error":
 			out.Values[i] = ec._KnowledgeDocument_error(ctx, field, obj)
-		case "enablePdfOcr":
-			out.Values[i] = ec._KnowledgeDocument_enablePdfOcr(ctx, field, obj)
+		case "forcePdfOcr":
+			out.Values[i] = ec._KnowledgeDocument_forcePdfOcr(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -3184,8 +3184,8 @@ func (ec *executionContext) _UploadKnowledgeDocumentPayload(ctx context.Context,
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "enablePdfOcr":
-			out.Values[i] = ec._UploadKnowledgeDocumentPayload_enablePdfOcr(ctx, field, obj)
+		case "forcePdfOcr":
+			out.Values[i] = ec._UploadKnowledgeDocumentPayload_forcePdfOcr(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}

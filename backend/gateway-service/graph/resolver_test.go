@@ -50,13 +50,13 @@ func TestUploadRequiresAPIKey(t *testing.T) {
 }
 
 func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
-	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded, EnablePdfOcr: true}, UploadURL: "http://upload", UploadMethod: "PUT", EnablePdfOcr: true}}
+	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded, ForcePdfOcr: true}, UploadURL: "http://upload", UploadMethod: "PUT", ForcePdfOcr: true}}
 	resolver := &Resolver{DocumentUploader: uploader, DocumentService: &stubProvider{}, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	ctx := ctxutils.WithAPIKey(context.Background(), "secret")
 	path := strPtr("docs/file.md")
-	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: path, FileSizeBytes: 100, EnablePDFOcr: boolPtr(true)})
+	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: path, FileSizeBytes: 100, ForcePDFOcr: boolPtr(true)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,11 +69,11 @@ func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
 		t.Fatalf("document not mapped: %+v", payload.Document)
 	}
 
-	if !payload.EnablePDFOcr {
-		t.Fatalf("expected enablePdfOcr propagated to payload")
+	if !payload.ForcePDFOcr {
+		t.Fatalf("expected forcePdfOcr propagated to payload")
 	}
-	if !uploader.input.EnablePdfOcr {
-		t.Fatalf("expected enablePdfOcr propagated to usecase input")
+	if !uploader.input.ForcePdfOcr {
+		t.Fatalf("expected forcePdfOcr propagated to usecase input")
 	}
 
 	if ctxutils.CorrelationID(uploader.lastCtx) == "" {

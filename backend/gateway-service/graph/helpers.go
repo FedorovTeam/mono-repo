@@ -20,13 +20,13 @@ func mapDocument(doc *domain.Document) *model.KnowledgeDocument {
 	}
 
 	result := &model.KnowledgeDocument{
-		ID:           doc.ID,
-		FileName:     doc.FileName,
-		Repository:   doc.Repository,
-		Branch:       doc.Branch,
-		Path:         doc.Path,
-		Status:       modelStatusFromDomain(doc.Status),
-		EnablePDFOcr: doc.EnablePdfOcr,
+		ID:          doc.ID,
+		FileName:    doc.FileName,
+		Repository:  doc.Repository,
+		Branch:      doc.Branch,
+		Path:        doc.Path,
+		Status:      modelStatusFromDomain(doc.Status),
+		ForcePDFOcr: doc.ForcePdfOcr,
 	}
 
 	if doc.RepositoryOwner != nil {
