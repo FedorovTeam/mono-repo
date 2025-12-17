@@ -2,12 +2,19 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
 	"github.com/mono-repo/docling-transformer-service/internal/usecase/metrics"
 	"go.uber.org/zap"
 )
@@ -50,5 +57,115 @@ func TestDoclingPollerRequeuesAfterWaitingLimit(t *testing.T) {
 	delay := time.Until(*task.NextPollAt)
 	if delay < time.Minute-2*time.Second || delay > time.Minute+2*time.Second {
 		t.Fatalf("expected next poll around 1m, got %s", delay)
+	}
+}
+
+func TestDoclingPollerUsesTaskIDForStatusAndResult(t *testing.T) {
+	const (
+		submitPath = "/v1/convert/file/async"
+		statusPath = "/v1/status/poll/"
+		resultPath = "/v1/result/"
+	)
+
+	var (
+		taskStatusCalls int32
+		jobStatusCalls  int32
+		taskResultCalls int32
+		jobResultCalls  int32
+	)
+
+	taskID := "docling-task-123"
+	jobID := "docling-job-456"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == submitPath:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]string{"task_id": taskID, "job_id": jobID})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, statusPath):
+			if strings.HasSuffix(r.URL.Path, taskID) {
+				atomic.AddInt32(&taskStatusCalls, 1)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"task_status": "success"})
+
+				return
+			}
+
+			if strings.HasSuffix(r.URL.Path, jobID) {
+				atomic.AddInt32(&jobStatusCalls, 1)
+				http.NotFound(w, r)
+
+				return
+			}
+
+			t.Fatalf("unexpected status path: %s", r.URL.Path)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, resultPath):
+			if strings.HasSuffix(r.URL.Path, taskID) {
+				atomic.AddInt32(&taskResultCalls, 1)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status":   "success",
+					"document": map[string]any{"md_content": "# done"},
+				})
+
+				return
+			}
+
+			if strings.HasSuffix(r.URL.Path, jobID) {
+				atomic.AddInt32(&jobResultCalls, 1)
+				http.NotFound(w, r)
+
+				return
+			}
+
+			t.Fatalf("unexpected result path: %s", r.URL.Path)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	repoStub := &pollingRepoStub{}
+	workerMetrics := metrics.NewWorkerMetrics(zap.NewNop())
+	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, zap.NewNop())
+	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{InitialInterval: time.Second, MaxInterval: time.Second, MaxAttempts: 3})
+
+	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{
+		FileName:    "document.docx",
+		Content:     []byte("content"),
+		ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if ids.TaskID != taskID || ids.JobID != jobID {
+		t.Fatalf("unexpected ids from submit: %+v", ids)
+	}
+
+	task := &transformations.TransformationTask{
+		ID:            uuid.New(),
+		Status:        transformations.StatusDocling,
+		DoclingTaskID: ids.TaskID,
+		DoclingJobID:  ids.JobID,
+		CreatedAt:     time.Now(),
+	}
+
+	result, pollErr := poller.Poll(context.Background(), task)
+	if pollErr != nil {
+		t.Fatalf("unexpected poll error: %v", pollErr)
+	}
+
+	if result == nil || string(result.Content) != "# done" {
+		t.Fatalf("unexpected poll result: %+v", result)
+	}
+
+	if taskStatusCalls != 1 || taskResultCalls != 1 {
+		t.Fatalf("expected single task-based status/result call, got status=%d result=%d", taskStatusCalls, taskResultCalls)
+	}
+
+	if jobStatusCalls != 0 || jobResultCalls != 0 {
+		t.Fatalf("expected no job-based polling, got status=%d result=%d", jobStatusCalls, jobResultCalls)
 	}
 }
