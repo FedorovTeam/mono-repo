@@ -33,7 +33,7 @@ type Config struct {
 	DoclingRequeueDelay    time.Duration
 	DoclingMaxRestarts     int
 	UseSourceAsync         bool
-	DefaultOCREnabled      bool
+	DefaultForceOCR        bool
 	DefaultOCRLang         string
 	DefaultPDFBackend      string
 }
@@ -66,7 +66,7 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 		MarkdownBucket:       normalized.MarkdownBucket,
 		FastOperationTimeout: normalized.FastOperationTimeout,
 		UseSourceAsync:       normalized.UseSourceAsync,
-		DefaultOCREnabled:    normalized.DefaultOCREnabled,
+		DefaultForceOCR:      normalized.DefaultForceOCR,
 		DefaultOCRLang:       normalized.DefaultOCRLang,
 		DefaultPDFBackend:    normalized.DefaultPDFBackend,
 	})

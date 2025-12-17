@@ -424,7 +424,7 @@ func TestHandleConvertPropagatesForceOCR(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if transformer.lastRequest == nil || !transformer.lastRequest.GetOcrEnabled() {
+	if transformer.lastRequest == nil || !transformer.lastRequest.GetForceOcr() {
 		t.Fatalf("expected OCR flag to be propagated to transformer, got %#v", transformer.lastRequest)
 	}
 	if transformer.lastRequest.GetFilenameExtension() != "pdf" {

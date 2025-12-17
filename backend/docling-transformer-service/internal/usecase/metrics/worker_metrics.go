@@ -199,12 +199,12 @@ func (m *WorkerMetrics) RecordOutcome(ctx context.Context, success bool) {
 	}
 }
 
-func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, enableOCR bool, ocrLang, pdfBackend string) {
+func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, forceOCR bool, ocrLang, pdfBackend string) {
 	if m == nil || m.doclingSubmit == nil {
 		return
 	}
 
-	attrs := []attribute.KeyValue{attribute.Bool("ocr_enabled", enableOCR)}
+	attrs := []attribute.KeyValue{attribute.Bool("force_ocr", forceOCR)}
 	if ocrLang != "" {
 		attrs = append(attrs, attribute.String("ocr_lang", ocrLang))
 	}

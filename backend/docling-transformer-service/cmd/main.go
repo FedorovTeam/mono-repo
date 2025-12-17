@@ -102,6 +102,7 @@ func main() {
 		DefaultLanguage:    cfg.Docling.DefaultLanguage,
 		PDFDefaultLanguage: cfg.Docling.PDFDefaultLanguage,
 		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
+		ForceOCR:           cfg.Docling.ForceOCR,
 		PDFBackend:         cfg.Docling.PDFBackend,
 		Mode:               cfg.Docling.Mode,
 		TraceHttpRequest:   cfg.Observability.LoggingEnabled,
@@ -122,7 +123,7 @@ func main() {
 		QueueLimit:        cfg.Service.QueueLimit,
 		StatusBackoff:     statusPolicy,
 		UseSourceAsync:    cfg.Docling.Mode == "source_async",
-		DefaultOCREnabled: cfg.Docling.PDFEnableOCR,
+		DefaultForceOCR:   cfg.Docling.ForceOCR,
 		DefaultOCRLang:    cfg.Docling.PDFDefaultLanguage,
 		DefaultPDFBackend: cfg.Docling.PDFBackend,
 	}, logger, &http.Client{Timeout: 30 * time.Second})
@@ -148,7 +149,7 @@ func main() {
 		DoclingRequeueDelay:    cfg.Scheduler.DoclingRequeueDelay,
 		DoclingMaxRestarts:     cfg.Scheduler.DoclingMaxRestarts,
 		UseSourceAsync:         cfg.Docling.Mode == "source_async",
-		DefaultOCREnabled:      cfg.Docling.PDFEnableOCR,
+		DefaultForceOCR:        cfg.Docling.ForceOCR,
 		DefaultOCRLang:         cfg.Docling.PDFDefaultLanguage,
 		DefaultPDFBackend:      cfg.Docling.PDFBackend,
 	})

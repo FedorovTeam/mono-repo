@@ -25,7 +25,7 @@ type TransformationDTO struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
-	OCREnabled        *bool
+	ForceOCR          *bool
 	OCRLanguage       string
 	PDFBackend        string
 	CreatedAt         time.Time
@@ -52,7 +52,7 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		MarkdownBucket:    dto.MarkdownBucket,
 		MarkdownObjectKey: dto.MarkdownObjectKey,
 		FilenameExtension: dto.FilenameExtension,
-		OCREnabled:        dto.OCREnabled,
+		ForceOCR:          dto.ForceOCR,
 		OCRLanguage:       dto.OCRLanguage,
 		PDFBackend:        dto.PDFBackend,
 		CreatedAt:         dto.CreatedAt,
