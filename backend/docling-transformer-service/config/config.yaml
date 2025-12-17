@@ -30,7 +30,7 @@ docling:
   pdf_default_language: ru
   pdf_enable_ocr: true
   force_ocr: false
-  pdf_backend: pypdfium2
+  pdf_backend: dlparse_v4
   status_initial_interval: 15s
   status_backoff_factor: 2
   status_max_interval: 2m
