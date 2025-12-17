@@ -27,7 +27,7 @@ docling:
   api_key: ""
   mode: upload_file
   default_language: ru
-  pdf_default_language: rus
+  pdf_default_language: ru
   pdf_enable_ocr: true
   force_ocr: false
   pdf_backend: pypdfium2
