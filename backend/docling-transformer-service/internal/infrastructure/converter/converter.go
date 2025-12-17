@@ -19,6 +19,7 @@ import (
 
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/doclingjson"
 	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 	"go.uber.org/zap"
 )
@@ -1073,6 +1074,10 @@ func buildConvertResult(resp convertDocumentResponse) (domain.ConvertResult, err
 	charset := ""
 	if doc.Charset != nil {
 		charset = *doc.Charset
+	}
+
+	if md, ok := doclingjson.RenderMarkdown(doc.JsonContent, doc.MdContent); ok && md != "" {
+		return domain.ConvertResult{Content: []byte(md), MediaType: "text/markdown", Charset: charset}, nil
 	}
 
 	if md := firstNonEmpty(doc.MdContent); md != "" {
