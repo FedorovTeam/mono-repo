@@ -137,6 +137,7 @@ type Config struct {
 	Mode               string
 	Storage            StorageConfig
 	TraceHttpRequest   bool
+	Render             RenderConfig
 }
 
 // StorageConfig описывает настройки доступа Docling к MinIO/S3.
@@ -147,6 +148,27 @@ type StorageConfig struct {
 	Bucket    string
 	Region    string
 	UseSSL    bool
+}
+
+// RenderConfig управляет источниками данных для результата Docling.
+type RenderConfig struct {
+	PreferJSON         bool
+	TwoPassVotingMerge bool
+	VotingTableMinRows int
+	PassBTableCoverage float64
+}
+
+func normalizeRenderConfig(cfg RenderConfig) RenderConfig {
+	if cfg.VotingTableMinRows <= 0 {
+		cfg.VotingTableMinRows = 1
+	}
+	if cfg.PassBTableCoverage < 0 {
+		cfg.PassBTableCoverage = 0
+	}
+	if cfg.PassBTableCoverage > 1 {
+		cfg.PassBTableCoverage = 1
+	}
+	return cfg
 }
 
 func (c *DoclingConverter) resolveSourceStorage(req domain.ConvertRequest) (storageSettings, error) {
@@ -296,6 +318,7 @@ type DoclingConverter struct {
 	storage            StorageConfig
 	client             *http.Client
 	logger             *zap.Logger
+	render             RenderConfig
 }
 
 // NewDoclingConverter создаёт конвертер с параметрами по умолчанию.
@@ -337,6 +360,7 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		storage:            storage,
 		client:             httpClient,
 		logger:             logger,
+		render:             normalizeRenderConfig(cfg.Render),
 	}
 }
 
@@ -508,7 +532,7 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, taskID string) (doma
 			return domain.StatusCheckResult{}, fmt.Errorf("docling result fetch failed: %w (body=%s)", err, responseSnippet(resultBody))
 		}
 
-		result, buildErr := buildConvertResult(resultResp)
+		result, buildErr := c.buildConvertResult(resultResp)
 		if buildErr != nil {
 			return domain.StatusCheckResult{}, fmt.Errorf("docling result: %w", buildErr)
 		}
@@ -1063,7 +1087,7 @@ func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, taskI
 }
 
 // buildConvertResult собирает domain.ConvertResult из ConvertDocumentResponse.
-func buildConvertResult(resp convertDocumentResponse) (domain.ConvertResult, error) {
+func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (domain.ConvertResult, error) {
 	normalizedStatus := normalizeStatus(resp.Status)
 	if !isSuccessStatus(normalizedStatus) {
 		return domain.ConvertResult{}, fmt.Errorf("docling response status=%s", resp.Status)
@@ -1076,12 +1100,9 @@ func buildConvertResult(resp convertDocumentResponse) (domain.ConvertResult, err
 		charset = *doc.Charset
 	}
 
-	if md, ok := doclingjson.RenderMarkdown(doc.JsonContent, doc.MdContent); ok && md != "" {
-		return domain.ConvertResult{Content: []byte(md), MediaType: "text/markdown", Charset: charset}, nil
-	}
-
-	if md := firstNonEmpty(doc.MdContent); md != "" {
-		return domain.ConvertResult{Content: []byte(md), MediaType: "text/markdown", Charset: charset}, nil
+	markdown := c.selectMarkdown(doc)
+	if markdown != "" {
+		return domain.ConvertResult{Content: []byte(markdown), MediaType: "text/markdown", Charset: charset}, nil
 	}
 	if html := firstNonEmpty(doc.HtmlContent); html != "" {
 		return domain.ConvertResult{Content: []byte(html), MediaType: "text/html", Charset: charset}, nil
@@ -1091,6 +1112,59 @@ func buildConvertResult(resp convertDocumentResponse) (domain.ConvertResult, err
 	}
 
 	return domain.ConvertResult{}, errors.New("docling response has empty content")
+}
+
+func (c *DoclingConverter) selectMarkdown(doc exportDocumentResponse) string {
+	rendered, ok, coverage := c.renderMarkdown(doc)
+	mdContent := strings.TrimSpace(firstNonEmpty(doc.MdContent))
+
+	switch {
+	case c.render.PreferJSON && ok && rendered != "":
+		return rendered
+	case c.render.TwoPassVotingMerge && mdContent != "":
+		if ok && rendered != "" && coverage >= c.render.PassBTableCoverage {
+			return rendered
+		}
+		return mdContent
+	case mdContent != "":
+		return mdContent
+	case ok:
+		return rendered
+	default:
+		return ""
+	}
+}
+
+func (c *DoclingConverter) renderMarkdown(doc exportDocumentResponse) (string, bool, float64) {
+	parsed, err := doclingjson.Parse(doc.JsonContent)
+	if err != nil {
+		return "", false, 0
+	}
+
+	coverage := calculateTableCoverage(parsed.Tables, c.render.VotingTableMinRows)
+	rendered, ok := doclingjson.RenderMarkdown(parsed, doc.MdContent)
+
+	return strings.TrimSpace(rendered), ok, coverage
+}
+
+func calculateTableCoverage(tables []doclingjson.Table, minRows int) float64 {
+	if minRows <= 0 {
+		minRows = 1
+	}
+
+	total := len(tables)
+	if total == 0 {
+		return 0
+	}
+
+	filled := 0
+	for _, table := range tables {
+		if len(table.Rows) >= minRows {
+			filled++
+		}
+	}
+
+	return float64(filled) / float64(total)
 }
 
 func firstNonEmpty(values ...*string) string {

@@ -114,6 +114,12 @@ func main() {
 			Region:    cfg.Docling.Storage.Region,
 			UseSSL:    cfg.Docling.Storage.UseSSL,
 		},
+		Render: converter.RenderConfig{
+			PreferJSON:         cfg.DoclingRender.PreferJSON != nil && *cfg.DoclingRender.PreferJSON,
+			TwoPassVotingMerge: cfg.DoclingRender.TwoPassVotingMerge,
+			VotingTableMinRows: cfg.DoclingRender.VotingTableMinRows,
+			PassBTableCoverage: cfg.DoclingRender.PassBTableCoverage,
+		},
 	}, logger)
 
 	statusPolicy := cfg.StatusBackoffPolicy()
