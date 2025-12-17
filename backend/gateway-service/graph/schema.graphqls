@@ -16,7 +16,7 @@ type UploadKnowledgeDocumentPayload {
   document: KnowledgeDocument!
   uploadUrl: String!
   uploadMethod: String!
-  enablePdfOcr: Boolean!
+  forcePdfOcr: Boolean!
 }
 
 type KnowledgeDocumentConnection {
@@ -36,7 +36,7 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
-  enablePdfOcr: Boolean!
+  forcePdfOcr: Boolean!
 }
 
 enum KnowledgeDocumentStatus {
@@ -54,7 +54,7 @@ input UploadKnowledgeDocumentInput {
   repository: String!
   branch: String!
   path: String
-  enablePdfOcr: Boolean = false
+  forcePdfOcr: Boolean = false
 }
 
 input KnowledgeDocumentFilter {
