@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -159,6 +160,10 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 	}
 
 	w.uploadResultFn = func(ctx context.Context, bucket, key, path string) error {
+		if bucket != "default-target" {
+			return fmt.Errorf("unexpected target bucket: %s", bucket)
+		}
+
 		uploadedPath = path
 		return nil
 	}

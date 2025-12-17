@@ -29,6 +29,7 @@ preprocess:
   output_dir: /tmp/out
   source_bucket: preprocess-source
   target_bucket: preprocess-target
+  target_key_prefix: converted
 logging:
   level: debug
 `)
@@ -56,6 +57,10 @@ logging:
 
 	if cfg.Preprocess.TargetBucket != "preprocess-target" {
 		t.Fatalf("unexpected target bucket: %s", cfg.Preprocess.TargetBucket)
+	}
+
+	if cfg.Preprocess.TargetKeyPrefix != "converted" {
+		t.Fatalf("unexpected target key prefix: %s", cfg.Preprocess.TargetKeyPrefix)
 	}
 
 	if cfg.Preprocess.OutputDir != "/tmp/out" {

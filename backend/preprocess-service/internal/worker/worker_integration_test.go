@@ -27,8 +27,8 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	db, terminate := setupPostgres(ctx, t)
 	defer terminate()
 
-	repo := postgres.NewJobRepository(db)
-	handler := transport.NewPreprocessHandler(repo)
+repo := postgres.NewJobRepository(db)
+handler := transport.NewPreprocessHandler(repo, "target", "converted")
 
 	submitResp, err := handler.SubmitPreprocess(ctx, &preprocessv1.SubmitPreprocessRequest{
 		SourceBucket:  "source",

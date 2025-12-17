@@ -2,6 +2,8 @@ package transport
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,16 +17,36 @@ import (
 
 type PreprocessHandler struct {
 	preprocessv1.UnimplementedPreprocessServiceServer
-	repo domain.JobRepository
+	repo            domain.JobRepository
+	targetBucket    string
+	targetKeyPrefix string
 }
 
-func NewPreprocessHandler(repo domain.JobRepository) *PreprocessHandler {
-	return &PreprocessHandler{repo: repo}
+func NewPreprocessHandler(repo domain.JobRepository, targetBucket, targetKeyPrefix string) *PreprocessHandler {
+	return &PreprocessHandler{
+		repo:            repo,
+		targetBucket:    targetBucket,
+		targetKeyPrefix: strings.TrimSuffix(targetKeyPrefix, "/"),
+	}
 }
 
 func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preprocessv1.SubmitPreprocessRequest) (*preprocessv1.SubmitPreprocessResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+
+	targetBucket := req.GetTargetBucket()
+	if targetBucket == "" {
+		targetBucket = h.targetBucket
+	}
+
+	targetKey := req.GetTargetKey()
+	if targetKey == "" {
+		targetKey = h.defaultTargetKey(req)
+	}
+
+	if targetBucket == "" || targetKey == "" {
+		return nil, status.Error(codes.InvalidArgument, "target_bucket and target_key are required")
 	}
 
 	existing, found, err := h.repo.FindBySource(ctx, req.GetSourceBucket(), req.GetSourceKey(), req.GetSourceEtag())
@@ -47,8 +69,8 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		SourceBucket:  req.GetSourceBucket(),
 		SourceKey:     req.GetSourceKey(),
 		SourceETag:    req.GetSourceEtag(),
-		TargetBucket:  req.GetTargetBucket(),
-		TargetKey:     req.GetTargetKey(),
+		TargetBucket:  targetBucket,
+		TargetKey:     targetKey,
 		CallbackURL:   req.GetCallbackUrl(),
 		CorrelationID: req.GetCorrelationId(),
 		Status:        preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING,
@@ -69,6 +91,19 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		Status:        job.Status,
 		CorrelationId: job.CorrelationID,
 	}, nil
+}
+
+func (h *PreprocessHandler) defaultTargetKey(req *preprocessv1.SubmitPreprocessRequest) string {
+	baseName := req.GetDocumentId()
+	if baseName == "" {
+		baseName = uuid.NewString()
+	}
+
+	if h.targetKeyPrefix != "" {
+		return fmt.Sprintf("%s/%s.docx", h.targetKeyPrefix, baseName)
+	}
+
+	return fmt.Sprintf("%s.docx", baseName)
 }
 
 func (h *PreprocessHandler) GetPreprocessStatus(ctx context.Context, req *preprocessv1.GetPreprocessStatusRequest) (*preprocessv1.GetPreprocessStatusResponse, error) {

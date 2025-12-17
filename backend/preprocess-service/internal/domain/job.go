@@ -37,11 +37,5 @@ func (j PreprocessJob) Validate() error {
 	if j.SourceETag == "" {
 		return fmt.Errorf("source etag is required")
 	}
-	if j.TargetBucket == "" {
-		return fmt.Errorf("target bucket is required")
-	}
-	if j.TargetKey == "" {
-		return fmt.Errorf("target key is required")
-	}
 	return nil
 }

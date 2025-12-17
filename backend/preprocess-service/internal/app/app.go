@@ -49,7 +49,7 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	repo := postgres.NewJobRepository(dbpool)
-	handler := transport.NewPreprocessHandler(repo)
+	handler := transport.NewPreprocessHandler(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 
 	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler, telemetry.Meter(), logger)
 	if err != nil {
