@@ -118,6 +118,18 @@ func (f *fakeQueueRepository) CleanupFinished(context.Context, time.Duration) (i
 	return 0, nil
 }
 
+func (f *fakeQueueRepository) AcquireSubmitLock(context.Context) (repo.SubmitLock, error) {
+	return fakeSubmitLock{}, nil
+}
+
+func (f *fakeQueueRepository) ReschedulePending(context.Context, uuid.UUID, time.Time) error {
+	return nil
+}
+
+type fakeSubmitLock struct{}
+
+func (fakeSubmitLock) Release(context.Context) error { return nil }
+
 func (f *fakeQueueRepository) CountByStatus(context.Context) (int, int, int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

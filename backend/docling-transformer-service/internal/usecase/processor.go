@@ -25,6 +25,7 @@ type Config struct {
 	CleanupRetention       time.Duration
 	FailedRetryDelay       time.Duration
 	MaxFailedRetries       int
+	SubmitLockDelay        time.Duration
 	DoclingInitialInterval time.Duration
 	DoclingMaxInterval     time.Duration
 	DoclingBackoffFactor   float64
@@ -78,6 +79,7 @@ func NewProcessor(
 		DefaultForceOCR:      normalized.DefaultForceOCR,
 		DefaultOCRLang:       normalized.DefaultOCRLang,
 		DefaultPDFBackend:    normalized.DefaultPDFBackend,
+		SubmitLockDelay:      normalized.SubmitLockDelay,
 		OverlayMatchRate:     normalized.OverlayMatchRate,
 	})
 
@@ -122,6 +124,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.RetryBackoff <= 0 {
 		cfg.RetryBackoff = cfg.PollInterval
+	}
+	if cfg.SubmitLockDelay <= 0 {
+		cfg.SubmitLockDelay = cfg.PollInterval
 	}
 	if cfg.CleanupInterval <= 0 {
 		cfg.CleanupInterval = 30 * time.Second
