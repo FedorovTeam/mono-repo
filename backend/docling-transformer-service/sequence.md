@@ -5,61 +5,86 @@ sequenceDiagram
     participant GW as Gateway/cron job
     participant TR as Transformer gRPC
     participant PG as PostgreSQL Queue
-    participant WK as Worker/maintenance
+    participant WK as Worker/Maintenance
     participant MN as MinIO
     participant DL as Docling HTTP
 
-    GW->>TR: ConvertDocumentToMarkdown(document_id, original_bucket, original_object_key,<br/>filename_extension?, markdown_bucket?, markdown_object_key?) + x-correlation-id
-    TR->>PG: SELECT latest task by document_id
-    alt существующая задача не failed
-        TR-->>GW: reuse queue_id + status + markdown_bucket/object_key (учёт сохранённых значений)
+    GW->>TR: ConvertDocumentToMarkdown(document_id, original_bucket, original_object_key,<br/>source_bucket/object_key | source_url,<br/>markdown_bucket?, markdown_object_key?, filename_extension?, force_ocr?, correlation_id)
+    TR->>TR: валидация document_id/original_*,<br/>исключаем source_url против source_bucket/object_key,<br/>markdown_bucket по умолчанию из конфигурации
+    TR->>TR: NormalizeExtension(filename_extension | original/source key) + ResolveContentTypeByExtension
+    TR->>TR: markdown_object_key по умолчанию через BuildMarkdownKey(original_object_key)
+    TR->>TR: force_ocr/ocr_lang/pdf_backend по умолчанию из конфигурации
+    TR->>TR: проверка лимита очереди (CountByStatus)
+    TR->>PG: GetLatestByDocument(document_id)
+    alt найдена неfailed задача
+        TR-->>GW: reuse queue_id/status + ResolveOutput(markdown_bucket/object_key) с учётом сохранённых значений
     else новая задача
-        TR->>TR: валидация bucket (дефолт из конфигурации) и extension (из запроса или original_object_key) + ResolveContentTypeByExtension
-        TR->>TR: проверка лимита service.queue_limit (CountByStatus)
-        TR->>PG: INSERT transformations_queue status=pending docling_poll_count=0
+        TR->>PG: Enqueue(status=pending, markdown_bucket/object_key,<br/>source_bucket/object_key или source_url, force_ocr?, ocr_lang, pdf_backend, correlation_id)
         TR-->>GW: queue_id, status=pending, markdown_bucket/object_key
     end
     opt wait_for_result=true
-        loop waitForTask (poll_attempts, next_poll_at/backoff)
-            TR->>PG: SELECT task by queue_id
+        loop WaitForResult (backoff из status_backoff + task.next_poll_at)
+            TR->>PG: GetByID(queue_id)
             alt status in [done, failed]
-                TR-->>GW: финальный status + markdown_bucket/object_key (учёт обновлённых значений)
-            else статус не готов
-                TR->>TR: ожидание до next_poll_at или увеличенного backoff (<= pollMaxInterval)
+                TR-->>GW: финальный status + markdown_bucket/object_key (с учётом обновлённых значений)
+            else
+                TR-->>TR: ожидание до next_poll_at или backoff
             end
         end
-        TR-->>GW: deadline exceeded при исчерпании попыток
+        TR-->>GW: DeadlineExceeded при исчерпании попыток
     end
 
     loop workerLoop (MaxWorkers)
-        WK->>PG: AcquireBatch(waiting_docling с наступившим next_poll_at, затем pending с next_poll_at <= NOW())
-        PG-->>WK: задачи со статусом processing (pending увеличивает retry_count)
-        alt задача уже ждёт Docling (docling_job_id задан)
-            WK->>DL: GET /v1/status/poll/{job_id} (X-Correlation-Id)
-            WK->>PG: UpdateDoclingInfo(job_id, docling_poll_count++)
-            alt статус готов
-                WK->>DL: GET /v1/result/{job_id}
-                WK->>MN: PUT markdown_object_key в markdown_bucket c media_type
-                WK->>PG: UPDATE status=done, finished_at, markdown_* fields
-            else статус pending / временная ошибка
-                WK->>PG: UPDATE status=waiting_docling, docling_poll_count++, next_poll_at=exp.backoff
-            else превышен лимит опросов/рестартов
-                WK->>PG: UPDATE status=pending, docling_job_id=NULL, docling_poll_count=0, next_poll_at=NOW()+scheduler.docling_requeue_delay
+        WK->>PG: AcquireBatch(BatchSize) // waiting_docling с наступившим next_poll_at → первыми; при наличии любых waiting_docling pending блокируются
+        alt задача с docling_task_id/job_id
+            WK->>DL: GET /v1/status/poll/{task_or_job_id} (X-Correlation-Id)
+            WK->>PG: UpdateDoclingInfo(docling_task_id/job_id, docling_poll_count++)
+            alt status/result готов
+                alt overlay требуется (force_ocr=true и pdf)
+                    alt overlay_stage != ocr (base-фаза)
+                        WK->>MN: PUT markdown_object_key+".base.md" в markdown_bucket
+                        WK->>PG: PrepareOverlayOCRPhase(status=pending, overlay_stage=ocr,<br/>clear docling ids, сохранить base refs)
+                        WK-->>WK: reschedule → обработка продолжится в OCR-фазе
+                    else overlay_stage=ocr
+                        WK->>MN: GET base_markdown_bucket/base_markdown_object_key
+                        WK-->>WK: merge overlayVotingTables(baseMD, ocrMD, match_rate)
+                        WK->>MN: PUT финальный markdown_object_key в markdown_bucket с media_type
+                        WK->>PG: MarkDone(status=done, finished_at, markdown_bucket/object_key)
+                    end
+                else обычный режим
+                    WK->>MN: PUT markdown_object_key в markdown_bucket с media_type
+                    WK->>PG: MarkDone(status=done, finished_at)
+                end
+            else статус pending/временная ошибка
+                alt превышен лимит поллинга или повтор ошибок
+                    WK->>PG: RequeueDoclingWaiting(status=pending, retry_count++, reset docling ids/poll_count,<br/>next_poll_at=requeue_delay)
+                else
+                    WK->>PG: MarkDoclingWaiting(status=waiting_docling, next_poll_at=exp.backoff)
+                end
             end
         else новая конвертация
-            WK->>MN: GET original_object_key из original_bucket
-            WK->>DL: POST /v1/convert/file/async (multipart, X-Correlation-Id, X-Docling-Source-Filename)
-            WK->>PG: UPDATE status=waiting_docling, docling_job_id, docling_poll_count=0, next_poll_at=initial backoff
+            WK-->>WK: определить converter (overlay base→baseConv/force_ocr=false, overlay ocr или обычный → ocrConv)
+            alt useSourceAsync (source_url пуст и известны source_bucket/object_key или включён fallback к оригиналу)
+                WK-->>DL: POST /v1/convert/file/async (source_bucket/object_key,<br/>target markdown_bucket/object_key, ForceOCR/EnableOCR/OCRLanguage/PDFBackend)
+            else синхронная загрузка
+                alt источник URL
+                    WK->>DL: POST /v1/convert/file/async (multipart, скачанный контент, X-Docling-Source-Filename)
+                else объект в MinIO (source_bucket/object_key или original_bucket/object_key)
+                    WK->>MN: GET исходный объект
+                    WK->>DL: POST /v1/convert/file/async (multipart контент)
+                end
+            end
+            WK->>PG: MarkDoclingWaiting(status=waiting_docling, docling_task_id/job_id,<br/>docling_poll_count=0, next_poll_at=initial backoff)
         end
-        alt ошибка или лимит поллинга/таймауты
-            WK->>PG: UPDATE status=failed, finished_at, error
+        alt ошибка обработчика
+            WK->>PG: MarkFailed(status=failed, finished_at, error)
         end
-        end
+    end
 
     loop maintenanceLoop
-        WK->>PG: CountByStatus // снимок метрик очереди
-        WK->>PG: ActivateWaiting(now, max_docling_lifetime) // возвращает pending, помечает просроченные как failed
-        WK->>PG: RestoreStuckProcessing(processing_timeout, max_retries, max_docling_attempts) // вернуть в pending или failed (сброс docling_job_id/poll_count/next_poll_at)
+        WK->>PG: CountByStatus // метрики очереди
+        WK->>PG: ActivateWaiting(now, max_docling_lifetime) // только помечает waiting_docling просроченные как failed
+        WK->>PG: RestoreStuckProcessing(processing_timeout, max_retries, max_docling_attempts) // pending или failed при превышении лимитов, сброс docling_* и next_poll_at
         WK->>PG: RetryFailed(olderThan=now-failed_retry_delay, max_failed_retries) // вернуть в pending или оставить failed при превышении лимита
         WK->>PG: CleanupFinished(retention)
     end
@@ -72,19 +97,20 @@ sequenceDiagram
     participant SRC as HTTP Source (docx_url)
     participant DL as Docling HTTP
 
-    CL->>TR: ConvertDocxToMarkdown(docx_content|docx_url, filename?) + x-correlation-id
+    CL->>TR: ConvertDocxToMarkdown(docx_content|docx_url, filename?, correlation_id)
     alt docx_content и docx_url заданы одновременно или оба пустые
         TR-->>CL: INVALID_ARGUMENT
     else валидный источник
+        TR-->>TR: correlation_id || EnsureCorrelationID
         alt указан docx_url
-            TR->>SRC: GET docx_url (timeout 30s)
+            TR->>SRC: GET docx_url (timeout ~30s)
             TR-->>TR: filename из URL, запасной document.docx
         else бинарное содержимое
             TR-->>TR: filename из запроса или document.docx
         end
         TR->>TR: ResolveContentTypeByExtension(filename)
         TR->>DL: POST /v1/convert/file/async (multipart, X-Correlation-Id, X-Docling-Source-Filename)
-        loop pollUntilReady (poll_attempts, poll_interval<=pollMaxInterval)
+        loop pollUntilReady (status_backoff)
             TR->>DL: GET /v1/status/poll/{job_id}
             alt результат готов
                 TR->>DL: GET /v1/result/{job_id}
@@ -94,5 +120,5 @@ sequenceDiagram
             end
         end
     end
-    TR-->>CL: ошибка DeadlineExceeded если попытки исчерпаны
+    TR-->>CL: DeadlineExceeded если попытки исчерпаны или контекст отменён
 ```
