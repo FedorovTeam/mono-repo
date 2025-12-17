@@ -74,10 +74,6 @@ func (p *pollingRepoStub) RequeueDoclingWaiting(_ context.Context, id uuid.UUID,
 	p.lastRequeueNextPoll = nextPollAt
 	return nil
 }
-func (p *pollingRepoStub) PrepareOverlayOCRPhase(context.Context, uuid.UUID, string, string) error {
-	return nil
-}
-func (p *pollingRepoStub) ClearOverlayState(context.Context, uuid.UUID) error { return nil }
 func (p *pollingRepoStub) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
 	return 0, 0, nil
 }

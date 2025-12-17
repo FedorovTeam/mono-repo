@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
@@ -33,6 +35,7 @@ type DoclingPoller struct {
 	metrics  *metrics.WorkerMetrics
 	logger   *zap.Logger
 	cfg      DoclingPollerConfig
+	errors   *pollErrorTracker
 }
 
 func NewDoclingPoller(
@@ -53,6 +56,7 @@ func NewDoclingPoller(
 		metrics:  metrics,
 		logger:   logger,
 		cfg:      cfg,
+		errors:   newPollErrorTracker(),
 	}
 }
 
@@ -77,6 +81,7 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 	}
 
 	if p.isWaitingLimitReached(pollOffset) {
+		p.errors.Clear(task.ID)
 		if err := p.requeueDoclingTask(ctx, task, fmt.Sprintf("poll limit reached before status check (%d)", pollOffset)); err != nil {
 			return nil, err
 		}
@@ -109,11 +114,21 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 	p.metrics.RecordDoclingPolls(ctx, 1)
 
 	if checkErr != nil {
+		streak, signature := p.errors.Add(task.ID, checkErr)
+		if streak >= 2 {
+			if err := p.requeueDoclingTask(ctx, task, fmt.Sprintf("repeated docling status error (%s)", signature)); err != nil {
+				return nil, err
+			}
+			p.errors.Clear(task.ID)
+			return nil, ErrDoclingWaiting
+		}
+
 		// Любая ошибка статуса → переводим обратно в waiting_docling с backoff.
 		if p.isWaitingLimitReached(newPollCount) {
 			if err := p.requeueDoclingTask(ctx, task, fmt.Sprintf("status check error limit reached (%d): %v", newPollCount, checkErr)); err != nil {
 				return nil, err
 			}
+			p.errors.Clear(task.ID)
 			return nil, ErrDoclingWaiting
 		}
 
@@ -126,6 +141,8 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 		p.logger.Warn("docling status check error, will retry", append(logIDs, zap.Time("next_poll_at", nextPoll), zap.Error(checkErr))...)
 		return nil, ErrDoclingWaiting
 	}
+
+	p.errors.Clear(task.ID)
 
 	if statusResult.Result == nil {
 		if p.isWaitingLimitReached(newPollCount) {
@@ -171,6 +188,8 @@ func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transforma
 		nextPollAt = &t
 	}
 
+	p.errors.Clear(task.ID)
+
 	if err := p.repo.RequeueDoclingWaiting(ctx, task.ID, nextPollAt); err != nil {
 		return fmt.Errorf("requeue docling waiting: %w", err)
 	}
@@ -192,4 +211,53 @@ func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transforma
 	)
 
 	return nil
+}
+
+type pollErrorTracker struct {
+	mu   sync.Mutex
+	last map[uuid.UUID]errorSignature
+}
+
+type errorSignature struct {
+	value string
+	count int
+}
+
+func newPollErrorTracker() *pollErrorTracker {
+	return &pollErrorTracker{last: make(map[uuid.UUID]errorSignature)}
+}
+
+func (t *pollErrorTracker) Add(taskID uuid.UUID, err error) (int, string) {
+	signature := describeError(err)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	info := t.last[taskID]
+	if info.value == signature {
+		info.count++
+	} else {
+		info.value = signature
+		info.count = 1
+	}
+
+	t.last[taskID] = info
+
+	return info.count, info.value
+}
+
+func (t *pollErrorTracker) Clear(taskID uuid.UUID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	delete(t.last, taskID)
+}
+
+func describeError(err error) string {
+	var status domain.StatusCoder
+	if errors.As(err, &status) {
+		return fmt.Sprintf("status:%d", status.StatusCode())
+	}
+
+	return fmt.Sprintf("error:%T:%s", err, err.Error())
 }
