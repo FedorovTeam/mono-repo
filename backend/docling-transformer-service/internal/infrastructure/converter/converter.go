@@ -655,8 +655,8 @@ func (c *DoclingConverter) writeDoclingOptions(
 	enableOCR, forceOCR bool,
 	ocrLang, pdfBackend string,
 ) error {
-	// Всегда явно просим Markdown
-	if err := writer.WriteField("to_formats", "md"); err != nil {
+	// Всегда явно просим JSON; Markdown оставляем как запасной формат
+	if err := writer.WriteField("to_formats", "json,md"); err != nil {
 		return fmt.Errorf("write to_formats: %w", err)
 	}
 
@@ -732,7 +732,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 
 func (c *DoclingConverter) buildDoclingOptions(contentType, fileExt string, enableOCR, forceOCR bool, ocrLang, pdfBackend string) doclingOptions {
 	opts := doclingOptions{
-		ToFormats:         []string{"md"},
+		ToFormats:         []string{"json", "md"},
 		TableMode:         "accurate",
 		TableCellMatching: boolPtr(true),
 		ImageExportMode:   "embedded",
