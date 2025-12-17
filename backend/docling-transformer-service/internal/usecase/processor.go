@@ -147,7 +147,7 @@ func normalizeConfig(cfg Config) Config {
 		cfg.DoclingMaxRestarts = 3
 	}
 	if cfg.DefaultPDFBackend == "" {
-		cfg.DefaultPDFBackend = "pypdfium2"
+		cfg.DefaultPDFBackend = "dlparse_v4"
 	}
 	if cfg.OverlayMatchRate <= 0 {
 		cfg.OverlayMatchRate = 0.6

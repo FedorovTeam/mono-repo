@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
@@ -37,6 +38,8 @@ const (
 	sourceFileHeader    = "X-Docling-Source-Filename"
 	endpointHeader      = "X-Docling-Endpoint"
 	apiKeyHeader        = "X-Api-Key"
+
+	defaultPDFBackend = "dlparse_v4"
 
 	doclingFileFieldName = "files"
 
@@ -297,6 +300,7 @@ type doclingOptions struct {
 	PDFBackend        string   `json:"pdf_backend,omitempty"`
 	TableMode         string   `json:"table_mode,omitempty"`
 	TableCellMatching *bool    `json:"table_cell_matching,omitempty"`
+	DoTableStructure  *bool    `json:"do_table_structure,omitempty"`
 	ImageExportMode   string   `json:"image_export_mode,omitempty"`
 	Pipeline          string   `json:"pipeline,omitempty"`
 }
@@ -330,7 +334,7 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 
 	pdfBackend := strings.TrimSpace(cfg.PDFBackend)
 	if pdfBackend == "" {
-		pdfBackend = "pypdfium2"
+		pdfBackend = defaultPDFBackend
 	}
 
 	httpClient := &http.Client{Timeout: 60 * time.Second}
@@ -385,7 +389,7 @@ func (c *DoclingConverter) shouldEnableOCR(contentType string) bool {
 	return contentType == "application/pdf" && c.pdfEnableOCR
 }
 
-func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.ConvertRequest) (doOCR, forceOCR bool, ocrLang, pdfBackend string) {
+func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.ConvertRequest) (doOCR, forceOCR bool, ocrLang []string, pdfBackend string) {
 	doOCR = c.shouldEnableOCR(contentType)
 	forceOCR = c.forceOCR
 
@@ -401,9 +405,12 @@ func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.Conv
 		doOCR = true
 	}
 
-	ocrLang = c.selectLanguage(contentType)
-	if req.OCRLanguage != "" {
-		ocrLang = req.OCRLanguage
+	if doOCR {
+		if req.OCRLanguage != "" {
+			ocrLang = normalizeTesseractLangs(splitOCRLanguages(req.OCRLanguage))
+		} else {
+			ocrLang = defaultOCRLanguages()
+		}
 	}
 
 	pdfBackend = c.pdfBackend
@@ -415,6 +422,7 @@ func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.Conv
 	if contentType != "application/pdf" {
 		doOCR = false
 		forceOCR = false
+		ocrLang = nil
 	}
 
 	return doOCR, forceOCR, ocrLang, pdfBackend
@@ -546,7 +554,8 @@ func (c *DoclingConverter) submitWithRetry(
 	correlationID, filename, contentType, fileExt string,
 	content []byte,
 	doOCR, forceOCR bool,
-	ocrLang, pdfBackend string,
+	ocrLang []string,
+	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
@@ -593,7 +602,8 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
 	doOCR, forceOCR bool,
-	ocrLang, pdfBackend string,
+	ocrLang []string,
+	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
@@ -642,7 +652,8 @@ func (c *DoclingConverter) writeDoclingOptions(
 	writer *multipart.Writer,
 	fileExt string,
 	doOCR, forceOCR bool,
-	ocrLang, pdfBackend string,
+	ocrLang []string,
+	pdfBackend string,
 ) error {
 	// to_formats[]: IMPORTANT — не "json,md", а отдельными значениями
 	if err := writer.WriteField("to_formats", "json"); err != nil {
@@ -663,10 +674,8 @@ func (c *DoclingConverter) writeDoclingOptions(
 	if err := writer.WriteField("do_ocr", fmt.Sprintf("%t", doOCR)); err != nil {
 		return fmt.Errorf("write do_ocr: %w", err)
 	}
-	if forceOCR {
-		if err := writer.WriteField("force_ocr", "true"); err != nil {
-			return fmt.Errorf("write force_ocr: %w", err)
-		}
+	if err := writer.WriteField("force_ocr", fmt.Sprintf("%t", forceOCR)); err != nil {
+		return fmt.Errorf("write force_ocr: %w", err)
 	}
 
 	// ocr_engine / ocr_lang / pdf_backend — можно слать всегда, сервер сам применит где нужно
@@ -674,17 +683,17 @@ func (c *DoclingConverter) writeDoclingOptions(
 		return fmt.Errorf("write ocr_engine: %w", err)
 	}
 
-	if ocrLang != "" {
+	for _, lang := range normalizeTesseractLangs(ocrLang) {
 		// ocr_lang по OpenAPI — array; для multipart достаточно одного значения,
 		// при желании можно повторять ключ несколько раз.
-		if err := writer.WriteField("ocr_lang", normalizeTesseractLang(ocrLang)); err != nil {
+		if err := writer.WriteField("ocr_lang", lang); err != nil {
 			return fmt.Errorf("write ocr_lang: %w", err)
 		}
 	}
 
 	backend := pdfBackend
 	if backend == "" {
-		backend = "pypdfium2"
+		backend = defaultPDFBackend
 	}
 	if err := writer.WriteField("pdf_backend", backend); err != nil {
 		return fmt.Errorf("write pdf_backend: %w", err)
@@ -695,9 +704,9 @@ func (c *DoclingConverter) writeDoclingOptions(
 		return fmt.Errorf("write table_mode: %w", err)
 	}
 	if err := writer.WriteField("do_table_structure", "true"); err != nil {
-		return fmt.Errorf("write table_mode: %w", err)
+		return fmt.Errorf("write do_table_structure: %w", err)
 	}
-	if err := writer.WriteField("table_cell_matching", "true"); err != nil {
+	if err := writer.WriteField("table_cell_matching", "false"); err != nil {
 		return fmt.Errorf("write table_cell_matching: %w", err)
 	}
 	if err := writer.WriteField("image_export_mode", "embedded"); err != nil {
@@ -710,11 +719,12 @@ func (c *DoclingConverter) writeDoclingOptions(
 	return nil
 }
 
-func (c *DoclingConverter) buildDoclingOptions(fileExt string, doOCR, forceOCR bool, ocrLang, pdfBackend string) doclingOptions {
+func (c *DoclingConverter) buildDoclingOptions(fileExt string, doOCR, forceOCR bool, ocrLang []string, pdfBackend string) doclingOptions {
 	opts := doclingOptions{
 		ToFormats:         []string{"json", "md"},
 		TableMode:         "accurate",
-		TableCellMatching: boolPtr(true),
+		TableCellMatching: boolPtr(false),
+		DoTableStructure:  boolPtr(true),
 		ImageExportMode:   "embedded",
 		Pipeline:          "standard",
 	}
@@ -724,19 +734,17 @@ func (c *DoclingConverter) buildDoclingOptions(fileExt string, doOCR, forceOCR b
 	}
 
 	opts.DoOCR = boolPtr(doOCR)
-	if forceOCR {
-		opts.ForceOCR = boolPtr(true)
-	}
+	opts.ForceOCR = boolPtr(forceOCR)
 
 	opts.OCREngine = "tesseract"
-	if ocrLang != "" {
-		opts.OCRLang = []string{normalizeTesseractLang(ocrLang)}
+	if len(ocrLang) > 0 {
+		opts.OCRLang = normalizeTesseractLangs(ocrLang)
 	}
 
 	if pdfBackend != "" {
 		opts.PDFBackend = pdfBackend
 	} else {
-		opts.PDFBackend = "pypdfium2"
+		opts.PDFBackend = defaultPDFBackend
 	}
 
 	return opts
@@ -747,7 +755,8 @@ func (c *DoclingConverter) submit(
 	correlationID, filename, contentType, fileExt string,
 	content []byte,
 	doOCR, forceOCR bool,
-	ocrLang, pdfBackend string,
+	ocrLang []string,
+	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
 
@@ -778,6 +787,13 @@ func (c *DoclingConverter) submit(
 	}
 	if err != nil {
 		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling multipart: %w", err)
+	}
+
+	language := c.selectLanguage(contentType)
+	if language != "" {
+		if err := writer.WriteField("language", language); err != nil {
+			return domain.DoclingIdentifiers{}, fmt.Errorf("write language: %w", err)
+		}
 	}
 
 	if err = c.writeDoclingOptions(writer, fileExt, doOCR, forceOCR, ocrLang, pdfBackend); err != nil {
@@ -814,7 +830,7 @@ func (c *DoclingConverter) submit(
 		return domain.DoclingIdentifiers{}, fmt.Errorf("read docling submit response: %w", readErr)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		baseErr := fmt.Errorf("docling submit returned status %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 			return domain.DoclingIdentifiers{}, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
@@ -822,12 +838,12 @@ func (c *DoclingConverter) submit(
 		return domain.DoclingIdentifiers{}, baseErr
 	}
 
-	var statusResp taskStatusResponse
+	var statusResp doclingSubmitResponse
 	if err := json.Unmarshal(body, &statusResp); err != nil {
 		return domain.DoclingIdentifiers{}, fmt.Errorf("unmarshal docling submit response: %w", err)
 	}
 
-	ids := domain.DoclingIdentifiers{TaskID: statusResp.TaskID}
+	ids := domain.DoclingIdentifiers{TaskID: statusResp.TaskID, JobID: statusResp.JobID}
 	if ids.TaskID == "" {
 		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty task identifier")
 	}
@@ -840,7 +856,8 @@ func (c *DoclingConverter) submitSourceAsync(
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
 	doOCR, forceOCR bool,
-	ocrLang, pdfBackend string,
+	ocrLang []string,
+	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
 
@@ -913,7 +930,7 @@ func (c *DoclingConverter) submitSourceAsync(
 		return domain.DoclingIdentifiers{}, fmt.Errorf("read docling source submit response: %w", readErr)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		baseErr := fmt.Errorf("docling submit returned status %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 			return domain.DoclingIdentifiers{}, &temporaryDoclingError{statusCode: resp.StatusCode, body: responseSnippet(body), cause: baseErr}
@@ -921,12 +938,12 @@ func (c *DoclingConverter) submitSourceAsync(
 		return domain.DoclingIdentifiers{}, baseErr
 	}
 
-	var statusResp taskStatusResponse
+	var statusResp doclingSubmitResponse
 	if err := json.Unmarshal(body, &statusResp); err != nil {
 		return domain.DoclingIdentifiers{}, fmt.Errorf("unmarshal docling source submit response: %w", err)
 	}
 
-	ids := domain.DoclingIdentifiers{TaskID: statusResp.TaskID}
+	ids := domain.DoclingIdentifiers{TaskID: statusResp.TaskID, JobID: statusResp.JobID}
 	if ids.TaskID == "" {
 		return domain.DoclingIdentifiers{}, errors.New("docling submit response has empty task identifier")
 	}
@@ -1127,6 +1144,42 @@ func isTemporaryDoclingError(err error) (bool, int) {
 		return true, 0
 	}
 	return false, 0
+}
+
+func defaultOCRLanguages() []string {
+	return []string{"rus", "eng", "osd"}
+}
+
+func splitOCRLanguages(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		switch r {
+		case ',', ';', '|', '+':
+			return true
+		}
+		return unicode.IsSpace(r)
+	})
+
+	return parts
+}
+
+func normalizeTesseractLangs(langs []string) []string {
+	if len(langs) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(langs))
+	for _, lang := range langs {
+		if lang == "" {
+			continue
+		}
+		normalized = append(normalized, normalizeTesseractLang(lang))
+	}
+
+	return normalized
 }
 
 func normalizeTesseractLang(lang string) string {

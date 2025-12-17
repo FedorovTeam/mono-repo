@@ -247,7 +247,7 @@ func (c *Config) applyDefaults() {
 	}
 
 	if c.Docling.PDFBackend == "" {
-		c.Docling.PDFBackend = "pypdfium2"
+		c.Docling.PDFBackend = "dlparse_v4"
 	}
 
 	if c.Docling.Storage.Endpoint == "" && c.Docling.Storage.AccessKey == "" && c.Docling.Storage.SecretKey == "" && c.Docling.Storage.Bucket == "" {
