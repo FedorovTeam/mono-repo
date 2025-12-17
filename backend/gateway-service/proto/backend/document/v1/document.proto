@@ -36,7 +36,7 @@ message Document {
   string base_branch = 16;
   bool create_pr = 17;
   string job_id = 18;
-  bool ocr_enabled = 20;
+  bool force_ocr = 20;
   // Бывшее поле actual_status больше не используется, номер и имя зарезервированы для обратной совместимости.
   reserved 19;
   reserved "actual_status";
@@ -57,7 +57,7 @@ message CreateDocumentRequest {
   string owner = 12;
   string base_branch = 13;
   bool create_pr = 14;
-  bool ocr_enabled = 16;
+  bool force_ocr = 16;
 
   reserved 15;
   reserved "entity_specific_path";
