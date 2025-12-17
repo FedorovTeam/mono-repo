@@ -67,7 +67,7 @@ column string
 {"transformations_queue", "markdown_bucket"},
 {"transformations_queue", "markdown_object_key"},
 {"transformations_queue", "filename_extension"},
-{"transformations_queue", "ocr_enabled"},
+{"transformations_queue", "force_ocr"},
 {"transformations_queue", "ocr_lang"},
 {"transformations_queue", "pdf_backend"},
 {"transformations_queue", "created_at"},

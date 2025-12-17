@@ -32,7 +32,7 @@ type TransformationConfig struct {
 	QueueLimit        int
 	StatusBackoff     backoff.Policy
 	UseSourceAsync    bool
-	DefaultOCREnabled bool
+	DefaultForceOCR   bool
 	DefaultOCRLang    string
 	DefaultPDFBackend string
 }
@@ -47,7 +47,7 @@ type SubmitConversionRequest struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
-	OCREnabled        *bool
+	ForceOCR          *bool
 	OCRLanguage       string
 	PDFBackend        string
 	CorrelationID     string
@@ -121,9 +121,9 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		markdownKey = domain.BuildMarkdownKey(params.OriginalObjectKey)
 	}
 
-	ocrEnabled := params.OCREnabled
-	if ocrEnabled == nil {
-		ocrEnabled = boolPtr(uc.cfg.DefaultOCREnabled)
+	forceOCR := params.ForceOCR
+	if forceOCR == nil {
+		forceOCR = boolPtr(uc.cfg.DefaultForceOCR)
 	}
 
 	ocrLang := params.OCRLanguage
@@ -169,7 +169,7 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		FilenameExtension: fileExt,
-		OCREnabled:        ocrEnabled,
+		ForceOCR:          forceOCR,
 		OCRLanguage:       ocrLang,
 		PDFBackend:        pdfBackend,
 		CorrelationID:     params.CorrelationID,
@@ -187,7 +187,7 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 			SourceBucket:      params.SourceBucket,
 			SourceObjectKey:   params.SourceObjectKey,
 			SourceURL:         params.SourceURL,
-			OCREnabled:        ocrEnabled,
+			ForceOCR:          forceOCR,
 			OCRLanguage:       ocrLang,
 			PDFBackend:        pdfBackend,
 		},

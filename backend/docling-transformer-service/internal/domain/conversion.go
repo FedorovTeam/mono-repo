@@ -11,6 +11,7 @@ type ConvertRequest struct {
 	TargetBucket    string
 	TargetObjectKey string
 	EnableOCR       *bool
+	ForceOCR        *bool
 	OCRLanguage     string
 	PDFBackend      string
 }

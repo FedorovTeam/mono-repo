@@ -281,7 +281,7 @@ func TestConvertToMarkdownFillsExtensionFromDocument(t *testing.T) {
 	if transformer.lastRequest.GetFilenameExtension() != "pdf" {
 		t.Fatalf("expected filename extension to be derived from document, got %q", transformer.lastRequest.GetFilenameExtension())
 	}
-	if !transformer.lastRequest.GetOcrEnabled() {
+	if !transformer.lastRequest.GetForceOcr() {
 		t.Fatalf("expected OCR flag to be propagated to transformer request")
 	}
 }
