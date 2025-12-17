@@ -6,30 +6,35 @@ graph TD
     main --> telemetry[internal/infrastructure/telemetry]
     main --> migrations[db/migrations]
     main --> storage[internal/infrastructure/storage]
-    main --> repo[internal/infrastructure/repository]
-    main --> conv[internal/infrastructure/converter]
+    main --> repoImpl[internal/infrastructure/repository]
+    main --> converter[internal/infrastructure/converter]
     main --> usecases[internal/usecase]
-    main --> grpcsrv[internal/interfaces/grpc]
-    usecases --> repo
-    usecases --> conv
+    main --> grpc[internal/interfaces/grpc]
+    main --> domain[internal/domain]
+    usecases --> repoIface[internal/repository]
+    repoIface --> repoImpl
+    repoImpl --> postgres[(Postgres)]
     usecases --> storage
-    grpcsrv --> usecases
-    grpcsrv --> proto[proto/backend/transformer/v1]
-    repo --> postgres[(Postgres)]
     storage --> minio[(MinIO)]
-    conv --> telemetry
+    usecases --> converter
+    converter --> doclingjson[internal/infrastructure/doclingjson]
+    converter --> telemetry
+    usecases --> backoff[internal/backoff]
+    usecases --> domain
+    grpc --> usecases
+    grpc --> proto[proto/backend/transformer/v1]
     telemetry --> cfg
 ```
 
-- `cmd/main` загружает конфигурацию, инициализирует логгер и OTEL‑провайдеры, прогоняет миграции, поднимает клиентов MinIO и Postgres, собирает конвертер Docling, запускает юзкейсы и gRPC сервер.
-- `internal/config` читает YAML‑конфигурацию сервиса с блоками Service, Scheduler, Docling, MinIO, Postgres и Observability.
-- `internal/interfaces/grpc` поднимает gRPC сервер и регистрирует `TransformerService`, валидирует вход, подставляет значения по умолчанию для bucket/ключей и делегирует работу юзкейсам.
-- `internal/usecase` реализует сценарии постановки и обработки задач конвертации, опираясь на доменные интерфейсы и не завися от транспорта или СУБД.
-- `internal/infrastructure/repository` реализует Postgres‑очередь трансформаций: постановка задач, выбор следующей, обновление статусов Docling, восстановление зависших, уборка завершённых и сбор статистики.
-- `internal/usecase` управляет воркерами обработки задач: скачивает исходники из MinIO, отправляет их в Docling, поллит статус с экспоненциальной задержкой и ограничением попыток, загружает Markdown обратно в MinIO, пишет метрики и восстанавливает зависшие задачи.
-- `internal/infrastructure/storage` оборачивает клиент MinIO для скачивания исходного файла и загрузки результата конвертации в указанный бакет.
-- `internal/infrastructure/converter` реализует HTTP‑клиент Docling: отправка файла с заголовками correlation-id, API‑ключом и именем источника, повторные попытки отправки, нормализация статусов и поллинг результата.
-- `internal/domain` содержит значения и сущности трансформации (статусы, задача очереди) и утилиты для построения ключей.
+- `cmd/main` загружает конфигурацию (включая блок `docling_render`), инициализирует логгер и OTEL‑провайдеры, прогоняет миграции, создаёт клиентов MinIO и Postgres‑пула, восстанавливает подвисшие задачи, собирает два Docling‑конвертера (базовый и OCR), поднимает воркер-процессор очереди и gRPC сервер.
+- `internal/config` читает YAML‑конфигурацию сервиса с блоками Service, Scheduler, Docling (включая storage и статусный backoff), DoclingRender, MinIO, Postgres и Observability, применяет значения по умолчанию и валидирует параметры.
+- `internal/interfaces/grpc` поднимает gRPC сервер `TransformerService` из proto, валидирует вход и correlation-id, проксирует вызовы юзкейса `TransformerUseCase` (очередь `ConvertDocumentToMarkdown` с optional `wait_for_result` и синхронный `ConvertDocxToMarkdown`).
+- `internal/usecase` реализует доменный слой: `TransformerService` ставит задачи в очередь, переиспользует актуальные задания, рассчитывает ключи/бакеты/расширения и backoff статусов; `Processor`/`ConversionExecutor`/`DoclingPoller` управляют обработкой очереди, поллят Docling, накатывают overlay в две фазы (base → OCR) через markdown, пишут метрики и ведут ретраи/реанимацию.
+- `internal/repository` описывает интерфейс `QueueRepository` для работы с очередью Docling‑трансформаций и вспомогательными операциями overlay/рестора.
+- `internal/infrastructure/repository` реализует `QueueRepository` для Postgres (`transformations_queue`): постановка и выбор задач, обновление статусов Docling, восстановление зависших, requeue/poll расписание, overlay‑поля и очистку завершённых.
+- `internal/infrastructure/storage` оборачивает MinIO‑клиент для скачивания исходного файла и загрузки результата конвертации в нужный бакет/ключ.
+- `internal/infrastructure/converter` реализует HTTP‑клиент Docling: submit задач (upload_file/source_async) с ретраями и заголовками correlation/API key, поллинг статуса/результата, выбор медиа-типов, построение multipart, поддержка MinIO‑стоража Docling и опциональный рендер Markdown из Docling JSON/таблиц.
+- `internal/infrastructure/doclingjson` парсит JSON Docling, собирает Markdown по таблицам/marks и накладывает таблицы OCR на базовый Markdown через voting merge.
+- `internal/domain` содержит статусы, сущности очереди и утилиты: определение контент‑тайпов, нормализация расширений и построение ключей для Markdown.
 - `internal/infrastructure/telemetry` предоставляет генерацию correlation-id, настройку OTEL провайдеров и вспомогательные опции для gRPC telemetry handler и логгера.
-- `db/migrations` содержит миграции Postgres для таблицы очереди трансформаций и выполняется на старте сервиса.
-
+- `db/migrations` содержит миграции Postgres для таблицы `transformations_queue` и связанных индексов/колонок.
