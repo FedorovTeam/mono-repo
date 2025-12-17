@@ -670,7 +670,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 	}
 
 	// ocr_engine / ocr_lang / pdf_backend — можно слать всегда, сервер сам применит где нужно
-	if err := writer.WriteField("ocr_engine", "tesseract"); err != nil {
+	if err := writer.WriteField("ocr_engine", "easyocr"); err != nil {
 		return fmt.Errorf("write ocr_engine: %w", err)
 	}
 

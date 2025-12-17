@@ -17,4 +17,5 @@ root@a39306:~# kubectl -n docling exec -it deploy/docling-serve -- sh
 List of available languages (2):
 eng
 osd
+rus
 ```
