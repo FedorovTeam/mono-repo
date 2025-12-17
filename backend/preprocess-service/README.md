@@ -61,7 +61,7 @@
      -e MINIO_ENDPOINT="minio.moiqr.localhost:80" \
      -e MINIO_ACCESS_KEY="PREPROCESS_MINIO_KEY" \
      -e MINIO_SECRET_KEY="PREPROCESS_MINIO_SECRET" \
-     -e MINIO_REGION="us-east-1" \
+     -e MINIO_REGION="ru-msk-1" \
      -e MINIO_SSL="false" \
      -v $(pwd)/config/config.yaml:/app/config/config.yaml:ro \
      preprocess-service:local

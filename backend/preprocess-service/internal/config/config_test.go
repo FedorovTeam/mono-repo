@@ -22,7 +22,7 @@ minio:
   access_key: demo
   secret_key: demo-secret
   ssl: false
-  region: us-east-1
+  region: ru-msk-1
 preprocess:
   libreoffice_path: /usr/bin/libreoffice
   working_dir: /tmp/work

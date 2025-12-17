@@ -1,18 +1,18 @@
 service:
   name: preprocess-service
   port: 8082
-  grpc_port: 9082
+  grpc_port: 9090
   region: ru-msk-1
 
 postgres:
-  dsn: postgres://preprocess:preprocess_password@postgres:5432/preprocess?sslmode=disable
+  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/preprocess?sslmode=disable"
 
 minio:
-  endpoint: minio.moiqr.localhost:80
-  access_key: PREPROCESS_MINIO_KEY
-  secret_key: PREPROCESS_MINIO_SECRET
-  ssl: false
-  region: us-east-1
+  endpoint: api.minio.tech.fedorov-team.tech
+  access_key: "xUCM3lvYME7MrYTwegSA"
+  secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
+  ssl: true
+  region: ru-msk-1
 
 preprocess:
   libreoffice_path: /usr/bin/libreoffice
