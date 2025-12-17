@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/internal/usecase/transformation.go
 package usecase
 
 import (
@@ -234,10 +235,6 @@ func (uc *TransformerService) WaitForResult(ctx context.Context, queueID uuid.UU
 	}
 
 	return nil, ErrResultNotReady
-}
-
-func boolPtr(val bool) *bool {
-	return &val
 }
 
 func (uc *TransformerService) ConvertDocxContent(ctx context.Context, filename string, content []byte) (domain.ConvertResult, error) {

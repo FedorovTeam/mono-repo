@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/internal/infrastructure/repository/queue.go
 package repository
 
 import (
@@ -36,18 +37,25 @@ func NewQueueRepository(pool *pgxpool.Pool) *PostgresQueueRepository {
 	return &PostgresQueueRepository{pool: pool}
 }
 
-// GetLatestByDocument возвращает самую свежую задачу для документа, если она есть.
-// При отсутствии записей возвращает (nil, nil).
+const baseSelectFields = `
+id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at,
+document_id, original_bucket, original_object_key,
+source_bucket, source_object_key, source_url,
+markdown_bucket, markdown_object_key, filename_extension,
+force_ocr, ocr_lang, pdf_backend,
+overlay_stage, base_markdown_bucket, base_markdown_object_key,
+created_at, started_at, finished_at, error, correlation_id
+`
+
 func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
-	const query = `
-SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+	query := fmt.Sprintf(`
+SELECT %s
 FROM transformations_queue
 WHERE document_id = $1
 ORDER BY created_at DESC
-LIMIT 1`
+LIMIT 1`, baseSelectFields)
 
 	row := r.pool.QueryRow(ctx, query, documentID)
-
 	task, err := scanTask(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -59,15 +67,13 @@ LIMIT 1`
 	return task, nil
 }
 
-// GetByID возвращает задачу очереди по идентификатору.
 func (r *PostgresQueueRepository) GetByID(ctx context.Context, id uuid.UUID) (*TransformationTask, error) {
-	const query = `
-SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+	query := fmt.Sprintf(`
+SELECT %s
 FROM transformations_queue
-WHERE id = $1`
+WHERE id = $1`, baseSelectFields)
 
 	row := r.pool.QueryRow(ctx, query, id)
-
 	task, err := scanTask(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -90,14 +96,28 @@ func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueuePar
 
 	query := `
 INSERT INTO transformations_queue (
- id, status, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, correlation_id, docling_poll_count, next_poll_at
- ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, 0, NULL)
-`
+ id, status, document_id, original_bucket, original_object_key,
+ source_bucket, source_object_key, source_url,
+ markdown_bucket, markdown_object_key, filename_extension,
+ force_ocr, ocr_lang, pdf_backend,
+ overlay_stage, base_markdown_bucket, base_markdown_object_key,
+ created_at, correlation_id, docling_poll_count, next_poll_at
+) VALUES (
+ $1, $2, $3, $4, $5,
+ $6, $7, $8,
+ $9, $10, $11,
+ $12, $13, $14,
+ NULL, NULL, NULL,
+ NOW(), $15, 0, NULL
+)`
 
 	_, err := r.pool.Exec(ctx, query,
-		id, StatusPending, params.DocumentID, params.OriginalBucket, params.OriginalObjectKey,
-		params.SourceBucket, params.SourceObjectKey, params.SourceURL, params.MarkdownBucket, params.MarkdownObjectKey,
-		normalizedExt, forceOCR, params.OCRLanguage, params.PDFBackend, params.CorrelationID,
+		id, StatusPending,
+		params.DocumentID, params.OriginalBucket, params.OriginalObjectKey,
+		params.SourceBucket, params.SourceObjectKey, params.SourceURL,
+		params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt,
+		forceOCR, params.OCRLanguage, params.PDFBackend,
+		params.CorrelationID,
 	)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("enqueue transformation: %w", err)
@@ -126,11 +146,9 @@ func (r *PostgresQueueRepository) AcquireNext(ctx context.Context) (*Transformat
 	if err != nil || len(tasks) == 0 {
 		return nil, err
 	}
-
 	return tasks[0], nil
 }
 
-// AcquireBatch выбирает несколько задач из очереди и помечает их как processing в одной транзакции.
 func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) ([]*TransformationTask, error) {
 	if limit <= 0 {
 		limit = 1
@@ -150,7 +168,6 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 			}
 			return nil, nil
 		}
-
 		return nil, err
 	}
 
@@ -168,13 +185,15 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 }
 
 func (r *PostgresQueueRepository) selectNextTasks(ctx context.Context, tx pgx.Tx, limit int) ([]*TransformationTask, error) {
-	tasks, err := r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+	query := fmt.Sprintf(`
+SELECT %s
 FROM transformations_queue
 WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
 LIMIT $1
-FOR UPDATE SKIP LOCKED`, 1)
+FOR UPDATE SKIP LOCKED`, baseSelectFields)
+
+	tasks, err := r.fetchTasks(ctx, tx, query, 1)
 	if err == nil && len(tasks) > 0 {
 		return tasks, nil
 	}
@@ -182,40 +201,20 @@ FOR UPDATE SKIP LOCKED`, 1)
 		return nil, err
 	}
 
-	hasWaiting, err := r.hasWaitingDocling(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if hasWaiting {
-		return nil, pgx.ErrNoRows
-	}
-
-	tasks, err = r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+	query = fmt.Sprintf(`
+SELECT %s
 FROM transformations_queue
 WHERE status = 'pending' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
 LIMIT $1
-FOR UPDATE SKIP LOCKED`, limit)
+FOR UPDATE SKIP LOCKED`, baseSelectFields)
+
+	tasks, err = r.fetchTasks(ctx, tx, query, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	return tasks, nil
-}
-
-func (r *PostgresQueueRepository) hasWaitingDocling(ctx context.Context, tx pgx.Tx) (bool, error) {
-	const query = `SELECT 1 FROM transformations_queue WHERE status = 'waiting_docling' LIMIT 1`
-
-	var marker int
-	switch err := tx.QueryRow(ctx, query).Scan(&marker); {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, pgx.ErrNoRows):
-		return false, nil
-	default:
-		return false, fmt.Errorf("check waiting docling: %w", err)
-	}
 }
 
 func (r *PostgresQueueRepository) fetchTasks(ctx context.Context, tx pgx.Tx, query string, limit int) ([]*TransformationTask, error) {
@@ -267,12 +266,16 @@ func (r *PostgresQueueRepository) markProcessing(ctx context.Context, tx pgx.Tx,
 }
 
 func (r *PostgresQueueRepository) MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error {
-	const query = `UPDATE transformations_queue SET status = 'done', markdown_bucket = $1, markdown_object_key = $2, finished_at = NOW(), error = NULL WHERE id = $3`
+	const query = `
+UPDATE transformations_queue
+SET status = 'done', markdown_bucket = $1, markdown_object_key = $2,
+    finished_at = NOW(), error = NULL,
+    overlay_stage = NULL, base_markdown_bucket = NULL, base_markdown_object_key = NULL
+WHERE id = $3`
 
 	if _, err := r.pool.Exec(ctx, query, markdownBucket, markdownObjectKey, id); err != nil {
 		return fmt.Errorf("mark done: %w", err)
 	}
-
 	return nil
 }
 
@@ -282,7 +285,6 @@ func (r *PostgresQueueRepository) MarkFailed(ctx context.Context, id uuid.UUID, 
 	if _, err := r.pool.Exec(ctx, query, errMsg, id); err != nil {
 		return fmt.Errorf("mark failed: %w", err)
 	}
-
 	return nil
 }
 
@@ -291,12 +293,16 @@ func (r *PostgresQueueRepository) UpdateDoclingInfo(ctx context.Context, id uuid
 		pollCount = 0
 	}
 
-	const query = `UPDATE transformations_queue SET docling_task_id = COALESCE(NULLIF($2, ''), docling_task_id), docling_job_id = COALESCE(NULLIF($3, ''), docling_job_id), docling_poll_count = $4 WHERE id = $1`
+	const query = `
+UPDATE transformations_queue
+SET docling_task_id = COALESCE(NULLIF($2, ''), docling_task_id),
+    docling_job_id  = COALESCE(NULLIF($3, ''), docling_job_id),
+    docling_poll_count = $4
+WHERE id = $1`
 
 	if _, err := r.pool.Exec(ctx, query, id, taskID, jobID, pollCount); err != nil {
 		return fmt.Errorf("update docling info: %w", err)
 	}
-
 	return nil
 }
 
@@ -307,7 +313,9 @@ func (r *PostgresQueueRepository) MarkDoclingWaiting(ctx context.Context, id uui
 
 	const query = `
 UPDATE transformations_queue
-SET status = 'waiting_docling', docling_task_id = $2, docling_job_id = $3, docling_poll_count = $4, next_poll_at = $5, started_at = NULL, error = NULL
+SET status = 'waiting_docling',
+    docling_task_id = $2, docling_job_id = $3, docling_poll_count = $4,
+    next_poll_at = $5, started_at = NULL, error = NULL
 WHERE id = $1`
 
 	if _, err := r.pool.Exec(ctx, query, id, taskID, jobID, pollCount, nextPollAt); err != nil {
@@ -334,7 +342,43 @@ WHERE id = $1 AND status = 'waiting_docling'`
 	if _, err := r.pool.Exec(ctx, query, id, nextPollAt); err != nil {
 		return fmt.Errorf("requeue docling waiting: %w", err)
 	}
+	return nil
+}
 
+// overlay: после base-прогона сохраняем base markdown в temp key и переводим задачу в ocr-фазу.
+func (r *PostgresQueueRepository) PrepareOverlayOCRPhase(ctx context.Context, id uuid.UUID, baseBucket, baseKey string) error {
+	const query = `
+UPDATE transformations_queue
+SET status = 'pending',
+    started_at = NULL,
+    finished_at = NULL,
+    error = NULL,
+    docling_task_id = NULL,
+    docling_job_id = NULL,
+    docling_poll_count = 0,
+    next_poll_at = NULL,
+    overlay_stage = 'ocr',
+    base_markdown_bucket = $2,
+    base_markdown_object_key = $3
+WHERE id = $1`
+
+	if _, err := r.pool.Exec(ctx, query, id, baseBucket, baseKey); err != nil {
+		return fmt.Errorf("prepare overlay ocr phase: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresQueueRepository) ClearOverlayState(ctx context.Context, id uuid.UUID) error {
+	const query = `
+UPDATE transformations_queue
+SET overlay_stage = NULL,
+    base_markdown_bucket = NULL,
+    base_markdown_object_key = NULL
+WHERE id = $1`
+
+	if _, err := r.pool.Exec(ctx, query, id); err != nil {
+		return fmt.Errorf("clear overlay state: %w", err)
+	}
 	return nil
 }
 
@@ -367,7 +411,11 @@ func (r *PostgresQueueRepository) failExpiredWaiting(ctx context.Context, tx pgx
 		return 0, nil
 	}
 
-	const query = `UPDATE transformations_queue SET status = 'failed', finished_at = NOW(), error = 'docling job lifetime exceeded' WHERE status = 'waiting_docling' AND created_at < $1 RETURNING 1`
+	const query = `
+UPDATE transformations_queue
+SET status = 'failed', finished_at = NOW(), error = 'docling job lifetime exceeded'
+WHERE status = 'waiting_docling' AND created_at < $1
+RETURNING 1`
 
 	rows, err := tx.Query(ctx, query, now.Add(-maxDoclingLifetime))
 	if err != nil {
@@ -379,7 +427,11 @@ func (r *PostgresQueueRepository) failExpiredWaiting(ctx context.Context, tx pgx
 }
 
 func (r *PostgresQueueRepository) releaseWaiting(ctx context.Context, tx pgx.Tx, now time.Time) (int, error) {
-	const query = `UPDATE transformations_queue SET status = 'pending', started_at = NULL, next_poll_at = NULL, error = NULL WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= $1) RETURNING 1`
+	const query = `
+UPDATE transformations_queue
+SET status = 'pending', started_at = NULL, next_poll_at = NULL, error = NULL
+WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= $1)
+RETURNING 1`
 
 	rows, err := tx.Query(ctx, query, now)
 	if err != nil {
@@ -387,12 +439,7 @@ func (r *PostgresQueueRepository) releaseWaiting(ctx context.Context, tx pgx.Tx,
 	}
 	defer rows.Close()
 
-	ready, err := countRows(rows)
-	if err != nil {
-		return 0, err
-	}
-
-	return ready, nil
+	return countRows(rows)
 }
 
 func (r *PostgresQueueRepository) RestoreProcessing(ctx context.Context) (int, error) {
@@ -408,18 +455,14 @@ RETURNING 1`
 	}
 	defer rows.Close()
 
-	restored, err := countRows(rows)
-	if err != nil {
-		return 0, err
-	}
-
-	return restored, nil
+	return countRows(rows)
 }
 
 func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error) {
 	const query = `
 WITH stalled AS (
-    SELECT id, retry_count, docling_job_id, docling_poll_count, started_at FROM transformations_queue
+    SELECT id, retry_count, docling_job_id, docling_poll_count, started_at
+    FROM transformations_queue
     WHERE status = 'processing' AND started_at < NOW() - $1::interval
 ),
 failed AS (
@@ -440,7 +483,8 @@ failed AS (
 ),
 restored AS (
     UPDATE transformations_queue
-    SET status = 'pending', started_at = NULL, error = format('restored after timeout %s (started_at=%s)', $1, COALESCE(started_at::text, 'unknown')),
+    SET status = 'pending', started_at = NULL,
+        error = format('restored after timeout %s (started_at=%s)', $1, COALESCE(started_at::text, 'unknown')),
         docling_task_id = NULL, docling_job_id = NULL, docling_poll_count = 0, next_poll_at = NULL
     WHERE id IN (SELECT id FROM stalled EXCEPT SELECT id FROM failed)
     RETURNING id
@@ -450,7 +494,6 @@ SELECT (SELECT COUNT(*) FROM restored), (SELECT COUNT(*) FROM failed);`
 	if maxRetries <= 0 {
 		maxRetries = 1
 	}
-
 	if maxDoclingPollAttempts < 0 {
 		maxDoclingPollAttempts = 0
 	}
@@ -529,7 +572,6 @@ func (r *PostgresQueueRepository) CleanupFinished(ctx context.Context, retention
 	for rows.Next() {
 		count++
 	}
-
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterate cleanup results: %w", err)
 	}
@@ -542,11 +584,9 @@ func countRows(rows pgx.Rows) (int, error) {
 	for rows.Next() {
 		count++
 	}
-
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-
 	return count, nil
 }
 
@@ -561,6 +601,10 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		forceOCR        sql.NullBool
 		ocrLang         sql.NullString
 		pdfBackend      sql.NullString
+
+		overlayStage          sql.NullString
+		baseMarkdownBucket    sql.NullString
+		baseMarkdownObjectKey sql.NullString
 	)
 
 	if err := row.Scan(
@@ -583,6 +627,9 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&forceOCR,
 		&ocrLang,
 		&pdfBackend,
+		&overlayStage,
+		&baseMarkdownBucket,
+		&baseMarkdownObjectKey,
 		&dto.CreatedAt,
 		&dto.StartedAt,
 		&dto.FinishedAt,
@@ -592,7 +639,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		if err == pgx.ErrNoRows {
 			return nil, pgx.ErrNoRows
 		}
-
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 
@@ -601,12 +647,19 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	dto.SourceBucket = sourceBucket.String
 	dto.SourceObjectKey = sourceObjectKey.String
 	dto.SourceURL = sourceURL.String
+
 	if forceOCR.Valid {
 		val := forceOCR.Bool
 		dto.ForceOCR = &val
 	}
 	dto.OCRLanguage = ocrLang.String
 	dto.PDFBackend = pdfBackend.String
+
+	if overlayStage.Valid {
+		dto.OverlayStage = transformations.OverlayStage(overlayStage.String)
+	}
+	dto.BaseMarkdownBucket = baseMarkdownBucket.String
+	dto.BaseMarkdownObjectKey = baseMarkdownObjectKey.String
 
 	return dto.ToDomain(), nil
 }

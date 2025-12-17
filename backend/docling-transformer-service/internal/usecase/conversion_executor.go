@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/internal/usecase/conversion_executor.go
 package usecase
 
 import (
@@ -11,17 +12,10 @@ import (
 
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/doclingjson"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/mono-repo/docling-transformer-service/internal/usecase/metrics"
 	"go.uber.org/zap"
-)
-
-type TaskState string
-
-const (
-	StateProcessing     TaskState = "processing"
-	StateWaitingDocling           = "waiting_docling"
-	StateCompleted                = "completed"
 )
 
 type ConversionExecutorConfig struct {
@@ -29,14 +23,18 @@ type ConversionExecutorConfig struct {
 	FastOperationTimeout time.Duration
 	HTTPClient           HTTPClient
 	UseSourceAsync       bool
-	DefaultForceOCR      bool
-	DefaultOCRLang       string
-	DefaultPDFBackend    string
+
+	DefaultForceOCR   bool
+	DefaultOCRLang    string
+	DefaultPDFBackend string
+
+	OverlayMatchRate float64
 }
 
 type ConversionExecutor struct {
 	repo       repo.QueueRepository
-	conv       domain.Converter
+	baseConv   domain.Converter // base: PreferJSON=false
+	ocrConv    domain.Converter // обычный
 	storage    domain.ObjectStorage
 	poller     *DoclingPoller
 	metrics    *metrics.WorkerMetrics
@@ -45,7 +43,16 @@ type ConversionExecutor struct {
 	cfg        ConversionExecutorConfig
 }
 
-func NewConversionExecutor(repository repo.QueueRepository, conv domain.Converter, storage domain.ObjectStorage, poller *DoclingPoller, metrics *metrics.WorkerMetrics, logger *zap.Logger, cfg ConversionExecutorConfig) *ConversionExecutor {
+func NewConversionExecutor(
+	repository repo.QueueRepository,
+	baseConv domain.Converter,
+	ocrConv domain.Converter,
+	storage domain.ObjectStorage,
+	poller *DoclingPoller,
+	metrics *metrics.WorkerMetrics,
+	logger *zap.Logger,
+	cfg ConversionExecutorConfig,
+) *ConversionExecutor {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -59,7 +66,21 @@ func NewConversionExecutor(repository repo.QueueRepository, conv domain.Converte
 		client = &http.Client{Timeout: timeout}
 	}
 
-	return &ConversionExecutor{repo: repository, conv: conv, storage: storage, poller: poller, metrics: metrics, logger: logger, httpClient: client, cfg: cfg}
+	if cfg.OverlayMatchRate <= 0 {
+		cfg.OverlayMatchRate = 0.6
+	}
+
+	return &ConversionExecutor{
+		repo:       repository,
+		baseConv:   baseConv,
+		ocrConv:    ocrConv,
+		storage:    storage,
+		poller:     poller,
+		metrics:    metrics,
+		logger:     logger,
+		httpClient: client,
+		cfg:        cfg,
+	}
 }
 
 func (e *ConversionExecutor) ProcessTask(ctx context.Context, task *transformations.TransformationTask) (TaskState, error) {
@@ -91,12 +112,74 @@ func (e *ConversionExecutor) pollDocling(ctx context.Context, task *transformati
 	}
 
 	mediaType := normalizeMediaType(result.MediaType, result.Charset)
+	isOverlay := e.shouldOverlay(task)
 
 	uploadCtx, cancelUpload := e.fastPhaseContext(ctx)
 	defer cancelUpload()
 
-	if err := e.storage.Upload(uploadCtx, task.MarkdownBucket, task.MarkdownObjectKey, mediaType, result.Content); err != nil {
-		return StateProcessing, fmt.Errorf("upload markdown: %w", err)
+	// BASE-фаза overlay: сохраняем base markdown в *.base.md и переводим задачу в OCR-фазу.
+	if isOverlay && task.OverlayStage != transformations.OverlayStageOCR {
+		tempKey := task.MarkdownObjectKey + ".base.md"
+
+		if err := e.storage.Upload(uploadCtx, task.MarkdownBucket, tempKey, mediaType, result.Content); err != nil {
+			return StateProcessing, fmt.Errorf("upload base markdown: %w", err)
+		}
+
+		if err := e.repo.PrepareOverlayOCRPhase(ctx, task.ID, task.MarkdownBucket, tempKey); err != nil {
+			return StateProcessing, fmt.Errorf("prepare overlay ocr phase: %w", err)
+		}
+
+		task.OverlayStage = transformations.OverlayStageOCR
+		task.BaseMarkdownBucket = task.MarkdownBucket
+		task.BaseMarkdownObjectKey = tempKey
+
+		e.logger.Info("overlay base stored, rescheduled to ocr phase",
+			zap.String("queue_id", task.ID.String()),
+			zap.String("base_bucket", task.BaseMarkdownBucket),
+			zap.String("base_key", task.BaseMarkdownObjectKey),
+		)
+
+		return StateRescheduled, nil
+	}
+
+	// Обычный режим — просто сохранить и done.
+	if !isOverlay {
+		if err := e.storage.Upload(uploadCtx, task.MarkdownBucket, task.MarkdownObjectKey, mediaType, result.Content); err != nil {
+			return StateProcessing, fmt.Errorf("upload markdown: %w", err)
+		}
+		if err := e.repo.MarkDone(ctx, task.ID, task.MarkdownBucket, task.MarkdownObjectKey); err != nil {
+			return StateProcessing, fmt.Errorf("mark done: %w", err)
+		}
+		return StateCompleted, nil
+	}
+
+	// OCR-фаза overlay: скачать base markdown, наложить таблицы из OCR и сохранить финал.
+	if task.BaseMarkdownBucket == "" || task.BaseMarkdownObjectKey == "" {
+		return StateProcessing, fmt.Errorf("overlay: base markdown reference is empty")
+	}
+
+	baseCtx, cancelBase := e.fastPhaseContext(ctx)
+	defer cancelBase()
+
+	baseBytes, err := e.storage.Download(baseCtx, task.BaseMarkdownBucket, task.BaseMarkdownObjectKey)
+	if err != nil {
+		return StateProcessing, fmt.Errorf("overlay: download base markdown: %w", err)
+	}
+
+	baseMD := string(baseBytes)
+	ocrMD := string(result.Content)
+
+	mergedMD, stats := doclingjson.OverlayVotingTablesInMarkdown(baseMD, ocrMD, e.cfg.OverlayMatchRate)
+
+	e.logger.Info("overlay tables merged",
+		zap.String("queue_id", task.ID.String()),
+		zap.Int("merge_total_rows", stats.TotalRows),
+		zap.Int("merge_matched_rows", stats.MatchedRows),
+		zap.Int("merge_filled_cells", stats.MergedRows),
+	)
+
+	if err := e.storage.Upload(uploadCtx, task.MarkdownBucket, task.MarkdownObjectKey, mediaType, []byte(mergedMD)); err != nil {
+		return StateProcessing, fmt.Errorf("upload merged markdown: %w", err)
 	}
 
 	if err := e.repo.MarkDone(ctx, task.ID, task.MarkdownBucket, task.MarkdownObjectKey); err != nil {
@@ -111,6 +194,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	if !useSourceAsync && task.SourceURL == "" && task.SourceBucket != "" && task.SourceObjectKey != "" && task.OriginalBucket != "" {
 		useSourceAsync = true
 	}
+
 	fileExt := task.FilenameExtension
 	if fileExt == "" {
 		key := task.OriginalObjectKey
@@ -119,26 +203,44 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		}
 		fileExt = domain.NormalizeExtension(filepath.Ext(key))
 	}
-	if fileExt == "" {
-		fileExt = domain.NormalizeExtension(filepath.Ext(ResolveFilenameFromURL(task.SourceURL, "")))
-	}
 
 	contentType, err := domain.ResolveContentTypeByExtension(fileExt)
 	if err != nil {
 		return StateProcessing, err
 	}
 
+	isOverlay := e.shouldOverlay(task)
+
+	// Выбор конвертера + force_ocr для конкретной фазы
+	conv := e.ocrConv
 	forceOCR := e.cfg.DefaultForceOCR
 	if task.ForceOCR != nil {
 		forceOCR = *task.ForceOCR
 	}
+
+	if isOverlay && task.OverlayStage != transformations.OverlayStageOCR {
+		// base-фаза
+		conv = e.baseConv
+		forceOCR = false
+		task.OverlayStage = transformations.OverlayStageBase
+	}
+
+	if isOverlay && task.OverlayStage == transformations.OverlayStageOCR {
+		// ocr-фаза
+		conv = e.ocrConv
+		forceOCR = true
+	}
+
+	// только PDF
 	if contentType != "application/pdf" {
 		forceOCR = false
 	}
+
 	ocrLang := e.cfg.DefaultOCRLang
 	if task.OCRLanguage != "" {
 		ocrLang = task.OCRLanguage
 	}
+
 	pdfBackend := e.cfg.DefaultPDFBackend
 	if task.PDFBackend != "" {
 		pdfBackend = task.PDFBackend
@@ -155,11 +257,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		}
 	}
 
-	originalFileName := task.OriginalObjectKey
-	if task.SourceObjectKey != "" {
-		originalFileName = task.SourceObjectKey
-	}
-	originalFileName = ResolveFilenameFromURL(task.SourceURL, filepath.Base(originalFileName))
+	originalFileName := ResolveFilenameFromURL(task.SourceURL, filepath.Base(task.OriginalObjectKey))
 	if filepath.Ext(originalFileName) == "" && fileExt != "" {
 		originalFileName = fmt.Sprintf("document.%s", fileExt)
 	}
@@ -191,12 +289,11 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		PDFBackend:      pdfBackend,
 	}
 
-	ids, err := e.conv.Submit(submitCtx, convertReq)
+	ids, err := conv.Submit(submitCtx, convertReq)
 	if err != nil {
 		if state, handleErr, handled := e.handleTemporarySubmitError(ctx, task, err); handled {
 			return state, handleErr
 		}
-
 		return StateProcessing, fmt.Errorf("docling submit: %w", err)
 	}
 
@@ -212,33 +309,36 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	task.DoclingPollCount = 0
 	task.NextPollAt = &nextPoll
 
-	logFields := []zap.Field{
+	e.logger.Info("docling job submitted",
+		zap.String("queue_id", task.ID.String()),
 		zap.String("docling_task_id", ids.TaskID),
-		zap.Time("next_poll_at", nextPoll),
+		zap.String("overlay_stage", string(task.OverlayStage)),
 		zap.Bool("force_ocr", forceOCR),
-		zap.String("ocr_lang", ocrLang),
-		zap.String("pdf_backend", pdfBackend),
-	}
-	if ids.JobID != "" {
-		logFields = append(logFields, zap.String("docling_job_id", ids.JobID))
-	}
-
-	e.logger.Info("docling job submitted", logFields...)
+	)
 
 	return StateWaitingDocling, nil
+}
+
+func (e *ConversionExecutor) shouldOverlay(task *transformations.TransformationTask) bool {
+	if task == nil || task.ForceOCR == nil || !*task.ForceOCR {
+		return false
+	}
+	ext := domain.NormalizeExtension(task.FilenameExtension)
+	if ext == "" {
+		ext = domain.NormalizeExtension(filepath.Ext(task.OriginalObjectKey))
+	}
+	return ext == "pdf"
 }
 
 func (e *ConversionExecutor) downloadSource(ctx context.Context, task *transformations.TransformationTask) ([]byte, error) {
 	if task.SourceURL != "" {
 		return e.downloadFromURL(ctx, task.SourceURL)
 	}
-
 	if task.SourceBucket != "" && task.SourceObjectKey != "" {
 		content, err := e.storage.Download(ctx, task.SourceBucket, task.SourceObjectKey)
 		if err != nil {
 			return nil, fmt.Errorf("download source object: %w", err)
 		}
-
 		return content, nil
 	}
 
@@ -246,7 +346,6 @@ func (e *ConversionExecutor) downloadSource(ctx context.Context, task *transform
 	if err != nil {
 		return nil, fmt.Errorf("download original: %w", err)
 	}
-
 	return content, nil
 }
 
@@ -275,7 +374,6 @@ func (e *ConversionExecutor) downloadFromURL(ctx context.Context, rawURL string)
 	if err != nil {
 		return nil, fmt.Errorf("download source: read body: %w", err)
 	}
-
 	if len(data) == 0 {
 		return nil, fmt.Errorf("download source: empty body")
 	}
@@ -287,7 +385,6 @@ func (e *ConversionExecutor) fastPhaseContext(ctx context.Context) (context.Cont
 	if e.cfg.FastOperationTimeout <= 0 {
 		return ctx, func() {}
 	}
-
 	return context.WithTimeout(ctx, e.cfg.FastOperationTimeout)
 }
 
@@ -313,25 +410,13 @@ func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, tas
 
 	task.NextPollAt = &nextPoll
 
-	var statusCode int
-	var coder domain.StatusCoder
-	if errors.As(err, &coder) {
-		statusCode = coder.StatusCode()
-	}
-
-	fields := []zap.Field{
+	e.logger.Warn("docling submit temporary error, rescheduled",
 		zap.String("queue_id", task.ID.String()),
-		zap.String("docling_task_id", task.DoclingTaskID),
-		zap.Int("retry_attempt", retryIndex),
-		zap.Int("status_code", statusCode),
 		zap.Time("next_poll_at", nextPoll),
 		zap.Error(err),
-	}
-	if task.DoclingJobID != "" {
-		fields = append(fields, zap.String("docling_job_id", task.DoclingJobID))
-	}
-
-	e.logger.Warn("docling submit temporary error, rescheduled", fields...)
+	)
 
 	return StateWaitingDocling, nil, true
 }
+
+func boolPtr(v bool) *bool { return &v }

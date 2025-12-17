@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/cmd/main.go
 package main
 
 import (
@@ -41,6 +42,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
 	shutdownObservability, err := telemetry.SetupProviders(ctx, cfg.Observability, cfg.Service.Name, logger)
 	if err != nil {
 		logger.Fatal("failed to setup observability", zap.Error(err))
@@ -74,8 +76,8 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to init minio", zap.Error(err))
 	}
-
 	storageClient := storage.NewMinioStorage(minioClient)
+
 	poolConfig, err := pgxpool.ParseConfig(cfg.Postgres.DSN)
 	if err != nil {
 		logger.Fatal("failed to parse postgres dsn", zap.Error(err))
@@ -91,12 +93,17 @@ func main() {
 	defer pool.Close()
 
 	queueRepo := repository.NewQueueRepository(pool)
+
 	restored, err := queueRepo.RestoreProcessing(ctx)
 	if err != nil {
 		logger.Fatal("failed to restore processing tasks", zap.Error(err))
 	}
 	logger.Info("restored processing tasks", zap.Int("count", restored))
-	conv := converter.NewDoclingConverter(converter.Config{
+
+	statusPolicy := cfg.StatusBackoffPolicy()
+
+	// --- OCR converter (обычный) ---
+	convOCR := converter.NewDoclingConverter(converter.Config{
 		Endpoint:           cfg.Docling.Endpoint,
 		APIKey:             cfg.Docling.APIKey,
 		DefaultLanguage:    cfg.Docling.DefaultLanguage,
@@ -119,12 +126,40 @@ func main() {
 			TwoPassVotingMerge: cfg.DoclingRender.TwoPassVotingMerge,
 			VotingTableMinRows: cfg.DoclingRender.VotingTableMinRows,
 			PassBTableCoverage: cfg.DoclingRender.PassBTableCoverage,
+			PassBMatchRate:     0.6,
 		},
 	}, logger)
 
-	statusPolicy := cfg.StatusBackoffPolicy()
+	// --- Base converter (важно: текст оставляем как в md_content, без JSON-перерендера) ---
+	convBase := converter.NewDoclingConverter(converter.Config{
+		Endpoint:           cfg.Docling.Endpoint,
+		APIKey:             cfg.Docling.APIKey,
+		DefaultLanguage:    cfg.Docling.DefaultLanguage,
+		PDFDefaultLanguage: cfg.Docling.PDFDefaultLanguage,
+		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
+		ForceOCR:           false,
+		PDFBackend:         cfg.Docling.PDFBackend,
+		Mode:               cfg.Docling.Mode,
+		TraceHttpRequest:   cfg.Observability.LoggingEnabled,
+		Storage: converter.StorageConfig{
+			Endpoint:  cfg.Docling.Storage.Endpoint,
+			AccessKey: cfg.Docling.Storage.AccessKey,
+			SecretKey: cfg.Docling.Storage.SecretKey,
+			Bucket:    cfg.Docling.Storage.Bucket,
+			Region:    cfg.Docling.Storage.Region,
+			UseSSL:    cfg.Docling.Storage.UseSSL,
+		},
+		Render: converter.RenderConfig{
+			PreferJSON:         false,
+			TwoPassVotingMerge: false,
+			VotingTableMinRows: 1,
+			PassBTableCoverage: 1,
+			PassBMatchRate:     0.6,
+		},
+	}, logger)
 
-	transformUC := usecase.NewTransformerService(queueRepo, conv, usecase.TransformationConfig{
+	// gRPC usecase можно держать на OCR-конвертере: очередь/overlay делает воркер.
+	transformUC := usecase.NewTransformerService(queueRepo, convOCR, usecase.TransformationConfig{
 		MarkdownBucket:    cfg.Minio.Bucket,
 		QueueLimit:        cfg.Service.QueueLimit,
 		StatusBackoff:     statusPolicy,
@@ -134,7 +169,7 @@ func main() {
 		DefaultPDFBackend: cfg.Docling.PDFBackend,
 	}, logger, &http.Client{Timeout: 30 * time.Second})
 
-	workerProcessor := usecase.NewProcessor(queueRepo, conv, storageClient, logger, usecase.Config{
+	workerProcessor := usecase.NewProcessor(queueRepo, convBase, convOCR, storageClient, logger, usecase.Config{
 		MarkdownBucket:         cfg.Minio.Bucket,
 		MaxWorkers:             cfg.Service.MaxWorkers,
 		PollInterval:           cfg.Scheduler.PollInterval,
@@ -158,6 +193,7 @@ func main() {
 		DefaultForceOCR:        cfg.Docling.ForceOCR,
 		DefaultOCRLang:         cfg.Docling.PDFDefaultLanguage,
 		DefaultPDFBackend:      cfg.Docling.PDFBackend,
+		OverlayMatchRate:       0.6,
 	})
 
 	workerDone := make(chan struct{})
@@ -181,10 +217,8 @@ func resolveConfigPath(flagPath string) string {
 	if flagPath != "" {
 		return flagPath
 	}
-
 	if envPath := os.Getenv("CONFIG_PATH"); envPath != "" {
 		return envPath
 	}
-
 	return "config/config.yaml"
 }

@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/internal/usecase/queue_worker.go
 package usecase
 
 import (
@@ -86,11 +87,17 @@ func (w *QueueWorker) handleSingle(ctx context.Context, task *transformations.Tr
 	taskCtx, correlationID := telemetry.ContextWithCorrelationID(ctx, task.CorrelationID)
 	isRetry := task.RetryCount > 1
 	w.metrics.RecordRetryAttempt(taskCtx, task.RetryCount)
-	w.logger.Info("processing transformation", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Int("attempt", task.RetryCount), zap.Bool("retry", isRetry))
+
+	w.logger.Info("processing transformation",
+		zap.String("queue_id", task.ID.String()),
+		zap.String("correlation_id", correlationID),
+		zap.Int("attempt", task.RetryCount),
+		zap.Bool("retry", isRetry),
+		zap.String("overlay_stage", string(task.OverlayStage)),
+	)
 
 	state, err := w.handler.ProcessTask(taskCtx, task)
 	duration := time.Since(start)
-
 	w.metrics.RecordDuration(taskCtx, float64(duration.Milliseconds()))
 
 	switch {
@@ -99,11 +106,29 @@ func (w *QueueWorker) handleSingle(ctx context.Context, task *transformations.Tr
 		if task.NextPollAt != nil {
 			nextPoll = *task.NextPollAt
 		}
-		w.logger.Info("docling pending", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Time("next_poll_at", nextPoll))
+		w.logger.Info("docling pending",
+			zap.String("queue_id", task.ID.String()),
+			zap.String("correlation_id", correlationID),
+			zap.Time("next_poll_at", nextPoll),
+		)
 		return
+
+	case err == nil && state == StateRescheduled:
+		w.logger.Info("task rescheduled",
+			zap.String("queue_id", task.ID.String()),
+			zap.String("correlation_id", correlationID),
+		)
+		return
+
 	case err == nil:
 		w.metrics.RecordOutcome(taskCtx, true)
-		w.logger.Info("transformation completed", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Duration("duration", duration))
+		w.logger.Info("transformation completed",
+			zap.String("queue_id", task.ID.String()),
+			zap.String("correlation_id", correlationID),
+			zap.Duration("duration", duration),
+		)
+		return
+
 	default:
 		w.metrics.RecordOutcome(taskCtx, false)
 		fields := []zap.Field{
@@ -117,8 +142,13 @@ func (w *QueueWorker) handleSingle(ctx context.Context, task *transformations.Tr
 			fields = append(fields, zap.String("docling_job_id", task.DoclingJobID))
 		}
 		w.logger.Error("task processing failed", fields...)
+
 		if markErr := w.repo.MarkFailed(ctx, task.ID, buildFailureMessage(err, task)); markErr != nil {
-			w.logger.Error("mark failed errored", zap.String("queue_id", task.ID.String()), zap.String("correlation_id", correlationID), zap.Error(markErr))
+			w.logger.Error("mark failed errored",
+				zap.String("queue_id", task.ID.String()),
+				zap.String("correlation_id", correlationID),
+				zap.Error(markErr),
+			)
 		}
 	}
 }

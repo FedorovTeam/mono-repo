@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:15.15-trixie
     container_name: preprocess-postgres
     environment:
       POSTGRES_USER: preprocess
@@ -19,7 +19,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:RELEASE.2024-06-11T03-13-30Z
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     container_name: preprocess-minio
     command: server /data --console-address ":9001"
     environment:
@@ -37,7 +37,7 @@ services:
       retries: 5
 
   minio-init:
-    image: minio/mc:RELEASE.2024-06-11T03-13-30Z
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z-cpuv1
     container_name: preprocess-minio-init
     depends_on:
       minio:
@@ -70,7 +70,7 @@ services:
       MINIO_SSL: "false"
     ports:
       - "8082:8082"
-      - "9082:9082"
+      - "9090:9090"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/ready"]
       interval: 10s

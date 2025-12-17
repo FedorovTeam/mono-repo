@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/internal/domain/helpers.go
 package domain
 
 import (

@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/internal/usecase/processor.go
 package usecase
 
 import (
@@ -11,7 +12,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Config задаёт параметры воркера очереди.
 type Config struct {
 	MarkdownBucket         string
 	MaxWorkers             int
@@ -36,6 +36,8 @@ type Config struct {
 	DefaultForceOCR        bool
 	DefaultOCRLang         string
 	DefaultPDFBackend      string
+
+	OverlayMatchRate float64
 }
 
 type Processor struct {
@@ -45,7 +47,14 @@ type Processor struct {
 	logger      *zap.Logger
 }
 
-func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storage domain.ObjectStorage, logger *zap.Logger, cfg Config) *Processor {
+func NewProcessor(
+	repository repo.QueueRepository,
+	baseConv domain.Converter,
+	ocrConv domain.Converter,
+	storage domain.ObjectStorage,
+	logger *zap.Logger,
+	cfg Config,
+) *Processor {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -53,7 +62,7 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 	normalized := normalizeConfig(cfg)
 	workerMetrics := metrics.NewWorkerMetrics(logger)
 
-	poller := NewDoclingPoller(conv, repository, workerMetrics, logger, DoclingPollerConfig{
+	poller := NewDoclingPoller(baseConv, ocrConv, repository, workerMetrics, logger, DoclingPollerConfig{
 		InitialInterval: normalized.DoclingInitialInterval,
 		MaxInterval:     normalized.DoclingMaxInterval,
 		BackoffFactor:   normalized.DoclingBackoffFactor,
@@ -62,13 +71,14 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 		MaxRestarts:     normalized.DoclingMaxRestarts,
 	})
 
-	executor := NewConversionExecutor(repository, conv, storage, poller, workerMetrics, logger, ConversionExecutorConfig{
+	executor := NewConversionExecutor(repository, baseConv, ocrConv, storage, poller, workerMetrics, logger, ConversionExecutorConfig{
 		MarkdownBucket:       normalized.MarkdownBucket,
 		FastOperationTimeout: normalized.FastOperationTimeout,
 		UseSourceAsync:       normalized.UseSourceAsync,
 		DefaultForceOCR:      normalized.DefaultForceOCR,
 		DefaultOCRLang:       normalized.DefaultOCRLang,
 		DefaultPDFBackend:    normalized.DefaultPDFBackend,
+		OverlayMatchRate:     normalized.OverlayMatchRate,
 	})
 
 	queueWorker := NewQueueWorker(repository, executor, workerMetrics, logger, QueueWorkerConfig{
@@ -94,10 +104,8 @@ func NewProcessor(repository repo.QueueRepository, conv domain.Converter, storag
 
 func (p *Processor) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-
 	p.queueWorker.Start(ctx, &wg)
 	p.maintenance.Start(ctx, &wg)
-
 	<-ctx.Done()
 	wg.Wait()
 }
@@ -133,10 +141,11 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.DoclingMaxRestarts <= 0 {
 		cfg.DoclingMaxRestarts = 3
 	}
-
 	if cfg.DefaultPDFBackend == "" {
 		cfg.DefaultPDFBackend = "pypdfium2"
 	}
-
+	if cfg.OverlayMatchRate <= 0 {
+		cfg.OverlayMatchRate = 0.6
+	}
 	return cfg
 }

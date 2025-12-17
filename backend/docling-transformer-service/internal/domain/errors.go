@@ -1,3 +1,4 @@
+// backend/docling-transformer-service/internal/domain/errors.go
 package domain
 
 // TemporaryError описывает ошибку, которую можно повторить.
