@@ -84,7 +84,12 @@
    ```bash
    make demo
    ```
-   Скрипт загрузит пример `testdata/sample.docx` в `preprocess-source/incoming/demo.docx` и выполнит gRPC‑вызов на `localhost:9082` через `grpcurl`.
+   
+   Скрипт дождётся готовности MinIO и сервиса, загрузит пример `testdata/sample.docx` в `preprocess-source/incoming/demo.docx` и выполнит gRPC‑вызов на `localhost:9082` через `grpcurl`. Чтобы прогнать конвертацию на стороннем файле (например, `*.doc` из интернета), передайте `DEMO_SOURCE_URL` и при необходимости `DEMO_SOURCE_FILE_NAME`/`DEMO_SOURCE_KEY`:
+   ```bash
+   DEMO_SOURCE_URL="https://file-examples.com/storage/fe4fbfdb5f6e1f040b04f3c/file-sample_100kB.doc" make demo
+   ```
+
 4. Возьмите `job_id` из ответа и проверьте статус выполнения, например:
    ```bash
    docker run --rm --network host \

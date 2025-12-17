@@ -38,3 +38,8 @@ docker-run: docker-build
 
 test:
 	go test ./...
+
+demo:
+	@command -v docker >/dev/null || (echo "Docker не установлен в окружении"; exit 1)
+	docker compose up -d
+	./demo.sh
