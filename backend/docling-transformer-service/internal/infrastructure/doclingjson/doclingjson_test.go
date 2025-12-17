@@ -82,3 +82,37 @@ func TestParseAcceptsStringPayload(t *testing.T) {
 		t.Fatalf("unexpected table id: %s", doc.Tables[0].ID)
 	}
 }
+
+func TestMergeVotingTablesFillsEmptyCells(t *testing.T) {
+	passA := []Table{
+		{
+			Rows: []TableRow{
+				{Cells: []TableCell{{Text: "№"}, {Text: "ФИО"}, {Text: "Голоса"}}},
+				{Cells: []TableCell{{Text: "1"}, {Text: "Иванов Иван"}, {Text: ""}}},
+			},
+		},
+	}
+	passB := ParseMarkdownTables("|№|ФИО|Голоса|\n|-|-|-|\n|1|Иванов Иван|42|")
+	t.Logf("parsed pass B: %+v", passB)
+
+	if len(passB) == 0 {
+		t.Fatalf("expected table parsed from markdown")
+	}
+
+	if numA, fioA := detectVotingColumns(passA[0]); numA == -1 || fioA == -1 {
+		t.Fatalf("expected voting columns in pass A, got %d %d", numA, fioA)
+	}
+	if numB, fioB := detectVotingColumns(passB[0]); numB == -1 || fioB == -1 {
+		t.Fatalf("expected voting columns in pass B, got %d %d", numB, fioB)
+	}
+
+	merged, stats := MergeVotingTables(passA, passB, 0.8)
+
+	if stats.MergedRows != 1 || stats.MatchedRows != 1 || stats.TotalRows != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+
+	if got := merged[0].Rows[1].Cells[2].Text; strings.TrimSpace(got) != "42" {
+		t.Fatalf("expected merged value from pass B, got %s", got)
+	}
+}
