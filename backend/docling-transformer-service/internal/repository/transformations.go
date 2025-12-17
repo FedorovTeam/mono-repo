@@ -13,6 +13,7 @@ type TransformationDTO struct {
 	ID                uuid.UUID
 	Status            transformations.TransformationStatus
 	RetryCount        int
+	DoclingTaskID     string
 	DoclingJobID      string
 	DoclingPollCount  int
 	NextPollAt        *time.Time
@@ -40,6 +41,7 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		ID:                dto.ID,
 		Status:            dto.Status,
 		RetryCount:        dto.RetryCount,
+		DoclingTaskID:     dto.DoclingTaskID,
 		DoclingJobID:      dto.DoclingJobID,
 		DoclingPollCount:  dto.DoclingPollCount,
 		NextPollAt:        dto.NextPollAt,
@@ -71,8 +73,8 @@ type QueueRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*transformations.TransformationTask, error)
 	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
-	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error
-	MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPollAt time.Time) error
+	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, taskID, jobID string, pollCount int) error
+	MarkDoclingWaiting(ctx context.Context, id uuid.UUID, taskID, jobID string, pollCount int, nextPollAt time.Time) error
 	RequeueDoclingWaiting(ctx context.Context, id uuid.UUID, nextPollAt *time.Time) error
 	ActivateWaiting(ctx context.Context, now time.Time, maxDoclingLifetime time.Duration) (int, int, error)
 	RestoreProcessing(ctx context.Context) (int, error)

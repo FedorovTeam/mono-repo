@@ -35,8 +35,8 @@ type checkingConverter struct {
 	calls    int
 }
 
-func (c *checkingConverter) Submit(context.Context, domain.ConvertRequest) (string, error) {
-	return "job", nil
+func (c *checkingConverter) Submit(context.Context, domain.ConvertRequest) (domain.SubmitResult, error) {
+        return domain.SubmitResult{TaskID: "job"}, nil
 }
 
 func (c *checkingConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {

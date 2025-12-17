@@ -55,11 +55,11 @@ func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) e
 	return nil
 }
 func (p *pollingRepoStub) MarkFailed(context.Context, uuid.UUID, string) error { return nil }
-func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
+func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, string, int) error {
 	p.updateInfoCalls++
 	return nil
 }
-func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UUID, jobID string, pollCount int, nextPoll time.Time) error {
+func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UUID, doclingTaskID, jobID string, pollCount int, nextPoll time.Time) error {
 	p.markWaitingCalls++
 	p.lastWaitingNextPoll = nextPoll
 	return nil
@@ -402,8 +402,8 @@ func TestDoclingPollerTreats404AsTemporary(t *testing.T) {
 
 type converterWithTemporaryError struct{}
 
-func (c *converterWithTemporaryError) Submit(context.Context, domain.ConvertRequest) (string, error) {
-	return "job", nil
+func (c *converterWithTemporaryError) Submit(context.Context, domain.ConvertRequest) (domain.SubmitResult, error) {
+	return domain.SubmitResult{TaskID: "job"}, nil
 }
 func (c *converterWithTemporaryError) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{}, temporaryStatusError{}
@@ -411,8 +411,8 @@ func (c *converterWithTemporaryError) CheckStatus(context.Context, string) (doma
 
 type staticResultConverter struct{}
 
-func (c *staticResultConverter) Submit(context.Context, domain.ConvertRequest) (string, error) {
-	return "", nil
+func (c *staticResultConverter) Submit(context.Context, domain.ConvertRequest) (domain.SubmitResult, error) {
+	return domain.SubmitResult{TaskID: ""}, nil
 }
 func (c *staticResultConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{Status: "ok", Result: &domain.ConvertResult{Content: []byte("result"), MediaType: "text/md"}}, nil
@@ -468,20 +468,20 @@ type submitOnlyConverter struct {
 	lastRequest  domain.ConvertRequest
 }
 
-func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertRequest) (string, error) {
+func (c *submitOnlyConverter) Submit(_ context.Context, req domain.ConvertRequest) (domain.SubmitResult, error) {
 	c.submitCalled = true
 	c.lastRequest = req
 	if c.submitErr != nil {
-		return "", c.submitErr
+		return domain.SubmitResult{}, c.submitErr
 	}
 	if c.jobID == "" {
 		c.jobID = "job-from-submit"
 	}
 	if req.ContentType == "" {
-		return "", errors.New("content type is empty")
+		return domain.SubmitResult{}, errors.New("content type is empty")
 	}
 
-	return c.jobID, nil
+	return domain.SubmitResult{TaskID: c.jobID, JobID: c.jobID}, nil
 }
 
 func (c *submitOnlyConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {

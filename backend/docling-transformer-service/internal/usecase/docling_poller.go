@@ -52,6 +52,7 @@ func (p *DoclingPoller) NextPollTime(now time.Time, pollCount int) time.Time {
 
 func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.TransformationTask) (*domain.ConvertResult, error) {
 	jobID := task.DoclingJobID
+	taskID := task.DoclingTaskID
 	pollOffset := task.DoclingPollCount
 
 	if p.isWaitingLimitReached(pollOffset) {
@@ -62,12 +63,18 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 		return nil, ErrDoclingWaiting
 	}
 
-	statusResult, err := p.conv.CheckStatus(ctx, jobID)
+	pollID := taskID
+	if pollID == "" {
+		pollID = jobID
+	}
+
+	statusResult, err := p.conv.CheckStatus(ctx, pollID)
 	newPollCount := pollOffset + 1
+	task.DoclingTaskID = pollID
 	task.DoclingJobID = jobID
 	task.DoclingPollCount = newPollCount
 
-	if err := p.repo.UpdateDoclingInfo(ctx, task.ID, jobID, newPollCount); err != nil {
+	if err := p.repo.UpdateDoclingInfo(ctx, task.ID, pollID, jobID, newPollCount); err != nil {
 		return nil, fmt.Errorf("store docling polling progress: %w", err)
 	}
 
@@ -85,17 +92,17 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 			nextPoll := p.NextPollTime(time.Now(), newPollCount)
 			task.DoclingPollCount = newPollCount
 			task.NextPollAt = &nextPoll
-			if markErr := p.repo.MarkDoclingWaiting(ctx, task.ID, jobID, newPollCount, nextPoll); markErr != nil {
+			if markErr := p.repo.MarkDoclingWaiting(ctx, task.ID, pollID, jobID, newPollCount, nextPoll); markErr != nil {
 				return nil, fmt.Errorf("store docling waiting: %w", markErr)
 			}
 
 			p.metrics.RecordTemporaryRetry(ctx, 1)
-			p.logger.Warn("docling temporary error, will retry", zap.String("job_id", jobID), zap.Int("docling_polls", newPollCount), zap.Int("status_code", statusCode), zap.Time("next_poll_at", nextPoll), zap.Error(err))
+			p.logger.Warn("docling temporary error, will retry", zap.String("task_id", pollID), zap.String("job_id", jobID), zap.Int("docling_polls", newPollCount), zap.Int("status_code", statusCode), zap.Time("next_poll_at", nextPoll), zap.Error(err))
 
 			return nil, ErrDoclingWaiting
 		}
 
-		p.logger.Error("docling status check failed", zap.String("job_id", jobID), zap.Int("docling_polls", newPollCount), zap.Error(err))
+		p.logger.Error("docling status check failed", zap.String("task_id", pollID), zap.String("job_id", jobID), zap.Int("docling_polls", newPollCount), zap.Error(err))
 
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			if p.isWaitingLimitReached(newPollCount) {
@@ -108,12 +115,12 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 
 			nextPoll := p.NextPollTime(time.Now(), newPollCount)
 			task.DoclingPollCount = newPollCount
-			if markErr := p.repo.MarkDoclingWaiting(ctx, task.ID, jobID, newPollCount, nextPoll); markErr != nil {
+			if markErr := p.repo.MarkDoclingWaiting(ctx, task.ID, pollID, jobID, newPollCount, nextPoll); markErr != nil {
 				return nil, fmt.Errorf("store docling waiting: %w", markErr)
 			}
 
 			task.NextPollAt = &nextPoll
-			p.logger.Info("docling still processing", zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))
+			p.logger.Info("docling still processing", zap.String("task_id", pollID), zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))
 
 			return nil, ErrDoclingWaiting
 		}
@@ -122,7 +129,7 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 	}
 
 	p.metrics.RecordDoclingPolls(ctx, 1)
-	p.logger.Info("docling status checked", zap.String("job_id", jobID), zap.String("status", statusResult.Status), zap.Int("docling_polls", newPollCount))
+	p.logger.Info("docling status checked", zap.String("task_id", pollID), zap.String("job_id", jobID), zap.String("status", statusResult.Status), zap.Int("docling_polls", newPollCount))
 
 	if statusResult.Result == nil {
 		if p.isWaitingLimitReached(newPollCount) {
@@ -134,12 +141,12 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 		}
 
 		nextPoll := p.NextPollTime(time.Now(), newPollCount)
-		if err := p.repo.MarkDoclingWaiting(ctx, task.ID, jobID, newPollCount, nextPoll); err != nil {
+		if err := p.repo.MarkDoclingWaiting(ctx, task.ID, pollID, jobID, newPollCount, nextPoll); err != nil {
 			return nil, fmt.Errorf("store docling waiting: %w", err)
 		}
 
 		task.NextPollAt = &nextPoll
-		p.logger.Info("docling still processing", zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))
+		p.logger.Info("docling still processing", zap.String("task_id", pollID), zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll), zap.Int("docling_polls", newPollCount))
 
 		return nil, ErrDoclingWaiting
 	}
@@ -169,6 +176,7 @@ func (p *DoclingPoller) isWaitingLimitReached(pollCount int) bool {
 }
 
 func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transformations.TransformationTask, reason string) error {
+	taskID := task.DoclingTaskID
 	jobID := task.DoclingJobID
 
 	var nextPollAt *time.Time
@@ -181,6 +189,7 @@ func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transforma
 		return fmt.Errorf("requeue docling waiting: %w", err)
 	}
 
+	task.DoclingTaskID = ""
 	task.DoclingJobID = ""
 	task.DoclingPollCount = 0
 	task.NextPollAt = nextPollAt
@@ -192,6 +201,7 @@ func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transforma
 
 	logger := p.logger.With(
 		zap.String("queue_id", task.ID.String()),
+		zap.String("docling_task_id", taskID),
 		zap.String("docling_job_id", jobID),
 		zap.String("reason", reason),
 	)

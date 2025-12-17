@@ -27,9 +27,14 @@ type StatusCheckResult struct {
 	Result *ConvertResult
 }
 
+type SubmitResult struct {
+	TaskID string
+	JobID  string
+}
+
 type Converter interface {
-	Submit(ctx context.Context, req ConvertRequest) (string, error)
-	CheckStatus(ctx context.Context, jobID string) (StatusCheckResult, error)
+	Submit(ctx context.Context, req ConvertRequest) (SubmitResult, error)
+	CheckStatus(ctx context.Context, taskID string) (StatusCheckResult, error)
 }
 
 type ObjectStorage interface {

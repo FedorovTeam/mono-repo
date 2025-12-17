@@ -78,11 +78,11 @@ func (f *fakeQueueRepository) MarkFailed(context.Context, uuid.UUID, string) err
 	return nil
 }
 
-func (f *fakeQueueRepository) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
+func (f *fakeQueueRepository) UpdateDoclingInfo(context.Context, uuid.UUID, string, string, int) error {
 	return nil
 }
 
-func (f *fakeQueueRepository) MarkDoclingWaiting(context.Context, uuid.UUID, string, int, time.Time) error {
+func (f *fakeQueueRepository) MarkDoclingWaiting(context.Context, uuid.UUID, string, string, int, time.Time) error {
 	return nil
 }
 

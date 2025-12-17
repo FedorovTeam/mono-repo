@@ -40,7 +40,7 @@ func NewQueueRepository(pool *pgxpool.Pool) *PostgresQueueRepository {
 // При отсутствии записей возвращает (nil, nil).
 func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
 	const query = `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE document_id = $1
 ORDER BY created_at DESC
@@ -62,7 +62,7 @@ LIMIT 1`
 // GetByID возвращает задачу очереди по идентификатору.
 func (r *PostgresQueueRepository) GetByID(ctx context.Context, id uuid.UUID) (*TransformationTask, error) {
 	const query = `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE id = $1`
 
@@ -169,7 +169,7 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 
 func (r *PostgresQueueRepository) selectNextTasks(ctx context.Context, tx pgx.Tx, limit int) ([]*TransformationTask, error) {
 	tasks, err := r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'waiting_docling' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
@@ -191,7 +191,7 @@ FOR UPDATE SKIP LOCKED`, 1)
 	}
 
 	tasks, err = r.fetchTasks(ctx, tx, `
-SELECT id, status, retry_count, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
+SELECT id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at, document_id, original_bucket, original_object_key, source_bucket, source_object_key, source_url, markdown_bucket, markdown_object_key, filename_extension, force_ocr, ocr_lang, pdf_backend, created_at, started_at, finished_at, error, correlation_id
 FROM transformations_queue
 WHERE status = 'pending' AND (next_poll_at IS NULL OR next_poll_at <= NOW())
 ORDER BY COALESCE(next_poll_at, created_at), created_at
@@ -286,31 +286,31 @@ func (r *PostgresQueueRepository) MarkFailed(ctx context.Context, id uuid.UUID, 
 	return nil
 }
 
-func (r *PostgresQueueRepository) UpdateDoclingInfo(ctx context.Context, id uuid.UUID, jobID string, pollCount int) error {
+func (r *PostgresQueueRepository) UpdateDoclingInfo(ctx context.Context, id uuid.UUID, taskID, jobID string, pollCount int) error {
 	if pollCount < 0 {
 		pollCount = 0
 	}
 
-	const query = `UPDATE transformations_queue SET docling_job_id = COALESCE(NULLIF($2, ''), docling_job_id), docling_poll_count = $3 WHERE id = $1`
+	const query = `UPDATE transformations_queue SET docling_task_id = COALESCE(NULLIF($2, ''), docling_task_id), docling_job_id = COALESCE(NULLIF($3, ''), docling_job_id), docling_poll_count = $4 WHERE id = $1`
 
-	if _, err := r.pool.Exec(ctx, query, id, jobID, pollCount); err != nil {
+	if _, err := r.pool.Exec(ctx, query, id, taskID, jobID, pollCount); err != nil {
 		return fmt.Errorf("update docling info: %w", err)
 	}
 
 	return nil
 }
 
-func (r *PostgresQueueRepository) MarkDoclingWaiting(ctx context.Context, id uuid.UUID, jobID string, pollCount int, nextPollAt time.Time) error {
+func (r *PostgresQueueRepository) MarkDoclingWaiting(ctx context.Context, id uuid.UUID, taskID, jobID string, pollCount int, nextPollAt time.Time) error {
 	if pollCount < 0 {
 		pollCount = 0
 	}
 
 	const query = `
 UPDATE transformations_queue
-SET status = 'waiting_docling', docling_job_id = $2, docling_poll_count = $3, next_poll_at = $4, started_at = NULL, error = NULL
+SET status = 'waiting_docling', docling_task_id = $2, docling_job_id = $3, docling_poll_count = $4, next_poll_at = $5, started_at = NULL, error = NULL
 WHERE id = $1`
 
-	if _, err := r.pool.Exec(ctx, query, id, jobID, pollCount, nextPollAt); err != nil {
+	if _, err := r.pool.Exec(ctx, query, id, taskID, jobID, pollCount, nextPollAt); err != nil {
 		return fmt.Errorf("mark docling waiting: %w", err)
 	}
 
@@ -325,6 +325,7 @@ SET status = 'pending',
     started_at = NULL,
     finished_at = NULL,
     error = NULL,
+    docling_task_id = NULL,
     docling_job_id = NULL,
     docling_poll_count = 0,
     next_poll_at = $2
@@ -418,7 +419,7 @@ RETURNING 1`
 func (r *PostgresQueueRepository) RestoreStuckProcessing(ctx context.Context, timeout time.Duration, maxRetries, maxDoclingPollAttempts int) (restored, failed int, err error) {
 	const query = `
 WITH stalled AS (
-    SELECT id, retry_count, docling_job_id, docling_poll_count, started_at FROM transformations_queue
+    SELECT id, retry_count, docling_task_id, docling_job_id, docling_poll_count, started_at FROM transformations_queue
     WHERE status = 'processing' AND started_at < NOW() - $1::interval
 ),
 failed AS (
@@ -440,7 +441,7 @@ failed AS (
 restored AS (
     UPDATE transformations_queue
     SET status = 'pending', started_at = NULL, error = format('restored after timeout %s (started_at=%s)', $1, COALESCE(started_at::text, 'unknown')),
-        docling_job_id = NULL, docling_poll_count = 0, next_poll_at = NULL
+        docling_task_id = NULL, docling_job_id = NULL, docling_poll_count = 0, next_poll_at = NULL
     WHERE id IN (SELECT id FROM stalled EXCEPT SELECT id FROM failed)
     RETURNING id
 )
@@ -551,6 +552,7 @@ func countRows(rows pgx.Rows) (int, error) {
 func scanTask(row pgx.Row) (*TransformationTask, error) {
 	var (
 		dto             repo.TransformationDTO
+		doclingTaskID   sql.NullString
 		doclingJobID    sql.NullString
 		sourceBucket    sql.NullString
 		sourceObjectKey sql.NullString
@@ -564,6 +566,7 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&dto.ID,
 		&dto.Status,
 		&dto.RetryCount,
+		&doclingTaskID,
 		&doclingJobID,
 		&dto.DoclingPollCount,
 		&dto.NextPollAt,
@@ -592,6 +595,7 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 
+	dto.DoclingTaskID = doclingTaskID.String
 	dto.DoclingJobID = doclingJobID.String
 	dto.SourceBucket = sourceBucket.String
 	dto.SourceObjectKey = sourceObjectKey.String

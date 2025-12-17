@@ -193,7 +193,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 
 	e.metrics.RecordDoclingSubmit(ctx, forceOCR, ocrLang, pdfBackend)
 
-	jobID, err := e.conv.Submit(submitCtx, convertReq)
+	submitResult, err := e.conv.Submit(submitCtx, convertReq)
 	if err != nil {
 		if state, handleErr, handled := e.handleTemporarySubmitError(ctx, task, err); handled {
 			return state, handleErr
@@ -202,16 +202,19 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, fmt.Errorf("docling submit: %w", err)
 	}
 
+	taskID := submitResult.TaskID
+	jobID := submitResult.JobID
 	nextPoll := e.poller.NextPollTime(time.Now(), 0)
-	if err := e.repo.MarkDoclingWaiting(ctx, task.ID, jobID, 0, nextPoll); err != nil {
+	if err := e.repo.MarkDoclingWaiting(ctx, task.ID, taskID, jobID, 0, nextPoll); err != nil {
 		return StateProcessing, fmt.Errorf("store docling job: %w", err)
 	}
 
+	task.DoclingTaskID = taskID
 	task.DoclingJobID = jobID
 	task.DoclingPollCount = 0
 	task.NextPollAt = &nextPoll
 
-	e.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll),
+	e.logger.Info("docling job submitted", zap.String("task_id", taskID), zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll),
 		zap.Bool("force_ocr", forceOCR), zap.String("ocr_lang", ocrLang), zap.String("pdf_backend", pdfBackend))
 
 	return StateWaitingDocling, nil
@@ -296,7 +299,7 @@ func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, tas
 	}
 
 	nextPoll := e.poller.NextPollTime(time.Now(), retryIndex)
-	if markErr := e.repo.MarkDoclingWaiting(ctx, task.ID, task.DoclingJobID, task.DoclingPollCount, nextPoll); markErr != nil {
+	if markErr := e.repo.MarkDoclingWaiting(ctx, task.ID, task.DoclingTaskID, task.DoclingJobID, task.DoclingPollCount, nextPoll); markErr != nil {
 		return StateProcessing, fmt.Errorf("store docling waiting: %w", markErr), true
 	}
 

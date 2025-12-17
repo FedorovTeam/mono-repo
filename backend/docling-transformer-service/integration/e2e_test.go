@@ -136,15 +136,16 @@ func (s *stubQueueRepo) RetryFailed(context.Context, time.Time, int) (int, int, 
 	return 0, 0, nil
 }
 
-func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, int) error {
+func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, string, int) error {
 	return nil
 }
 
-func (s *stubQueueRepo) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, jobID string, pollCount int, _ time.Time) error {
+func (s *stubQueueRepo) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, taskID, jobID string, pollCount int, _ time.Time) error {
 	if s.currentTask != nil {
 		clone := *s.currentTask
 		clone.StartedAt = nil
 		clone.Status = repository.StatusDocling
+		clone.DoclingTaskID = taskID
 		clone.DoclingJobID = jobID
 		clone.DoclingPollCount = pollCount
 		s.acquireTasks = append(s.acquireTasks, &clone)
@@ -190,7 +191,7 @@ type stubConverter struct {
 	maxInFlight atomic.Int32
 }
 
-func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest) (converter.SubmitResult, error) {
 	current := s.inFlight.Add(1)
 	if current > s.maxInFlight.Load() {
 		s.maxInFlight.Store(current)
@@ -201,9 +202,9 @@ func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest)
 		time.Sleep(s.delay)
 	}
 	if s.err != nil {
-		return "", s.err
+		return converter.SubmitResult{}, s.err
 	}
-	return "job-1", nil
+	return converter.SubmitResult{TaskID: "job-1"}, nil
 }
 
 func (s *stubConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {

@@ -259,12 +259,12 @@ func (uc *TransformerService) ConvertDocxContent(ctx context.Context, filename s
 		return domain.ConvertResult{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 	}
 
-	jobID, err := uc.conv.Submit(ctx, domain.ConvertRequest{FileName: name, Content: content, ContentType: contentType})
+	submitResult, err := uc.conv.Submit(ctx, domain.ConvertRequest{FileName: name, Content: content, ContentType: contentType})
 	if err != nil {
 		return domain.ConvertResult{}, err
 	}
 
-	return uc.pollUntilReady(ctx, jobID)
+	return uc.pollUntilReady(ctx, submitResult.TaskID)
 }
 
 func (uc *TransformerService) FetchContentByURL(ctx context.Context, rawURL string) ([]byte, error) {
@@ -304,11 +304,11 @@ func (uc *TransformerService) FetchContentByURL(ctx context.Context, rawURL stri
 	return data, nil
 }
 
-func (uc *TransformerService) pollUntilReady(ctx context.Context, jobID string) (domain.ConvertResult, error) {
+func (uc *TransformerService) pollUntilReady(ctx context.Context, taskID string) (domain.ConvertResult, error) {
 	strategy := backoff.NewStrategy(uc.cfg.StatusBackoff)
 
 	for attempt := 1; attempt <= uc.cfg.StatusBackoff.MaxAttempts; attempt++ {
-		statusResult, err := uc.conv.CheckStatus(ctx, jobID)
+		statusResult, err := uc.conv.CheckStatus(ctx, taskID)
 		if err != nil {
 			return domain.ConvertResult{}, err
 		}

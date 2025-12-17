@@ -23,6 +23,7 @@ type TransformationTask struct {
 	ID                uuid.UUID
 	Status            TransformationStatus
 	RetryCount        int
+	DoclingTaskID     string
 	DoclingJobID      string
 	DoclingPollCount  int
 	NextPollAt        *time.Time
