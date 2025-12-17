@@ -35,11 +35,11 @@ type checkingConverter struct {
 	calls    int
 }
 
-func (c *checkingConverter) Submit(context.Context, domain.ConvertRequest) (string, error) {
-	return "job", nil
+func (c *checkingConverter) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
+	return domain.DoclingIdentifiers{TaskID: "job"}, nil
 }
 
-func (c *checkingConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+func (c *checkingConverter) CheckStatus(context.Context, domain.DoclingIdentifiers) (domain.StatusCheckResult, error) {
 	c.calls++
 	if c.calls-1 < len(c.statuses) {
 		return c.statuses[c.calls-1], nil
@@ -70,7 +70,7 @@ func TestTransformerServiceUsesSharedBackoffLimits(t *testing.T) {
 		t.Fatalf("expected %d repository calls, got %d", policy.MaxAttempts, repoStub.calls)
 	}
 
-	if _, err := service.pollUntilReady(context.Background(), "job"); err != ErrResultNotReady {
+	if _, err := service.pollUntilReady(context.Background(), domain.DoclingIdentifiers{TaskID: "job"}); err != ErrResultNotReady {
 		t.Fatalf("expected result not ready from docling, got %v", err)
 	}
 

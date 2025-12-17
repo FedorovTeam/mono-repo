@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 )
 
@@ -32,14 +33,15 @@ func buildFailureMessage(err error, task *transformations.TransformationTask) st
 		return err.Error()
 	}
 
-	jobID := task.DoclingJobID
+	ids := domain.DoclingIdentifiers{TaskID: task.DoclingTaskID, JobID: task.DoclingJobID}
+	primaryID := ids.PrimaryID()
 	pollCount := task.DoclingPollCount
 
 	switch {
 	case errors.Is(err, transformations.ErrPollingAttemptsExceeded):
-		return fmt.Sprintf("docling polling attempts exceeded for job %s after %d attempts", jobID, pollCount)
-	case jobID != "":
-		return fmt.Sprintf("docling job %s failed: %v", jobID, err)
+		return fmt.Sprintf("docling polling attempts exceeded for task %s after %d attempts", primaryID, pollCount)
+	case primaryID != "":
+		return fmt.Sprintf("docling task %s failed: %v", primaryID, err)
 	default:
 		return err.Error()
 	}

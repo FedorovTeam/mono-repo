@@ -128,6 +128,7 @@ INSERT INTO transformations_queue (
 	require.NotNil(t, task)
 	require.Equal(t, taskID, task.ID)
 	require.Equal(t, StatusProcessing, task.Status)
+	require.Equal(t, "", task.DoclingTaskID)
 	require.Equal(t, "", task.DoclingJobID)
 	require.Equal(t, 0, task.DoclingPollCount)
 

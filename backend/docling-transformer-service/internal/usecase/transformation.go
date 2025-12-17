@@ -259,12 +259,12 @@ func (uc *TransformerService) ConvertDocxContent(ctx context.Context, filename s
 		return domain.ConvertResult{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 	}
 
-	jobID, err := uc.conv.Submit(ctx, domain.ConvertRequest{FileName: name, Content: content, ContentType: contentType})
+	ids, err := uc.conv.Submit(ctx, domain.ConvertRequest{FileName: name, Content: content, ContentType: contentType})
 	if err != nil {
 		return domain.ConvertResult{}, err
 	}
 
-	return uc.pollUntilReady(ctx, jobID)
+	return uc.pollUntilReady(ctx, ids)
 }
 
 func (uc *TransformerService) FetchContentByURL(ctx context.Context, rawURL string) ([]byte, error) {
@@ -304,11 +304,15 @@ func (uc *TransformerService) FetchContentByURL(ctx context.Context, rawURL stri
 	return data, nil
 }
 
-func (uc *TransformerService) pollUntilReady(ctx context.Context, jobID string) (domain.ConvertResult, error) {
+func (uc *TransformerService) pollUntilReady(ctx context.Context, ids domain.DoclingIdentifiers) (domain.ConvertResult, error) {
 	strategy := backoff.NewStrategy(uc.cfg.StatusBackoff)
 
+	if ids.PrimaryID() == "" {
+		return domain.ConvertResult{}, fmt.Errorf("%w: empty docling identifiers", ErrInvalidArgument)
+	}
+
 	for attempt := 1; attempt <= uc.cfg.StatusBackoff.MaxAttempts; attempt++ {
-		statusResult, err := uc.conv.CheckStatus(ctx, jobID)
+		statusResult, err := uc.conv.CheckStatus(ctx, ids)
 		if err != nil {
 			return domain.ConvertResult{}, err
 		}

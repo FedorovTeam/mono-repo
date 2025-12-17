@@ -27,9 +27,22 @@ type StatusCheckResult struct {
 	Result *ConvertResult
 }
 
+type DoclingIdentifiers struct {
+	TaskID string
+	JobID  string
+}
+
+func (d DoclingIdentifiers) PrimaryID() string {
+	if d.TaskID != "" {
+		return d.TaskID
+	}
+
+	return d.JobID
+}
+
 type Converter interface {
-	Submit(ctx context.Context, req ConvertRequest) (string, error)
-	CheckStatus(ctx context.Context, jobID string) (StatusCheckResult, error)
+	Submit(ctx context.Context, req ConvertRequest) (DoclingIdentifiers, error)
+	CheckStatus(ctx context.Context, ids DoclingIdentifiers) (StatusCheckResult, error)
 }
 
 type ObjectStorage interface {

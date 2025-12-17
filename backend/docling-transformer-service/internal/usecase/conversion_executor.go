@@ -74,7 +74,7 @@ func (e *ConversionExecutor) ProcessTask(ctx context.Context, task *transformati
 		task.MarkdownObjectKey = domain.BuildMarkdownKey(task.OriginalObjectKey)
 	}
 
-	if task.DoclingJobID != "" {
+	if task.DoclingJobID != "" || task.DoclingTaskID != "" {
 		return e.pollDocling(ctx, task)
 	}
 
@@ -191,9 +191,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		PDFBackend:      pdfBackend,
 	}
 
-	e.metrics.RecordDoclingSubmit(ctx, forceOCR, ocrLang, pdfBackend)
-
-	jobID, err := e.conv.Submit(submitCtx, convertReq)
+	ids, err := e.conv.Submit(submitCtx, convertReq)
 	if err != nil {
 		if state, handleErr, handled := e.handleTemporarySubmitError(ctx, task, err); handled {
 			return state, handleErr
@@ -202,16 +200,19 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, fmt.Errorf("docling submit: %w", err)
 	}
 
+	e.metrics.RecordDoclingSubmit(ctx, ids, forceOCR, ocrLang, pdfBackend)
+
 	nextPoll := e.poller.NextPollTime(time.Now(), 0)
-	if err := e.repo.MarkDoclingWaiting(ctx, task.ID, jobID, 0, nextPoll); err != nil {
+	if err := e.repo.MarkDoclingWaiting(ctx, task.ID, ids.TaskID, ids.JobID, 0, nextPoll); err != nil {
 		return StateProcessing, fmt.Errorf("store docling job: %w", err)
 	}
 
-	task.DoclingJobID = jobID
+	task.DoclingTaskID = ids.TaskID
+	task.DoclingJobID = ids.JobID
 	task.DoclingPollCount = 0
 	task.NextPollAt = &nextPoll
 
-	e.logger.Info("docling job submitted", zap.String("job_id", jobID), zap.Time("next_poll_at", nextPoll),
+	e.logger.Info("docling job submitted", zap.String("task_id", ids.TaskID), zap.String("job_id", ids.JobID), zap.Time("next_poll_at", nextPoll),
 		zap.Bool("force_ocr", forceOCR), zap.String("ocr_lang", ocrLang), zap.String("pdf_backend", pdfBackend))
 
 	return StateWaitingDocling, nil
@@ -296,7 +297,7 @@ func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, tas
 	}
 
 	nextPoll := e.poller.NextPollTime(time.Now(), retryIndex)
-	if markErr := e.repo.MarkDoclingWaiting(ctx, task.ID, task.DoclingJobID, task.DoclingPollCount, nextPoll); markErr != nil {
+	if markErr := e.repo.MarkDoclingWaiting(ctx, task.ID, task.DoclingTaskID, task.DoclingJobID, task.DoclingPollCount, nextPoll); markErr != nil {
 		return StateProcessing, fmt.Errorf("store docling waiting: %w", markErr), true
 	}
 
@@ -310,6 +311,8 @@ func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, tas
 
 	e.logger.Warn("docling submit temporary error, rescheduled",
 		zap.String("queue_id", task.ID.String()),
+		zap.String("task_id", task.DoclingTaskID),
+		zap.String("job_id", task.DoclingJobID),
 		zap.Int("retry_attempt", retryIndex),
 		zap.Int("status_code", statusCode),
 		zap.Time("next_poll_at", nextPoll),

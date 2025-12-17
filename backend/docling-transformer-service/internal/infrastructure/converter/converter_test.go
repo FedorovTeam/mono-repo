@@ -97,7 +97,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "corr-submit")
 
-	jobID, err := conv.Submit(ctx, domain.ConvertRequest{
+	ids, err := conv.Submit(ctx, domain.ConvertRequest{
 		FileName:    "sample.docx",
 		Content:     []byte("docx-bytes"),
 		ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -106,7 +106,11 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(ctx, jobID)
+	if ids.TaskID != "task-123" || ids.JobID != "" {
+		t.Fatalf("unexpected ids: %+v", ids)
+	}
+
+	status, err := conv.CheckStatus(ctx, ids)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -201,7 +205,7 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 	}, zap.NewNop())
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "corr-source")
-	jobID, err := conv.Submit(ctx, domain.ConvertRequest{
+	ids, err := conv.Submit(ctx, domain.ConvertRequest{
 		FileName:        "source.pdf",
 		ContentType:     "application/pdf",
 		SourceBucket:    "src-bucket",
@@ -213,7 +217,11 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(ctx, jobID)
+	if ids.TaskID != "s3-task" || ids.JobID != "" {
+		t.Fatalf("unexpected ids: %+v", ids)
+	}
+
+	status, err := conv.CheckStatus(ctx, ids)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -286,12 +294,12 @@ func TestDoclingConverterRetryOnSubmitFailure(t *testing.T) {
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "retry-corr")
 
-	jobID, err := conv.Submit(ctx, domain.ConvertRequest{Content: []byte("doc")})
+	ids, err := conv.Submit(ctx, domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error after retry: %v", err)
 	}
 
-	status, err := conv.CheckStatus(ctx, jobID)
+	status, err := conv.CheckStatus(ctx, ids)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -324,12 +332,12 @@ func TestDoclingConverterCheckStatusPending(t *testing.T) {
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "pending-corr")
 
-	jobID, err := conv.Submit(ctx, domain.ConvertRequest{Content: []byte("doc")})
+	ids, err := conv.Submit(ctx, domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(ctx, jobID)
+	status, err := conv.CheckStatus(ctx, ids)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -357,7 +365,7 @@ func TestCheckStatusMarks5xxAsTemporary(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	_, err := conv.CheckStatus(context.Background(), "job-5xx")
+	_, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{JobID: "job-5xx"})
 	if err == nil {
 		t.Fatal("expected error from status check")
 	}
@@ -389,7 +397,7 @@ func TestCheckStatusMarks404AsTemporary(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	_, err := conv.CheckStatus(context.Background(), "job-404")
+	_, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{JobID: "job-404"})
 	if err == nil {
 		t.Fatal("expected error from status check")
 	}
@@ -430,12 +438,12 @@ func TestDoclingConverterCheckStatusTaskStatusField(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	jobID, err := conv.Submit(context.Background(), domain.ConvertRequest{Content: []byte("doc")})
+	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(context.Background(), jobID)
+	status, err := conv.CheckStatus(context.Background(), ids)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -469,12 +477,12 @@ func TestDoclingConverterCheckStatusMissingStatusDefaultsToPending(t *testing.T)
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, logger)
 
-	jobID, err := conv.Submit(context.Background(), domain.ConvertRequest{Content: []byte("doc")})
+	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{Content: []byte("doc")})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	status, err := conv.CheckStatus(context.Background(), jobID)
+	status, err := conv.CheckStatus(context.Background(), ids)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -509,7 +517,7 @@ func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
 
 	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
 
-	_, err := conv.CheckStatus(context.Background(), "job-unknown")
+	_, err := conv.CheckStatus(context.Background(), domain.DoclingIdentifiers{JobID: "job-unknown"})
 	if err == nil {
 		t.Fatal("expected error for unknown status")
 	}
@@ -565,7 +573,7 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 	}, zap.NewNop())
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "pdf-corr")
-	jobID, err := conv.Submit(ctx, domain.ConvertRequest{
+	ids, err := conv.Submit(ctx, domain.ConvertRequest{
 		FileName:    "scan.pdf",
 		Content:     []byte("pdf content"),
 		ContentType: "application/pdf",
@@ -574,11 +582,11 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	if jobID == "" {
+	if ids.PrimaryID() == "" {
 		t.Fatalf("jobID must be returned")
 	}
 
-	status, err := conv.CheckStatus(ctx, jobID)
+	status, err := conv.CheckStatus(ctx, ids)
 	if err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
@@ -636,7 +644,7 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 		Storage:  StorageConfig{Endpoint: "minio", AccessKey: "a", SecretKey: "b", Bucket: "bucket"},
 	}, zap.NewNop())
 
-	jobID, err := conv.Submit(context.Background(), domain.ConvertRequest{
+	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{
 		FileName:        "file.docx",
 		ContentType:     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 		SourceBucket:    "bucket",
@@ -650,7 +658,7 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 		t.Fatalf("expected retry, got %d attempts", attempts)
 	}
 
-	if _, err := conv.CheckStatus(context.Background(), jobID); err != nil {
+	if _, err := conv.CheckStatus(context.Background(), ids); err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
 }
