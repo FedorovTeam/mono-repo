@@ -5,51 +5,47 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/converter"
-	"github.com/mono-repo/docling-transformer-service/internal/repository"
-	"github.com/mono-repo/docling-transformer-service/internal/server"
-	"github.com/mono-repo/docling-transformer-service/internal/storage"
-	"github.com/mono-repo/docling-transformer-service/internal/worker"
-	transformerv1 "github.com/mono-repo/docling-transformer-service/proto/backend/transformer/v1"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
+	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
+	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
+	"github.com/mono-repo/docling-transformer-service/internal/usecase"
 	"go.uber.org/zap"
 )
 
 type stubQueueRepo struct {
-	enqueueCalled []repository.EnqueueParams
+	enqueueCalled []transformations.EnqueueParams
 	enqueueErr    error
 	countErr      error
 
-	acquireTasks   []*repository.TransformationTask
-	markDoneIDs    []uuid.UUID
-	markFailedID   []uuid.UUID
-	markMutex      sync.Mutex
-	pending        int
-	processing     int
-	restored       int
-	rejected       int
-	cleanupRemoved int
-	restoreErr     error
-	cleanupErr     error
-	restoreCalls   int
-	cleanupCalls   int
-	currentTask    *repository.TransformationTask
+	acquireTasks []*transformations.TransformationTask
+	markDoneIDs  []uuid.UUID
+	markFailedID []uuid.UUID
+	markMutex    sync.Mutex
+	pending      int
+	processing   int
+	waiting      int
+	restoreCalls int
+	cleanupCalls int
+	currentTask  *transformations.TransformationTask
 }
 
-func (s *stubQueueRepo) Enqueue(_ context.Context, params repository.EnqueueParams) (uuid.UUID, error) {
+func (s *stubQueueRepo) Enqueue(_ context.Context, params transformations.EnqueueParams) (uuid.UUID, error) {
 	s.enqueueCalled = append(s.enqueueCalled, params)
 	if s.enqueueErr != nil {
 		return uuid.Nil, s.enqueueErr
 	}
-	return uuid.New(), nil
+	id := uuid.New()
+	return id, nil
 }
 
-func (s *stubQueueRepo) AcquireNext(context.Context) (*repository.TransformationTask, error) {
+func (s *stubQueueRepo) AcquireNext(context.Context) (*transformations.TransformationTask, error) {
 	if len(s.acquireTasks) == 0 {
 		return nil, nil
 	}
@@ -60,7 +56,7 @@ func (s *stubQueueRepo) AcquireNext(context.Context) (*repository.Transformation
 	return task, nil
 }
 
-func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*repository.TransformationTask, error) {
+func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*transformations.TransformationTask, error) {
 	if len(s.acquireTasks) == 0 {
 		return nil, nil
 	}
@@ -72,14 +68,14 @@ func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*repositor
 		}
 	}
 
-	tasks := make([]*repository.TransformationTask, limit)
+	tasks := make([]*transformations.TransformationTask, limit)
 	copy(tasks, s.acquireTasks[:limit])
 	s.acquireTasks = s.acquireTasks[limit:]
 	s.currentTask = tasks[len(tasks)-1]
 	return tasks, nil
 }
 
-func (s *stubQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*repository.TransformationTask, error) {
+func (s *stubQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*transformations.TransformationTask, error) {
 	if s.currentTask != nil && s.currentTask.ID == id {
 		return s.currentTask, nil
 	}
@@ -91,7 +87,7 @@ func (s *stubQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*repository.Tr
 	return nil, nil
 }
 
-func (s *stubQueueRepo) GetLatestByDocument(context.Context, string) (*repository.TransformationTask, error) {
+func (s *stubQueueRepo) GetLatestByDocument(context.Context, string) (*transformations.TransformationTask, error) {
 	return s.currentTask, nil
 }
 
@@ -109,67 +105,76 @@ func (s *stubQueueRepo) MarkFailed(_ context.Context, id uuid.UUID, _ string) er
 	return nil
 }
 
-func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
-	if s.countErr != nil {
-		return 0, 0, 0, s.countErr
-	}
-	return s.pending, s.processing, 0, nil
-}
-
-func (s *stubQueueRepo) RestoreProcessing(context.Context) (int, error) {
-	s.restoreCalls++
-	if s.restoreErr != nil {
-		return 0, s.restoreErr
-	}
-	return s.restored, nil
-}
-
-func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
-	s.restoreCalls++
-	if s.restoreErr != nil {
-		return 0, 0, s.restoreErr
-	}
-	return s.restored, s.rejected, nil
-}
-
-func (s *stubQueueRepo) RetryFailed(context.Context, time.Time, int) (int, int, error) {
-	return 0, 0, nil
-}
-
 func (s *stubQueueRepo) UpdateDoclingInfo(context.Context, uuid.UUID, string, string, int) error {
 	return nil
 }
 
-func (s *stubQueueRepo) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, taskID, jobID string, pollCount int, _ time.Time) error {
+func (s *stubQueueRepo) MarkDoclingWaiting(_ context.Context, _ uuid.UUID, _, _ string, pollCount int, nextPoll time.Time) error {
 	if s.currentTask != nil {
 		clone := *s.currentTask
 		clone.StartedAt = nil
-		clone.Status = repository.StatusDocling
-		clone.DoclingTaskID = taskID
-		clone.DoclingJobID = jobID
+		clone.Status = transformations.StatusDocling
 		clone.DoclingPollCount = pollCount
+		clone.NextPollAt = &nextPoll
 		s.acquireTasks = append(s.acquireTasks, &clone)
 	}
 
 	return nil
 }
 
+func (s *stubQueueRepo) RequeueDoclingWaiting(_ context.Context, id uuid.UUID, nextPollAt *time.Time) error {
+	if s.currentTask != nil && s.currentTask.ID == id {
+		s.currentTask.DoclingTaskID = ""
+		s.currentTask.DoclingJobID = ""
+		s.currentTask.DoclingPollCount = 0
+		s.currentTask.NextPollAt = nextPollAt
+	}
+	return nil
+}
+
+func (s *stubQueueRepo) PrepareOverlayOCRPhase(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+
+func (s *stubQueueRepo) ClearOverlayState(context.Context, uuid.UUID) error { return nil }
+
 func (s *stubQueueRepo) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
+	return 0, 0, nil
+}
+
+func (s *stubQueueRepo) RestoreProcessing(context.Context) (int, error) {
+	s.restoreCalls++
+	return 0, nil
+}
+
+func (s *stubQueueRepo) RestoreStuckProcessing(context.Context, time.Duration, int, int) (int, int, error) {
+	s.restoreCalls++
+	return 0, 0, nil
+}
+
+func (s *stubQueueRepo) RetryFailed(context.Context, time.Time, int) (int, int, error) {
 	return 0, 0, nil
 }
 
 func (s *stubQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) {
 	s.cleanupCalls++
-	if s.cleanupErr != nil {
-		return 0, s.cleanupErr
+	return 0, nil
+}
+
+func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
+	if s.countErr != nil {
+		return 0, 0, 0, s.countErr
 	}
-	return s.cleanupRemoved, nil
+	return s.pending, s.processing, s.waiting, nil
 }
 
 type stubStorage struct {
 	downloadContent []byte
 	downloadCalls   int
 	uploaded        []byte
+	lastBucket      string
+	lastKey         string
+	lastContentType string
 }
 
 func (s *stubStorage) Download(context.Context, string, string) ([]byte, error) {
@@ -177,21 +182,26 @@ func (s *stubStorage) Download(context.Context, string, string) ([]byte, error) 
 	return s.downloadContent, nil
 }
 
-func (s *stubStorage) Upload(_ context.Context, _, _ string, _ string, content []byte) error {
+func (s *stubStorage) Upload(_ context.Context, bucket, key, contentType string, content []byte) error {
 	s.uploaded = content
+	s.lastBucket = bucket
+	s.lastKey = key
+	s.lastContentType = contentType
 	return nil
 }
 
 type stubConverter struct {
-	result converter.DoclingConvertResult
+	result domain.ConvertResult
 	err    error
 	delay  time.Duration
+
+	ids domain.DoclingIdentifiers
 
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
 }
 
-func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest) (string, error) {
+func (s *stubConverter) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
 	current := s.inFlight.Add(1)
 	if current > s.maxInFlight.Load() {
 		s.maxInFlight.Store(current)
@@ -202,12 +212,15 @@ func (s *stubConverter) Submit(context.Context, converter.DoclingConvertRequest)
 		time.Sleep(s.delay)
 	}
 	if s.err != nil {
-		return "", s.err
+		return domain.DoclingIdentifiers{}, s.err
 	}
-	return "job-1", nil
+	if s.ids.TaskID == "" {
+		s.ids = domain.DoclingIdentifiers{TaskID: "task-1", JobID: "job-1"}
+	}
+	return s.ids, nil
 }
 
-func (s *stubConverter) CheckStatus(context.Context, string) (converter.StatusCheckResult, error) {
+func (s *stubConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	current := s.inFlight.Add(1)
 	if current > s.maxInFlight.Load() {
 		s.maxInFlight.Store(current)
@@ -218,22 +231,22 @@ func (s *stubConverter) CheckStatus(context.Context, string) (converter.StatusCh
 		time.Sleep(s.delay)
 	}
 	if s.err != nil {
-		return converter.StatusCheckResult{}, s.err
+		return domain.StatusCheckResult{}, s.err
 	}
 
-	return converter.StatusCheckResult{Status: "success", Result: &s.result}, nil
+	return domain.StatusCheckResult{Status: "success", Result: &s.result}, nil
 }
 
-var _ repository.QueueRepository = (*stubQueueRepo)(nil)
-var _ storage.ObjectStorage = (*stubStorage)(nil)
-var _ converter.Converter = (*stubConverter)(nil)
+var _ repo.QueueRepository = (*stubQueueRepo)(nil)
+var _ domain.ObjectStorage = (*stubStorage)(nil)
+var _ domain.Converter = (*stubConverter)(nil)
 
-func TestConvertDocumentQueuesTask(t *testing.T) {
-	repo := &stubQueueRepo{}
-	api := server.NewTransformerAPI(repo, "markdown-bucket", 0, nil, 0, 0, 0, zap.NewNop())
+func TestSubmitConversionQueuesTask(t *testing.T) {
+	repository := &stubQueueRepo{}
+	uc := usecase.NewTransformerService(repository, &stubConverter{}, usecase.TransformationConfig{MarkdownBucket: "markdown-bucket"}, zap.NewNop(), nil)
 
-	resp, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
-		DocumentId:        "doc-1",
+	result, err := uc.SubmitConversion(context.Background(), usecase.SubmitConversionRequest{
+		DocumentID:        "doc-1",
 		OriginalBucket:    "orig",
 		OriginalObjectKey: "path/file.docx",
 	})
@@ -241,15 +254,15 @@ func TestConvertDocumentQueuesTask(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if resp.GetQueueId() == "" {
+	if result.Task == nil || result.Task.ID == uuid.Nil {
 		t.Fatalf("queue id must be returned")
 	}
 
-	if len(repo.enqueueCalled) != 1 {
-		t.Fatalf("expected single enqueue, got %d", len(repo.enqueueCalled))
+	if len(repository.enqueueCalled) != 1 {
+		t.Fatalf("expected single enqueue, got %d", len(repository.enqueueCalled))
 	}
 
-	enqueued := repo.enqueueCalled[0]
+	enqueued := repository.enqueueCalled[0]
 	if enqueued.MarkdownBucket != "markdown-bucket" {
 		t.Fatalf("unexpected markdown bucket: %s", enqueued.MarkdownBucket)
 	}
@@ -258,130 +271,64 @@ func TestConvertDocumentQueuesTask(t *testing.T) {
 	}
 }
 
-func TestConvertDocumentResourceExhausted(t *testing.T) {
-	repo := &stubQueueRepo{pending: 1, processing: 1}
-	api := server.NewTransformerAPI(repo, "md", 2, nil, 0, 0, 0, zap.NewNop())
+func TestSubmitConversionQueueLimit(t *testing.T) {
+	repository := &stubQueueRepo{pending: 1, processing: 1}
+	uc := usecase.NewTransformerService(repository, &stubConverter{}, usecase.TransformationConfig{MarkdownBucket: "md", QueueLimit: 2}, zap.NewNop(), nil)
 
-	_, err := api.ConvertDocumentToMarkdown(context.Background(), &transformerv1.ConvertDocumentToMarkdownRequest{
-		DocumentId:        "doc-1",
+	_, err := uc.SubmitConversion(context.Background(), usecase.SubmitConversionRequest{
+		DocumentID:        "doc-1",
 		OriginalBucket:    "orig",
 		OriginalObjectKey: "file.docx",
 	})
-	if err == nil {
-		t.Fatal("expected resource exhausted error")
+	if !errors.Is(err, usecase.ErrQueueLimitReached) {
+		t.Fatalf("expected queue limit error, got %v", err)
 	}
 }
 
-func TestWorkerProcessesTask(t *testing.T) {
+func TestProcessorProcessesTask(t *testing.T) {
 	taskID := uuid.New()
-	repo := &stubQueueRepo{
-		acquireTasks: []*repository.TransformationTask{{
+	repository := &stubQueueRepo{
+		acquireTasks: []*transformations.TransformationTask{{
 			ID:                taskID,
+			Status:            transformations.StatusDocling,
+			DoclingTaskID:     "task-1",
+			DoclingJobID:      "job-1",
 			OriginalBucket:    "orig",
 			OriginalObjectKey: "path/file.docx",
 			MarkdownBucket:    "md",
 			MarkdownObjectKey: "dest/file.md",
 			FilenameExtension: "docx",
+			CreatedAt:         time.Now(),
 		}},
 	}
 
-	storage := &stubStorage{downloadContent: []byte("source")}
-	conv := &stubConverter{result: converter.DoclingConvertResult{Content: []byte("converted"), MediaType: "text/markdown"}}
+	storage := &stubStorage{}
+	conv := &stubConverter{result: domain.ConvertResult{Content: []byte("converted"), MediaType: "text/markdown"}}
 
-	processor := worker.NewProcessor(repo, conv, storage, zap.NewNop(), worker.Config{MaxWorkers: 1, PollInterval: 10 * time.Millisecond})
+	processor := usecase.NewProcessor(repository, conv, conv, storage, zap.NewNop(), usecase.Config{
+		MaxWorkers:           1,
+		PollInterval:         5 * time.Millisecond,
+		CleanupInterval:      20 * time.Millisecond,
+		MarkdownBucket:       "md",
+		FastOperationTimeout: 2 * time.Second,
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	processor.Run(ctx)
+	go processor.Run(ctx)
 
 	assertWithin(t, time.Second, func() bool {
-		repo.markMutex.Lock()
-		defer repo.markMutex.Unlock()
-		return len(repo.markDoneIDs) == 1
+		repository.markMutex.Lock()
+		defer repository.markMutex.Unlock()
+		return len(repository.markDoneIDs) == 1
 	})
-
-	if storage.downloadCalls != 1 {
-		t.Fatalf("expected original content to be downloaded once, got %d", storage.downloadCalls)
-	}
 
 	if string(storage.uploaded) != "converted" {
 		t.Fatalf("expected markdown to be uploaded")
 	}
-}
-
-func TestWorkerProcessesTasksSequentiallyWithSingleWorker(t *testing.T) {
-	taskID1 := uuid.New()
-	taskID2 := uuid.New()
-	repo := &stubQueueRepo{
-		acquireTasks: []*repository.TransformationTask{{
-			ID:                taskID1,
-			OriginalBucket:    "orig",
-			OriginalObjectKey: "path/first.docx",
-			MarkdownBucket:    "md",
-			MarkdownObjectKey: "dest/first.md",
-			FilenameExtension: "docx",
-		}, {
-			ID:                taskID2,
-			OriginalBucket:    "orig",
-			OriginalObjectKey: "path/second.docx",
-			MarkdownBucket:    "md",
-			MarkdownObjectKey: "dest/second.md",
-			FilenameExtension: "docx",
-		}},
+	if storage.lastBucket != "md" || storage.lastKey != "dest/file.md" {
+		t.Fatalf("unexpected upload destination %s/%s", storage.lastBucket, storage.lastKey)
 	}
-
-	storage := &stubStorage{downloadContent: []byte("source")}
-	conv := &stubConverter{result: converter.DoclingConvertResult{Content: []byte("converted"), MediaType: "text/markdown"}, delay: 20 * time.Millisecond}
-
-	processor := worker.NewProcessor(repo, conv, storage, zap.NewNop(), worker.Config{MaxWorkers: 1, PollInterval: 5 * time.Millisecond})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	processor.Run(ctx)
-
-	assertWithin(t, time.Second, func() bool {
-		repo.markMutex.Lock()
-		defer repo.markMutex.Unlock()
-		return len(repo.markDoneIDs) == 2
-	})
-
-	if max := conv.maxInFlight.Load(); max > 1 {
-		t.Fatalf("expected sequential processing, max concurrency = %d", max)
-	}
-}
-
-func TestWorkerRestoresStuckTasks(t *testing.T) {
-	repo := &stubQueueRepo{
-		pending:        3,
-		processing:     2,
-		restored:       2,
-		rejected:       1,
-		cleanupRemoved: 4,
-	}
-
-	storage := &stubStorage{downloadContent: []byte("source")}
-	conv := &stubConverter{result: converter.DoclingConvertResult{Content: []byte("converted")}}
-
-	processor := worker.NewProcessor(repo, conv, storage, zap.NewNop(), worker.Config{
-		MaxWorkers:           1,
-		PollInterval:         5 * time.Millisecond,
-		ProcessingTimeout:    5 * time.Millisecond,
-		MaxProcessingRetries: 1,
-		CleanupInterval:      10 * time.Millisecond,
-		CleanupRetention:     10 * time.Millisecond,
-		MarkdownBucket:       "md",
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	processor.Run(ctx)
-
-	assertWithin(t, time.Second, func() bool {
-		repo.markMutex.Lock()
-		defer repo.markMutex.Unlock()
-		return repo.restoreCalls > 0 && repo.cleanupCalls > 0
-	})
 }
 
 func assertWithin(t *testing.T, timeout time.Duration, condition func() bool) {
