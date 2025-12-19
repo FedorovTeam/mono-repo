@@ -10,6 +10,7 @@ import (
 	"github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 )
 
+// QueueRepository описывает работу очереди Docling без overlay-этапов.
 type QueueRepository interface {
 	Enqueue(ctx context.Context, params transformations.EnqueueParams) (uuid.UUID, error)
 

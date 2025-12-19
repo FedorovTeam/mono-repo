@@ -71,6 +71,25 @@ func startPostgresContainer(t *testing.T) (context.Context, *pgxpool.Pool) {
 	return ctx, pool
 }
 
+func TestTransformationsQueueHasNoOverlayColumns(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	const query = `
+SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'transformations_queue'
+      AND column_name = $1
+)`
+
+	for _, column := range []string{"overlay_stage", "base_markdown_bucket", "base_markdown_object_key"} {
+		var exists bool
+		require.NoError(t, pool.QueryRow(ctx, query, column).Scan(&exists))
+		require.Falsef(t, exists, "column %s should not exist", column)
+	}
+}
+
 func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
 	ctx, pool := startPostgresContainer(t)
 
@@ -211,6 +230,16 @@ func TestQueueRepositoryPersistsDoclingIdentifiers(t *testing.T) {
 	require.Equal(t, 3, task.DoclingPollCount)
 	require.NotNil(t, task.NextPollAt)
 	require.WithinDuration(t, nextPoll, *task.NextPollAt, time.Second)
+
+	require.NoError(t, repo.MarkDone(ctx, queueID, "md", "dest/other.md"))
+
+	task, err = repo.GetByID(ctx, queueID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Equal(t, StatusDone, task.Status)
+	require.Nil(t, task.NextPollAt)
+	require.Equal(t, "md", task.MarkdownBucket)
+	require.Equal(t, "dest/other.md", task.MarkdownObjectKey)
 }
 
 func TestRestoreProcessingMovesTasksToPendingOnStartup(t *testing.T) {
