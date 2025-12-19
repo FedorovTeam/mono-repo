@@ -50,7 +50,6 @@ type ComplexityRoot struct {
 		Branch          func(childComplexity int) int
 		Error           func(childComplexity int) int
 		FileName        func(childComplexity int) int
-		ForcePDFOcr     func(childComplexity int) int
 		ID              func(childComplexity int) int
 		JobID           func(childComplexity int) int
 		Path            func(childComplexity int) int
@@ -75,7 +74,6 @@ type ComplexityRoot struct {
 
 	UploadKnowledgeDocumentPayload struct {
 		Document     func(childComplexity int) int
-		ForcePDFOcr  func(childComplexity int) int
 		UploadMethod func(childComplexity int) int
 		UploadURL    func(childComplexity int) int
 	}
@@ -126,12 +124,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.FileName(childComplexity), true
-	case "KnowledgeDocument.forcePdfOcr":
-		if e.complexity.KnowledgeDocument.ForcePDFOcr == nil {
-			break
-		}
-
-		return e.complexity.KnowledgeDocument.ForcePDFOcr(childComplexity), true
 	case "KnowledgeDocument.id":
 		if e.complexity.KnowledgeDocument.ID == nil {
 			break
@@ -223,12 +215,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.UploadKnowledgeDocumentPayload.Document(childComplexity), true
-	case "UploadKnowledgeDocumentPayload.forcePdfOcr":
-		if e.complexity.UploadKnowledgeDocumentPayload.ForcePDFOcr == nil {
-			break
-		}
-
-		return e.complexity.UploadKnowledgeDocumentPayload.ForcePDFOcr(childComplexity), true
 	case "UploadKnowledgeDocumentPayload.uploadMethod":
 		if e.complexity.UploadKnowledgeDocumentPayload.UploadMethod == nil {
 			break
@@ -368,7 +354,6 @@ type UploadKnowledgeDocumentPayload {
   document: KnowledgeDocument!
   uploadUrl: String!
   uploadMethod: String!
-  forcePdfOcr: Boolean!
 }
 
 type KnowledgeDocumentConnection {
@@ -388,7 +373,6 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
-  forcePdfOcr: Boolean!
 }
 
 enum KnowledgeDocumentStatus {
@@ -406,7 +390,6 @@ input UploadKnowledgeDocumentInput {
   repository: String!
   branch: String!
   path: String
-  forcePdfOcr: Boolean = false
 }
 
 input KnowledgeDocumentFilter {
@@ -788,35 +771,6 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_error(_ context.Conte
 	return fc, nil
 }
 
-func (ec *executionContext) _KnowledgeDocument_forcePdfOcr(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
-	return graphql.ResolveField(
-		ctx,
-		ec.OperationContext,
-		field,
-		ec.fieldContext_KnowledgeDocument_forcePdfOcr,
-		func(ctx context.Context) (any, error) {
-			return obj.ForcePDFOcr, nil
-		},
-		nil,
-		ec.marshalNBoolean2bool,
-		true,
-		true,
-	)
-}
-
-func (ec *executionContext) fieldContext_KnowledgeDocument_forcePdfOcr(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "KnowledgeDocument",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Boolean does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
 func (ec *executionContext) _KnowledgeDocumentConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocumentConnection) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -859,8 +813,6 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
-			case "forcePdfOcr":
-				return ec.fieldContext_KnowledgeDocument_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -928,8 +880,6 @@ func (ec *executionContext) fieldContext_Mutation_uploadKnowledgeDocument(ctx co
 				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadUrl(ctx, field)
 			case "uploadMethod":
 				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadMethod(ctx, field)
-			case "forcePdfOcr":
-				return ec.fieldContext_UploadKnowledgeDocumentPayload_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type UploadKnowledgeDocumentPayload", field.Name)
 		},
@@ -991,8 +941,6 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
-			case "forcePdfOcr":
-				return ec.fieldContext_KnowledgeDocument_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -1208,8 +1156,6 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
-			case "forcePdfOcr":
-				return ec.fieldContext_KnowledgeDocument_forcePdfOcr(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -1270,35 +1216,6 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_uploadMe
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
-func (ec *executionContext) _UploadKnowledgeDocumentPayload_forcePdfOcr(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
-	return graphql.ResolveField(
-		ctx,
-		ec.OperationContext,
-		field,
-		ec.fieldContext_UploadKnowledgeDocumentPayload_forcePdfOcr,
-		func(ctx context.Context) (any, error) {
-			return obj.ForcePDFOcr, nil
-		},
-		nil,
-		ec.marshalNBoolean2bool,
-		true,
-		true,
-	)
-}
-
-func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_forcePdfOcr(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "UploadKnowledgeDocumentPayload",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Boolean does not have child fields")
 		},
 	}
 	return fc, nil
@@ -2832,11 +2749,7 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 		asMap[k] = v
 	}
 
-	if _, present := asMap["forcePdfOcr"]; !present {
-		asMap["forcePdfOcr"] = false
-	}
-
-	fieldsInOrder := [...]string{"fileName", "fileSizeBytes", "repository", "branch", "path", "forcePdfOcr"}
+	fieldsInOrder := [...]string{"fileName", "fileSizeBytes", "repository", "branch", "path"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -2878,13 +2791,6 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 				return it, err
 			}
 			it.Path = data
-		case "forcePdfOcr":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("forcePdfOcr"))
-			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
-			if err != nil {
-				return it, err
-			}
-			it.ForcePDFOcr = data
 		}
 	}
 
@@ -2946,11 +2852,6 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			out.Values[i] = ec._KnowledgeDocument_jobId(ctx, field, obj)
 		case "error":
 			out.Values[i] = ec._KnowledgeDocument_error(ctx, field, obj)
-		case "forcePdfOcr":
-			out.Values[i] = ec._KnowledgeDocument_forcePdfOcr(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3181,11 +3082,6 @@ func (ec *executionContext) _UploadKnowledgeDocumentPayload(ctx context.Context,
 			}
 		case "uploadMethod":
 			out.Values[i] = ec._UploadKnowledgeDocumentPayload_uploadMethod(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
-		case "forcePdfOcr":
-			out.Values[i] = ec._UploadKnowledgeDocumentPayload_forcePdfOcr(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}

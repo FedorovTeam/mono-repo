@@ -59,7 +59,7 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 	assertColumnExists(t, ctx, db, "documents", "path")
 	assertColumnExists(t, ctx, db, "documents", "error_reason")
 	assertColumnExists(t, ctx, db, "documents", "workflow_id")
-	assertColumnExists(t, ctx, db, "documents", "force_ocr")
+	assertColumnNotExists(t, ctx, db, "documents", "force_ocr")
 	assertColumnExists(t, ctx, db, "document_status_logs", "workflow_id")
 }
 
@@ -118,6 +118,18 @@ func assertColumnExists(t *testing.T, ctx context.Context, db *sql.DB, table, co
     `, table, column)
 	require.NoError(t, row.Scan(&exists))
 	require.Truef(t, exists, "column %s.%s does not exist", table, column)
+}
+
+func assertColumnNotExists(t *testing.T, ctx context.Context, db *sql.DB, table, column string) {
+	t.Helper()
+	var exists bool
+	row := db.QueryRowContext(ctx, `
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+        )
+    `, table, column)
+	require.NoError(t, row.Scan(&exists))
+	require.Falsef(t, exists, "column %s.%s unexpectedly exists", table, column)
 }
 
 func assertJobEnums(t *testing.T, ctx context.Context, db *sql.DB) {

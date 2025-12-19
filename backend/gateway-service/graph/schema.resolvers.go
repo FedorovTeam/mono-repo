@@ -32,7 +32,6 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		Branch:        input.Branch,
 		Path:          path,
 		FileSizeBytes: int64(input.FileSizeBytes),
-		ForcePdfOcr:   derefBool(input.ForcePDFOcr),
 	}
 
 	result, err := r.DocumentUploader.UploadKnowledgeDocument(ctx, uploadInput)
@@ -44,7 +43,6 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 		Document:     mapDocument(result.Document),
 		UploadURL:    result.UploadURL,
 		UploadMethod: result.UploadMethod,
-		ForcePDFOcr:  result.ForcePdfOcr,
 	}, nil
 }
 
