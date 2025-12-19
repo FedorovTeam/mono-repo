@@ -11,13 +11,12 @@ func mapDocument(doc *pb.Document) *domain.Document {
 	}
 
 	result := &domain.Document{
-		ID:          doc.GetId(),
-		FileName:    doc.GetFileName(),
-		Repository:  doc.GetRepository(),
-		Branch:      doc.GetBranch(),
-		Path:        doc.GetPath(),
-		Status:      domainStatusFromProto(doc.GetStatus()),
-		ForcePdfOcr: doc.GetForceOcr(),
+		ID:         doc.GetId(),
+		FileName:   doc.GetFileName(),
+		Repository: doc.GetRepository(),
+		Branch:     doc.GetBranch(),
+		Path:       doc.GetPath(),
+		Status:     domainStatusFromProto(doc.GetStatus()),
 	}
 
 	if doc.GetOwner() != "" {
