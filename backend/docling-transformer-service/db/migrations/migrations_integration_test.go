@@ -67,8 +67,6 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 		{"transformations_queue", "markdown_bucket"},
 		{"transformations_queue", "markdown_object_key"},
 		{"transformations_queue", "filename_extension"},
-		{"transformations_queue", "ocr_lang"},
-		{"transformations_queue", "pdf_backend"},
 		{"transformations_queue", "created_at"},
 		{"transformations_queue", "started_at"},
 		{"transformations_queue", "finished_at"},
@@ -91,10 +89,14 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 		{"transformations_queue", "overlay_stage"},
 		{"transformations_queue", "base_markdown_bucket"},
 		{"transformations_queue", "base_markdown_object_key"},
+		{"transformations_queue", "force_ocr"},
+		{"transformations_queue", "ocr_lang"},
+		{"transformations_queue", "pdf_backend"},
 	} {
 		assertColumnNotExists(t, ctx, db, c.table, c.column)
 	}
 
+	assertTableNotExists(t, ctx, db, "docling_submit_lock")
 	assertIndexExists(t, ctx, db, "transformations_queue_status_idx")
 	assertIndexExists(t, ctx, db, "transformations_queue_started_at_idx")
 	assertIndexExists(t, ctx, db, "transformations_queue_docling_idx")
@@ -112,6 +114,18 @@ func assertTableExists(t *testing.T, ctx context.Context, db *sql.DB, name strin
     `, name)
 	require.NoError(t, row.Scan(&exists))
 	require.Truef(t, exists, "table %s does not exist", name)
+}
+
+func assertTableNotExists(t *testing.T, ctx context.Context, db *sql.DB, name string) {
+	t.Helper()
+	var exists bool
+	row := db.QueryRowContext(ctx, `
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1
+        )
+    `, name)
+	require.NoError(t, row.Scan(&exists))
+	require.Falsef(t, exists, "table %s still exists", name)
 }
 
 func assertColumnExists(t *testing.T, ctx context.Context, db *sql.DB, table, column string) {

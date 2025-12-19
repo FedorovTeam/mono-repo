@@ -41,8 +41,6 @@ type TransformationTask struct {
 	MarkdownObjectKey string
 	FilenameExtension string
 
-	OCRLanguage   string
-	PDFBackend    string
 	CorrelationID string
 
 	CreatedAt  time.Time
@@ -64,7 +62,5 @@ type EnqueueParams struct {
 	MarkdownObjectKey string
 	FilenameExtension string
 
-	OCRLanguage   string
-	PDFBackend    string
 	CorrelationID string
 }
