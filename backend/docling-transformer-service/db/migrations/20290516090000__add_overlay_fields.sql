@@ -1,11 +1,11 @@
 -- +goose Up
 -- +goose StatementBegin
 ALTER TABLE transformations_queue
-    ADD COLUMN overlay_stage TEXT,
-    ADD COLUMN base_markdown_bucket TEXT,
-    ADD COLUMN base_markdown_object_key TEXT;
+    ADD COLUMN IF NOT EXISTS overlay_stage TEXT,
+    ADD COLUMN IF NOT EXISTS base_markdown_bucket TEXT,
+    ADD COLUMN IF NOT EXISTS base_markdown_object_key TEXT;
 
-CREATE INDEX transformations_queue_overlay_stage_idx
+CREATE INDEX IF NOT EXISTS transformations_queue_overlay_stage_idx
     ON transformations_queue (overlay_stage)
     WHERE overlay_stage IS NOT NULL;
 -- +goose StatementEnd

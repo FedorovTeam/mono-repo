@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -55,14 +54,31 @@ func NewQueueRepository(pool *pgxpool.Pool) *PostgresQueueRepository {
 	return &PostgresQueueRepository{pool: pool}
 }
 
-const baseSelectFields = `
-id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, next_poll_at,
-document_id, original_bucket, original_object_key,
-source_bucket, source_object_key, source_url,
-markdown_bucket, markdown_object_key, filename_extension,
-ocr_lang, pdf_backend,
-created_at, started_at, finished_at, error, correlation_id
-`
+var baseSelectFields = strings.Join([]string{
+	"id",
+	"status",
+	"retry_count",
+	"COALESCE(docling_task_id, '') AS docling_task_id",
+	"COALESCE(docling_job_id, '') AS docling_job_id",
+	"docling_poll_count",
+	"next_poll_at",
+	"document_id",
+	"original_bucket",
+	"original_object_key",
+	"COALESCE(source_bucket, '') AS source_bucket",
+	"COALESCE(source_object_key, '') AS source_object_key",
+	"COALESCE(source_url, '') AS source_url",
+	"markdown_bucket",
+	"markdown_object_key",
+	"filename_extension",
+	"COALESCE(ocr_lang, '') AS ocr_lang",
+	"COALESCE(pdf_backend, '') AS pdf_backend",
+	"created_at",
+	"started_at",
+	"finished_at",
+	"error",
+	"correlation_id",
+}, ",\n")
 
 func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
 	query := fmt.Sprintf(`
@@ -117,10 +133,10 @@ INSERT INTO transformations_queue (
  created_at, correlation_id, docling_poll_count, next_poll_at
 ) VALUES (
  $1, $2, $3, $4, $5,
- $6, $7, $8,
+ NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''),
  $9, $10, $11,
- $12, $13,
- NOW(), $14, 0, NULL
+ NULLIF($12, ''), NULLIF($13, ''),
+ NOW(), NULLIF($14, ''), 0, NULL
 )`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -333,7 +349,7 @@ func (r *PostgresQueueRepository) MarkDone(ctx context.Context, id uuid.UUID, ma
 	const query = `
 UPDATE transformations_queue
 SET status = 'done', markdown_bucket = $1, markdown_object_key = $2,
-    finished_at = NOW(), error = NULL
+    next_poll_at = NULL, finished_at = NOW(), error = NULL
 WHERE id = $3`
 
 	if _, err := r.pool.Exec(ctx, query, markdownBucket, markdownObjectKey, id); err != nil {
@@ -622,13 +638,13 @@ func countRows(rows pgx.Rows) (int, error) {
 func scanTask(row pgx.Row) (*TransformationTask, error) {
 	var (
 		dto             repo.TransformationDTO
-		doclingTaskID   sql.NullString
-		doclingJobID    sql.NullString
-		sourceBucket    sql.NullString
-		sourceObjectKey sql.NullString
-		sourceURL       sql.NullString
-		ocrLang         sql.NullString
-		pdfBackend      sql.NullString
+		doclingTaskID   string
+		doclingJobID    string
+		sourceBucket    string
+		sourceObjectKey string
+		sourceURL       string
+		ocrLang         string
+		pdfBackend      string
 	)
 
 	if err := row.Scan(
@@ -662,14 +678,14 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 
-	dto.DoclingTaskID = doclingTaskID.String
-	dto.DoclingJobID = doclingJobID.String
-	dto.SourceBucket = sourceBucket.String
-	dto.SourceObjectKey = sourceObjectKey.String
-	dto.SourceURL = sourceURL.String
+	dto.DoclingTaskID = doclingTaskID
+	dto.DoclingJobID = doclingJobID
+	dto.SourceBucket = sourceBucket
+	dto.SourceObjectKey = sourceObjectKey
+	dto.SourceURL = sourceURL
 
-	dto.OCRLanguage = ocrLang.String
-	dto.PDFBackend = pdfBackend.String
+	dto.OCRLanguage = ocrLang
+	dto.PDFBackend = pdfBackend
 
 	return dto.ToDomain(), nil
 }
