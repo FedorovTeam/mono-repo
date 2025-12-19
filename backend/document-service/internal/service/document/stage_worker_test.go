@@ -396,7 +396,7 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	}
 }
 
-func TestHandleConvertPropagatesForceOCR(t *testing.T) {
+func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-ocr",
 		Name:              "Doc.pdf",
@@ -424,19 +424,19 @@ func TestHandleConvertPropagatesForceOCR(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if transformer.lastRequest == nil || !transformer.lastRequest.GetForceOcr() {
-		t.Fatalf("expected OCR flag to be propagated to transformer, got %#v", transformer.lastRequest)
+	if transformer.lastRequest == nil {
+		t.Fatalf("expected transformer request to be sent")
 	}
 	if transformer.lastRequest.GetFilenameExtension() != "pdf" {
 		t.Fatalf("expected filename extension to be propagated, got %v", transformer.lastRequest.GetFilenameExtension())
 	}
 
 	payload := domain.ConvertPayloadFromMap(result.Payload)
-	if payload.ForceOCR == nil || !*payload.ForceOCR {
-		t.Fatalf("expected OCR flag in payload, got %v", result.Payload)
-	}
 	if payload.FilenameExtension != "pdf" {
 		t.Fatalf("expected filename extension in payload, got %v", result.Payload)
+	}
+	if payload.ForceOCR != nil {
+		t.Fatalf("expected force_ocr to be omitted from payload, got %v", result.Payload)
 	}
 }
 

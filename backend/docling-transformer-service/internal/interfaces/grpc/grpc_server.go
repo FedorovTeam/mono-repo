@@ -55,8 +55,7 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		zap.String("source_bucket", req.GetSourceBucket()),
 		zap.String("source_object_key", req.GetSourceObjectKey()),
 		zap.String("source_url", req.GetSourceUrl()),
-		zap.String("filename_extension", req.GetFilenameExtension()),
-		zap.Boolp("force_ocr", req.ForceOcr))
+		zap.String("filename_extension", req.GetFilenameExtension()))
 
 	if req.GetSourceUrl() != "" && (req.GetSourceBucket() != "" || req.GetSourceObjectKey() != "") {
 		return nil, status.Error(codes.InvalidArgument, "provide either source_url or source bucket/object key")
@@ -76,7 +75,6 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		MarkdownBucket:    req.GetMarkdownBucket(),
 		MarkdownObjectKey: req.GetMarkdownObjectKey(),
 		FilenameExtension: req.GetFilenameExtension(),
-		ForceOCR:          req.ForceOcr,
 		CorrelationID:     correlationID,
 	})
 	if err != nil {

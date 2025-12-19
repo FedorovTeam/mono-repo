@@ -138,13 +138,6 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
 
-	forceOCR := doc.ForceOCR
-	if payload.ForceOCR != nil {
-		forceOCR = *payload.ForceOCR
-	} else {
-		payload.ForceOCR = boolPtr(forceOCR)
-	}
-
 	input := convertInput{
 		DocumentID:        job.DocumentID,
 		OriginalBucket:    payload.OriginalBucket,
@@ -153,7 +146,6 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		MarkdownObjectKey: payload.MarkdownObjectKey,
 		FilenameExtension: payload.FilenameExtension,
 		Version:           latestVersion(doc).Version + 1,
-		ForceOCR:          forceOCR,
 	}
 
 	convCtx := w.jobContext(ctx, payload.CorrelationID)

@@ -21,9 +21,8 @@ message ConvertDocumentToMarkdownRequest {
   string source_bucket = 9;
   string source_object_key = 10;
   string source_url = 11;
-  optional bool force_ocr = 12;
 
-  reserved 13 to 21;
+  reserved 12 to 21;
 }
 
 message ConvertDocumentToMarkdownResponse {
