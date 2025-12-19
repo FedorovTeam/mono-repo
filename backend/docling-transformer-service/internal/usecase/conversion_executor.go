@@ -180,8 +180,6 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, fmt.Errorf("source bucket/object key are required for source_async mode")
 	}
 
-	enableOCR := e.shouldForceOCR(contentType)
-
 	convertReq := domain.ConvertRequest{
 		FileName:        originalFileName,
 		Content:         sourceContent,
@@ -190,7 +188,6 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		SourceObjectKey: sourceObjectKey,
 		TargetBucket:    task.MarkdownBucket,
 		TargetObjectKey: task.MarkdownObjectKey,
-		EnableOCR:       enableOCR,
 		OCRLanguage:     ocrLang,
 		PDFBackend:      pdfBackend,
 	}
@@ -231,7 +228,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, fmt.Errorf("docling submit: %w", err)
 	}
 
-	e.metrics.RecordDoclingSubmit(ctx, ids, ocrLang, pdfBackend)
+	e.metrics.RecordDoclingSubmit(ctx)
 
 	nextPoll := e.poller.NextPollTime(time.Now(), 0)
 	if err := e.repo.MarkDoclingWaiting(ctx, task.ID, ids.TaskID, ids.JobID, 0, nextPoll); err != nil {
@@ -338,13 +335,4 @@ func (e *ConversionExecutor) handleTemporarySubmitError(ctx context.Context, tas
 	)
 
 	return StateWaitingDocling, nil, true
-}
-
-func boolPtr(v bool) *bool { return &v }
-
-func (e *ConversionExecutor) shouldForceOCR(contentType string) *bool {
-	if contentType == "application/pdf" {
-		return boolPtr(true)
-	}
-	return nil
 }

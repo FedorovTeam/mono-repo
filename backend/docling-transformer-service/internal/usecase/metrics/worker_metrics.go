@@ -4,9 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
@@ -200,26 +198,12 @@ func (m *WorkerMetrics) RecordOutcome(ctx context.Context, success bool) {
 	}
 }
 
-func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, ids domain.DoclingIdentifiers, ocrLang, pdfBackend string) {
+func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context) {
 	if m == nil || m.doclingSubmit == nil {
 		return
 	}
 
-	attrs := make([]attribute.KeyValue, 0, 4)
-	if ids.TaskID != "" {
-		attrs = append(attrs, attribute.String("docling_task_id", ids.TaskID))
-	}
-	if ids.JobID != "" {
-		attrs = append(attrs, attribute.String("docling_job_id", ids.JobID))
-	}
-	if ocrLang != "" {
-		attrs = append(attrs, attribute.String("ocr_lang", ocrLang))
-	}
-	if pdfBackend != "" {
-		attrs = append(attrs, attribute.String("pdf_backend", pdfBackend))
-	}
-
-	m.doclingSubmit.Add(ctx, 1, metric.WithAttributes(attrs...))
+	m.doclingSubmit.Add(ctx, 1)
 }
 
 func (m *WorkerMetrics) RecordDuration(ctx context.Context, durationMs float64) {
