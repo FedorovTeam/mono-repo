@@ -27,8 +27,6 @@
 Хранит состояние job и фаз:
 
 - `status`: pending / processing / waiting_docling / done / failed
-- `overlay_stage`: "" | "base" | "ocr"
-- `base_markdown_*`: ссылка на сохранённый base-результат
 - `docling_task_id`, `docling_poll_count`, `next_poll_at`
 
 **Важно:** поддержать **глобальный лимит “только 1 активный docling submit одновременно”** (ниже объясню).
@@ -47,10 +45,10 @@
 
 Решает:
 
-- надо ли делать overlay (для PDF в overlay-стадии)
-- какую фазу выполнять: base или ocr
-- когда сохранять `.base.md`
-- когда запускать overlay и писать финальный `.md`
+- как получать исходник (download или source_async)
+- нужно ли форсировать OCR (для PDF)
+- как собрать и отправить Docling-запрос
+- когда загрузить финальный markdown в MinIO и отметить задачу завершённой
 
 ---
 
@@ -72,15 +70,9 @@
 
 ---
 
-### 7) `OverlayEngine` (табличный мердж)
+### 7) Постобработка таблиц
 
-Отдельный пакет, например: `internal/infrastructure/overlay`
-
-- `ExtractVotingTables(mdOrJson)`: выделить таблицы голосования
-- `NormalizeRowKey`: ключ строки (№ + ФИО) или fallback (позиция)
-- `ExtractMarks`: извлечь “✓/X/•” из OCR-таблицы
-- `Overlay(baseTable, ocrTable)`: заполнить только пустые ячейки base
-- `RenderBack(md, replacedTables)`: заменить таблицы в исходном base markdown
+Overlay-проходы убраны: Docling возвращает итоговый markdown за один прогон, без отдельного мерджа таблиц. Дополнительной ручной постобработки нет.
 
 ---
 
@@ -100,15 +92,11 @@
 
 `ProcessTask(task)`:
 
-1. Определить тип:
-- `isPDF = ext == "pdf" || contentType == application/pdf`
-- `needsOverlay = isPDF && overlay_stage != ""`
-1. Если `task.docling_task_id != ""` → перейти в polling (Шаг 3).
-2. Если `needsOverlay`:
-- если `overlay_stage == ""` или `overlay_stage == "base"` → делаем **Base pass**
-- если `overlay_stage == "ocr"` → делаем **OCR pass**
-1. Если `!needsOverlay`:
-- делаем **Single pass** (обычная конверсия)
+1. Определить тип: `isPDF = ext == "pdf" || contentType == application/pdf`.
+2. Если `task.docling_task_id != ""` → перейти в polling (Шаг 3).
+3. Подготовить отправку: выбрать режим `source_async`, вычислить имя файла, подобрать OCR язык и pdf_backend (с учётом параметров задачи).
+4. Для PDF принудительно включить OCR в запросе (`EnableOCR=true`), для остальных форматов использовать настройки по умолчанию.
+5. Отправить задачу в Docling и перейти в ожидание результата.
 
 ---
 
@@ -128,43 +116,6 @@
 
 ---
 
-### Шаг 2A. Base pass (текст “как есть”)
-
-Цель: получить максимально “чистый” markdown без OCR-переписывания текста.
-
-Docling options (идея):
-
-- `to_formats=["md","json"]`
-- `do_ocr=false`
-- `do_table_structure=true`
-- `table_mode=accurate`
-- `table_cell_matching=false` (часто помогает)
-- `pdf_backend=dlparse_v4`
-- `ocr_engine=tesseract` (можно не задавать в base, но не мешает)
-
-Submit → `docling_task_id` записать → status=waiting_docling.
-
----
-
-### Шаг 2B. OCR pass (табличные значения)
-
-Цель: достать “✓” и другие mark-символы из ячеек.
-
-Docling options:
-
-- `to_formats=["md","json"]`
-- `do_ocr=true`
-- `do_table_structure=true`
-- `table_mode=accurate`
-- `table_cell_matching=false`
-- `pdf_backend=dlparse_v4`
-- `ocr_engine=tesseract`
-- `ocr_lang=["rus","eng","osd"]` (у тебя реально есть rus/eng/osd)
-
-Submit → `docling_task_id` → status=waiting_docling.
-
----
-
 ### Шаг 3. Polling Docling
 
 `DoclingPoller.Poll(task)`:
@@ -176,6 +127,7 @@ Submit → `docling_task_id` → status=waiting_docling.
     - если можно достать `result` и там `errors[]` — логировать
     - если transient (502/timeout) → retry/backoff
     - если hard failure → MarkFailed (или requeue limited times)
+2. После получения результата сразу загрузить markdown в MinIO по `markdown_bucket/object_key` и завершить задачу.
 
 ---
 

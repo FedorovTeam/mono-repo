@@ -18,14 +18,6 @@ const (
 	StatusFailed     TransformationStatus = "failed"
 )
 
-type OverlayStage string
-
-const (
-	OverlayStageNone OverlayStage = ""
-	OverlayStageBase OverlayStage = "base" // выполняем base-прогон без OCR
-	OverlayStageOCR  OverlayStage = "ocr"  // выполняем OCR-прогон, затем overlay и done
-)
-
 var ErrPollingAttemptsExceeded = errors.New("conversion polling attempts exceeded")
 
 type TransformationTask struct {
@@ -52,11 +44,6 @@ type TransformationTask struct {
 	OCRLanguage   string
 	PDFBackend    string
 	CorrelationID string
-
-	// overlay state (используется для двухфазной обработки PDF)
-	OverlayStage          OverlayStage
-	BaseMarkdownBucket    string
-	BaseMarkdownObjectKey string
 
 	CreatedAt  time.Time
 	StartedAt  *time.Time

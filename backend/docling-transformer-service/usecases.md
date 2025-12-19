@@ -31,11 +31,11 @@
 - **Акторы:** Воркер сервиса (`internal/worker`).
 - **Подготовка:** при старте сервиса `processing` задачи восстанавливаются в `pending`; далее сервис циклически считает очереди, помечает просроченные `waiting_docling` старше `docling.max_job_lifetime` как `failed`, переводит зависшие `processing` в `pending` или `failed` (по `service.processing_timeout`, `scheduler.max_processing_retries`, `docling.status_max_attempts`), возвращает старые `failed` в работу (с `scheduler.max_failed_retries`) и удаляет завершённые задачи по `cleanup_retention`.
 - **Шаги:**
-  1. Забрать задачу из очереди: приоритет на `waiting_docling` с наступившим `next_poll_at`; если в очереди есть любые `waiting_docling` (даже с будущим `next_poll_at`), новые `pending` не выдаются.
-  2. Проставить отсутствующие значения: `markdown_bucket` из конфигурации, `markdown_object_key` из исходного пути, расширение и `Content-Type` через `ResolveContentTypeByExtension`.
-  3. Определить режим отправки в Docling: в `source_async` (или при наличии `source_bucket`/`source_object_key`) используется `convert/source/async` без скачивания файла, с передачей MinIO-кредов из конфига; иначе оригинал скачивается из MinIO/URL с быстрым таймаутом и именем из `original_object_key`/`source_url` (fallback `document.<ext>`).
-  4. Отправить документ в Docling: для загрузки файла — POST `<docling.endpoint>/v1/convert/file/async` с multipart `files`, заголовками `X-Correlation-Id`, `X-Docling-Source-Filename`, `X-Docling-Endpoint`, `X-Api-Key` (если задан) и настройками Markdown/таблиц/OCR; для `source_async` — POST `<docling.endpoint>/v1/convert/source/async` с JSON, содержащим MinIO-источник/приёмник.
-  5. Для задач в overlay-стадии по PDF выполняется двухфазный проход: сначала base-прогон без OCR сохраняется во временный `*.base.md` и задача переводится обратно в `pending` для OCR-фазы; в остальных случаях сохраняются `docling_task_id`/`docling_job_id`, счётчик поллинга и `next_poll_at`, статус — `waiting_docling`.
+ 1. Забрать задачу из очереди: приоритет на `waiting_docling` с наступившим `next_poll_at`; если в очереди есть любые `waiting_docling` (даже с будущим `next_poll_at`), новые `pending` не выдаются.
+ 2. Проставить отсутствующие значения: `markdown_bucket` из конфигурации, `markdown_object_key` из исходного пути, расширение и `Content-Type` через `ResolveContentTypeByExtension`.
+ 3. Определить режим отправки в Docling: в `source_async` (или при наличии `source_bucket`/`source_object_key`) используется `convert/source/async` без скачивания файла, с передачей MinIO-кредов из конфига; иначе оригинал скачивается из MinIO/URL с быстрым таймаутом и именем из `original_object_key`/`source_url` (fallback `document.<ext>`).
+  4. Отправить документ в Docling: для загрузки файла — POST `<docling.endpoint>/v1/convert/file/async` с multipart `files`, заголовками `X-Correlation-Id`, `X-Docling-Source-Filename`, `X-Docling-Endpoint`, `X-Api-Key` (если задан) и настройками Markdown/таблиц/OCR; для `source_async` — POST `<docling.endpoint>/v1/convert/source/async` с JSON, содержащим MinIO-источник/приёмник. Для PDF воркер принудительно включает OCR в запросе.
+  5. После отправки сохраняются `docling_task_id`/`docling_job_id`, счётчик поллинга и `next_poll_at`, статус — `waiting_docling`.
 
 ## Опрос Docling и завершение
 - **Акторы:** Воркер сервиса.
@@ -43,7 +43,7 @@
   1. Делать запрос статуса `GET <docling.endpoint>/v1/status/poll/{task_id|job_id}` тем же конвертером, который сабмитил задачу; прогресс поллинга (`docling_poll_count`, идентификаторы) сохраняется в базе.
   2. Ошибки статуса/сетевые тайм-ауты учитываются: при повторяемых ошибках или превышении лимита попыток `docling.status_max_attempts` задача переводится в `pending` с ростом `retry_count` и очисткой docling-id для повторной отправки позже; иные ожидания переносят `next_poll_at` по backoff.
   3. При успехе получать результат `GET <docling.endpoint>/v1/result/{job_id}` и извлекать контент в порядке приоритета: `md_content` → `html_content` → `text_content`, дополняя `charset`.
-  4. Для обычных задач нормализовать `media_type` (по умолчанию `text/markdown; charset=utf-8`) и загрузить результат в MinIO (`storage.Upload`) в `markdown_bucket/object_key`; для overlay на OCR-фазе скачать сохранённый base Markdown, наложить таблицы из OCR через `OverlayVotingTablesInMarkdown` и сохранить итог в итоговый `markdown_object_key`.
+  4. Нормализовать `media_type` (по умолчанию `text/markdown; charset=utf-8`) и загрузить результат в MinIO (`storage.Upload`) в `markdown_bucket/object_key`.
   5. Обновить задачу статусом `done` в очереди; при любой ошибке — `failed` с текстом причины. Метрики фиксируют длительность обработки, ожидание Docling и счётчики ретраев/реактиваций Docling.
 
 ## Возобновление после рестартов

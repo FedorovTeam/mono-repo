@@ -6,6 +6,6 @@ type TaskState string
 const (
 	StateProcessing     TaskState = "processing"
 	StateWaitingDocling           = "waiting_docling"
-	StateRescheduled              = "rescheduled" // задача переведена обратно в pending внутри обработки (overlay base→ocr)
+	StateRescheduled              = "rescheduled" // задача переведена обратно в pending внутри обработки
 	StateCompleted                = "completed"
 )
