@@ -130,8 +130,6 @@ func main() {
 		QueueLimit:        cfg.Service.QueueLimit,
 		StatusBackoff:     statusPolicy,
 		UseSourceAsync:    cfg.Docling.Mode == "source_async",
-		DefaultOCRLang:    cfg.Docling.PDFDefaultLanguage,
-		DefaultPDFBackend: cfg.Docling.PDFBackend,
 	}, logger, &http.Client{Timeout: 30 * time.Second})
 
 	workerProcessor := usecase.NewProcessor(queueRepo, convOCR, storageClient, logger, usecase.Config{

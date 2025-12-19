@@ -71,7 +71,7 @@ func startPostgresContainer(t *testing.T) (context.Context, *pgxpool.Pool) {
 	return ctx, pool
 }
 
-func TestTransformationsQueueHasNoOverlayColumns(t *testing.T) {
+func TestTransformationsQueueHasNoDeprecatedColumns(t *testing.T) {
 	ctx, pool := startPostgresContainer(t)
 
 	const query = `
@@ -83,7 +83,7 @@ SELECT EXISTS (
       AND column_name = $1
 )`
 
-	for _, column := range []string{"overlay_stage", "base_markdown_bucket", "base_markdown_object_key"} {
+	for _, column := range []string{"overlay_stage", "base_markdown_bucket", "base_markdown_object_key", "force_ocr", "ocr_lang", "pdf_backend"} {
 		var exists bool
 		require.NoError(t, pool.QueryRow(ctx, query, column).Scan(&exists))
 		require.Falsef(t, exists, "column %s should not exist", column)

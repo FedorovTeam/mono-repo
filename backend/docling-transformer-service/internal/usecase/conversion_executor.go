@@ -141,14 +141,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 	}
 
 	ocrLang := e.cfg.DefaultOCRLang
-	if task.OCRLanguage != "" {
-		ocrLang = task.OCRLanguage
-	}
-
 	pdfBackend := e.cfg.DefaultPDFBackend
-	if task.PDFBackend != "" {
-		pdfBackend = task.PDFBackend
-	}
 
 	var sourceContent []byte
 	if !useSourceAsync {

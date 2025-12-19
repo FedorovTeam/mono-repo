@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
@@ -26,6 +25,8 @@ const (
 type TransformationTask = transformations.TransformationTask
 type EnqueueParams = transformations.EnqueueParams
 
+const doclingSubmitLockKey int64 = 9955663377
+
 var _ repo.QueueRepository = (*PostgresQueueRepository)(nil)
 
 type PostgresQueueRepository struct {
@@ -33,18 +34,26 @@ type PostgresQueueRepository struct {
 }
 
 type submitLock struct {
-	tx       pgx.Tx
+	conn     *pgxpool.Conn
 	released bool
 }
 
 func (l *submitLock) Release(ctx context.Context) error {
-	if l == nil || l.tx == nil || l.released {
+	if l == nil || l.conn == nil || l.released {
 		return nil
 	}
 
 	l.released = true
-	if err := l.tx.Commit(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+
+	var unlocked bool
+	err := l.conn.QueryRow(ctx, "SELECT pg_advisory_unlock($1)", doclingSubmitLockKey).Scan(&unlocked)
+	l.conn.Release()
+	l.conn = nil
+	if err != nil {
 		return fmt.Errorf("release submit lock: %w", err)
+	}
+	if !unlocked {
+		return fmt.Errorf("release submit lock: lock not held")
 	}
 
 	return nil
@@ -71,8 +80,6 @@ var baseSelectFields = strings.Join([]string{
 	"markdown_bucket",
 	"markdown_object_key",
 	"filename_extension",
-	"COALESCE(ocr_lang, '') AS ocr_lang",
-	"COALESCE(pdf_backend, '') AS pdf_backend",
 	"created_at",
 	"started_at",
 	"finished_at",
@@ -129,14 +136,12 @@ INSERT INTO transformations_queue (
  id, status, document_id, original_bucket, original_object_key,
  source_bucket, source_object_key, source_url,
  markdown_bucket, markdown_object_key, filename_extension,
- ocr_lang, pdf_backend,
  created_at, correlation_id, docling_poll_count, next_poll_at
 ) VALUES (
  $1, $2, $3, $4, $5,
  NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''),
  $9, $10, $11,
- NULLIF($12, ''), NULLIF($13, ''),
- NOW(), NULLIF($14, ''), 0, NULL
+ NOW(), NULLIF($12, ''), 0, NULL
 )`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -144,7 +149,6 @@ INSERT INTO transformations_queue (
 		params.DocumentID, params.OriginalBucket, params.OriginalObjectKey,
 		params.SourceBucket, params.SourceObjectKey, params.SourceURL,
 		params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt,
-		params.OCRLanguage, params.PDFBackend,
 		params.CorrelationID,
 	)
 	if err != nil {
@@ -213,23 +217,22 @@ func (r *PostgresQueueRepository) AcquireBatch(ctx context.Context, limit int) (
 }
 
 func (r *PostgresQueueRepository) AcquireSubmitLock(ctx context.Context) (repo.SubmitLock, error) {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("begin submit lock tx: %w", err)
+		return nil, fmt.Errorf("acquire submit lock connection: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, `SELECT token FROM docling_submit_lock WHERE token = 'docling_submit' FOR UPDATE NOWAIT`); err != nil {
-		_ = tx.Rollback(ctx)
-
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
-			return nil, repo.ErrSubmitLockBusy
-		}
-
+	var locked bool
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", doclingSubmitLockKey).Scan(&locked); err != nil {
+		conn.Release()
 		return nil, fmt.Errorf("acquire submit lock: %w", err)
 	}
+	if !locked {
+		conn.Release()
+		return nil, repo.ErrSubmitLockBusy
+	}
 
-	return &submitLock{tx: tx}, nil
+	return &submitLock{conn: conn}, nil
 }
 
 // КЛЮЧЕВОЕ: строгая сериализация Docling.
@@ -643,8 +646,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		sourceBucket    string
 		sourceObjectKey string
 		sourceURL       string
-		ocrLang         string
-		pdfBackend      string
 	)
 
 	if err := row.Scan(
@@ -664,8 +665,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&dto.MarkdownBucket,
 		&dto.MarkdownObjectKey,
 		&dto.FilenameExtension,
-		&ocrLang,
-		&pdfBackend,
 		&dto.CreatedAt,
 		&dto.StartedAt,
 		&dto.FinishedAt,
@@ -683,9 +682,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	dto.SourceBucket = sourceBucket
 	dto.SourceObjectKey = sourceObjectKey
 	dto.SourceURL = sourceURL
-
-	dto.OCRLanguage = ocrLang
-	dto.PDFBackend = pdfBackend
 
 	return dto.ToDomain(), nil
 }

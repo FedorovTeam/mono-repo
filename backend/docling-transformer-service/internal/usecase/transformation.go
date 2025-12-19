@@ -29,12 +29,10 @@ var (
 )
 
 type TransformationConfig struct {
-	MarkdownBucket    string
-	QueueLimit        int
-	StatusBackoff     backoff.Policy
-	UseSourceAsync    bool
-	DefaultOCRLang    string
-	DefaultPDFBackend string
+	MarkdownBucket string
+	QueueLimit     int
+	StatusBackoff  backoff.Policy
+	UseSourceAsync bool
 }
 
 type SubmitConversionRequest struct {
@@ -47,8 +45,6 @@ type SubmitConversionRequest struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
-	OCRLanguage       string
-	PDFBackend        string
 	CorrelationID     string
 }
 
@@ -120,16 +116,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		markdownKey = domain.BuildMarkdownKey(params.OriginalObjectKey)
 	}
 
-	ocrLang := params.OCRLanguage
-	if ocrLang == "" {
-		ocrLang = uc.cfg.DefaultOCRLang
-	}
-
-	pdfBackend := params.PDFBackend
-	if pdfBackend == "" {
-		pdfBackend = uc.cfg.DefaultPDFBackend
-	}
-
 	existingTask, err := uc.repo.GetLatestByDocument(ctx, params.DocumentID)
 	if err != nil {
 		return SubmitConversionResult{}, fmt.Errorf("fetch latest task: %w", err)
@@ -163,8 +149,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		FilenameExtension: fileExt,
-		OCRLanguage:       ocrLang,
-		PDFBackend:        pdfBackend,
 		CorrelationID:     params.CorrelationID,
 	})
 	if err != nil {
@@ -180,8 +164,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 			SourceBucket:      params.SourceBucket,
 			SourceObjectKey:   params.SourceObjectKey,
 			SourceURL:         params.SourceURL,
-			OCRLanguage:       ocrLang,
-			PDFBackend:        pdfBackend,
 		},
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,

@@ -29,8 +29,6 @@ type TransformationDTO struct {
 	MarkdownObjectKey string
 	FilenameExtension string
 
-	OCRLanguage   string
-	PDFBackend    string
 	CorrelationID string
 
 	CreatedAt  time.Time
@@ -61,8 +59,6 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		MarkdownObjectKey: dto.MarkdownObjectKey,
 		FilenameExtension: dto.FilenameExtension,
 
-		OCRLanguage:   dto.OCRLanguage,
-		PDFBackend:    dto.PDFBackend,
 		CorrelationID: dto.CorrelationID,
 
 		CreatedAt:  dto.CreatedAt,

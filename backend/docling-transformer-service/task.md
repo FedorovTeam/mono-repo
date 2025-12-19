@@ -93,7 +93,7 @@ Overlay-проходы убраны: Docling возвращает итоговы
 
 1. Определить тип: `isPDF = ext == "pdf" || contentType == application/pdf`.
 2. Если `task.docling_task_id != ""` → перейти в polling (Шаг 3).
-3. Подготовить отправку: выбрать режим `source_async`, вычислить имя файла, подобрать OCR язык и pdf_backend (с учётом параметров задачи).
+3. Подготовить отправку: выбрать режим `source_async`, вычислить имя файла, использовать OCR-язык и pdf_backend из конфигурации.
 4. Для PDF принудительно включить OCR в запросе (`EnableOCR=true`), для остальных форматов использовать настройки по умолчанию.
 5. Отправить задачу в Docling и перейти в ожидание результата.
 
@@ -107,8 +107,8 @@ Overlay-проходы убраны: Docling возвращает итоговы
 
 **Решение:** в `QueueRepository` (или отдельном `DoclingGate`) добавить “глобальный lock” на submit:
 
-- В БД таблица `docling_submit_lock` с одной строкой.
-- `TryAcquireSubmitLock(owner, ttl)` через `SELECT ... FOR UPDATE NOWAIT` или advisory lock.
+- Использовать advisory lock в Postgres без отдельных таблиц.
+- `TryAcquireSubmitLock(owner, ttl)` через `pg_try_advisory_lock` или аналогичную конструкцию.
 - Если lock занят → задачу не сабмитим, а откладываем (`next_poll_at = now + small_delay`, status=pending).
 
 После успешного submit — lock освобождаем.
