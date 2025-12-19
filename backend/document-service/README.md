@@ -1,69 +1,68 @@
 # Document Service
 
-Сервис управляет метаданными документов, версиями и статусами на пути загрузки DOCX → Markdown → GitHub. Он не выполняет интеграции сам: хранит только ссылки и статусную модель в PostgreSQL, а постановка/получение задач выполняется через gRPC‑клиентов соседних сервисов.
+Сервис хранит метаданные документов, версии и статусы цепочки `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub`, а выполнение этапов поручает внешним gRPC‑сервисам (storage, transformer, GitHub publisher). В базе фиксируются только ссылки и история статусов; бинарные данные не хранятся.
 
-## Архитектура
-- PostgreSQL — хранение метаданных, версий и логов статусов.
-- Storage-service / docling-transformer-service / github-publisher-service — отдельные сервисы с публичными gRPC API, через которые ставятся задачи и считываются результаты.
-- Внутри document-service нет прямых вызовов MinIO, Docling или GitHub: cron/воркеры только меняют статусы и дергают gRPC клиентов других сервисов.
-- gRPC — внутренний API `proto/backend/document/document.proto`.
+## gRPC API
+- Контракт: `proto/backend/document/v1/document.proto`, сервер принимает `x-correlation-id` в метаданных и пишет его в логи. `CreateDocumentRequest`/`ConfirmUploadRequest` содержат `correlation_id`, но бизнес-логика его не использует — корреляция ведётся по `workflow_id=document_id`. 【F:internal/interfaces/grpc/server.go†L17-L106】【F:internal/usecase/document/create_document.go†L55-L105】
+- `CreateDocument`:
+  - Генерирует UUID при отсутствии `id`; валидирует формат переданного UUID.
+  - Нормализует `repository`: допускается `owner/repo`, конфликт с явным `owner` запрещён; дефолты `owner`/`repository`/`branch`/`base_branch` и бакетов берутся из конфигурации, `base_branch` заполняется из `branch`, если пусто.
+  - `path` по умолчанию `knowledge/docs/<document_id>.md`; `upload_object_key` и `markdown_object_key` обязательны и сохраняются как есть.
+  - Создаёт документ со статусом `Uploaded`, первой версией №1 и логом статуса; `workflow_id` равен `document_id`. 【F:internal/usecase/document/create_document.go†L22-L110】
+- `ConfirmUpload`:
+  - Валидирует UUID, пустые значения bucket/object_key и совпадение с сохранёнными в документе.
+  - Обязательно проверяет наличие объекта через `storage-service.GetObject`; отсутствие gRPC‑клиента или объект в хранилище даёт ошибку.
+  - Ставит задачу `processing_jobs` со стадией `store_original` в статусе `pending`, добавляет событие `scheduled`; статус документа не меняет. Ошибка постановки помечает документ `Failed`. 【F:internal/usecase/document/confirm_upload.go†L20-L88】
+- `UpdateDocumentStatus`:
+  - Допустимые переходы: линейные стадии, повторная установка текущего статуса и выход из `Failed` в рабочие стадии; `Failed` заполняет `error_reason`.
+  - Переданные `version`/`original_object_key`/`markdown_object_key` создают или обновляют запись в `document_versions` (проверяется совпадение ключей для существующей версии) и при необходимости переносят ключи в документ.
+  - После `StoredOriginal` и `ConvertedToMarkdown` автоматически планирует следующую задачу (`convert_to_markdown` или `publish_to_github`), иначе возвращает активную задачу, если она была. 【F:internal/usecase/document/update_status.go†L16-L92】
+- `GetDocument` и `ListDocuments` возвращают документ с версиями и `job_id` активной задачи; список сортируется по `created_at DESC` и фильтруется по статусу. 【F:internal/interfaces/grpc/server.go†L59-L87】【F:internal/infrastructure/postgres/repository.go†L108-L178】
 
-- `documents` — источник правды по статусу документа и метаданным публикации.
-- `processing_jobs` — очередь задач для крон-воркеров: `task_id` (UUID), `document_id`, `stage`, `status`, счётчик `attempts`, расписание `next_run_at`, произвольный `payload`.
-- `job_events` — аудит выполнения задач, фиксирует смену статуса, сообщение ошибки и полезную нагрузку.
-- `payload` в `processing_jobs` и `job_events` хранит только ссылки и параметры для gRPC-исполнителей (`bucket`/`object_key`, `queue_id`, `github_path`, `create_pr`), бинарные данные не пишутся в БД, а сами интеграции выполняют внешние сервисы (MinIO обслуживается через gRPC `storage-service`, без прямых клиентов внутри document-service).
-- Индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run` поддерживают выборку готовых задач, `SELECT ... FOR UPDATE SKIP LOCKED` защищает от двойного захвата при нескольких воркерах.
-- Все фоновые воркеры (`UploadReconciler`, `ProcessingReconciler`, stage worker-ы и `JobFollower`) запускаются одним раннером на базе `errgroup.WithContext`: первая ошибка воркера отменяет общий контекст, останавливая остальные фоновые задачи и gRPC-сервер.
+## Модель данных (PostgreSQL)
+- `documents`: `id`, `name`, `owner`, `repository`, `branch`, `base_branch`, `path`, `status`, `workflow_id`, `original_bucket`/`object_key`, `markdown_bucket`/`object_key`, `error_reason`, `create_pr`, `created_at/updated_at`; уникальные индексы на пары bucket/object_key. 【F:db/migrations/001_create_documents.sql†L11-L54】【F:db/migrations/003_add_repository_and_error_fields.sql†L1-L15】
+- `document_versions`: версия с ключами и `markdown_queue_id`; уникально по `(document_id, version)`. 【F:db/migrations/001_create_documents.sql†L37-L49】【F:db/migrations/005_add_markdown_queue_id.sql†L1-L4】
+- `document_status_logs`: история переходов с `workflow_id` и `reason`; используется для вычисления фактического статуса при `Failed`. 【F:db/migrations/001_create_documents.sql†L51-L64】【F:internal/service/document/status_application.go†L49-L76】
+- `processing_jobs`: очередь этапов (`stage` = `store_original`/`convert_to_markdown`/`publish_to_github`; `status` = `pending`/`in_progress`/`completed`/`failed`), `attempts`, `next_run_at`, `payload` (JSON с ссылками и вспомогательными полями), уникальность по `(document_id, stage)`; индексы `idx_processing_jobs_stage_status_next_run`, `idx_processing_jobs_next_run`. 【F:db/migrations/006_add_processing_jobs.sql†L9-L51】
+- `job_events`: аудит задач с `event_type` (`scheduled`/`postponed`/`completed`/`failed`/`recovered`/`handled`), `message` и `payload` (например, `last_error`, `queue_id`, `commit_sha`). 【F:db/migrations/006_add_processing_jobs.sql†L53-L71】
 
-## Валидация входных данных
-- `CreateDocument` принимает минимальный набор полей (имя файла, repository/owner, branch/baseBranch, path, бакеты и object_key) и сам нормализует `repository`: если передан формат `owner/repo`, владелец выделяется автоматически, а конфликт между `owner` и префиксом в `repository` приводит к `InvalidArgument`.
-- При пустых `branch`/`base_branch`/`path` используются значения по умолчанию из конфигурации, но пустые бакеты и ключи запрещены.
-- Идентификатор документа валидируется как UUID; при отсутствии генерируется автоматически.
-- `ConfirmUpload` дополнительно проверяет соответствие бакета/ключа сохранённым значениям и наличие объекта через `storage-service.GetObject`.
+## Очередь и фоновые воркеры
+- Все воркеры и gRPC‑сервер запускаются общим раннером; ошибка любого воркера останавливает остальные по контексту. 【F:cmd/main.go†L118-L186】【F:internal/service/document/runner.go†L18-L47】
+- `UploadReconciler`: периодически ищет документы в статусе `Uploaded`, старше `min_uploaded_age`, с заполненными ключами, и повторно вызывает `ConfirmUpload`. 【F:internal/service/document/reconciler.go†L15-L74】
+- `StageWorker` (по стадиям):
+  - Выбирает `pending` задачи `FOR UPDATE SKIP LOCKED`, помечает `in_progress`, инкрементирует `attempts`; для конвертации обрабатывает одну задачу за цикл (`convert_batch_size=1`).
+  - `store_original`: idempotent переход в `StoredOriginal`, если документ реально в `Uploaded` и у него есть ключи оригинала. 【F:internal/service/document/stage_worker.go†L49-L116】
+  - `convert_to_markdown`: собирает payload (bucket/object_key/расширение файла, correlation_id из `workflow_id`), вызывает `TransformerService.ConvertDocumentToMarkdown` с `wait_for_result=false`. Статусы `done` или `ConvertedToMarkdown` завершают задачу и переводят документ в `ConvertedToMarkdown` с новой версией и `queue_id`; промежуточные статусы откладывают задачу на `retry_delay`. Временные gRPC‑коды (`DeadlineExceeded`, `Unavailable`, `Internal`, `Aborted`, `ResourceExhausted`) дают экспоненциальный backoff (`retry_delay * 2^attempts`, максимум 5 попыток, далее документ помечается `Failed`). 【F:internal/service/document/stage_worker.go†L118-L215】【F:internal/service/document/activities.go†L83-L161】
+  - `publish_to_github`: дополняет payload данными документа и дефолтами коммита/PR, требует непустые `commit_message`, `author_name`, `author_email`; формирует `idempotency_key=publish:<document_id>:<branch>:<markdown_key>`. Успешный RPC переводит документ в `PublishedToGitHub`; ответ с `retry_after` или временные gRPC‑коды откладывают задачу с backoff, остальные ошибки фиксируют `failed`. 【F:internal/service/document/stage_worker.go†L217-L315】【F:internal/service/document/activities.go†L170-L255】
+- `JobFollower`: читает `completed`/`failed` задачи (после `reschedule_after`), переносит `next_run_at`, на успехе ставит следующую стадию (`convert_to_markdown` после `store_original`, `publish_to_github` после `convert_to_markdown`), при `failed` помечает документ `Failed` и фиксирует событие `handled`. 【F:internal/service/document/job_follower.go†L17-L142】
+- `ProcessingReconciler`: возвращает зависшие `in_progress` в `pending`, если они старше `stage_interval + grace_period`, увеличивает `attempts`, пишет событие `recovered`; имеет до 3 попыток с экспоненциальным backoff и джиттером при ошибках репозитория. 【F:internal/service/document/processing_reconciler.go†L15-L156】
 
-### Политика retry/timeout конвертации
-- Stage worker `convert_to_markdown` вызывается с интервалом `stage_worker.interval` и пачкой `stage_worker.batch_size`; если transformer возвращает `status=pending|processing|waiting_docling`, задача переводится в `pending` с `next_run_at = now()+stage_worker.retry_delay` без создания дублей в `processing_jobs`.
-- gRPC вызов `ConvertDocumentToMarkdown` фиксирует `queue_id` и `markdown_object_key` только в `processing_jobs.payload` и `document_versions`/`documents`; других таблиц конвертер не трогает.
-- При получении `status=done` document-service помечает документ как `ConvertedToMarkdown`, записывает `markdown_queue_id` в последнюю версию и передает управление `JobFollower` для постановки стадии публикации.
-
-## Статусы и повторная обработка
-- Жизненный цикл документа фиксируется в статусах `UPLOADED → STORED_ORIGINAL → CONVERTED_TO_MARKDOWN → PUBLISHED_TO_GITHUB` с отдельным состоянием `FAILED`. Источник правды — таблица `documents`.
-- В gRPC/DTO не передаётся дублирующее поле `actual_status`: `status` из таблицы `documents` используется как единственный источник правды, а восстановление после `FAILED` опирается на историю переходов в `document_status_logs`.
-- Каждая стадия обработки («сохранить оригинал», «конвертировать», «опубликовать в GitHub») заводится в очереди `processing_jobs` со стадией (`job_stage`) и статусом (`job_status`), а все попытки фиксируются в `job_events`.
-- Крон-воркеры выбирают готовые к исполнению задачи через `SELECT ... FOR UPDATE SKIP LOCKED` с фильтром по `status = 'pending'` и `next_run_at <= now()`, опираясь на индексы `idx_processing_jobs_stage_status_next_run` и `idx_processing_jobs_next_run`.
-- При успешном завершении задача переводится в `status = 'completed'`, документ в `documents` переключается на следующий статус. Проверки наличия файлов или публикаций выполняют профильные сервисы; document-service лишь фиксирует статусы и ошибки, полученные по gRPC. `ConfirmUpload` не меняет статус сам по себе — он планирует задачу `store_original`, а переход в `StoredOriginal` выполняет stage worker после валидации через gRPC `storage-service`.
-- Повторная обработка доступна за счёт перевода документа в предыдущий статус и постановки новой задачи с той же парой `document_id + stage` (уникальный ключ в `processing_jobs` не даёт раздувать очередь дублями). Если документ застрял в `UPLOADED`, периодический reconciler перечитывает объект через `storage-service` и перезапускает цепочку.
-
-## Формат ключей
-Document-service сам не генерирует ключи и не вызывает загрузку при `CreateDocument`. Он ожидает, что клиент передаст `upload_bucket`/`upload_object_key` и `markdown_bucket`/`markdown_object_key` (обычно их выдаёт `storage-service`), валидирует непустые значения и сохраняет их как есть. Проверка фактического существования объекта выполняется через `storage-service.GetObject` внутри `ConfirmUpload` и при повторной проверке reconciler'ом.
+## Интеграции
+- **Storage-service:** используется только для проверки наличия объекта через `GetObject` в `ConfirmUpload` и `UploadReconciler`; прямых вызовов MinIO нет. 【F:internal/usecase/document/confirm_upload.go†L57-L88】【F:internal/infrastructure/storage/storage.go†L9-L29】
+- **Transformer-service:** `ConvertDocumentToMarkdown` вызывается без ожидания результата, передаются buckets/keys, расширение файла и `correlation_id` (из заголовков или `workflow_id`). Ошибочные статусы ответа (`failed`/`error`) интерпретируются как `FailedPrecondition`. 【F:internal/service/document/activities.go†L107-L161】
+- **Github-publisher-service:** `PublishMarkdown` получает repo/branch/path, ключ Markdown из MinIO, commit/PR данные и `idempotency_key`; сохраняемые в `job_events` поля включают `commit_sha`, `pull_request_number/url`, `retry_after`, `idempotency_hit`. Ответы `TEMPORARY_FAILURE` или с `retry_after` считаются временной ошибкой. 【F:proto/backend/githubpublisher/v1/githubpublisher.proto†L28-L77】【F:internal/service/document/stage_worker.go†L241-L315】
 
 ## Конфигурация
-Все обязательные параметры находятся в `config.yaml` (путь передается через `CONFIG_PATH`). Значения по умолчанию настроены под инфраструктурные домены и DNS-шаблон `<context>.backend.svc.cluster.local`:
-- `server.addr` — адрес gRPC сервера (по умолчанию `:50051`).
-- `postgres.dsn` — строка подключения к PostgreSQL.
-- `storage.original_bucket` / `storage.markdown_bucket` — бакеты, которые возвращает `storage-service` при загрузке оригинала и Markdown.
-- `reconciler.interval` / `reconciler.batch_size` / `reconciler.min_uploaded_age` — периодичность и размер выборки задач для подтверждения загрузок, минимальный возраст загруженного объекта перед повторной проверкой (проверка выполняется через `storage-service.GetObject`).
-- Повторы публикации и backoff на стороне GitHub выполняет сам `github-publisher-service` согласно переданному `retry_policy` или собственной конфигурации; document-service лишь фиксирует статусы и `retry_after`, не рассчитывая задержки самостоятельно.
-- `job_follower.interval` / `job_follower.batch_size` / `job_follower.reschedule_after` — периодичность чтения завершённых задач и задержка перед повторным запуском следующей стадии.
- - `services.storage_service` — `storage.backend.svc.cluster.local:50052`, `services.transformer_service` — `docling-transformer-service.docling-transformer-service.svc.cluster.local:9090` (gRPC `ConvertDocumentToMarkdown`/`ConvertDocxToMarkdown`), `services.github_publisher_service` — `github-publisher.backend.svc.cluster.local:9090`.
-- `services.grpc` — общие параметры подключения к gRPC клиентам: `dial_timeout` для `grpc.WithBlock`, `min_connect_timeout` и `backoff` для `grpc.WithConnectParams`, `keepalive` для `grpc.WithKeepaliveParams` (все значения задаются в формате `time.Duration`, `keepalive.time` не меньше 5m и `permit_without_stream=false`, чтобы не нарушать стандартный `MinTime` gRPC‑серверов).
-- `github.repository` — целевой репозиторий (по умолчанию `FedorovTeam/knowledge-base`), `github.branch` — рабочая ветка. На входе сервис ожидает раздельные `owner` и `repository`; если в `repository` передан формат `owner/repo`, владелец выделяется автоматически, а в базе сохраняется только имя репозитория без префикса владельца.
-- `observability.logs.enabled` — включает вывод стандартных логов; при `false` логгер работает в no-op режиме.
-- `observability.traces.enabled` / `observability.metrics.enabled` — включает экспорт OTLP-трейсов и метрик через gRPC. Для работы требуется доступный OTLP Collector (адрес берется из `OTEL_EXPORTER_OTLP_ENDPOINT`, по умолчанию `localhost:4317` с нешифрованным соединением).
+- Файл YAML передаётся флагом `-config` (по умолчанию `config/config.yaml`); миграции всегда применяются при старте, флаг `-migrate-only` завершает процесс после миграций. 【F:cmd/main.go†L20-L70】
+- Обязательные поля: `server.addr`, `postgres.dsn`, `storage.original_bucket/markdown_bucket`, адреса сервисов `services.storage_service`/`transformer_service`/`github_publisher_service`, `grpc_clients` (timeout/keepalive/backoff), шаблон `github.commit_message`, автор `github.author_name/email`, интервалы `reconciler`, `job_follower`, `stage_worker` (interval/batch_size/convert_batch_size/retry_delay, `grace_period` ≥ 0). Пустые значения приводят к ошибке валидации. 【F:pkg/config/config.go†L13-L111】
+- Дополнительные параметры: `github.owner/repository/branch/base_branch/base_url`, `github.pr_title/pr_body`, `github.base_branch` по умолчанию подставляется в `CreateDocument`; `stage_worker.wait_markdown` присутствует в конфигурации, но сейчас не используется в коде. 【F:pkg/config/config.go†L24-L82】【F:config/config.yaml†L1-L48】
+- gRPC‑клиенты создаются с insecure‑транспортом, `keepalive` и `backoff` из `grpc_clients`. 【F:internal/infrastructure/grpcclient/client.go†L12-L45】
 
 ## Наблюдаемость
-Периодические воркеры публикуют метрики очереди и ошибок: gauge `document_service_upload_reconciler_queue_size`/`document_service_publish_retrier_queue_size`/`document_service_job_follower_queue_size`, гистограммы размеров пачек (`document_service_*_batch_size`) и длительности (`document_service_*_duration_ms`), счётчики ошибок (`document_service_*_errors_total`). В логах фиксируются некорректные выборки, пропуски объектов и ошибки публикации/маршрутизации, чтобы отслеживать частоту сбоев на каждой стадии.
+- Логи можно отключить (`observability.logs.enabled=false`); трейсинг и метрики включаются отдельными флагами и экспортируются в OTLP по gRPC (адрес и креды берутся из стандартных переменных OTEL). 【F:pkg/observability/setup.go†L11-L117】
+- Метрики воркеров: gauge `document_service_<worker>_queue_size`, гистограммы `..._batch_size` и `..._duration_ms`, счётчики `..._errors_total`, `..._retries_total`, `..._final_errors_total`; регистрируются через OpenTelemetry meter `document-service/<worker>`. 【F:internal/service/document/metrics.go†L12-L70】
+- Корреляционный ID прокидывается в исходящие gRPC вызовы (`x-correlation-id`) при наличии в контексте или из `workflow_id`; сервер логирует полученный ID даже если он отсутствует. 【F:internal/service/document/activities.go†L28-L52】【F:internal/interfaces/grpc/server.go†L114-L134】
 
-## Быстрый старт
-1. Запустите PostgreSQL, `storage-service` (подключенный к MinIO), `docling-transformer-service` и `github-publisher-service` (см. `infrastructure.md`).
-2. Выполните миграции: `go run ./cmd/server --migrate`.
-3. Сгенерируйте gRPC код: `./proto/generate.sh`.
-4. Соберите и запустите сервер: `go run ./cmd/server`.
-5. Пример запросов через `grpcurl` описан в `test.md`.
+## Локальный запуск
+1. Поднимите PostgreSQL и запустите зависимости (storage-service, docling-transformer-service, github-publisher-service), как показано в `infrastructure.md`.
+2. Примените миграции (выполняются автоматически, но можно отдельно): `go run ./cmd/main.go --config config/config.yaml --migrate-only`.
+3. Сгенерируйте gRPC-код после правок proto: `cd proto && ./generate.sh`.
+4. Запустите сервис: `go run ./cmd/main.go --config config/config.yaml`.
+5. Примеры grpcurl‑запросов — в `test.md`.
 
 ## Структура каталога
-- `cmd/server` — точка входа gRPC сервера.
-- `internal` — бизнес-логика, репозитории, интеграции.
-- `proto/backend/document` — gRPC контракт и сгенерированный код.
-- `db/migrations` — SQL миграции для PostgreSQL.
-- Документация: `diagrams.md`, `flows.md`, `contracts.md`, `usecases.md`, `tasks.md`, `test.md`, `code.md`, `infrastructure.md`, `sequence.md`.
+- `cmd/main.go` — точка входа, старт gRPC-сервера и всех воркеров.
+- `internal/` — доменные модели, use case, фоновые воркеры, инфраструктурные адаптеры.
+- `proto/backend/*` — gRPC контракты и сгенерированный код.
+- `db/migrations` — SQL миграции (применяются через embedded runner).
+- Документация: `code.md`, `flows.md`, `sequence.md`, `infrastructure.md`, `usecases.md`, `diagrams.md`, `contracts.md`, `tasks.md`, `test.md`.
