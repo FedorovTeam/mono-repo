@@ -409,7 +409,7 @@ SET status = 'pending',
     docling_job_id = NULL,
     docling_poll_count = 0,
     next_poll_at = $2
-WHERE id = $1 AND status = 'waiting_docling'`
+WHERE id = $1 AND status IN ('waiting_docling','processing')`
 
 	if _, err := r.pool.Exec(ctx, query, id, nextPollAt); err != nil {
 		return fmt.Errorf("requeue docling waiting: %w", err)
