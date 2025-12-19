@@ -21,7 +21,6 @@ type KnowledgeDocument struct {
 	Status          KnowledgeDocumentStatus `json:"status"`
 	JobID           *string                 `json:"jobId,omitempty"`
 	Error           *string                 `json:"error,omitempty"`
-	ForcePDFOcr     bool                    `json:"forcePdfOcr"`
 }
 
 type KnowledgeDocumentConnection struct {
@@ -51,17 +50,15 @@ type UploadKnowledgeDocumentInput struct {
 	FileName      string `json:"fileName"`
 	FileSizeBytes int    `json:"fileSizeBytes"`
 	// Имя репозитория GitHub: допускается `<repo>` или `<owner>/<repo>`.
-	Repository  string  `json:"repository"`
-	Branch      string  `json:"branch"`
-	Path        *string `json:"path,omitempty"`
-	ForcePDFOcr *bool   `json:"forcePdfOcr,omitempty"`
+	Repository string  `json:"repository"`
+	Branch     string  `json:"branch"`
+	Path       *string `json:"path,omitempty"`
 }
 
 type UploadKnowledgeDocumentPayload struct {
 	Document     *KnowledgeDocument `json:"document"`
 	UploadURL    string             `json:"uploadUrl"`
 	UploadMethod string             `json:"uploadMethod"`
-	ForcePDFOcr  bool               `json:"forcePdfOcr"`
 }
 
 type KnowledgeDocumentStatus string

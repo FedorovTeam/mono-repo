@@ -61,7 +61,6 @@ type ConvertPayload struct {
 	MarkdownObjectKey string
 	QueueID           string
 	Status            string
-	ForceOCR          *bool
 	FilenameExtension string
 }
 
@@ -145,9 +144,6 @@ func (p ConvertPayload) ToMap() map[string]any {
 	if p.Status != "" {
 		res["status"] = p.Status
 	}
-	if p.ForceOCR != nil {
-		res["force_ocr"] = *p.ForceOCR
-	}
 	if p.FilenameExtension != "" {
 		res["filename_extension"] = p.FilenameExtension
 	}
@@ -165,7 +161,6 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		MarkdownObjectKey:  stringFromMap(payload, "markdown_object_key"),
 		QueueID:            stringFromMap(payload, "queue_id"),
 		Status:             stringFromMap(payload, "status"),
-		ForceOCR:           boolFromMap(payload, "force_ocr"),
 		FilenameExtension:  stringFromMap(payload, "filename_extension"),
 	}
 }
@@ -248,16 +243,4 @@ func stringFromMap(payload map[string]any, key string) string {
 		}
 	}
 	return ""
-}
-
-func boolFromMap(payload map[string]any, key string) *bool {
-	if payload == nil {
-		return nil
-	}
-	if val, ok := payload[key]; ok {
-		if b, ok := val.(bool); ok {
-			return &b
-		}
-	}
-	return nil
 }
