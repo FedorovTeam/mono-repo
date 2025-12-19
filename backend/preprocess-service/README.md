@@ -1,129 +1,87 @@
 # preprocess-service
 
-Сервис принимает файлы в исходных форматах (doc/docx/pdf), конвертирует их в docx с помощью установленного LibreOffice и складывает результат в MinIO. Предназначен для внутреннего использования в цепочке DOCX → Markdown → GitHub.
+Сервис конвертирует входные файлы (`doc`/`docx`/`pdf`) в `docx` через установленный LibreOffice и сохраняет результат в MinIO. Очередь задач и состояния хранятся в PostgreSQL; взаимодействие с сервисом идёт через gRPC.
 
 ## Структура каталога
-- `cmd/preprocess-service/main.go` — точка входа, загрузка конфигурации и запуск HTTP/gRPC серверов.
-- `internal/config` — загрузка `config.yaml` с параметрами PostgreSQL, MinIO, путями LibreOffice и воркерами.
-- `internal/app` — инициализация логирования, телеметрии (метрики/трейсы), запуск http/gRPC серверов и воркера.
-- `internal/domain` — доменные сущности и валидация задания на предобработку.
-- `internal/transport` — HTTP‑слой с health/readiness/metrics и gRPC‑хендлер с middleware логов/метрик/trace.
-- `internal/worker` — загрузка исходника, конвертация LibreOffice, загрузка артефакта, обратные вызовы.
-- `config/config.yaml` — пример конфигурации для запуска.
-- `Makefile`, `Dockerfile` — сборка и упаковка сервиса.
+- `cmd/main.go` — точка входа, чтение конфига и запуск HTTP/gRPC/воркера.
+- `internal/config` — разбор `config.yaml`, поддержка переменных окружения для PostgreSQL и MinIO.
+- `internal/app` — инициализация логирования, телеметрии, миграций, серверов и воркера.
+- `internal/domain` — сущность задания и валидация входных параметров.
+- `internal/transport` — HTTP‑ручки (`/health`, `/ready`, `/metrics`) и gRPC сервер с метриками и correlation-id middleware.
+- `internal/storage/postgres` — репозиторий очереди на базе таблицы `preprocess_queue`.
+- `internal/worker` — цикл выборки задач, загрузка исходника из MinIO, запуск LibreOffice, выгрузка результата и callback.
+- `proto/preprocess.proto` — контракт gRPC (`SubmitPreprocess`, `GetPreprocessStatus`).
 
-## Локальный запуск
-1. Скопируйте или настройте `config/config.yaml` под свою среду (PostgreSQL, MinIO, пути LibreOffice, степень параллельности воркеров). Для стандартной кластерной схемы имена сервисов задаются в формате `<context>.backend.svc.cluster.local`.
-2. Примените миграции, чтобы таблица `preprocess_queue` из `migrations/001_create_preprocess_queue.sql` появилась до старта воркера:
+## gRPC API
+- `SubmitPreprocess` принимает `source_bucket`, `source_key`, `source_etag`, `document_id`, опциональные `target_bucket`, `target_key`, `callback_url`, `correlation_id`. При пустых `target_bucket`/`target_key` подставляются значения из конфига: bucket берётся из `preprocess.target_bucket`, ключ строится как `<target_key_prefix>/<document_id>.docx` (или `<document_id>.docx`). `document_id`, `source_bucket`, `source_key`, `source_etag` обязательны; иначе вернётся `INVALID_ARGUMENT`. Идемпотентность обеспечивается уникальным ключом `(source_bucket, source_key, source_etag)`: при повторе вернётся существующий `job_id` и текущий статус. Поле `correlation_id` в ответе берётся из запроса.
+- `GetPreprocessStatus` требует `job_id`; при отсутствии задачи возвращает `NOT_FOUND`. В ответе присутствуют координаты источника/результата, `status`, `error_code`, `error_message`, `error_details`, `updated_at` и `correlation_id` (из запроса или сохранённый вместе с задачей).
+- Статусы gRPC: `PREPROCESS_STATUS_PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`. Внутри БД им сопоставлены `pending|processing|done|failed|stopped`.
+
+HTTP сервер доступен на `service.port` (по умолчанию `8082`), gRPC — на `service.grpc_port` (по умолчанию `9090`).
+
+## Очередь в PostgreSQL
+- Таблица `preprocess_queue` содержит: `job_id` (UUID PK), `document_id`, `source_bucket/source_key/source_etag`, `target_bucket/target_key`, `target_media_type`, `status`, `attempts`, `max_attempts` (по умолчанию 5), `next_run_at`, `started_at`, `finished_at`, `error_code`, `error_message`, `error_details` (JSONB), `callback_url`, `correlation_id`, `created_at/updated_at`. Индексы: `(status, next_run_at)`, `(source_bucket, source_key)`, уникальный `(source_bucket, source_key, source_etag)`.
+- Миграции встроены в бинарник и выполняются при старте (`internal/app`). При необходимости можно отдельно прогнать `go run github.com/pressly/goose/v3/cmd/goose@v3.22.3 -dir db/migrations postgres "$POSTGRES_DSN" up`.
+
+## Воркеры и ретраи
+- Воркер выбирает задания со статусами `pending` или `failed`, у которых `next_run_at <= now()`, блокирует строку через `FOR UPDATE SKIP LOCKED`, увеличивает `attempts` и переводит статус в `processing`.
+- Настройки по умолчанию: параллелизм 1 поток (`preprocess.worker_concurrency`), таймаут конвертации 2 минуты (`convert_timeout`), задержка между опросами очереди 2 секунды (`poll_interval`), backoff 30 секунд (`backoff`), целевой медиатип результата `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+- Скачивание исходника использует `source_etag` как `If-Match`; 404/412 считаются постоянной ошибкой `source_missing`. Конвертация выполняется LibreOffice (`--convert-to docx`) в подкаталог `output_dir/<job_id>`. Загрузка результата в MinIO происходит в переданный или дефолтный бакет/ключ с указанным `target_media_type`.
+- Ошибки маркируются через `error_code/error_message/error_details`; при временной ошибке задача получает статус `failed` и `next_run_at = now() + backoff*attempt`. При постоянной ошибке или превышении `max_attempts` статус становится `stopped`, заполняется `finished_at`.
+- Callback (`POST` с полями `job_id`, `status`, `target_bucket`, `target_key`, `error{code,message}`) отправляется на `callback_url` только после финального успеха (`done`) или необратимой остановки (`stopped`). Повторов не более 3, между попытками — `backoff` (или 1s, если он не задан).
+
+## Конфигурация (`config/config.yaml`)
+- `service`: `name`, `port` (HTTP), `grpc_port`, `region`.
+- `postgres`: `dsn` (используется и для readiness).
+- `minio`: `endpoint`, `access_key`, `secret_key`, `ssl`, `region`.
+- `preprocess`: `libreoffice_path` (обязателен), `working_dir`, `output_dir`, `target_bucket`, `target_key_prefix`, `target_media_type`, `worker_concurrency`, `convert_timeout`, `backoff`, `poll_interval`.
+- `logging`: `level` (`debug|info|warn|error`).
+
+Переменные окружения перекрывают только `CONFIG_PATH`, `POSTGRES_DSN`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_REGION`, `MINIO_SSL`. Рабочие директории создаются на старте; если `target_bucket` не передан клиентом, используется значение из конфига. `target_key` обязателен: либо приходит в запросе, либо формируется по `target_key_prefix` и `document_id`.
+
+## Локальный запуск и тесты
+1. Настройте `config/config.yaml` для своей БД/MinIO и пути LibreOffice. Пример лежит в репозитории и копируется в образ `/app/config/config.yaml`.
+2. Примените миграции (опционально, они запустятся и при старте приложения):
    ```bash
-   POSTGRES_DSN="postgres://preprocess:preprocess_password@localhost:5432/preprocess?sslmode=disable" make migrate
+   POSTGRES_DSN="postgres://preprocess:preprocess_password@localhost:5432/preprocess?sslmode=disable" \
+     go run github.com/pressly/goose/v3/cmd/goose@v3.22.3 -dir db/migrations postgres "$POSTGRES_DSN" up
    ```
-3. Запустите сервис (миграции повторно применятся при старте и пропустят уже выполненные шаги):
+3. Запустите сервис:
    ```bash
-   make run
+   CONFIG_PATH=./config/config.yaml go run ./cmd/main.go
    ```
-4. Проверьте наблюдаемость и готовность:
+4. Проверки готовности и метрик:
    ```bash
    curl -i http://localhost:8082/health
    curl -i http://localhost:8082/ready
    curl -i http://localhost:8082/metrics
    ```
-5. Отправьте gRPC‑запрос `SubmitPreprocess` на порт 9082 и проверьте статус через `GetPreprocessStatus` или дождитесь `callback_url`.
-
-## Конфигурация (`config/config.yaml`)
-Все параметры вынесены в YAML и читаются через `CONFIG_PATH` (по умолчанию `config/config.yaml`):
-- `service.name`, `service.port`, `service.grpc_port`, `service.region` — сетевые параметры и регион сервиса.
-- `postgres.dsn` — DSN для очереди/метаданных. Пинги БД используются в `readiness`.
-- `minio.endpoint`, `minio.access_key`, `minio.secret_key`, `minio.region`, `minio.ssl` — доступ к бакетам источника и результата.
-- `preprocess.libreoffice_path` — путь до бинаря LibreOffice, `working_dir` — временные файлы и загрузка исходников, `output_dir` — итоговые DOCX (воркер создаёт подкаталог с `job_id` и кладёт результат туда перед загрузкой в MinIO), `worker_concurrency` — число воркеров, `convert_timeout`/`backoff`/`poll_interval` — тайминги обработки и повтора, `target_media_type`/`target_bucket`/`source_bucket` — ключевые бакеты и медиатип, `target_key_prefix` — префикс для дефолтного `target_key`.
-- `logging.level` — уровень логов (`debug|info|warn|error`).
-
-Если клиент не передаёт `target_bucket`/`target_key` в запросе gRPC, сервис подставит значения из конфигурации: bucket возьмётся из `preprocess.target_bucket`, а ключ сформируется как `<target_key_prefix>/<document_id>.docx` (или просто `<document_id>.docx`, если префикс пустой).
-
-В контейнерном образе пример `config/config.yaml` уже скопирован в `/app/config/config.yaml`, рабочие каталоги `/tmp/preprocess-service/work` и `/tmp/preprocess-service/output` созданы и доступны для записи. Итоговый файл конвертации складывается в `output_dir` (подкаталог с `job_id`), откуда загружается в MinIO. Значения MinIO и PostgreSQL можно переопределить через переменные окружения `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_REGION`, `MINIO_SSL` и `POSTGRES_DSN`, либо подменить весь конфиг файлом, смонтированным по `CONFIG_PATH`.
-
-## Миграции базы данных
-- Цель `make migrate` использует `goose` для применения SQL из каталога `migrations`. Переменная `POSTGRES_DSN` обязательна: она должна указывать на схему, где хранится очередь `preprocess_queue`.
-- При старте сервиса миграции запускаются автоматически (hook в `internal/app`), чтобы воркер не поднимался без таблиц. Повторное применение пропускает уже выполненные версии.
-- В Kubernetes миграции можно выполнять отдельной Helm Job/Argo Workflows step перед деплоем, используя тот же `make migrate` или вызов `goose` внутри init-контейнера.
-
-## Запуск в Docker
-1. Соберите образ:
+5. gRPC: отправьте `SubmitPreprocess` на `localhost:9090`, затем `GetPreprocessStatus` по полученному `job_id`.
+6. Тесты:
    ```bash
-   docker build -t preprocess-service:local .
+   go test ./...
    ```
-2. Запустите контейнер, передав параметры подключения к PostgreSQL и MinIO через переменные окружения или собственный конфиг:
-   ```bash
-   docker run --rm \
-     -p 8082:8082 -p 9082:9082 \
-     -e CONFIG_PATH=/app/config/config.yaml \
-     -e POSTGRES_DSN="postgres://preprocess:preprocess_password@postgres:5432/preprocess?sslmode=disable" \
-     -e MINIO_ENDPOINT="minio.moiqr.localhost:80" \
-     -e MINIO_ACCESS_KEY="PREPROCESS_MINIO_KEY" \
-     -e MINIO_SECRET_KEY="PREPROCESS_MINIO_SECRET" \
-     -e MINIO_REGION="ru-msk-1" \
-     -e MINIO_SSL="false" \
-     -v $(pwd)/config/config.yaml:/app/config/config.yaml:ro \
-     preprocess-service:local
-   ```
-   При желании можно заменить файл конфигурации на другой путь, передав `-e CONFIG_PATH=/app/config/custom.yaml` и примонтировав соответствующий volume.
 
 ## Быстрый стенд через docker-compose
-1. Поднимите инфраструктуру и сервис из корня каталога:
+1. Поднимите сервис и зависимости:
    ```bash
    docker compose up -d
    ```
-   В состав стенда входят PostgreSQL (порт 5432), MinIO (9000/9001) и `preprocess-service` (8082/9082). Консоль MinIO доступна на `http://localhost:9001` с учетными данными `PREPROCESS_MINIO_KEY/PREPROCESS_MINIO_SECRET`.
-2. Убедитесь, что контейнеры здоровы, а сервис перешел в состояние `healthy`:
+   В составе: PostgreSQL (`5432`), MinIO (`9000/9001`), `preprocess-service` (`8082` HTTP, `9090` gRPC).
+2. Проверьте здоровье:
    ```bash
    docker compose ps
    curl -f http://localhost:8082/health
    curl -f http://localhost:8082/ready
    ```
-3. Сформируйте тестовый объект в `preprocess-source` и отправьте `SubmitPreprocess` с готовыми параметрами:
-   ```bash
-   make demo
-   ```
-   
-   Скрипт дождётся готовности MinIO и сервиса, загрузит пример `testdata/sample.doc` в `preprocess-source/incoming/demo.doc` и выполнит gRPC‑вызов на `localhost:9082` через `grpcurl`. Чтобы прогнать конвертацию на стороннем файле (например, `*.doc` из интернета), передайте `DEMO_SOURCE_URL` и при необходимости `DEMO_SOURCE_FILE_NAME`/`DEMO_SOURCE_KEY`:
-   ```bash
-   DEMO_SOURCE_URL="https://file-examples.com/storage/fe4fbfdb5f6e1f040b04f3c/file-sample_100kB.doc" make demo
-   ```
+3. Демонстрация через `make demo`: загрузит `testdata/sample.doc` в `preprocess-source`, вызовет gRPC на `preprocess-service:9090` в docker-сети и вернёт `job_id`. Для своего файла задайте `DEMO_SOURCE_URL`/`DEMO_SOURCE_KEY`/`DEMO_SOURCE_FILE_NAME`.
 
-4. Возьмите `job_id` из ответа и проверьте статус выполнения, например:
-   ```bash
-   docker run --rm --network host \
-     -v $(pwd)/proto:/proto \
-     fullstorydev/grpcurl:v1.9.1 \
-     -plaintext \
-     -import-path /proto \
-     -proto /proto/preprocess.proto \
-     -d '{"job_id": "<JOB_ID>"}' \
-     localhost:9082 backend.preprocess.v1.PreprocessService/GetPreprocessStatus
-   ```
-
-## Поток Submit → очередь → воркер → MinIO → callback
-1. Клиент вызывает `SubmitPreprocess` (gRPC), передавая координаты исходного объекта в MinIO, `document_id`, `correlation_id` и при необходимости `callback_url`.
-2. Хендлер проверяет дубликаты по `source_bucket`/`source_key`/`source_etag`, возвращает существующий `job_id` или ставит новое задание в очередь.
-3. Воркеры по таймеру выбирают задание, скачивают исходный файл из MinIO и запускают LibreOffice для конвертации в docx.
-4. Результат кладётся в `preprocess.target_bucket`, статус фиксируется в PostgreSQL, а `GetPreprocessStatus` сразу отражает итог.
-5. Если указан `callback_url`, воркер отправит POST с итоговым статусом (успех/ошибка) и координатами выгруженного файла.
+## Наблюдаемость
+- HTTP эндпоинты: `/health` (OK), `/ready` (пингует PostgreSQL), `/metrics` (Prometheus).
+- Метрики: `http_requests_total`, `http_request_duration_ms`, `grpc_requests_total`, `grpc_request_duration_ms` с атрибутами метода/статуса.
+- Корреляция: HTTP хедер `X-Correlation-ID` прокидывается и логируется; в gRPC добавляется/переиспользуется метаданные `x-correlation-id` и подтягивается в логах/метриках.
 
 ## Требования
 - Go 1.24+
-- LibreOffice установлен в системе исполнения сервиса.
-- Доступ к MinIO или совместимому S3‑хранилищу и PostgreSQL.
-
-## CI/CD через Argo Workflows
-Для сборки и выката образа используется WorkflowTemplate `preprocess-service` в `cicd/argo-workflows/workflow.yaml`:
-
-1. Запустить пайплайн, передав SHA коммита:
-   ```bash
-   argo submit --from workflowtemplate/preprocess-service -p git_sha=$(git rev-parse HEAD)
-   ```
-2. Шаги пайплайна:
-   - `clone` — sparse-checkout только каталога `backend/preprocess-service` из репозитория `mono-repo`.
-   - `test` — запуск `go test ./...` для сервиса с кешем `/go` (без `-tags integration`).
-   - `build-image` — сборка образа `harbor.tech.fedorov-team.tech/backend/preprocess-service:<git_sha>` (и `:latest`) через Kaniko.
-   - `deploy` — обновление Argo CD приложения `app-preprocess-service` с новым тегом Helm-параметра `image.tag` и ожидание синхронизации/здоровья.
-3. Секреты, ожидаемые воркфлоу: `github-secret` (доступ к репозиторию), `harbor-docker-config` (pull/push в Harbor), `argocd-token` (токен для Argo CD).
+- LibreOffice в среде исполнения.
+- Доступ к PostgreSQL и MinIO (или совместимому S3).
