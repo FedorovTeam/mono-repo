@@ -1,6 +1,6 @@
 # Sequence diagram
 
-Диаграммы ниже отражают однопроходную конвертацию без отдельной base/OCR фазы и без overlay-мерджа таблиц.
+Диаграммы ниже отражают однопроходную конвертацию без вспомогательных фаз и ручного мерджа таблиц.
 
 ```mermaid
 sequenceDiagram
@@ -15,13 +15,13 @@ sequenceDiagram
     TR->>TR: валидация document_id/original_*,<br/>исключаем source_url против source_bucket/object_key,<br/>markdown_bucket по умолчанию из конфигурации
     TR->>TR: NormalizeExtension(filename_extension | original/source key) + ResolveContentTypeByExtension
     TR->>TR: markdown_object_key по умолчанию через BuildMarkdownKey(original_object_key)
-    TR->>TR: ocr_lang/pdf_backend по умолчанию из конфигурации
+    TR->>TR: параметры markdown_bucket/object_key по умолчанию из конфигурации
     TR->>TR: проверка лимита очереди (CountByStatus)
     TR->>PG: GetLatestByDocument(document_id)
     alt найдена неfailed задача
         TR-->>GW: reuse queue_id/status + ResolveOutput(markdown_bucket/object_key) с учётом сохранённых значений
     else новая задача
-        TR->>PG: Enqueue(status=pending, markdown_bucket/object_key,<br/>source_bucket/object_key или source_url, ocr_lang, pdf_backend, correlation_id)
+        TR->>PG: Enqueue(status=pending, markdown_bucket/object_key,<br/>source_bucket/object_key или source_url, correlation_id)
         TR-->>GW: queue_id, status=pending, markdown_bucket/object_key
     end
     opt wait_for_result=true
@@ -52,9 +52,9 @@ sequenceDiagram
                 end
             end
         else новая конвертация
-            WK-->>WK: определить источник (async|download) и форсировать OCR только для PDF
+            WK-->>WK: определить источник (async|download)
             alt useSourceAsync (source_url пуст и известны source_bucket/object_key или включён fallback к оригиналу)
-                WK-->>DL: POST /v1/convert/file/async (source_bucket/object_key,<br/>target markdown_bucket/object_key, EnableOCR/OCRLanguage/PDFBackend)
+                WK-->>DL: POST /v1/convert/file/async (source_bucket/object_key,<br/>target markdown_bucket/object_key, to_formats/from_formats)
             else синхронная загрузка
                 alt источник URL
                     WK->>DL: POST /v1/convert/file/async (multipart, скачанный контент, X-Docling-Source-Filename)

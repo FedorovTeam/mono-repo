@@ -18,3 +18,5 @@ graph LR
     MD --> MINIO[(MinIO bucket docling-transformations)]
     MD --> GH[GitHub Publisher (downstream)]
 ```
+
+Контракт минимален: Docling вызывается одним запросом без `force_ocr`/`do_ocr`, передаётся только исходный файл (или ссылка на него) и целевой формат Markdown.

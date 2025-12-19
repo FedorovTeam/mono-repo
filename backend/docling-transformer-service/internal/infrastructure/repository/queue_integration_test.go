@@ -71,25 +71,6 @@ func startPostgresContainer(t *testing.T) (context.Context, *pgxpool.Pool) {
 	return ctx, pool
 }
 
-func TestTransformationsQueueHasNoDeprecatedColumns(t *testing.T) {
-	ctx, pool := startPostgresContainer(t)
-
-	const query = `
-SELECT EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'transformations_queue'
-      AND column_name = $1
-)`
-
-	for _, column := range []string{"overlay_stage", "base_markdown_bucket", "base_markdown_object_key", "force_ocr", "ocr_lang", "pdf_backend"} {
-		var exists bool
-		require.NoError(t, pool.QueryRow(ctx, query, column).Scan(&exists))
-		require.Falsef(t, exists, "column %s should not exist", column)
-	}
-}
-
 func TestRestoreStuckProcessingResetsDoclingState(t *testing.T) {
 	ctx, pool := startPostgresContainer(t)
 

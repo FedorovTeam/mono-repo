@@ -927,8 +927,6 @@ func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
 		DoclingMaxInterval:     10 * time.Minute,
 		DoclingRequeueDelay:    15 * time.Second,
 		DoclingMaxRestarts:     7,
-		DefaultOCRLang:         "fr",
-		DefaultPDFBackend:      "custom_backend",
 	}
 
 	normalized := normalizeConfig(cfg)

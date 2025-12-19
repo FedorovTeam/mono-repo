@@ -27,9 +27,6 @@ docling:
   api_key: ""
   mode: upload_file
   default_language: ru
-  pdf_default_language: ru
-  pdf_enable_ocr: true
-  pdf_backend: pypdfium2
   status_initial_interval: 15s
   status_backoff_factor: 2
   status_max_interval: 2m
