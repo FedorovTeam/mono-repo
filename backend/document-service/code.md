@@ -2,40 +2,54 @@
 
 ```mermaid
 flowchart TD
-    main("cmd/main.go") --> configLoader{{"internal/config"}}
-    main --> observability{{"internal/observability"}}
-    main --> migrations{{"db/migrations"}}
-    main --> repo
-    main --> grpcDial{{"internal/grpcdial"}}
-    main --> jobWorkers["cron workers (store → convert → publish)"]
+    main("cmd/main.go") --> config{{"pkg/config"}}
+    main --> observability{{"pkg/observability"}}
+    main --> migrations["db/migrations"]
+    main --> repo["internal/infrastructure/postgres.Repository"]
+    main --> grpcDial{{"internal/infrastructure/grpcclient"}}
+    main --> storageAdapter["internal/infrastructure/storage"]
+    main --> usecase["internal/usecase/document.UseCase"]
+    main --> activities["internal/service/document.Activities"]
     main --> uploadReconciler["UploadReconciler"]
-    main --> grpcServer
+    main --> processingReconciler["ProcessingReconciler"]
+    main --> stageStore["StageWorker store_original"]
+    main --> stageConvert["StageWorker convert_to_markdown"]
+    main --> stagePublish["StageWorker publish_to_github"]
+    main --> jobFollower["JobFollower"]
+    main --> grpcServer["internal/interfaces/grpc.Server"]
 
-    migrations --> db[(PostgreSQL: documents, processing_jobs, job_events)]
-    repo[(internal/infra/postgres)] --> db
-
+    repo --> db[(PostgreSQL: documents, document_versions, document_status_logs, processing_jobs, job_events)]
     grpcDial --> storageClient["storage-service gRPC client"]
-    grpcDial --> transformerClient["docling-transformer-service gRPC client"]
+    grpcDial --> transformerClient["transformer-service gRPC client"]
     grpcDial --> publisherClient["github-publisher-service gRPC client"]
 
-    grpcServer[(internal/interfaces/grpc)] --> service
-    service[(internal/service/document.Service)] --> repo
-    service --> jobWorkers
+    storageAdapter --> storageClient
+    usecase --> repo
+    usecase --> storageAdapter
+    grpcServer --> usecase
 
-    jobWorkers --> repo
-    jobWorkers --> storageClient
-    jobWorkers --> transformerClient
-    jobWorkers --> publisherClient
+    activities --> repo
+    activities --> transformerClient
+    activities --> publisherClient
 
     uploadReconciler --> repo
-    uploadReconciler --> storageClient
-    uploadReconciler --> service
+    uploadReconciler --> usecase
+    processingReconciler --> repo
+
+    stageStore --> repo
+    stageConvert --> repo
+    stagePublish --> repo
+    stageStore --> activities
+    stageConvert --> activities
+    stagePublish --> activities
+
+    jobFollower --> repo
 ```
 
 Основные части сервиса:
 
-- **Точка входа `cmd/main.go`**: загружает конфигурацию, настраивает логирование и OpenTelemetry, прогоняет миграции PostgreSQL, инициализирует репозиторий и gRPC‑клиенты зависимых сервисов (`storage`, `transformer`, `github-publisher`) через `internal/grpcdial`. Поднимает периодические задачи (`UploadReconciler`, cron‑воркеры по стадиям store/convert/publish) и запускает gRPC‑сервер. Прямые SDK MinIO/GitHub/Docling не используются. 【F:cmd/main.go†L1-L137】【F:cmd/main.go†L143-L204】【F:cmd/main.go†L211-L240】
-- **`internal/service/document`**: бизнес-логика создания и управления документами, постановка задач в `processing_jobs`, валидация статусов и работа с gRPC-исполнителями стадий. Сервис остаётся источником статусов `UPLOADED → STORED_ORIGINAL → CONVERTED_TO_MARKDOWN → PUBLISHED_TO_GITHUB → FAILED` в таблице `documents`. 【F:internal/service/document/service.go†L1-L226】【F:internal/infra/postgres/repository.go†L1-L241】
-- **Крон-воркеры**: читают очередь `processing_jobs` через `SELECT ... FOR UPDATE SKIP LOCKED`, учитывают расписание `next_run_at`, обновляют статус задач и пишут события в `job_events`. Для конвертации и публикации используют gRPC‑клиенты `storage`, `transformer` и `github-publisher`, прокидывая `x-correlation-id` из `payload`. 【F:internal/service/document/reconciler.go†L14-L103】【F:internal/service/document/retrier.go†L14-L100】
-- **`internal/interfaces/grpc`**: серверная обёртка над proto `DocumentService`, маппинг моделей и логирование `x-correlation-id` для входящих вызовов. 【F:internal/interfaces/grpc/server.go†L1-L128】
-- **Конфигурация и наблюдаемость**: пакеты `internal/config` и `internal/observability` используются на старте для загрузки `config.yaml` и настройки логов/метрик/traces. 【F:cmd/main.go†L1-L83】
+- **Точка входа `cmd/main.go`**: читает конфигурацию из `pkg/config`, включает логирование и трейсинг через `pkg/observability`, прогоняет миграции, собирает PostgreSQL‑репозиторий, gRPC‑клиенты (storage/transformer/github-publisher) через `internal/infrastructure/grpcclient`, адаптер хранилища и use case. Затем инициализирует Activities, фоновые воркеры (reconciler-ы, stage‑воркеры по стадиям `store_original`/`convert_to_markdown`/`publish_to_github`, job follower) и поднимает gRPC‑сервер. 【F:cmd/main.go†L3-L185】
+- **Слой use case и gRPC‑интерфейс**: `internal/usecase/document.UseCase` агрегирует операции `CreateDocument`, `ConfirmUpload`, `UpdateStatus`, получение и листинг документов, опираясь на репозиторий и адаптер хранилища. Сервер `internal/interfaces/grpc.Server` маппит proto `DocumentService` на UseCase и логирует `x-correlation-id`. 【F:internal/usecase/document/usecase.go†L1-L44】【F:internal/interfaces/grpc/server.go†L1-L163】
+- **Репозиторий PostgreSQL**: `internal/infrastructure/postgres.Repository` ведёт таблицы документов, версий и логов статусов, добавляет и обновляет `processing_jobs` с событиями в `job_events`, использует `FOR UPDATE SKIP LOCKED` при выдаче pending‑задач и умеет восстанавливать зависшие `in_progress`. 【F:internal/infrastructure/postgres/repository.go†L19-L220】【F:internal/infrastructure/postgres/repository.go†L509-L660】
+- **Фоновые исполнители**: UploadReconciler обрабатывает документы в статусе `Uploaded`, вызывает `ConfirmUpload` после проверки давности и наличия объекта; ProcessingReconciler возвращает зависшие задачи в pending; StageWorker-ы подбирают pending‑очереди по стадиям, вызывают Activities и умеют переоткладывать/бэкофить; JobFollower реагирует на завершённые/ошибочные задачи, ставит следующую стадию или помечает документ `Failed`. 【F:internal/service/document/reconciler.go†L15-L104】【F:internal/service/document/processing_reconciler.go†L13-L182】【F:internal/service/document/stage_worker.go†L20-L312】【F:internal/service/document/job_follower.go†L28-L186】
+- **Интеграционные Activities**: инкапсулируют вызовы gRPC‑трансформера и GitHub‑паблишера, проверяют текущий статус документа и выполняют переходы `Uploaded → StoredOriginal → ConvertedToMarkdown → PublishedToGitHub` (или `Failed`), прокидывая корреляционный ID и версии объектов хранилища. 【F:internal/service/document/activities.go†L31-L218】【F:internal/service/document/stage_worker.go†L96-L291】
