@@ -45,9 +45,6 @@ docling:
 
 docling_render:
   prefer_json: false
-  two_pass_voting_merge: false
-  voting_table_min_rows: 1
-  pass_b_table_coverage: 0.5
 
 minio:
   endpoint: api.minio.tech.fedorov-team.tech

@@ -121,11 +121,7 @@ func main() {
 			UseSSL:    cfg.Docling.Storage.UseSSL,
 		},
 		Render: converter.RenderConfig{
-			PreferJSON:         cfg.DoclingRender.PreferJSON != nil && *cfg.DoclingRender.PreferJSON,
-			TwoPassVotingMerge: cfg.DoclingRender.TwoPassVotingMerge,
-			VotingTableMinRows: cfg.DoclingRender.VotingTableMinRows,
-			PassBTableCoverage: cfg.DoclingRender.PassBTableCoverage,
-			PassBMatchRate:     0.6,
+			PreferJSON: cfg.DoclingRender.PreferJSON != nil && *cfg.DoclingRender.PreferJSON,
 		},
 	}, logger)
 

@@ -3,11 +3,8 @@ package doclingjson
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 )
-
-const defaultTableSimilarityThreshold = 0.45
 
 // Document описывает часть JSON-ответа Docling, содержащую таблицы и отметки для них.
 type Document struct {
@@ -22,13 +19,6 @@ type Table struct {
 	Caption  string     `json:"caption"`
 	Markdown string     `json:"markdown"`
 	Rows     []TableRow `json:"rows"`
-}
-
-// MergeStats содержит метрики объединения таблиц между проходами.
-type MergeStats struct {
-	TotalRows   int
-	MergedRows  int
-	MatchedRows int
 }
 
 // TableRow описывает строку таблицы.
@@ -47,10 +37,6 @@ type Mark struct {
 	Name     string         `json:"name"`
 	TargetID string         `json:"target_id"`
 	Target   map[string]any `json:"target"`
-}
-
-type TableConflict struct {
-	Reason string `json:"reason"`
 }
 
 // RenderMarkdown пытается собрать Markdown по таблицам из jsonContent.
@@ -115,92 +101,6 @@ func RenderMarkdown(jsonContent any, mdFallback *string) (string, bool) {
 	return rendered, rendered != ""
 }
 
-func RenderMarkdownWithConflicts(jsonContent any, mdFallback *string) (string, bool, []TableConflict) {
-	doc, err := Parse(jsonContent)
-	if err != nil {
-		return "", false, []TableConflict{{Reason: err.Error()}}
-	}
-
-	fallback := ""
-	if mdFallback != nil && mdFallback != (*string)(nil) {
-		fallback = strings.TrimSpace(*mdFallback)
-	}
-
-	if len(doc.Tables) == 0 {
-		return fallback, false, []TableConflict{{Reason: "no ocr tables"}}
-	}
-
-	if strings.TrimSpace(fallback) == "" {
-		rendered, ok := RenderMarkdown(jsonContent, nil)
-		return rendered, ok, nil
-	}
-
-	if strings.Contains(fallback, "{{") {
-		rendered, ok := RenderMarkdown(jsonContent, &fallback)
-		return rendered, ok, nil
-	}
-
-	blocks := ParseMarkdownTableBlocks(fallback)
-	if len(blocks) == 0 {
-		rendered, ok := RenderMarkdown(jsonContent, &fallback)
-		return rendered, ok, nil
-	}
-
-	lines := strings.Split(fallback, "\n")
-	used := make(map[int]bool)
-	var conflicts []TableConflict
-
-	for i := len(blocks) - 1; i >= 0; i-- {
-		block := blocks[i]
-		baseColumns := tableColumnCount(block.Table)
-
-		matchIdx := -1
-		for idx, tbl := range doc.Tables {
-			if used[idx] {
-				continue
-			}
-
-			ocrColumns := tableColumnCount(tbl)
-			if ocrColumns == 0 {
-				continue
-			}
-
-			if ocrColumns == baseColumns {
-				matchIdx = idx
-				break
-			}
-		}
-
-		if matchIdx == -1 {
-			conflicts = append(conflicts, TableConflict{Reason: fmt.Sprintf("shape mismatch: base_columns=%d", baseColumns)})
-			continue
-		}
-
-		replacement := strings.TrimSpace(tableMarkdown(doc.Tables[matchIdx]))
-		if replacement == "" {
-			conflicts = append(conflicts, TableConflict{Reason: "empty ocr table"})
-			continue
-		}
-
-		used[matchIdx] = true
-
-		repLines := strings.Split(replacement, "\n")
-		start, end := block.StartLine, block.EndLine
-		if start < 0 || end >= len(lines) || start > end {
-			continue
-		}
-
-		newLines := make([]string, 0, len(lines)-((end-start)+1)+len(repLines))
-		newLines = append(newLines, lines[:start]...)
-		newLines = append(newLines, repLines...)
-		newLines = append(newLines, lines[end+1:]...)
-		lines = newLines
-	}
-
-	rendered := strings.Join(lines, "\n")
-	return rendered, true, conflicts
-}
-
 // Parse пытается tolerant-распарсить json_content.
 func Parse(jsonContent any) (Document, error) {
 	var doc Document
@@ -232,32 +132,6 @@ func Parse(jsonContent any) (Document, error) {
 	}
 
 	return doc, nil
-}
-
-func tableMarkdown(tbl Table) string {
-	if md := strings.TrimSpace(tbl.Markdown); md != "" {
-		return md
-	}
-
-	return strings.TrimSpace(renderTableRows(tbl.Rows))
-}
-
-func tableColumnCount(tbl Table) int {
-	if len(tbl.Rows) > 0 && len(tbl.Rows[0].Cells) > 0 {
-		return len(tbl.Rows[0].Cells)
-	}
-
-	md := strings.TrimSpace(tbl.Markdown)
-	if md == "" {
-		return 0
-	}
-
-	parsed := ParseMarkdownTables(md)
-	if len(parsed) == 0 || len(parsed[0].Rows) == 0 {
-		return 0
-	}
-
-	return len(parsed[0].Rows[0].Cells)
 }
 
 func buildTableMarkdowns(tables []Table) map[string]string {
@@ -425,50 +299,8 @@ func unique(items []string) []string {
 	return result
 }
 
-// ParseMarkdownTables пытается извлечь таблицы из Markdown для использования во втором проходе.
-func ParseMarkdownTables(md string) []Table {
-	lines := strings.Split(md, "\n")
-	var tables []Table
-
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if !strings.HasPrefix(line, "|") || !strings.Contains(line, "|") {
-			continue
-		}
-
-		header := parseMarkdownRow(line)
-		if len(header) == 0 {
-			continue
-		}
-
-		if i+1 >= len(lines) || !strings.Contains(lines[i+1], "-") {
-			continue
-		}
-
-		rows := []TableRow{{Cells: wrapCells(header)}}
-
-		for j := i + 2; j < len(lines); j++ {
-			rowLine := strings.TrimSpace(lines[j])
-			if !strings.HasPrefix(rowLine, "|") || !strings.Contains(rowLine, "|") {
-				break
-			}
-
-			cells := parseMarkdownRow(rowLine)
-			if len(cells) == 0 {
-				continue
-			}
-			rows = append(rows, TableRow{Cells: wrapCells(cells)})
-			i = j
-		}
-
-		tables = append(tables, Table{Rows: rows})
-	}
-
-	return tables
-}
-
 // ----------------------
-// Voting overlay helpers
+// Voting table helpers
 // ----------------------
 
 // detectVotingColumns возвращает индексы колонки "№" и "ФИО".
@@ -570,280 +402,6 @@ func ExtractVotingKey(row TableRow, numIdx, fioIdx int) (string, string) {
 	return num, name
 }
 
-// MergeVotingTables заполняет таблицы Pass A данными Pass B на основании номера и ФИО.
-func MergeVotingTables(passATables, passBTables []Table, similarityThreshold float64) ([]Table, MergeStats) {
-	if similarityThreshold <= 0 {
-		similarityThreshold = 0.6
-	}
-
-	stats := MergeStats{}
-	merged := make([]Table, 0, len(passATables))
-
-	for _, tableA := range passATables {
-		numA, fioA := detectVotingColumns(tableA)
-		if numA == -1 || fioA == -1 {
-			merged = append(merged, tableA)
-			continue
-		}
-
-		matchedTableB, numB, fioB, tableScore := findMatchingTable(tableA, passBTables, defaultTableSimilarityThreshold)
-		if matchedTableB == nil || tableScore < defaultTableSimilarityThreshold {
-			merged = append(merged, tableA)
-			continue
-		}
-
-		mergedTable, tableStats := mergeTableRows(tableA, *matchedTableB, numA, fioA, numB, fioB, similarityThreshold)
-		stats.TotalRows += tableStats.TotalRows
-		stats.MergedRows += tableStats.MergedRows
-		stats.MatchedRows += tableStats.MatchedRows
-
-		merged = append(merged, mergedTable)
-	}
-
-	return merged, stats
-}
-
-func mergeTableRows(passA, passB Table, numA, fioA, numB, fioB int, threshold float64) (Table, MergeStats) {
-	stats := MergeStats{}
-	keyB := buildRowIndex(passB, numB, fioB)
-
-	rows := make([]TableRow, 0, len(passA.Rows))
-	for rowIdx, row := range passA.Rows {
-		if rowIdx == 0 {
-			rows = append(rows, row)
-			continue
-		}
-
-		stats.TotalRows++
-		if len(row.Cells) == 0 {
-			rows = append(rows, row)
-			continue
-		}
-
-		number, fioNorm := ExtractVotingKey(row, numA, fioA)
-		if fioNorm == "" {
-			rows = append(rows, row)
-			continue
-		}
-
-		candidates := keyB[number]
-		bestIdx := -1
-		bestScore := 0.0
-
-		for idx, candidate := range candidates {
-			score := similarityScore(fioNorm, candidate.normalizedName)
-			if score >= threshold && score > bestScore {
-				bestIdx = idx
-				bestScore = score
-			}
-		}
-
-		if bestIdx == -1 {
-			rows = append(rows, row)
-			continue
-		}
-
-		stats.MatchedRows++
-		candidate := candidates[bestIdx]
-
-		mergedCells := make([]TableCell, len(row.Cells))
-		copy(mergedCells, row.Cells)
-
-		for idx, cell := range candidate.row.Cells {
-			if idx >= len(mergedCells) {
-				mergedCells = append(mergedCells, cell)
-				continue
-			}
-
-			// заполняем только пустые ячейки base
-			if strings.TrimSpace(mergedCells[idx].Text) == "" && strings.TrimSpace(cell.Text) != "" {
-				mergedCells[idx] = cell
-				stats.MergedRows++
-			}
-		}
-
-		rows = append(rows, TableRow{Cells: mergedCells})
-	}
-
-	return Table{ID: passA.ID, Name: passA.Name, Caption: passA.Caption, Markdown: passA.Markdown, Rows: rows}, stats
-}
-
-type indexedRow struct {
-	normalizedName string
-	row            TableRow
-}
-
-func buildRowIndex(table Table, numIdx, fioIdx int) map[string][]indexedRow {
-	index := map[string][]indexedRow{}
-	for rowIdx, row := range table.Rows {
-		if rowIdx == 0 {
-			continue
-		}
-
-		number, fioNorm := ExtractVotingKey(row, numIdx, fioIdx)
-		if fioNorm == "" {
-			continue
-		}
-
-		index[number] = append(index[number], indexedRow{normalizedName: fioNorm, row: row})
-	}
-	return index
-}
-
-func findMatchingTable(base Table, candidates []Table, minScore float64) (*Table, int, int, float64) {
-	bestScore := 0.0
-	bestNum := -1
-	bestFio := -1
-	var best *Table
-
-	for i := range candidates {
-		candidate := &candidates[i]
-
-		numIdx, fioIdx := detectVotingColumns(*candidate)
-		if numIdx == -1 || fioIdx == -1 {
-			continue
-		}
-
-		score := tableSimilarity(base, *candidate)
-		if score > bestScore {
-			bestScore = score
-			best = candidate
-			bestNum = numIdx
-			bestFio = fioIdx
-		}
-	}
-
-	if bestScore < minScore {
-		return nil, -1, -1, 0
-	}
-
-	return best, bestNum, bestFio, bestScore
-}
-
-func tableSimilarity(base, candidate Table) float64 {
-	headersA := normalizedHeaders(base)
-	headersB := normalizedHeaders(candidate)
-
-	headerScore := headerSimilarityScore(headersA, headersB)
-	rowsScore := rowCountScore(len(base.Rows), len(candidate.Rows))
-	keywordScore := votingKeywordScore(headersA, headersB)
-
-	votingColumnsScore := 0.0
-	if hasVotingColumns(base) && hasVotingColumns(candidate) {
-		votingColumnsScore = 1
-	}
-
-	return headerScore*0.55 + rowsScore*0.2 + keywordScore*0.2 + votingColumnsScore*0.05
-}
-
-func normalizedHeaders(table Table) []string {
-	if len(table.Rows) == 0 {
-		return nil
-	}
-
-	headers := make([]string, 0, len(table.Rows[0].Cells))
-	for _, cell := range table.Rows[0].Cells {
-		headers = append(headers, normalizeHeader(cell.Text))
-	}
-
-	return headers
-}
-
-func normalizeHeader(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	replacer := strings.NewReplacer(
-		"|", " ",
-		",", " ",
-		".", " ",
-		";", " ",
-		":", " ",
-	)
-	value = replacer.Replace(value)
-	value = strings.Join(strings.Fields(value), " ")
-	return value
-}
-
-func headerSimilarityScore(headersA, headersB []string) float64 {
-	if len(headersA) == 0 || len(headersB) == 0 {
-		return 0
-	}
-
-	total := 0.0
-	for _, headerA := range headersA {
-		best := 0.0
-		for _, headerB := range headersB {
-			if score := similarityScore(headerA, headerB); score > best {
-				best = score
-			}
-		}
-		total += best
-	}
-
-	return total / float64(len(headersA))
-}
-
-func rowCountScore(rowsA, rowsB int) float64 {
-	if rowsA == 0 && rowsB == 0 {
-		return 0
-	}
-
-	diff := rowsA - rowsB
-	if diff < 0 {
-		diff = -diff
-	}
-
-	max := rowsA
-	if rowsB > max {
-		max = rowsB
-	}
-
-	if max == 0 {
-		return 0
-	}
-
-	return 1 - float64(diff)/float64(max)
-}
-
-func votingKeywordScore(headersA, headersB []string) float64 {
-	keywordsA := collectVotingKeywords(headersA)
-	keywordsB := collectVotingKeywords(headersB)
-
-	if len(keywordsA) == 0 || len(keywordsB) == 0 {
-		return 0
-	}
-
-	matches := 0
-	for kw := range keywordsA {
-		if _, ok := keywordsB[kw]; ok {
-			matches++
-		}
-	}
-
-	return float64(matches) / float64(len(keywordsA))
-}
-
-func collectVotingKeywords(headers []string) map[string]struct{} {
-	keywords := []string{
-		"за", "против", "воздерж", "присутств", "отсутств", "голоса", "итог", "for", "against", "abstain", "present",
-	}
-
-	normalized := make(map[string]struct{})
-	for _, header := range headers {
-		for _, kw := range keywords {
-			if strings.Contains(header, kw) {
-				normalized[kw] = struct{}{}
-			}
-		}
-	}
-
-	return normalized
-}
-
-func hasVotingColumns(table Table) bool {
-	numIdx, fioIdx := detectVotingColumns(table)
-	return numIdx != -1 && fioIdx != -1
-}
-
 func safeCellText(cells []TableCell, idx int) string {
 	if idx < 0 || idx >= len(cells) {
 		return ""
@@ -851,99 +409,10 @@ func safeCellText(cells []TableCell, idx int) string {
 	return strings.TrimSpace(cells[idx].Text)
 }
 
-func parseMarkdownRow(line string) []string {
-	parts := strings.Split(line, "|")
-	var cells []string
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		cells = append(cells, part)
-	}
-	return cells
-}
-
-func wrapCells(values []string) []TableCell {
-	cells := make([]TableCell, 0, len(values))
-	for _, v := range values {
-		cells = append(cells, TableCell{Text: v})
-	}
-	return cells
-}
-
 func normalizeName(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.ReplaceAll(value, " ", "")
 	return value
-}
-
-func similarityScore(a, b string) float64 {
-	if a == "" || b == "" {
-		return 0
-	}
-	distance := levenshteinDistance(a, b)
-	maxLen := len(a)
-	if len(b) > maxLen {
-		maxLen = len(b)
-	}
-	if maxLen == 0 {
-		return 1
-	}
-	return 1 - float64(distance)/float64(maxLen)
-}
-
-func levenshteinDistance(a, b string) int {
-	if len(a) == 0 {
-		return len(b)
-	}
-	if len(b) == 0 {
-		return len(a)
-	}
-
-	dp := make([][]int, len(a)+1)
-	for i := range dp {
-		dp[i] = make([]int, len(b)+1)
-	}
-
-	for i := 0; i <= len(a); i++ {
-		dp[i][0] = i
-	}
-	for j := 0; j <= len(b); j++ {
-		dp[0][j] = j
-	}
-
-	for i := 1; i <= len(a); i++ {
-		for j := 1; j <= len(b); j++ {
-			cost := 0
-			if a[i-1] != b[j-1] {
-				cost = 1
-			}
-
-			dp[i][j] = min(
-				dp[i-1][j]+1,
-				dp[i][j-1]+1,
-				dp[i-1][j-1]+cost,
-			)
-		}
-	}
-
-	return dp[len(a)][len(b)]
-}
-
-func min(values ...int) int {
-	if len(values) == 0 {
-		return 0
-	}
-
-	result := values[0]
-	for _, v := range values[1:] {
-		if v < result {
-			result = v
-		}
-	}
-
-	return result
 }
 
 // CalculateVotingFillRate вычисляет долю строк, где заполнены номер и ФИО.

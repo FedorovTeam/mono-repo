@@ -1,5 +1,7 @@
 # Sequence diagram
 
+Диаграммы ниже отражают однопроходную конвертацию без отдельной base/OCR фазы и без overlay-мерджа таблиц.
+
 ```mermaid
 sequenceDiagram
     participant GW as Gateway/cron job

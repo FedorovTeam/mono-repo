@@ -83,7 +83,6 @@ Overlay-проходы убраны: Docling возвращает итоговы
 1. Получили запрос.
 2. Если задача уже существует и не failed → вернуть её статус и output key.
 3. Иначе `Enqueue`:
-    - `overlay_stage = NULL`
     - `docling_*` пусто
 
 ---
@@ -131,50 +130,11 @@ Overlay-проходы убраны: Docling возвращает итоговы
 
 ---
 
-### Шаг 4. Обработка результата по фазам
+### Шаг 4. Завершение
 
-### 4A. Если это Single pass (не overlay)
-
-- Пишем `result.md` в `task.MarkdownBucket/task.MarkdownObjectKey`.
-- MarkDone.
-
-### 4B. Если это Base pass результата (overlay включён, stage!=ocr)
-
-- Сохраняем base markdown в `key + ".base.md"` в MinIO.
-- В БД: `overlay_stage="ocr"`, `base_markdown_bucket/key` заполнить.
-- Перевести задачу обратно в `pending` (чтобы следующий цикл воркера делал OCR pass).
-
-### 4C. Если это OCR pass результата (overlay_stage="ocr")
-
-- Скачать `base.md.base.md`.
-- Запустить `OverlayEngine`:
-    1. Extract tables from base markdown (позиции строк, заголовки).
-    2. Extract tables from OCR output (markdown и/или json tables).
-    3. Найти пары таблиц (лучше не по “marks”, а по:
-        - схожести заголовков колонок
-        - количеству строк
-        - наличию “№” и “Ф.И.О.”)
-    4. Для каждой пары:
-        - key row: (`№`, `ФИО`) — если в OCR таблице “ФИО” распознано хуже, допускаем fuzzy-match, но с порогом.
-        - overlay cells: только если base cell пустая, а OCR cell содержит `✓`/`x`/`1`.
-    5. Заменить соответствующий кусок markdown таблицы в base.
-- Записать финальный markdown в `task.MarkdownObjectKey`.
-- MarkDone (и очистить overlay_state поля).
-
----
-
-## Почему сейчас “таблицы не заполняются” даже после overlay
-
-По твоему примеру, OCR-фаза иногда:
-
-- **падает (`task_status=failure`)** — значит до overlay даже не дошло нормального OCR результата.
-- а когда доходит, `merge_total_rows=0` — значит `OverlayEngine` не нашёл таблицы или не распознал колонки.
-
-Чтобы “нашёл”, надо:
-
-1. В `ParseMarkdownTables` сделать более строгий детектор таблиц (учитывать separator line `|---|---|`).
-2. В `detectVotingColumns` искать колонки не только по “фио/№”, а ещё по “присутствует/за/против/воздержался/не голосовал”.
-3. В OCR-таблице “✓” может оказаться как `v`, `√`, `+`, `x` — завести `normalizeMark()`.
+- Забрать результат Docling, отдавая приоритет Markdown.
+- Загрузить финальный markdown в `task.MarkdownBucket/task.MarkdownObjectKey`.
+- MarkDone; при любой ошибке — MarkFailed с сохранением текста причины.
 
 ---
 
@@ -194,7 +154,7 @@ flowchart TD
 
 ---
 
-## Sequence diagram (overlay сценарий)
+## Sequence diagram
 
 ```mermaid
 sequenceDiagram
@@ -202,60 +162,33 @@ sequenceDiagram
     participant API as TransformerAPI (gRPC)
     participant DB as Postgres Queue
     participant W as QueueWorker
-    participant EX as ConversionExecutor
     participant DL as Docling Serve
     participant S3 as MinIO
 
     C->>API: ConvertDocumentToMarkdown()
-    API->>DB: INSERT task(status=pending, overlay_stage=NULL)
+    API->>DB: INSERT task(status=pending)
     API-->>C: queue_id, status=pending
 
     loop worker loop
-      W->>DB: SELECT pending FOR UPDATE SKIP LOCKED
+      W->>DB: SELECT pending|waiting_docling FOR UPDATE SKIP LOCKED
       DB-->>W: task
-      W->>EX: ProcessTask(task)
+      W-->>W: определить источник (download/source_async), OCR для PDF
 
-      alt Phase = base submit
-        EX->>DB: Acquire DoclingSubmitLock (global)
-        EX->>S3: Download PDF (if upload_file mode)
-        EX->>DL: POST /v1/convert/file/async (do_ocr=false)
-        DL-->>EX: task_id
-        EX->>DB: Save docling_task_id, status=waiting_docling
-        EX->>DB: Release DoclingSubmitLock
-      else Phase = polling
-        EX->>DL: GET /v1/status/poll/{task_id}
-        alt not ready
-          DL-->>EX: pending/processing
-          EX->>DB: Update poll_count + next_poll_at
-        else ready base
-          DL-->>EX: success
-          EX->>DL: GET /v1/result/{task_id}
-          DL-->>EX: md_content/json_content
-          EX->>S3: Upload base md as *.base.md
-          EX->>DB: overlay_stage=ocr, base_md_ref=...
-          EX->>DB: status=pending
+      alt docling_task_id есть
+        W->>DL: GET /v1/status/poll/{task_id}
+        alt готов результат
+          W->>DL: GET /v1/result/{task_id}
+          W->>S3: Upload markdown to markdown_bucket/object_key
+          W->>DB: MarkDone(status=done, finished_at)
+        else не готов или временная ошибка
+          W->>DB: Update poll_count + next_poll_at, status=waiting_docling
         end
-      end
-
-      alt Phase = ocr submit
-        EX->>DB: Acquire DoclingSubmitLock (global)
-        EX->>S3: Download PDF
-        EX->>DL: POST /v1/convert/file/async (do_ocr=true)
-        DL-->>EX: task_id
-        EX->>DB: status=waiting_docling
-        EX->>DB: Release DoclingSubmitLock
-      else OCR polling + merge
-        EX->>DL: GET /v1/status/poll/{task_id}
-        alt ready ocr
-          EX->>DL: GET /v1/result/{task_id}
-          EX->>S3: Download *.base.md
-          EX->>EX: OverlayEngine.merge(base_md, ocr_md/json)
-          EX->>S3: Upload final md
-          EX->>DB: status=done, clear overlay fields
-        end
+      else отправка в Docling
+        W->>DL: POST /v1/convert/file/async
+        DL-->>W: task_id
+        W->>DB: status=waiting_docling, docling_task_id/job_id, next_poll_at
       end
     end
-
 ```
 
 ---
@@ -266,22 +199,14 @@ sequenceDiagram
 flowchart TD
   A[Task acquired] --> B{docling_task_id exists?}
   B -- yes --> P[Poll status]
-  B -- no --> C{PDF && overlay_stage set?}
+  B -- no --> SUBMIT[Submit to Docling]
 
-  C -- no --> S[Single pass submit]
-  C -- yes --> D{overlay_stage == ocr?}
-  D -- no --> BASE[Submit base pass]
-  D -- yes --> OCR[Submit OCR pass]
-
+  SUBMIT --> WAIT[Set next_poll_at + waiting_docling]
   P --> E{ready?}
-  E -- no --> WAIT[Set next_poll_at + waiting_docling]
+  E -- no --> WAIT
   E -- yes --> R[Fetch result]
 
-  R --> F{overlay enabled?}
-  F -- no --> DONE1[Upload final md; MarkDone]
-  F -- yes --> G{stage == base?}
-  G -- yes --> SAVEBASE[Upload *.base.md; set overlay_stage=ocr; pending]
-  G -- no --> MERGE[OverlayEngine merge; Upload final; MarkDone]
+  R --> DONE1[Upload final md; MarkDone]
 
 ```
 
@@ -298,15 +223,7 @@ flowchart TD
 - OCR:
     - `ocr_engine=tesseract` (у тебя установлен)
     - `ocr_lang` как массив: `["rus","osd"]` (можно `["rus","eng","osd"]`)
-    - `do_ocr=true` во второй фазе
-
-### Overlay (логика)
-
-- Не пытаться “заполнить таблицы из JSON” если Docling JSON таблиц нет.
-- Парсить **markdown** OCR-выхода и искать **символы галочек**.
-- “✓” нормализовать:
-    - `✓`, `✔`, `v`, `V`, `√`, `+`, `x` (иногда tesseract так распознаёт)
-- Значение сохранять как `"✓"` или `"1"` — выбери единый формат.
+    - `do_ocr=true` для PDF, чтобы получить заполненные таблицы за один проход
 
 ---
 
