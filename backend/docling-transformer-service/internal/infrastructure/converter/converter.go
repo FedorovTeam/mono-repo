@@ -131,7 +131,6 @@ type Config struct {
 	DefaultLanguage    string
 	PDFDefaultLanguage string
 	PDFEnableOCR       bool
-	ForceOCR           bool
 	PDFBackend         string
 	Mode               string
 	Storage            StorageConfig
@@ -289,12 +288,11 @@ type s3TargetRequest struct {
 	Region    string `json:"region,omitempty"`
 }
 
-// ВАЖНО: по OpenAPI нет поля "ocr". Есть do_ocr + force_ocr.
+// ВАЖНО: по OpenAPI нет поля "ocr". Используются do_ocr и связанные OCR-настройки.
 type doclingOptions struct {
 	ToFormats         []string `json:"to_formats,omitempty"`
 	FromFormats       []string `json:"from_formats,omitempty"`
 	DoOCR             *bool    `json:"do_ocr,omitempty"`
-	ForceOCR          *bool    `json:"force_ocr,omitempty"`
 	OCREngine         string   `json:"ocr_engine,omitempty"`
 	OCRLang           []string `json:"ocr_lang,omitempty"`
 	PDFBackend        string   `json:"pdf_backend,omitempty"`
@@ -312,7 +310,6 @@ type DoclingConverter struct {
 	defaultLanguage    string
 	pdfDefaultLanguage string
 	pdfEnableOCR       bool
-	forceOCR           bool
 	pdfBackend         string
 	mode               string
 	storage            StorageConfig
@@ -348,7 +345,6 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		defaultLanguage:    cfg.DefaultLanguage,
 		pdfDefaultLanguage: cfg.PDFDefaultLanguage,
 		pdfEnableOCR:       cfg.PDFEnableOCR,
-		forceOCR:           cfg.ForceOCR,
 		pdfBackend:         pdfBackend,
 		mode:               mode,
 		storage:            cfg.Storage,
@@ -389,20 +385,11 @@ func (c *DoclingConverter) shouldEnableOCR(contentType string) bool {
 	return contentType == "application/pdf" && c.pdfEnableOCR
 }
 
-func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.ConvertRequest) (doOCR, forceOCR bool, ocrLang []string, pdfBackend string) {
+func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.ConvertRequest) (doOCR bool, ocrLang []string, pdfBackend string) {
 	doOCR = c.shouldEnableOCR(contentType)
-	forceOCR = c.forceOCR
 
 	if req.EnableOCR != nil {
 		doOCR = *req.EnableOCR
-	}
-	if req.ForceOCR != nil {
-		forceOCR = *req.ForceOCR
-	}
-
-	// force_ocr => do_ocr=true
-	if forceOCR {
-		doOCR = true
 	}
 
 	if doOCR {
@@ -421,11 +408,10 @@ func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.Conv
 	// OCR опции только для PDF
 	if contentType != "application/pdf" {
 		doOCR = false
-		forceOCR = false
 		ocrLang = nil
 	}
 
-	return doOCR, forceOCR, ocrLang, pdfBackend
+	return doOCR, ocrLang, pdfBackend
 }
 
 func (c *DoclingConverter) selectLanguage(contentType string) string {
@@ -449,11 +435,11 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 		filename = fmt.Sprintf("document.%s", fileExt)
 	}
 
-	doOCR, forceOCR, ocrLang, pdfBackend := c.resolveOCROptions(contentType, req)
+	doOCR, ocrLang, pdfBackend := c.resolveOCROptions(contentType, req)
 
 	switch c.mode {
 	case doclingModeSourceAsync:
-		ids, err := c.submitSourceAsyncWithRetry(ctx, correlationID, filename, contentType, fileExt, req, doOCR, forceOCR, ocrLang, pdfBackend)
+		ids, err := c.submitSourceAsyncWithRetry(ctx, correlationID, filename, contentType, fileExt, req, doOCR, ocrLang, pdfBackend)
 		if err != nil {
 			return domain.DoclingIdentifiers{}, err
 		}
@@ -473,7 +459,7 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			return domain.DoclingIdentifiers{}, errors.New("empty document")
 		}
 
-		ids, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content, doOCR, forceOCR, ocrLang, pdfBackend)
+		ids, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content, doOCR, ocrLang, pdfBackend)
 		if err != nil {
 			return domain.DoclingIdentifiers{}, err
 		}
@@ -553,14 +539,14 @@ func (c *DoclingConverter) submitWithRetry(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	content []byte,
-	doOCR, forceOCR bool,
+	doOCR bool,
 	ocrLang []string,
 	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
-		ids, err := c.submit(ctx, correlationID, filename, contentType, fileExt, content, doOCR, forceOCR, ocrLang, pdfBackend)
+		ids, err := c.submit(ctx, correlationID, filename, contentType, fileExt, content, doOCR, ocrLang, pdfBackend)
 		if err == nil {
 			return ids, nil
 		}
@@ -601,14 +587,14 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
-	doOCR, forceOCR bool,
+	doOCR bool,
 	ocrLang []string,
 	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
-		ids, err := c.submitSourceAsync(ctx, correlationID, filename, contentType, fileExt, req, doOCR, forceOCR, ocrLang, pdfBackend)
+		ids, err := c.submitSourceAsync(ctx, correlationID, filename, contentType, fileExt, req, doOCR, ocrLang, pdfBackend)
 		if err == nil {
 			return ids, nil
 		}
@@ -647,11 +633,11 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 
 // writeDoclingOptions — form-data поля под OpenAPI:
 // - to_formats: повторяем ключ для массива
-// - do_ocr / force_ocr: вместо "ocr"
+// - do_ocr: вместо "ocr"
 func (c *DoclingConverter) writeDoclingOptions(
 	writer *multipart.Writer,
 	fileExt string,
-	doOCR, forceOCR bool,
+	doOCR bool,
 	ocrLang []string,
 	pdfBackend string,
 ) error {
@@ -670,12 +656,9 @@ func (c *DoclingConverter) writeDoclingOptions(
 		}
 	}
 
-	// OCR flags по OpenAPI: do_ocr / force_ocr
+	// OCR flags по OpenAPI: do_ocr
 	if err := writer.WriteField("do_ocr", fmt.Sprintf("%t", doOCR)); err != nil {
 		return fmt.Errorf("write do_ocr: %w", err)
-	}
-	if err := writer.WriteField("force_ocr", fmt.Sprintf("%t", forceOCR)); err != nil {
-		return fmt.Errorf("write force_ocr: %w", err)
 	}
 
 	// ocr_engine / ocr_lang / pdf_backend — можно слать всегда, сервер сам применит где нужно
@@ -719,7 +702,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 	return nil
 }
 
-func (c *DoclingConverter) buildDoclingOptions(fileExt string, doOCR, forceOCR bool, ocrLang []string, pdfBackend string) doclingOptions {
+func (c *DoclingConverter) buildDoclingOptions(fileExt string, doOCR bool, ocrLang []string, pdfBackend string) doclingOptions {
 	opts := doclingOptions{
 		ToFormats:         []string{"json", "md"},
 		TableMode:         "accurate",
@@ -734,7 +717,6 @@ func (c *DoclingConverter) buildDoclingOptions(fileExt string, doOCR, forceOCR b
 	}
 
 	opts.DoOCR = boolPtr(doOCR)
-	opts.ForceOCR = boolPtr(forceOCR)
 
 	opts.OCREngine = "tesseract"
 	if len(ocrLang) > 0 {
@@ -754,7 +736,7 @@ func (c *DoclingConverter) submit(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	content []byte,
-	doOCR, forceOCR bool,
+	doOCR bool,
 	ocrLang []string,
 	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
@@ -796,7 +778,7 @@ func (c *DoclingConverter) submit(
 		}
 	}
 
-	if err = c.writeDoclingOptions(writer, fileExt, doOCR, forceOCR, ocrLang, pdfBackend); err != nil {
+	if err = c.writeDoclingOptions(writer, fileExt, doOCR, ocrLang, pdfBackend); err != nil {
 		return domain.DoclingIdentifiers{}, err
 	}
 
@@ -855,7 +837,7 @@ func (c *DoclingConverter) submitSourceAsync(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
-	doOCR, forceOCR bool,
+	doOCR bool,
 	ocrLang []string,
 	pdfBackend string,
 ) (domain.DoclingIdentifiers, error) {
@@ -883,7 +865,7 @@ func (c *DoclingConverter) submitSourceAsync(
 				Region:    sourceStorage.Region,
 			},
 		},
-		Options: c.buildDoclingOptions(fileExt, doOCR, forceOCR, ocrLang, pdfBackend),
+		Options: c.buildDoclingOptions(fileExt, doOCR, ocrLang, pdfBackend),
 	}
 
 	if req.TargetBucket != "" {

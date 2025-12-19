@@ -34,7 +34,6 @@ type Config struct {
 	DoclingRequeueDelay    time.Duration
 	DoclingMaxRestarts     int
 	UseSourceAsync         bool
-	DefaultForceOCR        bool
 	DefaultOCRLang         string
 	DefaultPDFBackend      string
 
@@ -76,7 +75,6 @@ func NewProcessor(
 		MarkdownBucket:       normalized.MarkdownBucket,
 		FastOperationTimeout: normalized.FastOperationTimeout,
 		UseSourceAsync:       normalized.UseSourceAsync,
-		DefaultForceOCR:      normalized.DefaultForceOCR,
 		DefaultOCRLang:       normalized.DefaultOCRLang,
 		DefaultPDFBackend:    normalized.DefaultPDFBackend,
 		SubmitLockDelay:      normalized.SubmitLockDelay,

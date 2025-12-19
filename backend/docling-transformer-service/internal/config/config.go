@@ -59,7 +59,6 @@ type DoclingConfig struct {
 	DefaultLanguage       string               `yaml:"default_language"`
 	PDFDefaultLanguage    string               `yaml:"pdf_default_language"`
 	PDFEnableOCR          bool                 `yaml:"pdf_enable_ocr"`
-	ForceOCR              bool                 `yaml:"force_ocr"`
 	PDFBackend            string               `yaml:"pdf_backend"`
 	Mode                  string               `yaml:"mode"`
 	Storage               DoclingStorageConfig `yaml:"storage"`

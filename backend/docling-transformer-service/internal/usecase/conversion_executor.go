@@ -24,7 +24,6 @@ type ConversionExecutorConfig struct {
 	HTTPClient           HTTPClient
 	UseSourceAsync       bool
 
-	DefaultForceOCR   bool
 	DefaultOCRLang    string
 	DefaultPDFBackend string
 
@@ -216,29 +215,17 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 
 	isOverlay := e.shouldOverlay(task)
 
-	// Выбор конвертера + force_ocr для конкретной фазы
+	// Выбор конвертера для конкретной фазы
 	conv := e.ocrConv
-	forceOCR := e.cfg.DefaultForceOCR
-	if task.ForceOCR != nil {
-		forceOCR = *task.ForceOCR
-	}
-
 	if isOverlay && task.OverlayStage != transformations.OverlayStageOCR {
 		// base-фаза
 		conv = e.baseConv
-		forceOCR = false
 		task.OverlayStage = transformations.OverlayStageBase
 	}
 
 	if isOverlay && task.OverlayStage == transformations.OverlayStageOCR {
 		// ocr-фаза
 		conv = e.ocrConv
-		forceOCR = true
-	}
-
-	// только PDF
-	if contentType != "application/pdf" {
-		forceOCR = false
 	}
 
 	ocrLang := e.cfg.DefaultOCRLang
@@ -299,7 +286,6 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		TargetBucket:    task.MarkdownBucket,
 		TargetObjectKey: task.MarkdownObjectKey,
 		EnableOCR:       enableOCR,
-		ForceOCR:        boolPtr(forceOCR),
 		OCRLanguage:     ocrLang,
 		PDFBackend:      pdfBackend,
 	}
@@ -340,7 +326,7 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, fmt.Errorf("docling submit: %w", err)
 	}
 
-	e.metrics.RecordDoclingSubmit(ctx, ids, forceOCR, ocrLang, pdfBackend)
+	e.metrics.RecordDoclingSubmit(ctx, ids, ocrLang, pdfBackend)
 
 	nextPoll := e.poller.NextPollTime(time.Now(), 0)
 	if err := e.repo.MarkDoclingWaiting(ctx, task.ID, ids.TaskID, ids.JobID, 0, nextPoll); err != nil {
@@ -356,21 +342,13 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		zap.String("queue_id", task.ID.String()),
 		zap.String("docling_task_id", ids.TaskID),
 		zap.String("overlay_stage", string(task.OverlayStage)),
-		zap.Bool("force_ocr", forceOCR),
 	)
 
 	return StateWaitingDocling, nil
 }
 
 func (e *ConversionExecutor) shouldOverlay(task *transformations.TransformationTask) bool {
-	if task == nil || task.ForceOCR == nil || !*task.ForceOCR {
-		return false
-	}
-	ext := domain.NormalizeExtension(task.FilenameExtension)
-	if ext == "" {
-		ext = domain.NormalizeExtension(filepath.Ext(task.OriginalObjectKey))
-	}
-	return ext == "pdf"
+	return task != nil && task.OverlayStage != transformations.OverlayStageNone
 }
 
 func (e *ConversionExecutor) downloadSource(ctx context.Context, task *transformations.TransformationTask) ([]byte, error) {

@@ -267,10 +267,6 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 		t.Fatalf("expected do_ocr=true for pdf, got %+v", receivedRequest.Options.DoOCR)
 	}
 
-	if receivedRequest.Options.ForceOCR == nil || *receivedRequest.Options.ForceOCR {
-		t.Fatalf("expected force_ocr=false by default, got %+v", receivedRequest.Options.ForceOCR)
-	}
-
 	if !reflect.DeepEqual(receivedRequest.Options.OCRLang, []string{"rus", "eng", "osd"}) {
 		t.Fatalf("unexpected ocr_lang: %+v", receivedRequest.Options.OCRLang)
 	}
@@ -563,7 +559,7 @@ func ptr[T any](v T) *T {
 
 func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 	var receivedQuery string
-	var receivedLanguageField, receivedDoOCRField, receivedForceOCRField string
+	var receivedLanguageField, receivedDoOCRField string
 	var receivedPDFBackend, receivedTableCellMatching, receivedTableStructure string
 	var receivedOCRLang []string
 
@@ -578,7 +574,6 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 
 			receivedLanguageField = r.FormValue("language")
 			receivedDoOCRField = r.FormValue("do_ocr")
-			receivedForceOCRField = r.FormValue("force_ocr")
 			receivedPDFBackend = r.FormValue("pdf_backend")
 			receivedTableCellMatching = r.FormValue("table_cell_matching")
 			receivedTableStructure = r.FormValue("do_table_structure")
@@ -605,7 +600,6 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 	conv := NewDoclingConverter(Config{
 		Endpoint:           server.URL,
 		PDFEnableOCR:       true,
-		ForceOCR:           true,
 		DefaultLanguage:    "ru",
 		PDFDefaultLanguage: "sah",
 	}, zap.NewNop())
@@ -648,10 +642,6 @@ func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
 
 	if receivedDoOCRField != "true" {
 		t.Fatalf("expected do_ocr form field, got %s", receivedDoOCRField)
-	}
-
-	if receivedForceOCRField != "true" {
-		t.Fatalf("expected force_ocr form field, got %s", receivedForceOCRField)
 	}
 
 	if receivedPDFBackend != "dlparse_v4" {
@@ -736,10 +726,6 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 
 	if receivedOptions.DoOCR == nil || *receivedOptions.DoOCR {
 		t.Fatalf("expected do_ocr to be false for docx, got %+v", receivedOptions.DoOCR)
-	}
-
-	if receivedOptions.ForceOCR == nil || *receivedOptions.ForceOCR {
-		t.Fatalf("expected force_ocr to be false, got %+v", receivedOptions.ForceOCR)
 	}
 
 	if receivedOptions.PDFBackend != "dlparse_v4" {

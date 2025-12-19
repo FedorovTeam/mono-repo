@@ -60,7 +60,7 @@ id, status, retry_count, docling_task_id, docling_job_id, docling_poll_count, ne
 document_id, original_bucket, original_object_key,
 source_bucket, source_object_key, source_url,
 markdown_bucket, markdown_object_key, filename_extension,
-force_ocr, ocr_lang, pdf_backend,
+ocr_lang, pdf_backend,
 overlay_stage, base_markdown_bucket, base_markdown_object_key,
 created_at, started_at, finished_at, error, correlation_id
 `
@@ -109,26 +109,21 @@ func (r *PostgresQueueRepository) Enqueue(ctx context.Context, params EnqueuePar
 	id := uuid.New()
 	normalizedExt := strings.TrimPrefix(strings.ToLower(params.FilenameExtension), ".")
 
-	var forceOCR interface{}
-	if params.ForceOCR != nil {
-		forceOCR = *params.ForceOCR
-	}
-
 	query := `
 INSERT INTO transformations_queue (
  id, status, document_id, original_bucket, original_object_key,
  source_bucket, source_object_key, source_url,
  markdown_bucket, markdown_object_key, filename_extension,
- force_ocr, ocr_lang, pdf_backend,
+ ocr_lang, pdf_backend,
  overlay_stage, base_markdown_bucket, base_markdown_object_key,
  created_at, correlation_id, docling_poll_count, next_poll_at
 ) VALUES (
  $1, $2, $3, $4, $5,
  $6, $7, $8,
  $9, $10, $11,
- $12, $13, $14,
+ $12, $13,
  NULL, NULL, NULL,
- NOW(), $15, 0, NULL
+ NOW(), $14, 0, NULL
 )`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -136,7 +131,7 @@ INSERT INTO transformations_queue (
 		params.DocumentID, params.OriginalBucket, params.OriginalObjectKey,
 		params.SourceBucket, params.SourceObjectKey, params.SourceURL,
 		params.MarkdownBucket, params.MarkdownObjectKey, normalizedExt,
-		forceOCR, params.OCRLanguage, params.PDFBackend,
+		params.OCRLanguage, params.PDFBackend,
 		params.CorrelationID,
 	)
 	if err != nil {
@@ -673,7 +668,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		sourceBucket    sql.NullString
 		sourceObjectKey sql.NullString
 		sourceURL       sql.NullString
-		forceOCR        sql.NullBool
 		ocrLang         sql.NullString
 		pdfBackend      sql.NullString
 
@@ -699,7 +693,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&dto.MarkdownBucket,
 		&dto.MarkdownObjectKey,
 		&dto.FilenameExtension,
-		&forceOCR,
 		&ocrLang,
 		&pdfBackend,
 		&overlayStage,
@@ -723,10 +716,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	dto.SourceObjectKey = sourceObjectKey.String
 	dto.SourceURL = sourceURL.String
 
-	if forceOCR.Valid {
-		val := forceOCR.Bool
-		dto.ForceOCR = &val
-	}
 	dto.OCRLanguage = ocrLang.String
 	dto.PDFBackend = pdfBackend.String
 

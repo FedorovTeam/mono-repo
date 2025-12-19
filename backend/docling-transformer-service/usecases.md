@@ -35,7 +35,7 @@
   2. Проставить отсутствующие значения: `markdown_bucket` из конфигурации, `markdown_object_key` из исходного пути, расширение и `Content-Type` через `ResolveContentTypeByExtension`.
   3. Определить режим отправки в Docling: в `source_async` (или при наличии `source_bucket`/`source_object_key`) используется `convert/source/async` без скачивания файла, с передачей MinIO-кредов из конфига; иначе оригинал скачивается из MinIO/URL с быстрым таймаутом и именем из `original_object_key`/`source_url` (fallback `document.<ext>`).
   4. Отправить документ в Docling: для загрузки файла — POST `<docling.endpoint>/v1/convert/file/async` с multipart `files`, заголовками `X-Correlation-Id`, `X-Docling-Source-Filename`, `X-Docling-Endpoint`, `X-Api-Key` (если задан) и настройками Markdown/таблиц/OCR; для `source_async` — POST `<docling.endpoint>/v1/convert/source/async` с JSON, содержащим MinIO-источник/приёмник.
-  5. При `force_ocr=true` и PDF выполняется двухфазный overlay: сначала base-прогон без OCR сохраняется во временный `*.base.md` и задача переводится обратно в `pending` для OCR-фазы; в остальных случаях сохраняются `docling_task_id`/`docling_job_id`, счётчик поллинга и `next_poll_at`, статус — `waiting_docling`.
+  5. Для задач в overlay-стадии по PDF выполняется двухфазный проход: сначала base-прогон без OCR сохраняется во временный `*.base.md` и задача переводится обратно в `pending` для OCR-фазы; в остальных случаях сохраняются `docling_task_id`/`docling_job_id`, счётчик поллинга и `next_poll_at`, статус — `waiting_docling`.
 
 ## Опрос Docling и завершение
 - **Акторы:** Воркер сервиса.

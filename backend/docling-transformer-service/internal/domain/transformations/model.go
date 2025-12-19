@@ -22,8 +22,8 @@ type OverlayStage string
 
 const (
 	OverlayStageNone OverlayStage = ""
-	OverlayStageBase OverlayStage = "base" // выполняем base-прогон (force_ocr=false)
-	OverlayStageOCR  OverlayStage = "ocr"  // выполняем ocr-прогон (force_ocr=true), затем overlay и done
+	OverlayStageBase OverlayStage = "base" // выполняем base-прогон без OCR
+	OverlayStageOCR  OverlayStage = "ocr"  // выполняем OCR-прогон, затем overlay и done
 )
 
 var ErrPollingAttemptsExceeded = errors.New("conversion polling attempts exceeded")
@@ -49,12 +49,11 @@ type TransformationTask struct {
 	MarkdownObjectKey string
 	FilenameExtension string
 
-	ForceOCR      *bool
 	OCRLanguage   string
 	PDFBackend    string
 	CorrelationID string
 
-	// overlay state (используется только когда ForceOCR==true и это PDF)
+	// overlay state (используется для двухфазной обработки PDF)
 	OverlayStage          OverlayStage
 	BaseMarkdownBucket    string
 	BaseMarkdownObjectKey string
@@ -78,7 +77,6 @@ type EnqueueParams struct {
 	MarkdownObjectKey string
 	FilenameExtension string
 
-	ForceOCR      *bool
 	OCRLanguage   string
 	PDFBackend    string
 	CorrelationID string
