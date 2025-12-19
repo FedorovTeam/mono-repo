@@ -1,36 +1,27 @@
 # backend-gateway-service
 
-Публичный GraphQL-шлюз для сценариев загрузки и отслеживания статуса знаниевых документов. Сервис выдаёт подписанные ссылки для прямой загрузки DOCX в MinIO через `storage-service`, проверяет `X-API-Key`, проксирует обращения к `backend-document-service` по gRPC и снабжает запросы трассировками и корреляционными идентификаторами.
+Публичный GraphQL-шлюз для загрузки знаниевых документов: выдаёт presigned URL через `storage-service`, создаёт записи в `document-service`, принимает MinIO webhook для подтверждения загрузки и прокидывает `X-API-Key`/`X-Correlation-ID` в downstream gRPC вызовы.
 
 ## Назначение и ответственность
-- Приём GraphQL-мутаций `uploadKnowledgeDocument` (выдача signed URL) и `retryProcessing`, а также запросов `knowledgeDocument` и `knowledgeDocuments` **с обязательным заголовком `X-API-Key` для всех операций (включая `/playground`)**.
-
-
-- Подключение метрик и трейсинга (OTLP exporter), отдача `X-Correlation-ID` в ответах.
-- Проверка API-ключа, заданного в конфигурации (GraphQL и playground требуют `X-API-Key`).
-- Приём webhook уведомлений MinIO (`/internal/storage/uploaded`) и передача `ConfirmUpload` в document-service.
+- Обработка GraphQL запросов `knowledgeDocument`/`knowledgeDocuments` и мутации `uploadKnowledgeDocument` на `/query` (Playground — `/playground`) с обязательным заголовком `X-API-Key` для всех методов кроме preflight `OPTIONS`; `CorrelationIDMiddleware` генерирует/пробрасывает `X-Correlation-ID` и возвращает его в ответе. CORS разрешён только для `https://console.fedorov-team.tech` и `http://localhost:3000`.
+- Выдача signed URL: `uploadKnowledgeDocument` валидирует, что `fileName`/`repository`/`branch` непустые и `fileSizeBytes > 0`, генерирует `documentId` (UUID), триммит `path` и при пустом значении подставляет `knowledge/docs/<documentId>.md`, вызывает `storage-service.GenerateUploadURL` с TTL из конфигурации и передаёт ответные bucket/object ключи в `document-service.CreateDocument`.
+- Проксирование gRPC вызовов: `X-API-Key` и `x-correlation-id` из контекста передаются в metadata клиентов document/storage-service; для webhook ConfirmUpload используется только correlation-id.
+- Приём вебхука `/internal/storage/uploaded` от MinIO: парсинг `s3:ObjectCreated:*`, `PathUnescape` objectKey, извлечение `documentId` из basename и корреляции из `x-amz-meta-correlation-id` (userMetadata/responseElements, case-insensitive) с генерацией нового идентификатора при отсутствии; подтверждение загрузки через `document-service.ConfirmUpload` и ответ `202 Accepted`, либо `400 Bad Request`, если нет обработанных записей или payload невалиден.
+- Наблюдаемость: HTTP- и gRPC-клиенты обёрнуты OTLP-инструментацией; при выключенной телеметрии используются no-op провайдеры.
 
 ## Внешние зависимости
-- **backend-document-service** — доменный gRPC API, принимает `CreateDocument`/`GetDocument`/`ListDocuments`/`ConfirmUpload`.
-- **storage-service** — выдача signed URL для загрузки оригиналов.
-- **MinIO** — целевое хранилище для подписанных ссылок (через `storage-service`).
-- **OTLP endpoint/collector** — приём трассировок и метрик от gateway при включённой телеметрии.
-
-gRPC-вызов `storage-service.GenerateUploadURL` ожидает поля `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds` и возвращает bucket/object_key/TTL + presigned PUT URL. Корреляционный идентификатор пробрасывается в заголовок `x-amz-meta-correlation-id`, чтобы MinIO сохранил его в метаданных объекта.
+- **document-service** — gRPC API: `CreateDocument`, `GetDocument`, `ListDocuments`, `ConfirmUpload`.
+- **storage-service** — gRPC API: `GenerateUploadURL` (ожидает `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds`; возвращает PUT `uploadUrl`, `bucket/objectKey`, `markdownBucket/markdownObjectKey`).
+- **MinIO** — источник уведомлений `s3:ObjectCreated:*` (через webhook).
+- **OTLP collector** — при `observability.enabled=true` для отправки трейсов и метрик по gRPC.
 
 ## GraphQL API
-### Схема (фрагмент)
-- `mutation uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!` — выдаёт `uploadUrl`/`uploadMethod` и создаёт запись в document-service.
-- `query knowledgeDocument(id: ID!): KnowledgeDocument` — возвращает статус по идентификатору.
-- `query knowledgeDocuments(filter: KnowledgeDocumentFilter, pagination: Pagination): KnowledgeDocumentConnection!` — список документов с фильтрами.
+- `mutation uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!` — возвращает `uploadUrl`, `uploadMethod="PUT"` и созданный документ (статус из document-service, `repositoryOwner` — если пришёл из gRPC, `jobId` выбирается по приоритету `job_id` → `workflow_id` → `id`, `error` при наличии). Gateway не разбирает владельца репозитория: строка `repository` передается как есть.
+- `query knowledgeDocument(id: ID!): KnowledgeDocument` — возвращает документ по идентификатору.
+- `query knowledgeDocuments(filter, pagination): KnowledgeDocumentConnection!` — постраничный список (`limit`/`offset`, по умолчанию `10/0`) с фильтрами по статусу и `repository`.
+- Статусы: `UPLOADED`, `STORED_ORIGINAL`, `CONVERTED_TO_MARKDOWN`, `PUBLISHED_TO_GITHUB`, `FAILED`.
 
-Все GraphQL запросы и мутации требуют заголовок `X-API-Key`; `X-Correlation-ID` (необязательный) прокидывается в gRPC-метаданные `document-service`/`storage-service` и возвращается в ответе.
-
-### Валидация
-- Gateway проверяет только пустые строки (`fileName`, `repository`, `branch`, `path`) и то, что `fileSizeBytes` положителен; лимиты размера и допустимые расширения проверяются в `storage-service` при генерации presigned URL.
-- Проверка формата репозитория (`owner/repo`), нормализация владельца, обязательность ключей/бакетов и прочая бизнес-валидация выполняются в downstream-сервисах (`document-service` и `storage-service`). Ошибки gRPC возвращаются клиенту без повторной интерпретации.
-
-### Примеры запросов
+### Пример
 ```bash
 API_KEY=secret
 ENDPOINT=http://localhost:8080/query
@@ -40,38 +31,42 @@ curl -X POST "$ENDPOINT" \
   -H "X-API-Key: $API_KEY" \
   -H "X-Correlation-ID: demo-corr" \
   -d '{
-    "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId } } }",
+    "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId path repositoryOwner } } }",
     "variables": {"input": {"fileName":"demo.docx","fileSizeBytes":1024,"repository":"org/repo","branch":"main","path":"docs/demo.md"}}
   }'
 
 curl -X POST "$ENDPOINT" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $API_KEY" \
-  -d '{"query": "{ knowledgeDocuments(pagination:{limit:5,offset:0}){ nodes { id status fileName } totalCount } }"}'
+  -d '{"query": "{ knowledgeDocuments(pagination:{limit:5,offset:0}){ nodes { id status fileName repository } totalCount } }"}'
 ```
 
 ## Конфигурация
-Файл `config/config.yaml` обязателен к заполнению (читается по `CONFIG_PATH`). Ключевые поля по умолчанию используют DNS-имена в формате `<context>.backend.svc.cluster.local`:
+Файл `config/config.yaml` обязателен; путь передаётся флагом `-config` (по умолчанию `config/config.yaml`).
 - `server.port` — порт HTTP GraphQL сервера.
-- `security.apiKey` — ожидаемое значение заголовка `X-API-Key`.
-- `documentService.address` — `document.backend.svc.cluster.local:50051`.
-- `storageService.address` — `storage.backend.svc.cluster.local:50052`.
-- `documentService.grpc` / `storageService.grpc` — настройки gRPC-подключений (TLS через `insecure`, таймауты подключения `dialTimeout`/`minConnectTimeout`, keepalive `time`/`timeout`/`permitWithoutStream` с интервалом не меньше 5m и отключённым `permitWithoutStream`, бэкофф `baseDelay`/`multiplier`/`jitter`/`maxDelay`).
-- `uploads.signedUrlTtlSeconds` — TTL presigned ссылок, передаваемый в `storage-service`.
-- `observability.enabled` — включает/отключает экспорт метрик и трассировок (при `false` вместо экспортеров используются no-op провайдеры и обработчики).
-- `observability.otlpEndpoint`/`observability.serviceName` — адрес OTLP-коллектора и сервисное имя (обязателен при включённой телеметрии).
+- `security.apiKey` — ожидаемое значение заголовка `X-API-Key` (обязательно).
+- `documentService.address` / `storageService.address` — gRPC адреса (обязательны). Пример по умолчанию: `document-service.document-service.svc.cluster.local:9090`, `storage-service.storage-service.svc.cluster.local:9090`.
+- `documentService.grpc` / `storageService.grpc` — настройки gRPC клиентов: `insecure` (по умолчанию `true`), `dialTimeout` (5s), `minConnectTimeout` (3s), keepalive (`time=5m`, `timeout=10s`, `permitWithoutStream=false`), бэкофф (`baseDelay=1s`, `multiplier=1.6`, `jitter=0.2`, `maxDelay=30s`), `WaitForReady` включён.
+- `uploads.signedUrlTtlSeconds` — TTL presigned ссылок; если не задано или ≤0, используется `900`.
+- `observability.enabled` — по умолчанию `true`; при `true` обязателен `observability.otlpEndpoint`, `observability.serviceName` по умолчанию `backend-gateway-service`.
 - `logging.level` — уровень логирования.
-- CORS доступ разрешён только для `https://console.fedorov-team.tech` и `http://localhost:3000` (значения захардкожены в коде).
+
+## Наблюдаемость
+- HTTP обработчики (`/query`, `/playground`, `/internal/storage/uploaded`) оборачиваются `otelhttp` при `observability.enabled=true`.
+- gRPC клиенты storage/document-service получают `otelgrpc` stats handler с propagation; при выключенной телеметрии используются no-op провайдеры без отправки данных.
 
 ## Локальный запуск
-1. Сгенерировать GraphQL код: `go run github.com/99designs/gqlgen generate`.
-2. Запустить сервер: `go run ./cmd/server` (предварительно настроить `config/config.yaml` и OTLP endpoint).
-3. Проверить health GraphQL-пингом: `curl -H "X-API-Key: secret" -d '{"query":"{ __typename }"}' http://localhost:8080/query`.
+1. Убедиться, что `config/config.yaml` заполнен (минимум `security.apiKey`, адреса gRPC-сервисов; указать `observability.enabled: false`, если нет OTLP collector).
+2. Сгенерировать GraphQL код (если схема менялась): `go run github.com/99designs/gqlgen generate`.
+3. Запустить сервер: `go run ./cmd -config config/config.yaml`.
+4. Проверить доступность: `curl -H "X-API-Key: <key>" -d '{"query":"{ __typename }"}' http://localhost:<port>/query`.
 
 ## Структура
-- `cmd/server` — точка входа.
-- `graph/` — схема и gqlgen-генерация.
-- `internal/infrastructure/clients` — адаптеры gRPC клиентов document-service и storage-service.
-- `internal/server` — HTTP/GraphQL сервер и middleware.
-- `internal/config` — загрузка конфигурации.
-
+- `cmd/` — точка входа сервера.
+- `graph/` — схема GraphQL и resolvers.
+- `internal/config` — загрузка и валидация конфигурации.
+- `internal/infrastructure/clients` — gRPC клиенты document/storage-service.
+- `internal/infrastructure/webhook` — парсер уведомлений MinIO.
+- `internal/usecase` — сценарии upload/status/webhook.
+- `internal/server` — HTTP сервер, маршруты и middleware.
+- `pkg/` — вспомогательные пакеты (ctxutils, middleware, grpcdial, observability, logging).
