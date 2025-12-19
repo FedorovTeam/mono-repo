@@ -22,18 +22,33 @@ classDiagram
     class Logging {
         +New(level)
     }
+    class Observability {
+        +Setup(ctx, enabled, otlpEndpoint, serviceName)
+        +HTTPHandler(name, handler, providers)
+        +GRPCDialOptions(providers)
+        Providers
+    }
     class GRPCDial {
         +DefaultOptions(cfg, providers)
     }
-    class GraphQLResolver {
+    class Resolver {
         +UploadKnowledgeDocument()
         +KnowledgeDocument()
         +KnowledgeDocuments()
+        UploadValidationConfig
     }
     class UploadValidationConfig {
-        MaxSizeBytes
-        AllowedExtensions
         SignedURLTTLSeconds
+    }
+    class UploadService {
+        +UploadKnowledgeDocument()
+    }
+    class DocumentService {
+        +GetDocument()
+        +ListDocuments()
+    }
+    class UploadConfirmationService {
+        +HandleWebhook()
     }
     class DocumentClient {
         +CreateDocument()
@@ -46,28 +61,38 @@ classDiagram
         +GenerateUploadURL()
         +Close()
     }
+    class StorageNotificationParser {
+        +Parse()
+    }
+    class MinIOWebhookParser {
+        +Parse()
+    }
     class Middleware {
         +APIKeyMiddleware()
         +CorrelationIDMiddleware()
         +CORSMiddleware()
     }
-    class Observability {
-        +Setup()
-        +HTTPHandler()
-        +GRPCDialOptions()
-    }
     Main --> Config : Load
     Main --> Server : New + Run
     Server --> Config
     Server --> Logging
-    Server --> Observability : Setup
+    Server --> Observability : Setup + HTTPHandler
     Server --> GRPCDial
-    Server --> GraphQLResolver
+    Server --> DocumentClient
+    Server --> StorageClient
+    Server --> UploadService
+    Server --> DocumentService
+    Server --> UploadConfirmationService
     Server --> Middleware
-    Server --> Observability : HTTPHandler
-    GraphQLResolver --> DocumentClient
-    GraphQLResolver --> StorageClient
-    Server --> DocumentClient : ConfirmUpload (webhook)
-    GraphQLResolver --> UploadValidationConfig
+    Server --> Resolver : GraphQL handler
+    Resolver --> UploadService : DocumentUploader
+    Resolver --> DocumentService : DocumentProvider
+    Resolver --> UploadValidationConfig
+    UploadService --> DocumentClient
+    UploadService --> StorageClient
+    DocumentService --> DocumentClient
+    UploadConfirmationService --> StorageNotificationParser
+    UploadConfirmationService --> DocumentClient : ConfirmUpload
+    StorageNotificationParser <|-- MinIOWebhookParser
+    GRPCDial --> Observability : GRPCDialOptions
 ```
-
