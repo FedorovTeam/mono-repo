@@ -33,7 +33,6 @@ type TransformationConfig struct {
 	QueueLimit        int
 	StatusBackoff     backoff.Policy
 	UseSourceAsync    bool
-	DefaultForceOCR   bool
 	DefaultOCRLang    string
 	DefaultPDFBackend string
 }
@@ -48,7 +47,6 @@ type SubmitConversionRequest struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	FilenameExtension string
-	ForceOCR          *bool
 	OCRLanguage       string
 	PDFBackend        string
 	CorrelationID     string
@@ -122,11 +120,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		markdownKey = domain.BuildMarkdownKey(params.OriginalObjectKey)
 	}
 
-	forceOCR := params.ForceOCR
-	if forceOCR == nil {
-		forceOCR = boolPtr(uc.cfg.DefaultForceOCR)
-	}
-
 	ocrLang := params.OCRLanguage
 	if ocrLang == "" {
 		ocrLang = uc.cfg.DefaultOCRLang
@@ -170,7 +163,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		FilenameExtension: fileExt,
-		ForceOCR:          forceOCR,
 		OCRLanguage:       ocrLang,
 		PDFBackend:        pdfBackend,
 		CorrelationID:     params.CorrelationID,
@@ -188,7 +180,6 @@ func (uc *TransformerService) SubmitConversion(ctx context.Context, params Submi
 			SourceBucket:      params.SourceBucket,
 			SourceObjectKey:   params.SourceObjectKey,
 			SourceURL:         params.SourceURL,
-			ForceOCR:          forceOCR,
 			OCRLanguage:       ocrLang,
 			PDFBackend:        pdfBackend,
 		},

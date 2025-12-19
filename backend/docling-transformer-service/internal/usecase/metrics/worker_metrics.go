@@ -200,12 +200,12 @@ func (m *WorkerMetrics) RecordOutcome(ctx context.Context, success bool) {
 	}
 }
 
-func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, ids domain.DoclingIdentifiers, forceOCR bool, ocrLang, pdfBackend string) {
+func (m *WorkerMetrics) RecordDoclingSubmit(ctx context.Context, ids domain.DoclingIdentifiers, ocrLang, pdfBackend string) {
 	if m == nil || m.doclingSubmit == nil {
 		return
 	}
 
-	attrs := []attribute.KeyValue{attribute.Bool("force_ocr", forceOCR)}
+	attrs := make([]attribute.KeyValue, 0, 4)
 	if ids.TaskID != "" {
 		attrs = append(attrs, attribute.String("docling_task_id", ids.TaskID))
 	}

@@ -931,7 +931,6 @@ func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
 		DoclingMaxInterval:     10 * time.Minute,
 		DoclingRequeueDelay:    15 * time.Second,
 		DoclingMaxRestarts:     7,
-		DefaultForceOCR:        true,
 		DefaultOCRLang:         "fr",
 		DefaultPDFBackend:      "custom_backend",
 		OverlayMatchRate:       0.9,

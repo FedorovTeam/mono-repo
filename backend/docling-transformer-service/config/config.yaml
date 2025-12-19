@@ -29,7 +29,6 @@ docling:
   default_language: ru
   pdf_default_language: ru
   pdf_enable_ocr: true
-  force_ocr: false
   pdf_backend: pypdfium2
   status_initial_interval: 15s
   status_backoff_factor: 2

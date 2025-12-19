@@ -10,7 +10,7 @@
 
 ### 1) `TransformerAPI` (gRPC слой)
 
-**Use-case:** `ConvertDocumentToMarkdown(document_id, bucket, key, force_ocr?)`
+**Use-case:** `ConvertDocumentToMarkdown(document_id, bucket, key)`
 
 - Валидация входа.
 - Идемпотентность: если задача уже есть и не failed → вернуть статус + output key.
@@ -47,7 +47,7 @@
 
 Решает:
 
-- надо ли делать overlay (только `PDF && force_ocr==true`)
+- надо ли делать overlay (для PDF в overlay-стадии)
 - какую фазу выполнять: base или ocr
 - когда сохранять `.base.md`
 - когда запускать overlay и писать финальный `.md`
@@ -91,7 +91,6 @@
 1. Получили запрос.
 2. Если задача уже существует и не failed → вернуть её статус и output key.
 3. Иначе `Enqueue`:
-    - `force_ocr` из запроса
     - `overlay_stage = NULL`
     - `docling_*` пусто
 
@@ -103,7 +102,7 @@
 
 1. Определить тип:
 - `isPDF = ext == "pdf" || contentType == application/pdf`
-- `needsOverlay = isPDF && force_ocr==true`
+- `needsOverlay = isPDF && overlay_stage != ""`
 1. Если `task.docling_task_id != ""` → перейти в polling (Шаг 3).
 2. Если `needsOverlay`:
 - если `overlay_stage == ""` или `overlay_stage == "base"` → делаем **Base pass**
@@ -137,7 +136,6 @@ Docling options (идея):
 
 - `to_formats=["md","json"]`
 - `do_ocr=false`
-- `force_ocr=false`
 - `do_table_structure=true`
 - `table_mode=accurate`
 - `table_cell_matching=false` (часто помогает)
@@ -156,7 +154,6 @@ Docling options:
 
 - `to_formats=["md","json"]`
 - `do_ocr=true`
-- `force_ocr=true`
 - `do_table_structure=true`
 - `table_mode=accurate`
 - `table_cell_matching=false`
@@ -257,7 +254,7 @@ sequenceDiagram
     participant DL as Docling Serve
     participant S3 as MinIO
 
-    C->>API: ConvertDocumentToMarkdown(force_ocr=true)
+    C->>API: ConvertDocumentToMarkdown()
     API->>DB: INSERT task(status=pending, overlay_stage=NULL)
     API-->>C: queue_id, status=pending
 
@@ -291,7 +288,7 @@ sequenceDiagram
       alt Phase = ocr submit
         EX->>DB: Acquire DoclingSubmitLock (global)
         EX->>S3: Download PDF
-        EX->>DL: POST /v1/convert/file/async (do_ocr=true, force_ocr=true)
+        EX->>DL: POST /v1/convert/file/async (do_ocr=true)
         DL-->>EX: task_id
         EX->>DB: status=waiting_docling
         EX->>DB: Release DoclingSubmitLock
@@ -317,7 +314,7 @@ sequenceDiagram
 flowchart TD
   A[Task acquired] --> B{docling_task_id exists?}
   B -- yes --> P[Poll status]
-  B -- no --> C{PDF && force_ocr?}
+  B -- no --> C{PDF && overlay_stage set?}
 
   C -- no --> S[Single pass submit]
   C -- yes --> D{overlay_stage == ocr?}
@@ -349,7 +346,7 @@ flowchart TD
 - OCR:
     - `ocr_engine=tesseract` (у тебя установлен)
     - `ocr_lang` как массив: `["rus","osd"]` (можно `["rus","eng","osd"]`)
-    - `do_ocr=true` и `force_ocr=true` во второй фазе
+    - `do_ocr=true` во второй фазе
 
 ### Overlay (логика)
 
