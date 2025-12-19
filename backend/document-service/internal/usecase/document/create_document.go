@@ -107,7 +107,6 @@ func (uc *CreateDocument) Execute(ctx context.Context, in CreateDocumentInput) (
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		CreatePR:          in.CreatePR,
-		ForceOCR:          in.ForceOCR,
 	}
 
 	if err := doc.ValidateForCreation(); err != nil {

@@ -25,7 +25,6 @@ type Document struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	CreatePR          bool
-	ForceOCR          bool
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Versions          []DocumentVersion

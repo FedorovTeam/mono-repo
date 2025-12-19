@@ -13,11 +13,9 @@ interface UploadResponse {
         repository: string;
         branch: string;
         path: string;
-        forcePdfOcr: boolean;
       };
       uploadUrl: string;
       uploadMethod: string;
-      forcePdfOcr: boolean;
     };
   };
   errors?: { message: string }[];
@@ -28,7 +26,6 @@ export default function HomePage() {
   const [repository, setRepository] = useState('docs');
   const [branch, setBranch] = useState('main');
   const [path, setPath] = useState('knowledge/docs/test.md');
-  const [forcePdfOcr, setForcePdfOcr] = useState(false);
 
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -36,9 +33,6 @@ export default function HomePage() {
 
   const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
   const apiKey = process.env.NEXT_PUBLIC_API_KEY;
-
-  const formatMessageWithOcr = (text: string, ocrEnabled = forcePdfOcr) =>
-      `${text} (OCR для PDF ${ocrEnabled ? 'форсируется' : 'не форсируется'})`;
 
   console.log('GATEWAY URL:', gatewayUrl);
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -51,15 +45,11 @@ export default function HomePage() {
     setMessage(null);
 
     if (!file) {
-      setMessage(formatMessageWithOcr('Выберите файл'));
+      setMessage('Выберите файл');
       return;
     }
     if (!gatewayUrl || !apiKey) {
-      setMessage(
-          formatMessageWithOcr(
-              'NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы',
-          ),
-      );
+      setMessage('NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы');
       return;
     }
 
@@ -82,11 +72,9 @@ export default function HomePage() {
               repository
               branch
               path
-              forcePdfOcr
             }
             uploadUrl
             uploadMethod
-            forcePdfOcr
           }
         }
       `;
@@ -98,7 +86,6 @@ export default function HomePage() {
           repository,
           branch,
           path,
-          forcePdfOcr,
         },
       };
 
@@ -123,8 +110,7 @@ export default function HomePage() {
         throw new Error('Пустой ответ uploadKnowledgeDocument');
       }
 
-      const { document, uploadUrl, uploadMethod, forcePdfOcr: payloadOcrFlag } = payload;
-      const effectiveOcr = document.forcePdfOcr ?? payloadOcrFlag ?? forcePdfOcr;
+      const { document, uploadUrl, uploadMethod } = payload;
       setDocumentId(document.id);
 
       if (!uploadUrl) {
@@ -155,17 +141,12 @@ export default function HomePage() {
       }
 
       setStatus('done');
-      setMessage(
-          formatMessageWithOcr(
-              `Файл загружен. Document ID: ${document.id}, статус: ${document.status}`,
-              effectiveOcr,
-          ),
-      );
+      setMessage(`Файл загружен. Document ID: ${document.id}, статус: ${document.status}`);
     } catch (err: unknown) {
       console.error(err);
       setStatus('error');
       const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
-      setMessage(formatMessageWithOcr(errorMessage));
+      setMessage(errorMessage);
     }
   };
 
@@ -223,23 +204,6 @@ export default function HomePage() {
                     onChange={(e) => setPath(e.target.value)}
                     className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-              </div>
-              <div className="flex items-start gap-2">
-                <input
-                    id="enable-ocr"
-                    type="checkbox"
-                    checked={forcePdfOcr}
-                    onChange={(e) => setForcePdfOcr(e.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
-                />
-                <div>
-                  <label htmlFor="enable-ocr" className="block text-sm font-medium">
-                    Форсировать OCR для PDF
-                  </label>
-                  <p className="mt-1 text-xs text-slate-400">
-                    Принудительно запускает OCR для PDF: помогает извлекать таблицы и отметки, но может занять больше времени.
-                  </p>
-                </div>
               </div>
             </div>
 

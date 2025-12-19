@@ -125,9 +125,9 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *domain.Document, v
 	doc.UpdatedAt = now
 
 	_, err = tx.ExecContext(ctx, `
-        INSERT INTO documents (id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, force_ocr, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-    `, doc.ID, doc.Name, doc.Owner, doc.Repository, doc.Branch, doc.BaseBranch, doc.Path, string(doc.Status), doc.WorkflowID, doc.OriginalBucket, doc.OriginalObjectKey, doc.MarkdownBucket, doc.MarkdownObjectKey, doc.ErrorReason, doc.CreatePR, doc.ForceOCR, doc.CreatedAt, doc.UpdatedAt)
+        INSERT INTO documents (id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    `, doc.ID, doc.Name, doc.Owner, doc.Repository, doc.Branch, doc.BaseBranch, doc.Path, string(doc.Status), doc.WorkflowID, doc.OriginalBucket, doc.OriginalObjectKey, doc.MarkdownBucket, doc.MarkdownObjectKey, doc.ErrorReason, doc.CreatePR, doc.CreatedAt, doc.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -175,12 +175,12 @@ func (r *Repository) CreateDocument(ctx context.Context, doc *domain.Document, v
 
 func (r *Repository) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	row := r.db.QueryRowContext(ctx, `
-SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, force_ocr, created_at, updated_at
+SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at
 FROM documents WHERE id=$1
 `, id)
 
 	var doc domain.Document
-	if err := row.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.ForceOCR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+	if err := row.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
 	versions, err := r.fetchVersions(ctx, id)
@@ -223,7 +223,7 @@ func (r *Repository) CountStatusLogsWithReasonPrefix(ctx context.Context, id str
 }
 
 func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) ([]domain.Document, error) {
-	base := `SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, force_ocr, created_at, updated_at FROM documents`
+	base := `SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents`
 	args := []any{}
 	if status != nil {
 		base += " WHERE status=$1"
@@ -248,7 +248,7 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	var result []domain.Document
 	for rows.Next() {
 		var doc domain.Document
-		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.ForceOCR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+		if err := rows.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if err := r.attachActiveJob(ctx, &doc); err != nil {
@@ -268,10 +268,10 @@ func (r *Repository) UpdateStatus(ctx context.Context, id string, to domain.Docu
 
 	var doc domain.Document
 	row := tx.QueryRowContext(ctx, `
-        SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, force_ocr, created_at, updated_at
+        SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at
         FROM documents WHERE id=$1 FOR UPDATE
     `, id)
-	if err := row.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.ForceOCR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
+	if err := row.Scan(&doc.ID, &doc.Name, &doc.Owner, &doc.Repository, &doc.Branch, &doc.BaseBranch, &doc.Path, &doc.Status, &doc.WorkflowID, &doc.OriginalBucket, &doc.OriginalObjectKey, &doc.MarkdownBucket, &doc.MarkdownObjectKey, &doc.ErrorReason, &doc.CreatePR, &doc.CreatedAt, &doc.UpdatedAt); err != nil {
 		return nil, err
 	}
 

@@ -50,7 +50,6 @@ func (c *GRPCClient) CreateDocument(ctx context.Context, req domain.CreateDocume
 		MarkdownBucket:    req.MarkdownBucket,
 		MarkdownObjectKey: req.MarkdownObjectKey,
 		Owner:             valueOrEmpty(req.RepositoryOwner),
-		ForceOcr:          req.ForcePdfOcr,
 	})
 	if err != nil {
 		return nil, err

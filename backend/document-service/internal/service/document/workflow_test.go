@@ -256,7 +256,6 @@ func TestConvertToMarkdownFillsExtensionFromDocument(t *testing.T) {
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "path/doc-ext.md",
 		Name:              "doc-ext.PDF",
-		ForceOCR:          true,
 	}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ext", Status: "pending"}}
 

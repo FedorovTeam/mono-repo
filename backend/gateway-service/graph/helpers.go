@@ -20,13 +20,12 @@ func mapDocument(doc *domain.Document) *model.KnowledgeDocument {
 	}
 
 	result := &model.KnowledgeDocument{
-		ID:          doc.ID,
-		FileName:    doc.FileName,
-		Repository:  doc.Repository,
-		Branch:      doc.Branch,
-		Path:        doc.Path,
-		Status:      modelStatusFromDomain(doc.Status),
-		ForcePDFOcr: doc.ForcePdfOcr,
+		ID:         doc.ID,
+		FileName:   doc.FileName,
+		Repository: doc.Repository,
+		Branch:     doc.Branch,
+		Path:       doc.Path,
+		Status:     modelStatusFromDomain(doc.Status),
 	}
 
 	if doc.RepositoryOwner != nil {
@@ -92,11 +91,4 @@ func requireAPIKey(ctx context.Context) (string, error) {
 		return "", errors.New("missing api key for public mutation")
 	}
 	return apiKey, nil
-}
-
-func derefBool(value *bool) bool {
-	if value == nil {
-		return false
-	}
-	return *value
 }

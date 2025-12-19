@@ -14,7 +14,6 @@ type CreateDocumentInput struct {
 	MarkdownBucket    string
 	MarkdownObjectKey string
 	CreatePR          bool
-	ForceOCR          bool
 }
 
 // ConfirmUploadInput подтверждает загрузку исходного файла.
