@@ -120,13 +120,3 @@ func TestStatusBackoffOverridesConfig(t *testing.T) {
 		t.Fatalf("defaults must not override provided values: %+v", cfg.Docling)
 	}
 }
-
-func TestApplyDefaultsSetsDoclingPDFBackend(t *testing.T) {
-	cfg := Config{}
-
-	cfg.applyDefaults()
-
-	if cfg.Docling.PDFBackend != "dlparse_v4" {
-		t.Fatalf("expected default pdf backend dlparse_v4, got %s", cfg.Docling.PDFBackend)
-	}
-}

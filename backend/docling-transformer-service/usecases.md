@@ -10,7 +10,7 @@
   - Поля источника: `source_bucket` и `source_object_key` заполняются только вместе, `source_url` взаимоисключён с ними.
   - При превышении лимита очереди (`pending`/`processing`/`waiting_docling` >= `service.queue_limit`, если он задан) возвращается `ResourceExhausted`.
 - **Поведение:** если уже есть последняя задача для `document_id` не в статусе `failed`, она возвращается как результат вызова без создания новой записи; выходные bucket/object_key берутся из задачи или из запроса/конфига.
-- **Модель:** конвертация выполняется одним запросом к Docling без деления на base/OCR проходы и без overlay-мерджа таблиц.
+- **Модель:** конвертация выполняется одним запросом к Docling без промежуточных файлов и этапов.
 - **Шаги:**
 1. Принять gRPC вызов `ConvertDocumentToMarkdown` с обязательными `document_id`, `original_bucket`, `original_object_key`, опциональными `markdown_bucket`, `markdown_object_key`, `filename_extension`, флагом `wait_for_result`, а также источником (`source_bucket`/`source_object_key` либо `source_url`) без передачи кредов; `x-correlation-id` читается из метаданных или генерируется заново.
   2. Нормализовать расширение и вычислить `markdown_object_key`, если не передан (замена исходного расширения на `.md`).
@@ -35,7 +35,7 @@
  1. Забрать задачу из очереди: приоритет на `waiting_docling` с наступившим `next_poll_at`; если в очереди есть любые `waiting_docling` (даже с будущим `next_poll_at`), новые `pending` не выдаются.
  2. Проставить отсутствующие значения: `markdown_bucket` из конфигурации, `markdown_object_key` из исходного пути, расширение и `Content-Type` через `ResolveContentTypeByExtension`.
  3. Определить режим отправки в Docling: в `source_async` (или при наличии `source_bucket`/`source_object_key`) используется `convert/source/async` без скачивания файла, с передачей MinIO-кредов из конфига; иначе оригинал скачивается из MinIO/URL с быстрым таймаутом и именем из `original_object_key`/`source_url` (fallback `document.<ext>`).
-  4. Отправить документ в Docling: для загрузки файла — POST `<docling.endpoint>/v1/convert/file/async` с multipart `files`, заголовками `X-Correlation-Id`, `X-Docling-Source-Filename`, `X-Docling-Endpoint`, `X-Api-Key` (если задан) и настройками Markdown/таблиц/OCR; для `source_async` — POST `<docling.endpoint>/v1/convert/source/async` с JSON, содержащим MinIO-источник/приёмник. Для PDF воркер принудительно включает OCR в запросе.
+  4. Отправить документ в Docling: для загрузки файла — POST `<docling.endpoint>/v1/convert/file/async` с multipart `files`, заголовками `X-Correlation-Id`, `X-Docling-Source-Filename`, `X-Docling-Endpoint`, `X-Api-Key` (если задан) и минимальными полями `to_formats`/`from_formats`; для `source_async` — POST `<docling.endpoint>/v1/convert/source/async` с JSON, содержащим MinIO-источник/приёмник и те же опции форматов.
   5. После отправки сохраняются `docling_task_id`/`docling_job_id`, счётчик поллинга и `next_poll_at`, статус — `waiting_docling`.
 
 ## Опрос Docling и завершение

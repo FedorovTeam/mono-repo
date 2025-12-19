@@ -11,8 +11,6 @@ type ConvertRequest struct {
 	SourceObjectKey string
 	TargetBucket    string
 	TargetObjectKey string
-	OCRLanguage     string
-	PDFBackend      string
 }
 
 type ConvertResult struct {

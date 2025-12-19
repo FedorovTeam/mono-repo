@@ -8,7 +8,6 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path"
 	"reflect"
 	"strings"
@@ -37,8 +36,16 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 			}
 
 			formats := r.MultipartForm.Value["to_formats"]
-			if !reflect.DeepEqual(formats, []string{"json", "md"}) {
+			if !reflect.DeepEqual(formats, []string{"md"}) {
 				t.Fatalf("unexpected to_formats: %+v", formats)
+			}
+
+			if fromFormats := r.MultipartForm.Value["from_formats"]; !reflect.DeepEqual(fromFormats, []string{"docx"}) {
+				t.Fatalf("unexpected from_formats: %+v", fromFormats)
+			}
+
+			if _, exists := r.MultipartForm.Value["do_ocr"]; exists {
+				t.Fatalf("did not expect do_ocr field in minimal contract")
 			}
 
 			receivedCorrelationSubmit = r.Header.Get(correlationIDHeader)
@@ -194,12 +201,10 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 	defer server.Close()
 
 	conv := NewDoclingConverter(Config{
-		Endpoint:           server.URL,
-		APIKey:             "token",
-		DefaultLanguage:    "ru",
-		PDFDefaultLanguage: "ru",
-		PDFEnableOCR:       true,
-		Mode:               "source_async",
+		Endpoint:        server.URL,
+		APIKey:          "token",
+		DefaultLanguage: "ru",
+		Mode:            "source_async",
 		Storage: StorageConfig{
 			Endpoint:  "minio:9000",
 			AccessKey: "acc",
@@ -259,28 +264,12 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 		t.Fatalf("unexpected target credentials: %+v", receivedRequest.Target)
 	}
 
-	if !reflect.DeepEqual(receivedRequest.Options.ToFormats, []string{"json", "md"}) {
+	if !reflect.DeepEqual(receivedRequest.Options.ToFormats, []string{"md"}) {
 		t.Fatalf("unexpected to_formats: %+v", receivedRequest.Options.ToFormats)
 	}
 
-	if receivedRequest.Options.DoOCR == nil || !*receivedRequest.Options.DoOCR {
-		t.Fatalf("expected do_ocr=true for pdf, got %+v", receivedRequest.Options.DoOCR)
-	}
-
-	if !reflect.DeepEqual(receivedRequest.Options.OCRLang, []string{"rus", "eng", "osd"}) {
-		t.Fatalf("unexpected ocr_lang: %+v", receivedRequest.Options.OCRLang)
-	}
-
-	if receivedRequest.Options.PDFBackend != "dlparse_v4" {
-		t.Fatalf("expected default pdf_backend dlparse_v4, got %s", receivedRequest.Options.PDFBackend)
-	}
-
-	if receivedRequest.Options.DoTableStructure == nil || !*receivedRequest.Options.DoTableStructure {
-		t.Fatalf("expected do_table_structure to be true, got %+v", receivedRequest.Options.DoTableStructure)
-	}
-
-	if receivedRequest.Options.TableCellMatching == nil || *receivedRequest.Options.TableCellMatching {
-		t.Fatalf("expected table_cell_matching to be false, got %+v", receivedRequest.Options.TableCellMatching)
+	if !reflect.DeepEqual(receivedRequest.Options.FromFormats, []string{"pdf"}) {
+		t.Fatalf("unexpected from_formats: %+v", receivedRequest.Options.FromFormats)
 	}
 }
 
@@ -557,121 +546,6 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
-func TestDoclingConverterSubmitPDFWithOCR(t *testing.T) {
-	var receivedQuery string
-	var receivedLanguageField, receivedDoOCRField string
-	var receivedPDFBackend, receivedTableCellMatching, receivedTableStructure string
-	var receivedOCRLang []string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
-			receivedQuery = r.URL.RawQuery
-
-			if err := r.ParseMultipartForm(1 << 20); err != nil {
-				t.Fatalf("failed to parse submit form: %v", err)
-			}
-
-			receivedLanguageField = r.FormValue("language")
-			receivedDoOCRField = r.FormValue("do_ocr")
-			receivedPDFBackend = r.FormValue("pdf_backend")
-			receivedTableCellMatching = r.FormValue("table_cell_matching")
-			receivedTableStructure = r.FormValue("do_table_structure")
-			receivedOCRLang = r.MultipartForm.Value["ocr_lang"]
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "pdf-task"})
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(taskStatusResponse{TaskID: "pdf-task", TaskStatus: "success"})
-		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
-				Status:   "success",
-				Document: exportDocumentResponse{MdContent: ptr("# pdf")},
-			})
-		default:
-			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	conv := NewDoclingConverter(Config{
-		Endpoint:           server.URL,
-		PDFEnableOCR:       true,
-		DefaultLanguage:    "ru",
-		PDFDefaultLanguage: "sah",
-	}, zap.NewNop())
-
-	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "pdf-corr")
-	ids, err := conv.Submit(ctx, domain.ConvertRequest{
-		FileName:    "scan.pdf",
-		Content:     []byte("pdf content"),
-		ContentType: "application/pdf",
-	})
-	if err != nil {
-		t.Fatalf("unexpected submit error: %v", err)
-	}
-
-	if ids.PrimaryID() == "" {
-		t.Fatalf("jobID must be returned")
-	}
-
-	status, err := conv.CheckStatus(ctx, ids.TaskID)
-	if err != nil {
-		t.Fatalf("unexpected status error: %v", err)
-	}
-
-	if status.Status != "success" {
-		t.Fatalf("unexpected status: %s", status.Status)
-	}
-
-	query := statusFromRawQuery(receivedQuery)
-	if q := query.Get("ocr"); q != "" && q != "true" {
-		t.Fatalf("expected ocr param in query if provided, got %s", q)
-	}
-
-	if lang := query.Get("language"); lang != "" && lang != "sah" {
-		t.Fatalf("expected pdf language override in query if provided, got %s", lang)
-	}
-
-	if receivedLanguageField != "sah" {
-		t.Fatalf("expected language form field, got %s", receivedLanguageField)
-	}
-
-	if receivedDoOCRField != "true" {
-		t.Fatalf("expected do_ocr form field, got %s", receivedDoOCRField)
-	}
-
-	if receivedPDFBackend != "dlparse_v4" {
-		t.Fatalf("expected pdf_backend dlparse_v4, got %s", receivedPDFBackend)
-	}
-
-	if receivedTableStructure != "true" {
-		t.Fatalf("expected do_table_structure form field to be true, got %s", receivedTableStructure)
-	}
-
-	if receivedTableCellMatching != "false" {
-		t.Fatalf("expected table_cell_matching form field to be false, got %s", receivedTableCellMatching)
-	}
-
-	if len(receivedOCRLang) != 3 {
-		t.Fatalf("expected three ocr_lang entries, got %v", receivedOCRLang)
-	}
-
-	langSet := map[string]bool{}
-	for _, lang := range receivedOCRLang {
-		langSet[lang] = true
-	}
-
-	for _, expected := range []string{"rus", "eng", "osd"} {
-		if !langSet[expected] {
-			t.Fatalf("expected ocr_lang to contain %s, got %v", expected, receivedOCRLang)
-		}
-	}
-}
-
 func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 	var attempts int32
 	var receivedOptions doclingOptions
@@ -724,36 +598,14 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 		t.Fatalf("expected retry, got %d attempts", attempts)
 	}
 
-	if receivedOptions.DoOCR == nil || *receivedOptions.DoOCR {
-		t.Fatalf("expected do_ocr to be false for docx, got %+v", receivedOptions.DoOCR)
+	if !reflect.DeepEqual(receivedOptions.ToFormats, []string{"md"}) {
+		t.Fatalf("unexpected to_formats: %+v", receivedOptions.ToFormats)
 	}
-
-	if receivedOptions.PDFBackend != "dlparse_v4" {
-		t.Fatalf("expected default pdf_backend dlparse_v4, got %s", receivedOptions.PDFBackend)
-	}
-
-	if receivedOptions.DoTableStructure == nil || !*receivedOptions.DoTableStructure {
-		t.Fatalf("expected do_table_structure to be true, got %+v", receivedOptions.DoTableStructure)
-	}
-
-	if receivedOptions.TableCellMatching == nil || *receivedOptions.TableCellMatching {
-		t.Fatalf("expected table_cell_matching to be false, got %+v", receivedOptions.TableCellMatching)
-	}
-
-	if len(receivedOptions.OCRLang) != 0 {
-		t.Fatalf("expected no ocr_lang entries for non-ocr request, got %v", receivedOptions.OCRLang)
+	if !reflect.DeepEqual(receivedOptions.FromFormats, []string{"docx"}) {
+		t.Fatalf("unexpected from_formats: %+v", receivedOptions.FromFormats)
 	}
 
 	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
-}
-
-func statusFromRawQuery(rawQuery string) url.Values {
-	query, err := url.ParseQuery(rawQuery)
-	if err != nil {
-		return url.Values{}
-	}
-
-	return query
 }

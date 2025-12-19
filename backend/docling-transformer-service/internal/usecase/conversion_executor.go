@@ -23,9 +23,6 @@ type ConversionExecutorConfig struct {
 	HTTPClient           HTTPClient
 	UseSourceAsync       bool
 
-	DefaultOCRLang    string
-	DefaultPDFBackend string
-
 	SubmitLockDelay time.Duration
 }
 
@@ -140,9 +137,6 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		return StateProcessing, err
 	}
 
-	ocrLang := e.cfg.DefaultOCRLang
-	pdfBackend := e.cfg.DefaultPDFBackend
-
 	var sourceContent []byte
 	if !useSourceAsync {
 		downloadCtx, cancelDownload := e.fastPhaseContext(ctx)
@@ -181,8 +175,6 @@ func (e *ConversionExecutor) submitConversion(ctx context.Context, task *transfo
 		SourceObjectKey: sourceObjectKey,
 		TargetBucket:    task.MarkdownBucket,
 		TargetObjectKey: task.MarkdownObjectKey,
-		OCRLanguage:     ocrLang,
-		PDFBackend:      pdfBackend,
 	}
 
 	lock, err := e.repo.AcquireSubmitLock(ctx)

@@ -82,26 +82,11 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 		assertColumnExists(t, ctx, db, c.table, c.column)
 	}
 
-	for _, c := range []struct {
-		table  string
-		column string
-	}{
-		{"transformations_queue", "overlay_stage"},
-		{"transformations_queue", "base_markdown_bucket"},
-		{"transformations_queue", "base_markdown_object_key"},
-		{"transformations_queue", "force_ocr"},
-		{"transformations_queue", "ocr_lang"},
-		{"transformations_queue", "pdf_backend"},
-	} {
-		assertColumnNotExists(t, ctx, db, c.table, c.column)
-	}
-
 	assertTableNotExists(t, ctx, db, "docling_submit_lock")
 	assertIndexExists(t, ctx, db, "transformations_queue_status_idx")
 	assertIndexExists(t, ctx, db, "transformations_queue_started_at_idx")
 	assertIndexExists(t, ctx, db, "transformations_queue_docling_idx")
 	assertIndexExists(t, ctx, db, "transformations_queue_waiting_idx")
-	assertIndexNotExists(t, ctx, db, "transformations_queue_overlay_stage_idx")
 }
 
 func assertTableExists(t *testing.T, ctx context.Context, db *sql.DB, name string) {
@@ -150,28 +135,4 @@ func assertIndexExists(t *testing.T, ctx context.Context, db *sql.DB, name strin
     `, name)
 	require.NoError(t, row.Scan(&exists))
 	require.Truef(t, exists, "index %s does not exist", name)
-}
-
-func assertColumnNotExists(t *testing.T, ctx context.Context, db *sql.DB, table, column string) {
-	t.Helper()
-	var exists bool
-	row := db.QueryRowContext(ctx, `
-        SELECT EXISTS (
-            SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
-        )
-    `, table, column)
-	require.NoError(t, row.Scan(&exists))
-	require.Falsef(t, exists, "column %s.%s still exists", table, column)
-}
-
-func assertIndexNotExists(t *testing.T, ctx context.Context, db *sql.DB, name string) {
-	t.Helper()
-	var exists bool
-	row := db.QueryRowContext(ctx, `
-        SELECT EXISTS (
-            SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1
-        )
-    `, name)
-	require.NoError(t, row.Scan(&exists))
-	require.Falsef(t, exists, "index %s still exists", name)
 }

@@ -104,14 +104,11 @@ func main() {
 
 	// --- OCR converter (обычный) ---
 	convOCR := converter.NewDoclingConverter(converter.Config{
-		Endpoint:           cfg.Docling.Endpoint,
-		APIKey:             cfg.Docling.APIKey,
-		DefaultLanguage:    cfg.Docling.DefaultLanguage,
-		PDFDefaultLanguage: cfg.Docling.PDFDefaultLanguage,
-		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
-		PDFBackend:         cfg.Docling.PDFBackend,
-		Mode:               cfg.Docling.Mode,
-		TraceHttpRequest:   cfg.Observability.LoggingEnabled,
+		Endpoint:         cfg.Docling.Endpoint,
+		APIKey:           cfg.Docling.APIKey,
+		DefaultLanguage:  cfg.Docling.DefaultLanguage,
+		Mode:             cfg.Docling.Mode,
+		TraceHttpRequest: cfg.Observability.LoggingEnabled,
 		Storage: converter.StorageConfig{
 			Endpoint:  cfg.Docling.Storage.Endpoint,
 			AccessKey: cfg.Docling.Storage.AccessKey,
@@ -126,10 +123,10 @@ func main() {
 	}, logger)
 
 	transformUC := usecase.NewTransformerService(queueRepo, convOCR, usecase.TransformationConfig{
-		MarkdownBucket:    cfg.Minio.Bucket,
-		QueueLimit:        cfg.Service.QueueLimit,
-		StatusBackoff:     statusPolicy,
-		UseSourceAsync:    cfg.Docling.Mode == "source_async",
+		MarkdownBucket: cfg.Minio.Bucket,
+		QueueLimit:     cfg.Service.QueueLimit,
+		StatusBackoff:  statusPolicy,
+		UseSourceAsync: cfg.Docling.Mode == "source_async",
 	}, logger, &http.Client{Timeout: 30 * time.Second})
 
 	workerProcessor := usecase.NewProcessor(queueRepo, convOCR, storageClient, logger, usecase.Config{
@@ -154,8 +151,6 @@ func main() {
 		DoclingRequeueDelay:    cfg.Scheduler.DoclingRequeueDelay,
 		DoclingMaxRestarts:     cfg.Scheduler.DoclingMaxRestarts,
 		UseSourceAsync:         cfg.Docling.Mode == "source_async",
-		DefaultOCRLang:         cfg.Docling.PDFDefaultLanguage,
-		DefaultPDFBackend:      cfg.Docling.PDFBackend,
 	})
 
 	workerDone := make(chan struct{})

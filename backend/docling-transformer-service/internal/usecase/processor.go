@@ -34,8 +34,6 @@ type Config struct {
 	DoclingRequeueDelay    time.Duration
 	DoclingMaxRestarts     int
 	UseSourceAsync         bool
-	DefaultOCRLang         string
-	DefaultPDFBackend      string
 }
 
 type Processor struct {
@@ -72,8 +70,6 @@ func NewProcessor(
 		MarkdownBucket:       normalized.MarkdownBucket,
 		FastOperationTimeout: normalized.FastOperationTimeout,
 		UseSourceAsync:       normalized.UseSourceAsync,
-		DefaultOCRLang:       normalized.DefaultOCRLang,
-		DefaultPDFBackend:    normalized.DefaultPDFBackend,
 		SubmitLockDelay:      normalized.SubmitLockDelay,
 	})
 
@@ -139,9 +135,6 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.DoclingMaxRestarts <= 0 {
 		cfg.DoclingMaxRestarts = 3
-	}
-	if cfg.DefaultPDFBackend == "" {
-		cfg.DefaultPDFBackend = "dlparse_v4"
 	}
 	return cfg
 }
