@@ -2,29 +2,15 @@ package converter
 
 import "testing"
 
-func TestBuildConvertResultPrefersJsonTables(t *testing.T) {
-	tableJSON := map[string]any{
-		"tables": []any{
-			map[string]any{
-				"id": "t1",
-				"rows": []any{
-					map[string]any{"cells": []any{map[string]any{"text": "H1"}, map[string]any{"text": "H2"}}},
-					map[string]any{"cells": []any{map[string]any{"text": "R1"}, map[string]any{"text": "R2"}}},
-				},
-			},
-		},
-		"marks": []any{
-			map[string]any{"mark": "{{t1}}"},
-		},
-	}
-	mdContent := "# placeholder\n\n{{t1}}"
+func TestBuildConvertResultUsesMarkdownContent(t *testing.T) {
+	mdContent := "# md-source"
 
-	converter := NewDoclingConverter(Config{Render: RenderConfig{PreferJSON: true}}, nil)
+	converter := NewDoclingConverter(Config{}, nil)
 
 	result, err := converter.buildConvertResult(convertDocumentResponse{
 		Status: "success",
 		Document: exportDocumentResponse{
-			JsonContent: tableJSON,
+			JsonContent: map[string]any{"tables": []any{}},
 			MdContent:   &mdContent,
 		},
 	})
@@ -32,19 +18,15 @@ func TestBuildConvertResultPrefersJsonTables(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(result.Content) == mdContent {
-		t.Fatalf("expected JSON-derived markdown to be preferred")
-	}
-
-	if string(result.Content) == "" {
-		t.Fatalf("expected non-empty content")
+	if string(result.Content) != mdContent {
+		t.Fatalf("expected markdown content to be returned, got: %s", string(result.Content))
 	}
 }
 
 func TestBuildConvertResultFallbackToMarkdown(t *testing.T) {
 	mdContent := "# fallback"
 
-	converter := NewDoclingConverter(Config{Render: RenderConfig{PreferJSON: false}}, nil)
+	converter := NewDoclingConverter(Config{}, nil)
 
 	result, err := converter.buildConvertResult(convertDocumentResponse{
 		Status: "success",
@@ -61,35 +43,22 @@ func TestBuildConvertResultFallbackToMarkdown(t *testing.T) {
 	}
 }
 
-func TestBuildConvertResultPrefersMarkdownWhenDisabled(t *testing.T) {
-	tableJSON := map[string]any{
-		"tables": []any{
-			map[string]any{
-				"id":       "table_a",
-				"markdown": "|A|B|\n|-|-|\n|1|2|",
-			},
-		},
-		"marks": []any{map[string]any{"mark": "table_a"}},
-	}
+func TestBuildConvertResultFallsBackToHtml(t *testing.T) {
+	htmlContent := "<p>html</p>"
 
-	mdContent := "md-source"
-
-	converter := NewDoclingConverter(Config{Render: RenderConfig{
-		PreferJSON: false,
-	}}, nil)
+	converter := NewDoclingConverter(Config{}, nil)
 
 	result, err := converter.buildConvertResult(convertDocumentResponse{
 		Status: "success",
 		Document: exportDocumentResponse{
-			JsonContent: tableJSON,
-			MdContent:   &mdContent,
+			HtmlContent: &htmlContent,
 		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(result.Content) != mdContent {
-		t.Fatalf("expected markdown content to win when prefer_json is disabled, got: %s", string(result.Content))
+	if string(result.Content) != htmlContent || result.MediaType != "text/html" {
+		t.Fatalf("expected html fallback, got: %s (media type %s)", string(result.Content), result.MediaType)
 	}
 }

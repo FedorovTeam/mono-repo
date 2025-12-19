@@ -20,7 +20,6 @@ import (
 
 	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
-	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/doclingjson"
 	"github.com/mono-repo/docling-transformer-service/internal/infrastructure/telemetry"
 	"go.uber.org/zap"
 )
@@ -367,10 +366,6 @@ func (c *DoclingConverter) shouldEnableOCR(contentType string) bool {
 
 func (c *DoclingConverter) resolveOCROptions(contentType string, req domain.ConvertRequest) (doOCR bool, ocrLang []string, pdfBackend string) {
 	doOCR = c.shouldEnableOCR(contentType)
-
-	if req.EnableOCR != nil {
-		doOCR = *req.EnableOCR
-	}
 
 	if doOCR {
 		if req.OCRLanguage != "" {
@@ -1025,31 +1020,11 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 }
 
 func (c *DoclingConverter) selectMarkdown(doc exportDocumentResponse) string {
-	rendered := ""
 	mdContent := strings.TrimSpace(firstNonEmpty(doc.MdContent))
-
-	if parsed, err := doclingjson.Parse(doc.JsonContent); err == nil {
-		derived, ok := doclingjson.RenderMarkdown(parsed, doc.MdContent)
-		if ok {
-			rendered = strings.TrimSpace(derived)
-		}
-	}
-
-	if c.render.PreferJSON {
-		if rendered != "" {
-			return rendered
-		}
-		if mdContent != "" {
-			return mdContent
-		}
-		return rendered
-	}
-
 	if mdContent != "" {
 		return mdContent
 	}
-
-	return rendered
+	return ""
 }
 
 func firstNonEmpty(values ...*string) string {
