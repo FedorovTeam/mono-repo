@@ -86,14 +86,6 @@ func (f *fakeQueueRepository) MarkDoclingWaiting(context.Context, uuid.UUID, str
 	return nil
 }
 
-func (f *fakeQueueRepository) PrepareOverlayOCRPhase(context.Context, uuid.UUID, string, string) error {
-	return nil
-}
-
-func (f *fakeQueueRepository) ClearOverlayState(context.Context, uuid.UUID) error {
-	return nil
-}
-
 func (f *fakeQueueRepository) RequeueDoclingWaiting(context.Context, uuid.UUID, *time.Time) error {
 	return nil
 }

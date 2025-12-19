@@ -130,35 +130,7 @@ func main() {
 		},
 	}, logger)
 
-	// --- Base converter (важно: текст оставляем как в md_content, без JSON-перерендера) ---
-	convBase := converter.NewDoclingConverter(converter.Config{
-		Endpoint:           cfg.Docling.Endpoint,
-		APIKey:             cfg.Docling.APIKey,
-		DefaultLanguage:    cfg.Docling.DefaultLanguage,
-		PDFDefaultLanguage: cfg.Docling.PDFDefaultLanguage,
-		PDFEnableOCR:       cfg.Docling.PDFEnableOCR,
-		ForceOCR:           false,
-		PDFBackend:         cfg.Docling.PDFBackend,
-		Mode:               cfg.Docling.Mode,
-		TraceHttpRequest:   cfg.Observability.LoggingEnabled,
-		Storage: converter.StorageConfig{
-			Endpoint:  cfg.Docling.Storage.Endpoint,
-			AccessKey: cfg.Docling.Storage.AccessKey,
-			SecretKey: cfg.Docling.Storage.SecretKey,
-			Bucket:    cfg.Docling.Storage.Bucket,
-			Region:    cfg.Docling.Storage.Region,
-			UseSSL:    cfg.Docling.Storage.UseSSL,
-		},
-		Render: converter.RenderConfig{
-			PreferJSON:         false,
-			TwoPassVotingMerge: false,
-			VotingTableMinRows: 1,
-			PassBTableCoverage: 1,
-			PassBMatchRate:     0.6,
-		},
-	}, logger)
-
-	// gRPC usecase можно держать на OCR-конвертере: очередь/overlay делает воркер.
+	// gRPC usecase можно держать на OCR-конвертере: очередь использует тот же экземпляр.
 	transformUC := usecase.NewTransformerService(queueRepo, convOCR, usecase.TransformationConfig{
 		MarkdownBucket:    cfg.Minio.Bucket,
 		QueueLimit:        cfg.Service.QueueLimit,
@@ -169,7 +141,7 @@ func main() {
 		DefaultPDFBackend: cfg.Docling.PDFBackend,
 	}, logger, &http.Client{Timeout: 30 * time.Second})
 
-	workerProcessor := usecase.NewProcessor(queueRepo, convBase, convOCR, storageClient, logger, usecase.Config{
+	workerProcessor := usecase.NewProcessor(queueRepo, convOCR, storageClient, logger, usecase.Config{
 		MarkdownBucket:         cfg.Minio.Bucket,
 		MaxWorkers:             cfg.Service.MaxWorkers,
 		PollInterval:           cfg.Scheduler.PollInterval,
@@ -194,7 +166,6 @@ func main() {
 		DefaultForceOCR:        cfg.Docling.ForceOCR,
 		DefaultOCRLang:         cfg.Docling.PDFDefaultLanguage,
 		DefaultPDFBackend:      cfg.Docling.PDFBackend,
-		OverlayMatchRate:       0.6,
 	})
 
 	workerDone := make(chan struct{})

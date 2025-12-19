@@ -61,7 +61,6 @@ document_id, original_bucket, original_object_key,
 source_bucket, source_object_key, source_url,
 markdown_bucket, markdown_object_key, filename_extension,
 force_ocr, ocr_lang, pdf_backend,
-overlay_stage, base_markdown_bucket, base_markdown_object_key,
 created_at, started_at, finished_at, error, correlation_id
 `
 
@@ -120,14 +119,12 @@ INSERT INTO transformations_queue (
  source_bucket, source_object_key, source_url,
  markdown_bucket, markdown_object_key, filename_extension,
  force_ocr, ocr_lang, pdf_backend,
- overlay_stage, base_markdown_bucket, base_markdown_object_key,
  created_at, correlation_id, docling_poll_count, next_poll_at
 ) VALUES (
  $1, $2, $3, $4, $5,
  $6, $7, $8,
  $9, $10, $11,
  $12, $13, $14,
- NULL, NULL, NULL,
  NOW(), $15, 0, NULL
 )`
 
@@ -341,8 +338,7 @@ func (r *PostgresQueueRepository) MarkDone(ctx context.Context, id uuid.UUID, ma
 	const query = `
 UPDATE transformations_queue
 SET status = 'done', markdown_bucket = $1, markdown_object_key = $2,
-    finished_at = NOW(), error = NULL,
-    overlay_stage = NULL, base_markdown_bucket = NULL, base_markdown_object_key = NULL
+    finished_at = NOW(), error = NULL
 WHERE id = $3`
 
 	if _, err := r.pool.Exec(ctx, query, markdownBucket, markdownObjectKey, id); err != nil {
@@ -434,43 +430,6 @@ WHERE id = $1`
 		return fmt.Errorf("reschedule pending: %w", err)
 	}
 
-	return nil
-}
-
-// overlay: после base-прогона сохраняем base markdown в temp key и переводим задачу в ocr-фазу.
-func (r *PostgresQueueRepository) PrepareOverlayOCRPhase(ctx context.Context, id uuid.UUID, baseBucket, baseKey string) error {
-	const query = `
-UPDATE transformations_queue
-SET status = 'pending',
-    started_at = NULL,
-    finished_at = NULL,
-    error = NULL,
-    docling_task_id = NULL,
-    docling_job_id = NULL,
-    docling_poll_count = 0,
-    next_poll_at = NULL,
-    overlay_stage = 'ocr',
-    base_markdown_bucket = $2,
-    base_markdown_object_key = $3
-WHERE id = $1`
-
-	if _, err := r.pool.Exec(ctx, query, id, baseBucket, baseKey); err != nil {
-		return fmt.Errorf("prepare overlay ocr phase: %w", err)
-	}
-	return nil
-}
-
-func (r *PostgresQueueRepository) ClearOverlayState(ctx context.Context, id uuid.UUID) error {
-	const query = `
-UPDATE transformations_queue
-SET overlay_stage = NULL,
-    base_markdown_bucket = NULL,
-    base_markdown_object_key = NULL
-WHERE id = $1`
-
-	if _, err := r.pool.Exec(ctx, query, id); err != nil {
-		return fmt.Errorf("clear overlay state: %w", err)
-	}
 	return nil
 }
 
@@ -676,10 +635,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		forceOCR        sql.NullBool
 		ocrLang         sql.NullString
 		pdfBackend      sql.NullString
-
-		overlayStage          sql.NullString
-		baseMarkdownBucket    sql.NullString
-		baseMarkdownObjectKey sql.NullString
 	)
 
 	if err := row.Scan(
@@ -702,9 +657,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&forceOCR,
 		&ocrLang,
 		&pdfBackend,
-		&overlayStage,
-		&baseMarkdownBucket,
-		&baseMarkdownObjectKey,
 		&dto.CreatedAt,
 		&dto.StartedAt,
 		&dto.FinishedAt,
@@ -729,12 +681,6 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	}
 	dto.OCRLanguage = ocrLang.String
 	dto.PDFBackend = pdfBackend.String
-
-	if overlayStage.Valid {
-		dto.OverlayStage = transformations.OverlayStage(overlayStage.String)
-	}
-	dto.BaseMarkdownBucket = baseMarkdownBucket.String
-	dto.BaseMarkdownObjectKey = baseMarkdownObjectKey.String
 
 	return dto.ToDomain(), nil
 }

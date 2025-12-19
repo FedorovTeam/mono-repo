@@ -75,6 +75,10 @@ func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*transform
 	return tasks, nil
 }
 
+func (s *stubQueueRepo) AcquireSubmitLock(context.Context) (repo.SubmitLock, error) {
+	return stubSubmitLock{}, nil
+}
+
 func (s *stubQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*transformations.TransformationTask, error) {
 	if s.currentTask != nil && s.currentTask.ID == id {
 		return s.currentTask, nil
@@ -132,12 +136,6 @@ func (s *stubQueueRepo) RequeueDoclingWaiting(_ context.Context, id uuid.UUID, n
 	return nil
 }
 
-func (s *stubQueueRepo) PrepareOverlayOCRPhase(context.Context, uuid.UUID, string, string) error {
-	return nil
-}
-
-func (s *stubQueueRepo) ClearOverlayState(context.Context, uuid.UUID) error { return nil }
-
 func (s *stubQueueRepo) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
 	return 0, 0, nil
 }
@@ -167,6 +165,10 @@ func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
 	}
 	return s.pending, s.processing, s.waiting, nil
 }
+
+type stubSubmitLock struct{}
+
+func (stubSubmitLock) Release(context.Context) error { return nil }
 
 type stubStorage struct {
 	downloadContent []byte
@@ -305,7 +307,7 @@ func TestProcessorProcessesTask(t *testing.T) {
 	storage := &stubStorage{}
 	conv := &stubConverter{result: domain.ConvertResult{Content: []byte("converted"), MediaType: "text/markdown"}}
 
-	processor := usecase.NewProcessor(repository, conv, conv, storage, zap.NewNop(), usecase.Config{
+	processor := usecase.NewProcessor(repository, conv, storage, zap.NewNop(), usecase.Config{
 		MaxWorkers:           1,
 		PollInterval:         5 * time.Millisecond,
 		CleanupInterval:      20 * time.Millisecond,

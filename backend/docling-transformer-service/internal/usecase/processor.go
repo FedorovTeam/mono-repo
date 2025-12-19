@@ -37,8 +37,6 @@ type Config struct {
 	DefaultForceOCR        bool
 	DefaultOCRLang         string
 	DefaultPDFBackend      string
-
-	OverlayMatchRate float64
 }
 
 type Processor struct {
@@ -50,8 +48,7 @@ type Processor struct {
 
 func NewProcessor(
 	repository repo.QueueRepository,
-	baseConv domain.Converter,
-	ocrConv domain.Converter,
+	converter domain.Converter,
 	storage domain.ObjectStorage,
 	logger *zap.Logger,
 	cfg Config,
@@ -63,7 +60,7 @@ func NewProcessor(
 	normalized := normalizeConfig(cfg)
 	workerMetrics := metrics.NewWorkerMetrics(logger)
 
-	poller := NewDoclingPoller(baseConv, ocrConv, repository, workerMetrics, logger, DoclingPollerConfig{
+	poller := NewDoclingPoller(converter, repository, workerMetrics, logger, DoclingPollerConfig{
 		InitialInterval: normalized.DoclingInitialInterval,
 		MaxInterval:     normalized.DoclingMaxInterval,
 		BackoffFactor:   normalized.DoclingBackoffFactor,
@@ -72,7 +69,7 @@ func NewProcessor(
 		MaxRestarts:     normalized.DoclingMaxRestarts,
 	})
 
-	executor := NewConversionExecutor(repository, baseConv, ocrConv, storage, poller, workerMetrics, logger, ConversionExecutorConfig{
+	executor := NewConversionExecutor(repository, converter, storage, poller, workerMetrics, logger, ConversionExecutorConfig{
 		MarkdownBucket:       normalized.MarkdownBucket,
 		FastOperationTimeout: normalized.FastOperationTimeout,
 		UseSourceAsync:       normalized.UseSourceAsync,
@@ -80,7 +77,6 @@ func NewProcessor(
 		DefaultOCRLang:       normalized.DefaultOCRLang,
 		DefaultPDFBackend:    normalized.DefaultPDFBackend,
 		SubmitLockDelay:      normalized.SubmitLockDelay,
-		OverlayMatchRate:     normalized.OverlayMatchRate,
 	})
 
 	queueWorker := NewQueueWorker(repository, executor, workerMetrics, logger, QueueWorkerConfig{
@@ -148,9 +144,6 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.DefaultPDFBackend == "" {
 		cfg.DefaultPDFBackend = "dlparse_v4"
-	}
-	if cfg.OverlayMatchRate <= 0 {
-		cfg.OverlayMatchRate = 0.6
 	}
 	return cfg
 }

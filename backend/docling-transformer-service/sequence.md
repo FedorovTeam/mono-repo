@@ -40,21 +40,8 @@ sequenceDiagram
             WK->>DL: GET /v1/status/poll/{task_or_job_id} (X-Correlation-Id)
             WK->>PG: UpdateDoclingInfo(docling_task_id/job_id, docling_poll_count++)
             alt status/result готов
-                alt overlay требуется (force_ocr=true и pdf)
-                    alt overlay_stage != ocr (base-фаза)
-                        WK->>MN: PUT markdown_object_key+".base.md" в markdown_bucket
-                        WK->>PG: PrepareOverlayOCRPhase(status=pending, overlay_stage=ocr,<br/>clear docling ids, сохранить base refs)
-                        WK-->>WK: reschedule → обработка продолжится в OCR-фазе
-                    else overlay_stage=ocr
-                        WK->>MN: GET base_markdown_bucket/base_markdown_object_key
-                        WK-->>WK: merge overlayVotingTables(baseMD, ocrMD, match_rate)
-                        WK->>MN: PUT финальный markdown_object_key в markdown_bucket с media_type
-                        WK->>PG: MarkDone(status=done, finished_at, markdown_bucket/object_key)
-                    end
-                else обычный режим
-                    WK->>MN: PUT markdown_object_key в markdown_bucket с media_type
-                    WK->>PG: MarkDone(status=done, finished_at)
-                end
+                WK->>MN: PUT markdown_object_key в markdown_bucket с media_type
+                WK->>PG: MarkDone(status=done, finished_at)
             else статус pending/временная ошибка
                 alt превышен лимит поллинга или повтор ошибок
                     WK->>PG: RequeueDoclingWaiting(status=pending, retry_count++, reset docling ids/poll_count,<br/>next_poll_at=requeue_delay)
@@ -63,7 +50,7 @@ sequenceDiagram
                 end
             end
         else новая конвертация
-            WK-->>WK: определить converter (overlay base→baseConv/force_ocr=false, overlay ocr или обычный → ocrConv)
+            WK-->>WK: рассчитать OCR-параметры (force_ocr только для PDF)
             alt useSourceAsync (source_url пуст и известны source_bucket/object_key или включён fallback к оригиналу)
                 WK-->>DL: POST /v1/convert/file/async (source_bucket/object_key,<br/>target markdown_bucket/object_key, ForceOCR/EnableOCR/OCRLanguage/PDFBackend)
             else синхронная загрузка
