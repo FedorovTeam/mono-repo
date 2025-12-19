@@ -18,6 +18,8 @@ graph LR
     WRK -.->|OTLP (traces/metrics/logs)\nкогда включено| OBS
 ```
 
+Docling вызывается в одном проходе: после успешного ответа результат сразу сохраняется, без дополнительных base/OCR фаз и overlay-мерджа.
+
 - gRPC сервер слушает порт из `service.grpc_port` (в `config/config.yaml` по умолчанию `9090`) и принимает:
   - `ConvertDocumentToMarkdown` — ставит задачу в таблицу `transformations_queue` PostgreSQL. Контроль параллельности выполняется воркером через `service.max_workers`, а приём новых задач ограничивается отдельным лимитом `service.queue_limit` (если задан). При `wait_for_result` сервер блокируется до готовности задачи, опрашивая очередь по backoff-политике `docling.*`.
   - `ConvertDocxToMarkdown` — синхронно проксирует docx-файл (или скачивает `docx_url`) в Docling и возвращает готовый Markdown без постановки в очередь и без MinIO.

@@ -61,19 +61,12 @@ func TestBuildConvertResultFallbackToMarkdown(t *testing.T) {
 	}
 }
 
-func TestBuildConvertResultTwoPassVoting(t *testing.T) {
+func TestBuildConvertResultPrefersMarkdownWhenDisabled(t *testing.T) {
 	tableJSON := map[string]any{
 		"tables": []any{
 			map[string]any{
-				"id": "table_a",
-				"rows": []any{
-					map[string]any{"cells": []any{map[string]any{"text": "A"}}},
-					map[string]any{"cells": []any{map[string]any{"text": "B"}}},
-				},
-			},
-			map[string]any{
-				"id":   "table_b",
-				"rows": []any{map[string]any{"cells": []any{map[string]any{"text": "Only header"}}}},
+				"id":       "table_a",
+				"markdown": "|A|B|\n|-|-|\n|1|2|",
 			},
 		},
 		"marks": []any{map[string]any{"mark": "table_a"}},
@@ -82,10 +75,7 @@ func TestBuildConvertResultTwoPassVoting(t *testing.T) {
 	mdContent := "md-source"
 
 	converter := NewDoclingConverter(Config{Render: RenderConfig{
-		PreferJSON:         false,
-		TwoPassVotingMerge: true,
-		VotingTableMinRows: 2,
-		PassBTableCoverage: 0.5,
+		PreferJSON: false,
 	}}, nil)
 
 	result, err := converter.buildConvertResult(convertDocumentResponse{
@@ -99,7 +89,7 @@ func TestBuildConvertResultTwoPassVoting(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(result.Content) == mdContent {
-		t.Fatalf("expected JSON markdown to be selected by two-pass strategy")
+	if string(result.Content) != mdContent {
+		t.Fatalf("expected markdown content to win when prefer_json is disabled, got: %s", string(result.Content))
 	}
 }

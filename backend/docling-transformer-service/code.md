@@ -34,7 +34,7 @@ graph TD
 - `internal/infrastructure/repository` реализует `QueueRepository` для Postgres (`transformations_queue`): постановка и выбор задач, обновление статусов Docling, восстановление зависших, requeue/poll расписание и очистку завершённых.
 - `internal/infrastructure/storage` оборачивает MinIO‑клиент для скачивания исходного файла и загрузки результата конвертации в нужный бакет/ключ.
 - `internal/infrastructure/converter` реализует HTTP‑клиент Docling: submit задач (upload_file/source_async) с ретраями и заголовками correlation/API key, поллинг статуса/результата, выбор медиа-типов, построение multipart, поддержка MinIO‑стоража Docling и опциональный рендер Markdown из Docling JSON/таблиц.
-- `internal/infrastructure/doclingjson` парсит JSON Docling, собирает Markdown по таблицам/marks и выполняет voting merge таблиц в одном проходе.
+- `internal/infrastructure/doclingjson` парсит JSON Docling, собирает Markdown по таблицам/marks и оценивает заполненность voting-таблиц.
 - `internal/domain` содержит статусы, сущности очереди и утилиты: определение контент‑тайпов, нормализация расширений и построение ключей для Markdown.
 - `internal/infrastructure/telemetry` предоставляет генерацию correlation-id, настройку OTEL провайдеров и вспомогательные опции для gRPC telemetry handler и логгера.
 - `db/migrations` содержит миграции Postgres для таблицы `transformations_queue` и связанных индексов/колонок.

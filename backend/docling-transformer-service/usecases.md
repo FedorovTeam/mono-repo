@@ -10,6 +10,7 @@
   - Поля источника: `source_bucket` и `source_object_key` заполняются только вместе, `source_url` взаимоисключён с ними.
   - При превышении лимита очереди (`pending`/`processing`/`waiting_docling` >= `service.queue_limit`, если он задан) возвращается `ResourceExhausted`.
 - **Поведение:** если уже есть последняя задача для `document_id` не в статусе `failed`, она возвращается как результат вызова без создания новой записи; выходные bucket/object_key берутся из задачи или из запроса/конфига.
+- **Модель:** конвертация выполняется одним запросом к Docling без деления на base/OCR проходы и без overlay-мерджа таблиц.
 - **Шаги:**
 1. Принять gRPC вызов `ConvertDocumentToMarkdown` с обязательными `document_id`, `original_bucket`, `original_object_key`, опциональными `markdown_bucket`, `markdown_object_key`, `filename_extension`, флагом `wait_for_result`, а также источником (`source_bucket`/`source_object_key` либо `source_url`) без передачи кредов; `x-correlation-id` читается из метаданных или генерируется заново.
   2. Нормализовать расширение и вычислить `markdown_object_key`, если не передан (замена исходного расширения на `.md`).

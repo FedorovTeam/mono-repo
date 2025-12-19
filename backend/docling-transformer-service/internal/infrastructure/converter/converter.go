@@ -150,27 +150,7 @@ type StorageConfig struct {
 
 // RenderConfig управляет источниками данных для результата Docling.
 type RenderConfig struct {
-	PreferJSON         bool
-	TwoPassVotingMerge bool
-	VotingTableMinRows int
-	PassBTableCoverage float64
-	PassBMatchRate     float64
-}
-
-func normalizeRenderConfig(cfg RenderConfig) RenderConfig {
-	if cfg.VotingTableMinRows <= 0 {
-		cfg.VotingTableMinRows = 1
-	}
-	if cfg.PassBTableCoverage < 0 {
-		cfg.PassBTableCoverage = 0
-	}
-	if cfg.PassBTableCoverage > 1 {
-		cfg.PassBTableCoverage = 1
-	}
-	if cfg.PassBMatchRate <= 0 {
-		cfg.PassBMatchRate = 0.6
-	}
-	return cfg
+	PreferJSON bool
 }
 
 type storageSettings struct {
@@ -350,7 +330,7 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		storage:            cfg.Storage,
 		client:             httpClient,
 		logger:             logger,
-		render:             normalizeRenderConfig(cfg.Render),
+		render:             cfg.Render,
 	}
 }
 
@@ -1045,55 +1025,31 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 }
 
 func (c *DoclingConverter) selectMarkdown(doc exportDocumentResponse) string {
-	parsed, err := doclingjson.Parse(doc.JsonContent)
-	if err != nil {
-		return strings.TrimSpace(firstNonEmpty(doc.MdContent))
-	}
-
-	coverage := calculateTableCoverage(parsed.Tables, c.render.VotingTableMinRows)
-	fillRate := doclingjson.CalculateVotingFillRate(parsed.Tables)
-
-	rendered, ok := doclingjson.RenderMarkdown(parsed, doc.MdContent)
-	rendered = strings.TrimSpace(rendered)
+	rendered := ""
 	mdContent := strings.TrimSpace(firstNonEmpty(doc.MdContent))
 
-	c.logger.Info("docling voting coverage",
-		zap.Float64("table_coverage", coverage),
-		zap.Float64("fill_rate", fillRate),
-	)
+	if parsed, err := doclingjson.Parse(doc.JsonContent); err == nil {
+		derived, ok := doclingjson.RenderMarkdown(parsed, doc.MdContent)
+		if ok {
+			rendered = strings.TrimSpace(derived)
+		}
+	}
 
-	switch {
-	case c.render.PreferJSON && ok && rendered != "":
-		return rendered
-	case c.render.TwoPassVotingMerge && mdContent != "":
-		if ok && rendered != "" && (fillRate >= c.render.PassBTableCoverage || coverage >= c.render.PassBTableCoverage) {
+	if c.render.PreferJSON {
+		if rendered != "" {
 			return rendered
 		}
-		return mdContent
-	case mdContent != "":
-		return mdContent
-	case ok:
-		return rendered
-	default:
-		return ""
-	}
-}
-
-func calculateTableCoverage(tables []doclingjson.Table, minRows int) float64 {
-	if minRows <= 0 {
-		minRows = 1
-	}
-	total := len(tables)
-	if total == 0 {
-		return 0
-	}
-	filled := 0
-	for _, table := range tables {
-		if len(table.Rows) >= minRows {
-			filled++
+		if mdContent != "" {
+			return mdContent
 		}
+		return rendered
 	}
-	return float64(filled) / float64(total)
+
+	if mdContent != "" {
+		return mdContent
+	}
+
+	return rendered
 }
 
 func firstNonEmpty(values ...*string) string {

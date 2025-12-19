@@ -71,10 +71,7 @@ type DoclingConfig struct {
 
 // DoclingRenderConfig управляет выбором источника данных и стратегией merge для Docling.
 type DoclingRenderConfig struct {
-	PreferJSON         *bool   `yaml:"prefer_json"`
-	TwoPassVotingMerge bool    `yaml:"two_pass_voting_merge"`
-	VotingTableMinRows int     `yaml:"voting_table_min_rows"`
-	PassBTableCoverage float64 `yaml:"pass_b_table_coverage"`
+	PreferJSON *bool `yaml:"prefer_json"`
 }
 
 type DoclingStorageConfig struct {
@@ -225,12 +222,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("docling status backoff: %w", err)
 	}
 
-	if c.DoclingRender.VotingTableMinRows < 0 {
-		return fmt.Errorf("docling_render.voting_table_min_rows cannot be negative")
-	}
-	if c.DoclingRender.PassBTableCoverage < 0 || c.DoclingRender.PassBTableCoverage > 1 {
-		return fmt.Errorf("docling_render.pass_b_table_coverage must be between 0 and 1")
-	}
 	return nil
 }
 
@@ -279,15 +270,6 @@ func (c *Config) applyDefaults() {
 	if c.DoclingRender.PreferJSON == nil {
 		defaultPreferJSON := true
 		c.DoclingRender.PreferJSON = &defaultPreferJSON
-	}
-	if c.DoclingRender.VotingTableMinRows <= 0 {
-		c.DoclingRender.VotingTableMinRows = 1
-	}
-	if c.DoclingRender.PassBTableCoverage < 0 {
-		c.DoclingRender.PassBTableCoverage = 0
-	}
-	if c.DoclingRender.PassBTableCoverage > 1 {
-		c.DoclingRender.PassBTableCoverage = 1
 	}
 }
 
