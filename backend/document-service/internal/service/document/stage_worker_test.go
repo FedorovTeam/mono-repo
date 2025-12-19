@@ -396,6 +396,50 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	}
 }
 
+func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-ocr",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "path/doc",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "path/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc", MarkdownObjectKey: "path/doc.md"}},
+		ForceOCR:          true,
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ocr", Status: "done", MarkdownObjectKey: "path/doc.md"}}
+	activities := NewActivities(repo, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-ocr", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if transformer.lastRequest == nil {
+		t.Fatalf("expected transformer request to be sent")
+	}
+	if transformer.lastRequest.GetFilenameExtension() != "pdf" {
+		t.Fatalf("expected filename extension to be propagated, got %v", transformer.lastRequest.GetFilenameExtension())
+	}
+
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if payload.FilenameExtension != "pdf" {
+		t.Fatalf("expected filename extension in payload, got %v", result.Payload)
+	}
+	if payload.ForceOCR != nil {
+		t.Fatalf("expected force_ocr to be omitted from payload, got %v", result.Payload)
+	}
+}
+
 func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-failed-status",
