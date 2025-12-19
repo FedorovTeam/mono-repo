@@ -93,7 +93,6 @@ func (w *QueueWorker) handleSingle(ctx context.Context, task *transformations.Tr
 		zap.String("correlation_id", correlationID),
 		zap.Int("attempt", task.RetryCount),
 		zap.Bool("retry", isRetry),
-		zap.String("overlay_stage", string(task.OverlayStage)),
 	)
 
 	state, err := w.handler.ProcessTask(taskCtx, task)

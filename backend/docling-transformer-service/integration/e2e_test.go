@@ -75,6 +75,10 @@ func (s *stubQueueRepo) AcquireBatch(_ context.Context, limit int) ([]*transform
 	return tasks, nil
 }
 
+func (s *stubQueueRepo) AcquireSubmitLock(context.Context) (repo.SubmitLock, error) {
+	return stubSubmitLock{}, nil
+}
+
 func (s *stubQueueRepo) GetByID(_ context.Context, id uuid.UUID) (*transformations.TransformationTask, error) {
 	if s.currentTask != nil && s.currentTask.ID == id {
 		return s.currentTask, nil
@@ -132,12 +136,6 @@ func (s *stubQueueRepo) RequeueDoclingWaiting(_ context.Context, id uuid.UUID, n
 	return nil
 }
 
-func (s *stubQueueRepo) PrepareOverlayOCRPhase(context.Context, uuid.UUID, string, string) error {
-	return nil
-}
-
-func (s *stubQueueRepo) ClearOverlayState(context.Context, uuid.UUID) error { return nil }
-
 func (s *stubQueueRepo) ActivateWaiting(context.Context, time.Time, time.Duration) (int, int, error) {
 	return 0, 0, nil
 }
@@ -159,6 +157,10 @@ func (s *stubQueueRepo) RetryFailed(context.Context, time.Time, int) (int, int, 
 func (s *stubQueueRepo) CleanupFinished(context.Context, time.Duration) (int, error) {
 	s.cleanupCalls++
 	return 0, nil
+}
+
+func (s *stubQueueRepo) ReschedulePending(context.Context, uuid.UUID, time.Time) error {
+	return nil
 }
 
 func (s *stubQueueRepo) CountByStatus(context.Context) (int, int, int, error) {
@@ -189,6 +191,10 @@ func (s *stubStorage) Upload(_ context.Context, bucket, key, contentType string,
 	s.lastContentType = contentType
 	return nil
 }
+
+type stubSubmitLock struct{}
+
+func (stubSubmitLock) Release(context.Context) error { return nil }
 
 type stubConverter struct {
 	result domain.ConvertResult

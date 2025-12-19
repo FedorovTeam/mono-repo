@@ -33,10 +33,6 @@ type TransformationDTO struct {
 	PDFBackend    string
 	CorrelationID string
 
-	OverlayStage          transformations.OverlayStage
-	BaseMarkdownBucket    string
-	BaseMarkdownObjectKey string
-
 	CreatedAt  time.Time
 	StartedAt  *time.Time
 	FinishedAt *time.Time
@@ -68,10 +64,6 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		OCRLanguage:   dto.OCRLanguage,
 		PDFBackend:    dto.PDFBackend,
 		CorrelationID: dto.CorrelationID,
-
-		OverlayStage:          dto.OverlayStage,
-		BaseMarkdownBucket:    dto.BaseMarkdownBucket,
-		BaseMarkdownObjectKey: dto.BaseMarkdownObjectKey,
 
 		CreatedAt:  dto.CreatedAt,
 		StartedAt:  dto.StartedAt,

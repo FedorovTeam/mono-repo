@@ -69,10 +69,6 @@ func (p *pollingRepoStub) MarkDoclingWaiting(ctx context.Context, taskID uuid.UU
 	p.lastWaitingNextPoll = nextPoll
 	return nil
 }
-func (p *pollingRepoStub) PrepareOverlayOCRPhase(context.Context, uuid.UUID, string, string) error {
-	return nil
-}
-func (p *pollingRepoStub) ClearOverlayState(context.Context, uuid.UUID) error { return nil }
 func (p *pollingRepoStub) RequeueDoclingWaiting(_ context.Context, id uuid.UUID, nextPollAt *time.Time) error {
 	p.requeueCalls++
 	p.lastRequeueID = id
@@ -108,8 +104,8 @@ func TestConversionExecutorSetsWaitingState(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{}
 	conv := &submitOnlyConverter{jobID: "job-123"}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{})
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md"})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md"})
 
 	task := &transformations.TransformationTask{
 		ID:                uuid.New(),
@@ -135,8 +131,8 @@ func TestConversionExecutorReschedulesAfterTemporarySubmitError(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{}
 	conv := &submitOnlyConverter{submitErr: &domain.TemporarySubmitRetryExhaustedError{Err: temporaryStatusError{}}}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md"})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md"})
 
 	task := &transformations.TransformationTask{
 		ID:                uuid.New(),
@@ -168,8 +164,8 @@ func TestConversionExecutorReschedulesWhenSubmitLockBusy(t *testing.T) {
 	repoStub.locked.Store(true)
 	storage := &trackingStorage{}
 	conv := &submitOnlyConverter{jobID: "job-123"}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md", SubmitLockDelay: time.Second})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md", SubmitLockDelay: time.Second})
 
 	task := &transformations.TransformationTask{
 		ID:                uuid.New(),
@@ -199,8 +195,8 @@ func TestConversionExecutorSerializesConcurrentSubmits(t *testing.T) {
 	repoStub := &lockingRepoStub{}
 	storage := &trackingStorage{}
 	conv := newBlockingConverter()
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md", SubmitLockDelay: 50 * time.Millisecond})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{MarkdownBucket: "md", SubmitLockDelay: 50 * time.Millisecond})
 
 	firstTask := &transformations.TransformationTask{ID: uuid.New(), OriginalBucket: "orig", OriginalObjectKey: "path/first.pdf", FilenameExtension: "pdf"}
 	secondTask := &transformations.TransformationTask{ID: uuid.New(), OriginalBucket: "orig", OriginalObjectKey: "path/second.pdf", FilenameExtension: "pdf"}
@@ -264,8 +260,8 @@ func TestConversionExecutorRestartsAfterDoclingRequeue(t *testing.T) {
 	storage := &trackingStorage{}
 	conv := &restartingConverter{submitOnlyConverter: submitOnlyConverter{jobID: "job-new"}}
 	workerMetrics := metrics.NewWorkerMetrics(zap.NewNop())
-	poller := NewDoclingPoller(conv, conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{MaxAttempts: 1, InitialInterval: time.Second})
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, workerMetrics, zap.NewNop(), ConversionExecutorConfig{
+	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{MaxAttempts: 1, InitialInterval: time.Second})
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, workerMetrics, zap.NewNop(), ConversionExecutorConfig{
 		MarkdownBucket: "md",
 		UseSourceAsync: true,
 	})
@@ -317,10 +313,10 @@ func TestConversionExecutorDownloadsFromSourceURL(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{}
 	conv := &submitOnlyConverter{jobID: "job-123"}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
 	httpClient := &recordingHTTPClient{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewBufferString("url-content"))}}
 
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
 		MarkdownBucket:       "md",
 		FastOperationTimeout: time.Second,
 		HTTPClient:           httpClient,
@@ -354,10 +350,10 @@ func TestConversionExecutorDownloadsFromSourceBucket(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{downloadContent: []byte("bucket-content")}
 	conv := &submitOnlyConverter{jobID: "job-123"}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
 	httpClient := &recordingHTTPClient{}
 
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
 		MarkdownBucket:       "md",
 		FastOperationTimeout: time.Second,
 		HTTPClient:           httpClient,
@@ -391,9 +387,9 @@ func TestConversionExecutorUsesSourceAsyncWhenSourceObjectProvided(t *testing.T)
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{downloadContent: []byte("should-not-be-used")}
 	conv := &submitOnlyConverter{jobID: "job-123"}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
 
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
 		MarkdownBucket: "md",
 	})
 
@@ -427,10 +423,10 @@ func TestConversionExecutorErrorsOnUnavailableSource(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	storage := &trackingStorage{downloadErr: errors.New("not found")}
 	conv := &submitOnlyConverter{jobID: "job-123"}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{})
 	httpClient := &recordingHTTPClient{err: errors.New("unreachable")}
 
-	executor := NewConversionExecutor(repoStub, conv, conv, storage, poller, nil, nil, ConversionExecutorConfig{
+	executor := NewConversionExecutor(repoStub, conv, storage, poller, nil, nil, ConversionExecutorConfig{
 		MarkdownBucket:       "md",
 		FastOperationTimeout: time.Second,
 		HTTPClient:           httpClient,
@@ -456,7 +452,7 @@ func (temporaryStatusError) StatusCode() int { return 503 }
 func TestDoclingPollerTemporaryErrorReturnsWaiting(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	conv := &converterWithTemporaryError{}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, DoclingPollerConfig{MaxAttempts: 3})
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, DoclingPollerConfig{MaxAttempts: 3})
 
 	task := &transformations.TransformationTask{ID: uuid.New(), DoclingTaskID: "job-1", DoclingJobID: "job-1", CreatedAt: time.Now().Add(-time.Minute)}
 
@@ -488,7 +484,7 @@ func TestDoclingPollerTreats404AsTemporary(t *testing.T) {
 
 	conv := converter.NewDoclingConverter(converter.Config{Endpoint: server.URL}, nil)
 	config := DoclingPollerConfig{InitialInterval: 10 * time.Millisecond, MaxInterval: time.Second, BackoffFactor: 2, MaxAttempts: 5}
-	poller := NewDoclingPoller(conv, conv, repoStub, nil, nil, config)
+	poller := NewDoclingPoller(conv, repoStub, nil, nil, config)
 
 	task := &transformations.TransformationTask{ID: uuid.New(), DoclingTaskID: "job-404", DoclingJobID: "job-404", CreatedAt: time.Now().Add(-time.Minute)}
 
@@ -933,7 +929,6 @@ func TestNormalizeConfigKeepsProvidedValues(t *testing.T) {
 		DoclingMaxRestarts:     7,
 		DefaultOCRLang:         "fr",
 		DefaultPDFBackend:      "custom_backend",
-		OverlayMatchRate:       0.9,
 	}
 
 	normalized := normalizeConfig(cfg)

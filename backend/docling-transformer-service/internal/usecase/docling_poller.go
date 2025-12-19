@@ -29,18 +29,16 @@ type DoclingPollerConfig struct {
 }
 
 type DoclingPoller struct {
-	baseConv domain.Converter
-	ocrConv  domain.Converter
-	repo     repo.QueueRepository
-	metrics  *metrics.WorkerMetrics
-	logger   *zap.Logger
-	cfg      DoclingPollerConfig
-	errors   *pollErrorTracker
+	conv    domain.Converter
+	repo    repo.QueueRepository
+	metrics *metrics.WorkerMetrics
+	logger  *zap.Logger
+	cfg     DoclingPollerConfig
+	errors  *pollErrorTracker
 }
 
 func NewDoclingPoller(
-	baseConv domain.Converter,
-	ocrConv domain.Converter,
+	conv domain.Converter,
 	repository repo.QueueRepository,
 	metrics *metrics.WorkerMetrics,
 	logger *zap.Logger,
@@ -50,13 +48,12 @@ func NewDoclingPoller(
 		logger = zap.NewNop()
 	}
 	return &DoclingPoller{
-		baseConv: baseConv,
-		ocrConv:  ocrConv,
-		repo:     repository,
-		metrics:  metrics,
-		logger:   logger,
-		cfg:      cfg,
-		errors:   newPollErrorTracker(),
+		conv:    conv,
+		repo:    repository,
+		metrics: metrics,
+		logger:  logger,
+		cfg:     cfg,
+		errors:  newPollErrorTracker(),
 	}
 }
 
@@ -88,9 +85,7 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 		return nil, ErrDoclingWaiting
 	}
 
-	conv := p.chooseConverter(task)
-
-	statusResult, checkErr := conv.CheckStatus(ctx, taskID)
+	statusResult, checkErr := p.conv.CheckStatus(ctx, taskID)
 
 	newPollCount := pollOffset + 1
 	task.DoclingTaskID = ids.TaskID
@@ -99,7 +94,6 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 
 	logIDs := []zap.Field{
 		zap.String("docling_task_id", ids.TaskID),
-		zap.String("overlay_stage", string(task.OverlayStage)),
 		zap.Int("docling_polls", newPollCount),
 	}
 	if ids.JobID != "" {
@@ -167,16 +161,6 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 	return &result, nil
 }
 
-func (p *DoclingPoller) chooseConverter(task *transformations.TransformationTask) domain.Converter {
-	// Важно: статус должен проверяться тем же конвертером, который сабмитил
-	// overlay-base → baseConv
-	// overlay-ocr или обычная задача → ocrConv
-	if task.OverlayStage == transformations.OverlayStageBase {
-		return p.baseConv
-	}
-	return p.ocrConv
-}
-
 func (p *DoclingPoller) isWaitingLimitReached(pollCount int) bool {
 	return p.cfg.MaxAttempts > 0 && pollCount >= p.cfg.MaxAttempts
 }
@@ -207,7 +191,6 @@ func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transforma
 	p.logger.Warn("docling job requeued",
 		zap.String("queue_id", task.ID.String()),
 		zap.String("reason", reason),
-		zap.String("overlay_stage", string(task.OverlayStage)),
 	)
 
 	return nil
