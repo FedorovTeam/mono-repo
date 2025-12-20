@@ -10,6 +10,7 @@ import (
 
 const (
 	doclingEndpointEnv = "DOCLING_ENDPOINT"
+	doclingAPIKeyEnv   = "DOCLING_API_KEY"
 
 	minioEndpointEnv  = "MINIO_ENDPOINT"
 	minioAccessKeyEnv = "MINIO_ACCESS_KEY"
@@ -28,6 +29,10 @@ func LoadTestConfig(t *testing.T) *config.Config {
 
 	if endpoint := os.Getenv(doclingEndpointEnv); endpoint != "" {
 		cfg.Docling.Endpoint = endpoint
+	}
+
+	if apiKey := os.Getenv(doclingAPIKeyEnv); apiKey != "" {
+		cfg.Docling.APIKey = apiKey
 	}
 
 	applyMinioOverrides(t, cfg)
