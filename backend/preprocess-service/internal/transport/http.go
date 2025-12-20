@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/metric"
+	otelmetric "go.opentelemetry.io/otel/metric/noop"
 )
 
 type HTTPServer struct {
@@ -18,6 +19,13 @@ type HTTPServer struct {
 }
 
 func NewHTTPServer(port int, db *pgxpool.Pool, metricsHandler http.Handler, meter metric.Meter, logger *slog.Logger) *HTTPServer {
+	if meter == nil {
+		meter = otelmetric.NewMeterProvider().Meter("preprocess-service")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

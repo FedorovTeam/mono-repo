@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/metric"
+	otelmetric "go.opentelemetry.io/otel/metric/noop"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/domain"
@@ -73,10 +75,16 @@ func New(cfg config.Config, deps Dependencies) (*App, error) {
 	}
 	handler := transport.NewPreprocessHandler(submitService)
 
-	meter := deps.Telemetry.Meter()
-	var metricsHandler http.Handler
+	var (
+		metricsHandler http.Handler
+		meter          metric.Meter
+	)
+
 	if deps.Telemetry != nil {
+		meter = deps.Telemetry.Meter()
 		metricsHandler = deps.Telemetry.MetricsHandler
+	} else {
+		meter = otelmetric.NewMeterProvider().Meter("preprocess-service")
 	}
 
 	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler, meter, logger)
