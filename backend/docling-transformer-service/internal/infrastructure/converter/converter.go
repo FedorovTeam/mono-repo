@@ -181,6 +181,7 @@ type Config struct {
 	OCRLang          []string
 	SkipOCROnTextPDF *bool
 	Mode             string
+	EngineKind       string
 	Storage          StorageConfig
 	TraceHttpRequest bool
 	Render           RenderConfig
@@ -289,20 +290,22 @@ type doclingSubmitResponse struct {
 }
 
 type convertDocumentsRequest struct {
-	Sources []s3SourceRequest `json:"sources"`
-	Target  *s3TargetRequest  `json:"target,omitempty"`
-	Options doclingOptions    `json:"options,omitempty"`
+	Sources    []s3SourceRequest `json:"sources"`
+	Target     *s3TargetRequest  `json:"target,omitempty"`
+	Options    doclingOptions    `json:"options,omitempty"`
+	EngineKind string            `json:"engine_kind,omitempty"`
 }
 
 type s3SourceRequest struct {
-	Kind      string `json:"kind"`
-	Endpoint  string `json:"endpoint"`
-	VerifySSL bool   `json:"verify_ssl"`
-	AccessKey string `json:"access_key"`
-	SecretKey string `json:"secret_key"`
-	Bucket    string `json:"bucket"`
-	KeyPrefix string `json:"key_prefix"`
-	Region    string `json:"region,omitempty"`
+	Kind       string `json:"kind"`
+	Endpoint   string `json:"endpoint"`
+	VerifySSL  bool   `json:"verify_ssl"`
+	AccessKey  string `json:"access_key"`
+	SecretKey  string `json:"secret_key"`
+	Bucket     string `json:"bucket"`
+	KeyPrefix  string `json:"key_prefix"`
+	Region     string `json:"region,omitempty"`
+	EngineKind string `json:"engine_kind,omitempty"`
 }
 
 type s3TargetRequest struct {
@@ -336,6 +339,7 @@ type DoclingConverter struct {
 	client           *http.Client
 	logger           *zap.Logger
 	render           RenderConfig
+	engineKind       string
 }
 
 // Option позволяет переопределить параметры DoclingConverter.
@@ -354,6 +358,13 @@ func WithHTTPClient(client *http.Client) Option {
 func WithBaseEndpoint(endpoint string) Option {
 	return func(c *DoclingConverter) {
 		c.endpoint = strings.TrimRight(endpoint, "/")
+	}
+}
+
+// WithEngineKind задаёт значение engine_kind для запросов в Docling.
+func WithEngineKind(kind string) Option {
+	return func(c *DoclingConverter) {
+		c.engineKind = strings.TrimSpace(kind)
 	}
 }
 
@@ -397,6 +408,7 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger, opts ...Option) *Doclin
 		ocrEngine:        ocrEngine,
 		ocrLang:          append([]string(nil), ocrLang...),
 		skipOCROnTextPDF: skipOCROnTextPDF,
+		engineKind:       strings.TrimSpace(cfg.EngineKind),
 	}
 
 	for _, opt := range opts {
@@ -913,6 +925,10 @@ func (c *DoclingConverter) submitSourceAsync(
 	useOCR bool,
 ) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
+	submitURL, err := url.Parse(endpoint)
+	if err != nil {
+		return domain.DoclingIdentifiers{}, fmt.Errorf("parse docling source endpoint: %w", err)
+	}
 
 	sourceStorage, err := c.resolveSourceStorage(req)
 	if err != nil {
@@ -926,17 +942,19 @@ func (c *DoclingConverter) submitSourceAsync(
 	requestBody := convertDocumentsRequest{
 		Sources: []s3SourceRequest{
 			{
-				Kind:      "s3",
-				Endpoint:  sourceStorage.Endpoint,
-				VerifySSL: sourceStorage.UseSSL,
-				AccessKey: sourceStorage.AccessKey,
-				SecretKey: sourceStorage.SecretKey,
-				Bucket:    req.SourceBucket,
-				KeyPrefix: strings.TrimPrefix(req.SourceObjectKey, "/"),
-				Region:    sourceStorage.Region,
+				Kind:       "s3",
+				Endpoint:   sourceStorage.Endpoint,
+				VerifySSL:  sourceStorage.UseSSL,
+				AccessKey:  sourceStorage.AccessKey,
+				SecretKey:  sourceStorage.SecretKey,
+				Bucket:     req.SourceBucket,
+				KeyPrefix:  strings.TrimPrefix(req.SourceObjectKey, "/"),
+				Region:     sourceStorage.Region,
+				EngineKind: c.engineKind,
 			},
 		},
-		Options: c.buildDoclingOptions(fileExt, useOCR),
+		Options:    c.buildDoclingOptions(fileExt, useOCR),
+		EngineKind: c.engineKind,
 	}
 
 	if req.TargetBucket != "" {
@@ -957,7 +975,13 @@ func (c *DoclingConverter) submitSourceAsync(
 		return domain.DoclingIdentifiers{}, fmt.Errorf("marshal docling source request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if c.engineKind != "" {
+		query := submitURL.Query()
+		query.Set("engine_kind", c.engineKind)
+		submitURL.RawQuery = query.Encode()
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, submitURL.String(), bytes.NewReader(payload))
 	if err != nil {
 		return domain.DoclingIdentifiers{}, fmt.Errorf("build docling source request: %w", err)
 	}
