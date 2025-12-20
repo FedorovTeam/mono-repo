@@ -3,8 +3,6 @@ package domain
 import (
 	"fmt"
 	"time"
-
-	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
 )
 
 type PreprocessJob struct {
@@ -17,7 +15,7 @@ type PreprocessJob struct {
 	TargetKey     string
 	CallbackURL   string
 	CorrelationID string
-	Status        preprocessv1.PreprocessStatus
+	Status        PreprocessStatus
 	ErrorMessage  string
 	ErrorCode     string
 	ErrorDetails  map[string]string

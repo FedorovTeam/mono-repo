@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sync/semaphore"
 	"log/slog"
 
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/usecase/ports"
 	"preprocess-service/internal/usecase/preprocess"
 )
@@ -189,7 +190,7 @@ func (w *Worker) pickJob(ctx context.Context) (QueueJob, bool, error) {
         ORDER BY next_run_at
         LIMIT 1
         FOR UPDATE SKIP LOCKED
-    `, preprocess.StatusPending, preprocess.StatusFailed)
+    `, domain.StatusPending.ToDB(), domain.StatusFailed.ToDB())
 
 	var job QueueJob
 	err = row.Scan(&job.JobID, &job.SourceBucket, &job.SourceKey, &job.SourceETag, &job.TargetBucket, &job.TargetKey, &job.Attempts, &job.MaxAttempts, &job.CallbackURL, &job.CorrelationID)
@@ -206,7 +207,7 @@ func (w *Worker) pickJob(ctx context.Context) (QueueJob, bool, error) {
         UPDATE preprocess_queue
         SET status = $1, attempts = attempts + 1, started_at = now(), updated_at = now()
         WHERE job_id = $2
-    `, preprocess.StatusProcessing, job.JobID); err != nil {
+    `, domain.StatusProcessing.ToDB(), job.JobID); err != nil {
 		return QueueJob{}, false, err
 	}
 

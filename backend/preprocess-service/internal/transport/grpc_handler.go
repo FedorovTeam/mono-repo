@@ -57,7 +57,7 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 	if found {
 		return &preprocessv1.SubmitPreprocessResponse{
 			JobId:         existing.ID,
-			Status:        existing.Status,
+			Status:        existing.Status.ToProto(),
 			ErrorMessage:  existing.ErrorMessage,
 			CorrelationId: req.GetCorrelationId(),
 		}, nil
@@ -73,7 +73,7 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		TargetKey:     targetKey,
 		CallbackURL:   req.GetCallbackUrl(),
 		CorrelationID: req.GetCorrelationId(),
-		Status:        preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING,
+		Status:        domain.StatusPending,
 		ErrorDetails:  map[string]string{},
 		UpdatedAt:     time.Now().UTC(),
 	}
@@ -88,7 +88,7 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 
 	return &preprocessv1.SubmitPreprocessResponse{
 		JobId:         job.ID,
-		Status:        job.Status,
+		Status:        job.Status.ToProto(),
 		CorrelationId: job.CorrelationID,
 	}, nil
 }
@@ -136,7 +136,7 @@ func (h *PreprocessHandler) GetPreprocessStatus(ctx context.Context, req *prepro
 		SourceKey:     job.SourceKey,
 		TargetBucket:  job.TargetBucket,
 		TargetKey:     job.TargetKey,
-		Status:        job.Status,
+		Status:        job.Status.ToProto(),
 		ErrorMessage:  job.ErrorMessage,
 		ErrorCode:     job.ErrorCode,
 		ErrorDetails:  errorDetails,
