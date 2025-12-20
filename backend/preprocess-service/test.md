@@ -8,6 +8,14 @@
    curl -f http://localhost:8082/ready
    curl -f http://localhost:8082/metrics | head -n 5
    ```
+
+## Конфигурация для тестов
+1. Подготовьте тестовую копию `config/config.yaml` в `config/testdata/config.yaml` и пропишите в ней актуальные пути для `preprocess.libreoffice_path`, `preprocess.working_dir` и `preprocess.output_dir`.
+2. При запуске тестов укажите путь к файлу через `CONFIG_PATH`, чувствительные параметры (`POSTGRES_DSN`, `MINIO_*`) можно перекрыть переменными окружения:
+   ```bash
+   CONFIG_PATH=./config/testdata/config.yaml go test ./...
+   ```
+
 ## Демонстрация через docker-compose
 1. Запустить стенд: `docker compose up -d` (PostgreSQL, MinIO и preprocess-service).
 2. Проверить готовность:

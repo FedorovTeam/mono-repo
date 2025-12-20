@@ -1,0 +1,34 @@
+service:
+  name: preprocess-service
+  port: 8082
+  grpc_port: 9082
+  region: ru-msk-1
+
+postgres:
+  dsn: postgres://postgres:password@localhost:5432/preprocess?sslmode=disable
+
+minio:
+  endpoint: localhost:9000
+  access_key: demo
+  secret_key: demo-secret
+  ssl: false
+  region: local
+
+preprocess:
+  libreoffice_path: /usr/bin/libreoffice
+  working_dir: /tmp/preprocess-service/work
+  output_dir: /tmp/preprocess-service/output
+  storage_mode: filesystem
+  local_source_dir: /tmp/preprocess-service/source
+  local_target_dir: /tmp/preprocess-service/target
+  source_bucket: preprocess-source
+  target_bucket: preprocess-target
+  target_key_prefix: converted
+  target_media_type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+  worker_concurrency: 2
+  convert_timeout: 2m
+  backoff: 30s
+  poll_interval: 2s
+
+logging:
+  level: debug

@@ -3,29 +3,42 @@ package submit
 import (
 	"context"
 	"errors"
+	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"preprocess-service/internal/config"
 	"preprocess-service/internal/domain"
 	"preprocess-service/internal/storage/memory"
 )
 
+func loadTestConfig(t *testing.T) config.Config {
+	t.Helper()
+
+	t.Setenv("CONFIG_PATH", filepath.Join("config", "testdata", "config.yaml"))
+
+	return config.LoadTestConfig(t)
+}
+
 func TestSubmitPreprocessIdempotent(t *testing.T) {
 	t.Helper()
 
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, "target", "converted")
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
 
 	cmd := SubmitCommand{
 		DocumentID:    "doc-1",
-		SourceBucket:  "source",
-		SourceKey:     "file.docx",
+		SourceBucket:  cfg.Preprocess.SourceBucket,
+		SourceKey:     path.Join("incoming", "file.docx"),
 		SourceETag:    "etag-1",
-		TargetBucket:  "target",
-		TargetKey:     "converted/file.docx",
+		TargetBucket:  cfg.Preprocess.TargetBucket,
+		TargetKey:     path.Join(cfg.Preprocess.TargetKeyPrefix, "file.docx"),
 		CorrelationID: "corr-1",
 	}
 
@@ -52,16 +65,18 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	t.Helper()
 
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, "default-target", "converted")
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
 
 	cmd := SubmitCommand{
 		DocumentID:   "doc-2",
-		SourceBucket: "source",
-		SourceKey:    "file.docx",
+		SourceBucket: cfg.Preprocess.SourceBucket,
+		SourceKey:    path.Join("incoming", "file.docx"),
 		SourceETag:   "etag-2",
 	}
 
@@ -70,11 +85,11 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 		t.Fatalf("submit failed: %v", err)
 	}
 
-	if job.TargetBucket != "default-target" {
+	if job.TargetBucket != cfg.Preprocess.TargetBucket {
 		t.Fatalf("unexpected target bucket: %s", job.TargetBucket)
 	}
 
-	if job.TargetKey != "converted/doc-2.docx" {
+	if job.TargetKey != path.Join(cfg.Preprocess.TargetKeyPrefix, "doc-2.docx") {
 		t.Fatalf("unexpected target key: %s", job.TargetKey)
 	}
 }
@@ -82,8 +97,10 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 func TestSubmitPreprocessValidatesInput(t *testing.T) {
 	t.Helper()
 
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, "target", "converted")
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
@@ -101,8 +118,10 @@ func TestSubmitPreprocessValidatesInput(t *testing.T) {
 func TestGetStatusReturnsJob(t *testing.T) {
 	t.Helper()
 
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, "target", "converted")
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
@@ -140,8 +159,10 @@ func TestGetStatusReturnsJob(t *testing.T) {
 func TestGetStatusNotFound(t *testing.T) {
 	t.Helper()
 
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, "target", "converted")
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
