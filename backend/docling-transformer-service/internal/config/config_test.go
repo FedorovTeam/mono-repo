@@ -25,7 +25,10 @@ func TestValidateSuccess(t *testing.T) {
 			FailedRetryDelay:     time.Minute,
 			MaxFailedRetries:     3,
 		},
-		Docling: DoclingConfig{Endpoint: "http://docling"},
+		Docling: DoclingConfig{
+			Endpoint:  "http://docling",
+			OCREngine: "easyocr",
+		},
 		Minio: MinioConfig{
 			Endpoint:  "minio",
 			AccessKey: "key",
@@ -67,7 +70,7 @@ func TestValidateFailsWithoutSourceAsyncStorage(t *testing.T) {
 			FailedRetryDelay:     time.Minute,
 			MaxFailedRetries:     3,
 		},
-		Docling: DoclingConfig{Endpoint: "http://docling", Mode: "source_async"},
+		Docling: DoclingConfig{Endpoint: "http://docling", Mode: "source_async", OCREngine: "easyocr"},
 		Minio: MinioConfig{
 			Endpoint:  "minio",
 			AccessKey: "key",

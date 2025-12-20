@@ -44,6 +44,14 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 				t.Fatalf("unexpected from_formats: %+v", fromFormats)
 			}
 
+			if engine := r.MultipartForm.Value["ocr_engine"]; !reflect.DeepEqual(engine, []string{"easyocr"}) {
+				t.Fatalf("unexpected ocr_engine: %+v", engine)
+			}
+
+			if langs := r.MultipartForm.Value["ocr_lang"]; !reflect.DeepEqual(langs, []string{"ru"}) {
+				t.Fatalf("unexpected ocr_lang: %+v", langs)
+			}
+
 			if _, exists := r.MultipartForm.Value["do_ocr"]; exists {
 				t.Fatalf("did not expect do_ocr field in minimal contract")
 			}
@@ -106,7 +114,10 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
+	conv := NewDoclingConverter(Config{
+		Endpoint:        server.URL,
+		DefaultLanguage: "ru",
+	}, zap.NewNop())
 
 	ctx, _ := telemetry.ContextWithCorrelationID(context.Background(), "corr-submit")
 
@@ -205,6 +216,8 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 		APIKey:          "token",
 		DefaultLanguage: "ru",
 		Mode:            "source_async",
+		OCREngine:       "rapidocr",
+		OCRLang:         []string{"en", "de"},
 		Storage: StorageConfig{
 			Endpoint:  "minio:9000",
 			AccessKey: "acc",
@@ -270,6 +283,14 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 
 	if !reflect.DeepEqual(receivedRequest.Options.FromFormats, []string{"pdf"}) {
 		t.Fatalf("unexpected from_formats: %+v", receivedRequest.Options.FromFormats)
+	}
+
+	if receivedRequest.Options.OCREngine != "rapidocr" {
+		t.Fatalf("unexpected ocr_engine: %s", receivedRequest.Options.OCREngine)
+	}
+
+	if !reflect.DeepEqual(receivedRequest.Options.OCRLang, []string{"en", "de"}) {
+		t.Fatalf("unexpected ocr_lang: %+v", receivedRequest.Options.OCRLang)
 	}
 }
 
@@ -603,6 +624,12 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 	}
 	if !reflect.DeepEqual(receivedOptions.FromFormats, []string{"docx"}) {
 		t.Fatalf("unexpected from_formats: %+v", receivedOptions.FromFormats)
+	}
+	if receivedOptions.OCREngine != "easyocr" {
+		t.Fatalf("unexpected ocr_engine: %s", receivedOptions.OCREngine)
+	}
+	if receivedOptions.OCRLang != nil {
+		t.Fatalf("expected empty ocr_lang, got: %+v", receivedOptions.OCRLang)
 	}
 
 	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {

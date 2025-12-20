@@ -125,6 +125,8 @@ type Config struct {
 	Endpoint         string
 	APIKey           string
 	DefaultLanguage  string
+	OCREngine        string
+	OCRLang          []string
 	Mode             string
 	Storage          StorageConfig
 	TraceHttpRequest bool
@@ -264,6 +266,8 @@ type s3TargetRequest struct {
 type doclingOptions struct {
 	ToFormats   []string `json:"to_formats,omitempty"`
 	FromFormats []string `json:"from_formats,omitempty"`
+	OCREngine   string   `json:"ocr_engine,omitempty"`
+	OCRLang     []string `json:"ocr_lang,omitempty"`
 }
 
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
@@ -271,6 +275,8 @@ type DoclingConverter struct {
 	endpoint        string
 	apiKey          string
 	defaultLanguage string
+	ocrEngine       string
+	ocrLang         []string
 	mode            string
 	storage         StorageConfig
 	client          *http.Client
@@ -289,6 +295,16 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		mode = doclingModeUploadFile
 	}
 
+	ocrEngine := strings.TrimSpace(cfg.OCREngine)
+	if ocrEngine == "" {
+		ocrEngine = "easyocr"
+	}
+
+	ocrLang := cfg.OCRLang
+	if ocrLang == nil && cfg.DefaultLanguage != "" {
+		ocrLang = []string{cfg.DefaultLanguage}
+	}
+
 	httpClient := &http.Client{Timeout: 60 * time.Second}
 	if cfg.TraceHttpRequest {
 		httpClient.Transport = newLoggingTransport(httpClient.Transport, logger)
@@ -303,6 +319,8 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		client:          httpClient,
 		logger:          logger,
 		render:          cfg.Render,
+		ocrEngine:       ocrEngine,
+		ocrLang:         append([]string(nil), ocrLang...),
 	}
 }
 
@@ -335,6 +353,27 @@ func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, 
 
 func (c *DoclingConverter) selectLanguage() string {
 	return c.defaultLanguage
+}
+
+func (c *DoclingConverter) ocrLanguages() []string {
+	if len(c.ocrLang) == 0 {
+		return nil
+	}
+
+	langs := make([]string, 0, len(c.ocrLang))
+	for _, lang := range c.ocrLang {
+		lang = strings.TrimSpace(lang)
+		if lang == "" {
+			continue
+		}
+		langs = append(langs, lang)
+	}
+
+	if len(langs) == 0 {
+		return nil
+	}
+
+	return langs
 }
 
 // Submit отправляет документ в Docling и возвращает идентификаторы задачи.
@@ -545,6 +584,18 @@ func (c *DoclingConverter) writeDoclingOptions(
 	writer *multipart.Writer,
 	fileExt string,
 ) error {
+	if c.ocrEngine != "" {
+		if err := writer.WriteField("ocr_engine", c.ocrEngine); err != nil {
+			return fmt.Errorf("write ocr_engine: %w", err)
+		}
+	}
+
+	for _, lang := range c.ocrLanguages() {
+		if err := writer.WriteField("ocr_lang", lang); err != nil {
+			return fmt.Errorf("write ocr_lang: %w", err)
+		}
+	}
+
 	// to_formats[]: IMPORTANT — не "json,md", а отдельными значениями
 	if err := writer.WriteField("to_formats", "md"); err != nil {
 		return fmt.Errorf("write to_formats md: %w", err)
@@ -563,6 +614,11 @@ func (c *DoclingConverter) writeDoclingOptions(
 func (c *DoclingConverter) buildDoclingOptions(fileExt string) doclingOptions {
 	opts := doclingOptions{
 		ToFormats: []string{"md"},
+		OCREngine: c.ocrEngine,
+	}
+
+	if langs := c.ocrLanguages(); len(langs) > 0 {
+		opts.OCRLang = langs
 	}
 
 	if fileExt != "" {
