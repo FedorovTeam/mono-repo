@@ -109,6 +109,7 @@ func main() {
 		DefaultLanguage:  cfg.Docling.DefaultLanguage,
 		OCREngine:        cfg.Docling.OCREngine,
 		OCRLang:          cfg.Docling.OCRLang,
+		SkipOCROnTextPDF: cfg.Docling.SkipOCROnTextPDF,
 		Mode:             cfg.Docling.Mode,
 		TraceHttpRequest: cfg.Observability.LoggingEnabled,
 		Storage: converter.StorageConfig{
