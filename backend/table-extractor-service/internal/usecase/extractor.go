@@ -70,29 +70,12 @@ func (uc *TableExtractorUseCase) ExtractTablesFromPDF(ctx context.Context, req E
 		return domain.TableExtractionJob{}, fmt.Errorf("%w: source_url and original bucket/object cannot be used together", ErrInvalidArgument)
 	}
 
-	if existing, ok, err := uc.repo.GetByDocumentID(ctx, req.DocumentID); err != nil {
-		return domain.TableExtractionJob{}, err
-	} else if ok && existing.Status != domain.StatusFailed {
-		return existing, nil
-	}
-
-	if uc.cfg.QueueLimit > 0 {
-		count, err := uc.repo.CountActive(ctx)
-		if err != nil {
-			return domain.TableExtractionJob{}, err
-		}
-		if count >= uc.cfg.QueueLimit {
-			return domain.TableExtractionJob{}, ErrQueueLimitReached
-		}
-	}
-
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
 	if req.CorrelationID != "" {
 		correlationID = req.CorrelationID
 		ctx = telemetry.ContextWithCorrelationID(ctx, correlationID)
 	}
 
-	jobID := uuid.New()
 	now := time.Now().UTC()
 	artifactsBucket := req.ArtifactsBucket
 	if artifactsBucket == "" {
@@ -101,24 +84,31 @@ func (uc *TableExtractorUseCase) ExtractTablesFromPDF(ctx context.Context, req E
 	if artifactsBucket == "" {
 		return domain.TableExtractionJob{}, fmt.Errorf("%w: artifacts_bucket is required", ErrInvalidArgument)
 	}
+	jobID := uuid.New()
 	prefix := req.ArtifactsPrefix
 	if prefix == "" {
 		prefix = path.Join(uc.cfg.DefaultArtifactsPrefix, req.DocumentID, jobID.String())
 	}
-	artifacts := uc.buildArtifacts(prefix, artifactsBucket)
 
 	job := domain.TableExtractionJob{
-		ID:            jobID,
-		DocumentID:    req.DocumentID,
-		Status:        domain.StatusPending,
-		Artifacts:     artifacts,
-		CorrelationID: correlationID,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:              jobID,
+		DocumentID:      req.DocumentID,
+		Original:        domain.ArtifactLocation{Bucket: req.OriginalBucket, ObjectKey: req.OriginalObjectKey},
+		ArtifactsBucket: artifactsBucket,
+		ArtifactsPrefix: prefix,
+		Artifacts:       domain.BuildArtifacts(artifactsBucket, prefix),
+		Status:          domain.StatusPending,
+		Attempts:        0,
+		CorrelationID:   correlationID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
-	job, err := uc.repo.Create(ctx, job)
+	job, _, err := uc.repo.UpsertOrGetActive(ctx, job, uc.cfg.QueueLimit)
 	if err != nil {
+		if errors.Is(err, repository.ErrQueueLimitReached) {
+			return domain.TableExtractionJob{}, ErrQueueLimitReached
+		}
 		return domain.TableExtractionJob{}, err
 	}
 
@@ -134,29 +124,4 @@ func (uc *TableExtractorUseCase) GetJob(ctx context.Context, id uuid.UUID) (doma
 		return domain.TableExtractionJob{}, ErrNotFound
 	}
 	return job, nil
-}
-
-func (uc *TableExtractorUseCase) buildArtifacts(prefix, bucket string) domain.TableArtifacts {
-	return domain.TableArtifacts{
-		RawJSON: domain.ArtifactLocation{
-			Bucket:    bucket,
-			ObjectKey: path.Join(prefix, "tables.raw.json"),
-		},
-		NormalizedJSON: domain.ArtifactLocation{
-			Bucket:    bucket,
-			ObjectKey: path.Join(prefix, "tables.normalized.json"),
-		},
-		Markdown: domain.ArtifactLocation{
-			Bucket:    bucket,
-			ObjectKey: path.Join(prefix, "tables.md"),
-		},
-		Manifest: domain.ArtifactLocation{
-			Bucket:    bucket,
-			ObjectKey: path.Join(prefix, "manifest.json"),
-		},
-		DebugPrefix: domain.ArtifactLocation{
-			Bucket:    bucket,
-			ObjectKey: path.Join(prefix, "debug"),
-		},
-	}
 }

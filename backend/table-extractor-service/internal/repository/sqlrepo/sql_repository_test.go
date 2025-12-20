@@ -1,0 +1,219 @@
+package sqlrepo_test
+
+import (
+	"context"
+	"database/sql"
+	"path"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/mono-repo/table-extractor-service/db/migrations"
+	"github.com/mono-repo/table-extractor-service/internal/domain"
+	"github.com/mono-repo/table-extractor-service/internal/repository"
+	"github.com/mono-repo/table-extractor-service/internal/repository/sqlrepo"
+	"github.com/mono-repo/table-extractor-service/internal/storage/database"
+)
+
+func TestUpsertOrGetActiveIdempotent(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+
+	job := newJob("doc-1")
+
+	created, existed, err := repo.UpsertOrGetActive(ctx, job, 10)
+	require.NoError(t, err)
+	require.False(t, existed)
+	require.Equal(t, job.DocumentID, created.DocumentID)
+	require.Equal(t, domain.StatusPending, created.Status)
+	require.Equal(t, job.Artifacts.RawJSON.ObjectKey, created.Artifacts.RawJSON.ObjectKey)
+	require.Equal(t, 0, created.Attempts)
+
+	secondJob := job
+	secondJob.ID = uuid.New()
+	secondJob.ArtifactsPrefix = "other/prefix"
+	secondJob.Artifacts = domain.BuildArtifacts(secondJob.ArtifactsBucket, secondJob.ArtifactsPrefix)
+
+	reused, existed, err := repo.UpsertOrGetActive(ctx, secondJob, 10)
+	require.NoError(t, err)
+	require.True(t, existed)
+	require.Equal(t, created.ID, reused.ID)
+	require.Equal(t, created.Artifacts.RawJSON.ObjectKey, reused.Artifacts.RawJSON.ObjectKey)
+}
+
+func TestUpsertOrGetActiveQueueLimit(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+
+	_, existed, err := repo.UpsertOrGetActive(ctx, newJob("doc-1"), 1)
+	require.NoError(t, err)
+	require.False(t, existed)
+
+	_, _, err = repo.UpsertOrGetActive(ctx, newJob("doc-2"), 1)
+	require.ErrorIs(t, err, repository.ErrQueueLimitReached)
+}
+
+func TestAcquirePendingBatch(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	job1 := newJob("doc-1")
+	job1.NextRunAt = nil
+	job2 := newJob("doc-2")
+	job2.NextRunAt = ptrTime(now.Add(-time.Minute))
+	job3 := newJob("doc-3")
+	job3.NextRunAt = ptrTime(now.Add(time.Hour))
+
+	for _, job := range []domain.TableExtractionJob{job1, job2, job3} {
+		_, _, err := repo.UpsertOrGetActive(ctx, job, 10)
+		require.NoError(t, err)
+	}
+
+	acquired, err := repo.AcquirePendingBatch(ctx, 2, now)
+	require.NoError(t, err)
+	require.Len(t, acquired, 2)
+	require.Equal(t, domain.StatusProcessing, acquired[0].Status)
+	require.Equal(t, domain.StatusProcessing, acquired[1].Status)
+	require.Equal(t, 1, acquired[0].Attempts)
+
+	stillPending, ok, err := repo.GetByID(ctx, job3.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, domain.StatusPending, stillPending.Status)
+}
+
+func TestUpdateStatus(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+
+	job := newJob("doc-1")
+	created, _, err := repo.UpsertOrGetActive(ctx, job, 10)
+	require.NoError(t, err)
+
+	err = repo.UpdateStatus(ctx, created.ID, domain.StatusDone, "finished", "", "", nil)
+	require.NoError(t, err)
+
+	updated, ok, err := repo.GetByID(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, domain.StatusDone, updated.Status)
+	require.Equal(t, "finished", updated.StatusReason)
+	require.NotNil(t, updated.FinishedAt)
+}
+
+func TestPostpone(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+
+	job := newJob("doc-1")
+	created, _, err := repo.UpsertOrGetActive(ctx, job, 10)
+	require.NoError(t, err)
+
+	nextRun := time.Now().UTC().Add(time.Hour)
+	err = repo.Postpone(ctx, created.ID, nextRun, "retry later")
+	require.NoError(t, err)
+
+	updated, ok, err := repo.GetByID(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, domain.StatusPending, updated.Status)
+	require.NotNil(t, updated.NextRunAt)
+	require.Equal(t, "retry later", updated.StatusReason)
+}
+
+func TestCleanupAndRetryFailed(t *testing.T) {
+	repo, db := setupRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	doneJob := newJob("doc-done")
+	doneJob.Status = domain.StatusDone
+	doneJob.FinishedAt = ptrTime(now.Add(-48 * time.Hour))
+	_, _, err := repo.UpsertOrGetActive(ctx, doneJob, 10)
+	require.NoError(t, err)
+	storedDone, ok, err := repo.GetByID(ctx, doneJob.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, storedDone.FinishedAt)
+	require.True(t, storedDone.FinishedAt.Before(now.Add(-24*time.Hour)))
+
+	failedJob := newJob("doc-failed")
+	failedJob.Status = domain.StatusFailed
+	failedJob.Attempts = 1
+	failedJob.FinishedAt = ptrTime(now.Add(-time.Hour))
+	createdFailed, _, err := repo.UpsertOrGetActive(ctx, failedJob, 10)
+	require.NoError(t, err)
+
+	cleaned, err := repo.Cleanup(ctx, now.Add(-24*time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, cleaned)
+	_, ok, err = repo.GetByID(ctx, doneJob.ID)
+	require.NoError(t, err)
+	require.False(t, ok)
+	var remaining int
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM table_extraction_queue WHERE status IN ('done','failed')").Scan(&remaining))
+	require.Equal(t, 1, remaining)
+	rows, err := db.QueryContext(ctx, "SELECT status, finished_at FROM table_extraction_queue")
+	require.NoError(t, err)
+	defer rows.Close()
+	statuses := make([]string, 0)
+	for rows.Next() {
+		var status string
+		var finished time.Time
+		require.NoError(t, rows.Scan(&status, &finished))
+		statuses = append(statuses, status)
+	}
+	require.NoError(t, rows.Err())
+	require.ElementsMatch(t, []string{string(domain.StatusFailed)}, statuses)
+
+	retired, err := repo.RetryFailed(ctx, 3, time.Minute, now)
+	require.NoError(t, err)
+	require.Equal(t, 1, retired)
+
+	updated, ok, err := repo.GetByID(ctx, createdFailed.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, domain.StatusPending, updated.Status)
+	require.Nil(t, updated.FinishedAt)
+	require.NotNil(t, updated.NextRunAt)
+}
+
+func setupRepo(t *testing.T) (repository.TableExtractionRepository, *sql.DB) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	ctx := context.Background()
+	require.NoError(t, migrations.Apply(ctx, db, zap.NewNop()))
+
+	return sqlrepo.NewSQLRepository(db, database.DialectSQLite), db
+}
+
+func newJob(documentID string) domain.TableExtractionJob {
+	jobID := uuid.New()
+	prefix := path.Join("tables", documentID, jobID.String())
+	return domain.TableExtractionJob{
+		ID:              jobID,
+		DocumentID:      documentID,
+		Original:        domain.ArtifactLocation{Bucket: "originals", ObjectKey: documentID + ".pdf"},
+		ArtifactsBucket: "artifacts",
+		ArtifactsPrefix: prefix,
+		Artifacts:       domain.BuildArtifacts("artifacts", prefix),
+		Status:          domain.StatusPending,
+		CorrelationID:   "corr-" + documentID,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}
+}
+
+func ptrTime(value time.Time) *time.Time {
+	return &value
+}
