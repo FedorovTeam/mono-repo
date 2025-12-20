@@ -31,6 +31,24 @@ type PreprocessJob struct {
 
 const DefaultMaxAttempts = 5
 
+type Failure struct {
+	Code      ErrorCode
+	Message   string
+	Permanent bool
+	Details   map[string]string
+}
+
+type FailureUpdate struct {
+	Status       PreprocessStatus
+	NextRunAt    time.Time
+	Code         ErrorCode
+	Message      string
+	Permanent    bool
+	TargetBucket string
+	TargetKey    string
+	Details      map[string]string
+}
+
 func (j PreprocessJob) Validate() error {
 	if j.ID == "" {
 		return fmt.Errorf("job id is required")
@@ -60,4 +78,73 @@ func (j PreprocessJob) Validate() error {
 		return fmt.Errorf("next run time is required")
 	}
 	return nil
+}
+
+func (j PreprocessJob) MarkProcessing(now time.Time) (PreprocessJob, error) {
+	j.Attempts++
+	j.Status = StatusProcessing
+	j.StartedAt = now
+	j.UpdatedAt = now
+
+	if j.NextRunAt.IsZero() {
+		j.NextRunAt = now
+	}
+
+	return j, j.Validate()
+}
+
+func (j PreprocessJob) MarkCompleted(now time.Time) (PreprocessJob, error) {
+	j.Status = StatusCompleted
+	j.FinishedAt = now
+	j.UpdatedAt = now
+
+	return j, j.Validate()
+}
+
+func (j PreprocessJob) MarkFailed(now time.Time, policy RetryPolicy, failure Failure) (PreprocessJob, FailureUpdate, error) {
+	failure = failure.normalize()
+
+	j.ErrorCode = failure.Code.String()
+	j.ErrorMessage = failure.Message
+	j.ErrorDetails = failure.Details
+	j.UpdatedAt = now
+
+	if policy.ShouldStop(j.Attempts, j.MaxAttempts, failure.Permanent) {
+		j.Status = StatusStopped
+		j.FinishedAt = now
+		j.NextRunAt = now
+	} else {
+		j.Status = StatusFailed
+		j.NextRunAt = policy.NextRun(now, j.Attempts)
+	}
+
+	if err := j.Validate(); err != nil {
+		return PreprocessJob{}, FailureUpdate{}, fmt.Errorf("validate job %s: %w", j.ID, err)
+	}
+
+	update := FailureUpdate{
+		Status:       j.Status,
+		NextRunAt:    j.NextRunAt,
+		Code:         failure.Code,
+		Message:      failure.Message,
+		Permanent:    failure.Permanent,
+		TargetBucket: j.TargetBucket,
+		TargetKey:    j.TargetKey,
+		Details:      failure.Details,
+	}
+
+	return j, update, nil
+}
+
+func (f Failure) normalize() Failure {
+	if f.Code == "" {
+		f.Code = ErrorCodeProcessingError
+	}
+	if f.Message == "" {
+		f.Message = f.Code.String()
+	}
+	if f.Details == nil {
+		f.Details = map[string]string{}
+	}
+	return f
 }

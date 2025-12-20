@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,6 +92,115 @@ type noopCallback struct{}
 
 func (noopCallback) Send(_ context.Context, _ string, _ ports.CallbackPayload) (bool, error) {
 	return false, nil
+}
+
+type failureRepo struct {
+	job         domain.PreprocessJob
+	returned    bool
+	failures    []ports.FailureUpdate
+	updatesChan chan ports.FailureUpdate
+}
+
+func newFailureRepo(job domain.PreprocessJob) *failureRepo {
+	return &failureRepo{
+		job:         job,
+		updatesChan: make(chan ports.FailureUpdate, 1),
+	}
+}
+
+func (r *failureRepo) NextJobForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error) {
+	if r.returned {
+		return domain.PreprocessJob{}, false, nil
+	}
+	r.returned = true
+	processed, err := r.job.MarkProcessing(time.Now().UTC())
+	if err != nil {
+		return domain.PreprocessJob{}, false, err
+	}
+	return processed, true, nil
+}
+
+func (r *failureRepo) MarkDone(_ context.Context, job domain.PreprocessJob) error {
+	return fmt.Errorf("unexpected MarkDone call for job %s", job.ID)
+}
+
+func (r *failureRepo) MarkFailed(_ context.Context, job domain.PreprocessJob, update ports.FailureUpdate) error {
+	r.failures = append(r.failures, update)
+	r.updatesChan <- update
+	return nil
+}
+
+type missingDownloader struct{}
+
+func (missingDownloader) Download(_ context.Context, _, _, _ string, _ string) error {
+	return ports.ErrObjectNotFound
+}
+
+func TestWorkerMarksPermanentFailureAsStopped(t *testing.T) {
+	t.Helper()
+
+	now := time.Now().UTC()
+	job := domain.PreprocessJob{
+		ID:           "job-fail",
+		DocumentID:   "doc-fail",
+		SourceBucket: "src",
+		SourceKey:    "missing.txt",
+		SourceETag:   "etag",
+		TargetBucket: "t",
+		TargetKey:    "out/doc.docx",
+		Status:       domain.StatusPending,
+		MaxAttempts:  1,
+		NextRunAt:    now,
+	}
+
+	repo := newFailureRepo(job)
+	w, err := New(Dependencies{
+		Repo:       repo,
+		Downloader: missingDownloader{},
+		Uploader:   &noopUploader{},
+		Converter:  noopConverter{},
+		Callback:   noopCallback{},
+	}, Config{
+		WorkingDir:      t.TempDir(),
+		OutputDir:       t.TempDir(),
+		TargetBucket:    "t",
+		TargetMediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		Concurrency:     1,
+		PollInterval:    5 * time.Millisecond,
+		Backoff:         5 * time.Millisecond,
+		ConvertTimeout:  time.Second,
+	}, nil)
+	if err != nil {
+		t.Fatalf("init worker: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- w.Run(ctx)
+	}()
+
+	var update ports.FailureUpdate
+	select {
+	case update = <-repo.updatesChan:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for failure update")
+	}
+
+	cancel()
+
+	if err := <-errCh; err != nil && err != context.Canceled {
+		t.Fatalf("worker returned error: %v", err)
+	}
+
+	if update.Status != domain.StatusStopped {
+		t.Fatalf("expected stopped status, got %s", update.Status)
+	}
+	if update.Code != domain.ErrorCodeSourceMissing {
+		t.Fatalf("unexpected error code: %s", update.Code)
+	}
 }
 
 func TestWorkerProcessesJobsConcurrently(t *testing.T) {

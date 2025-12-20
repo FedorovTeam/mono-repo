@@ -21,6 +21,6 @@ type Job = domain.PreprocessJob
 type FailureUpdate = ports.FailureUpdate
 
 type callbackErrorInfo struct {
-	Code    string
+	Code    domain.ErrorCode
 	Message string
 }
