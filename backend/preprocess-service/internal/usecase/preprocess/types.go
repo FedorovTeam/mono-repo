@@ -16,7 +16,7 @@ const (
 	callbackMaxAttempts    = 3
 )
 
-type Job = ports.Job
+type Job = domain.PreprocessJob
 
 type FailureUpdate = ports.FailureUpdate
 

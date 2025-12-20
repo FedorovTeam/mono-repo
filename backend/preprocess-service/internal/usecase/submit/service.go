@@ -89,6 +89,10 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		CorrelationID: cmd.CorrelationID,
 		Status:        domain.StatusPending,
 		ErrorDetails:  map[string]string{},
+		Attempts:      0,
+		MaxAttempts:   domain.DefaultMaxAttempts,
+		NextRunAt:     time.Now().UTC(),
+		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	}
 

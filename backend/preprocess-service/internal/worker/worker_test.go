@@ -9,18 +9,19 @@ import (
 	"testing"
 	"time"
 
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/usecase/ports"
 )
 
 type stubQueueRepo struct {
-	jobs   chan ports.Job
+	jobs   chan domain.PreprocessJob
 	doneCh chan string
 	mu     sync.Mutex
 	done   map[string]int
 }
 
-func newStubQueueRepo(jobs []ports.Job) *stubQueueRepo {
-	ch := make(chan ports.Job, len(jobs))
+func newStubQueueRepo(jobs []domain.PreprocessJob) *stubQueueRepo {
+	ch := make(chan domain.PreprocessJob, len(jobs))
 	for _, job := range jobs {
 		ch <- job
 	}
@@ -32,33 +33,33 @@ func newStubQueueRepo(jobs []ports.Job) *stubQueueRepo {
 	}
 }
 
-func (r *stubQueueRepo) NextJobForProcessing(ctx context.Context) (ports.Job, bool, error) {
+func (r *stubQueueRepo) NextJobForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error) {
 	select {
 	case job := <-r.jobs:
 		job.Attempts++
 		return job, true, nil
 	case <-ctx.Done():
-		return ports.Job{}, false, ctx.Err()
+		return domain.PreprocessJob{}, false, ctx.Err()
 	default:
-		return ports.Job{}, false, nil
+		return domain.PreprocessJob{}, false, nil
 	}
 }
 
-func (r *stubQueueRepo) MarkDone(_ context.Context, job ports.Job, _ string) error {
+func (r *stubQueueRepo) MarkDone(_ context.Context, job domain.PreprocessJob) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.done[job.JobID]++
-	r.doneCh <- job.JobID
+	r.done[job.ID]++
+	r.doneCh <- job.ID
 	return nil
 }
 
-func (r *stubQueueRepo) MarkFailed(_ context.Context, job ports.Job, _ ports.FailureUpdate) error {
+func (r *stubQueueRepo) MarkFailed(_ context.Context, job domain.PreprocessJob, _ ports.FailureUpdate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.done[job.JobID]++
-	r.doneCh <- job.JobID
+	r.done[job.ID]++
+	r.doneCh <- job.ID
 	return nil
 }
 
@@ -95,10 +96,11 @@ func (noopCallback) Send(_ context.Context, _ string, _ ports.CallbackPayload) (
 func TestWorkerProcessesJobsConcurrently(t *testing.T) {
 	t.Helper()
 
-	jobs := []ports.Job{
-		{JobID: "job-1", SourceBucket: "src", SourceKey: "a.txt", TargetBucket: "t", TargetKey: "out/a.docx"},
-		{JobID: "job-2", SourceBucket: "src", SourceKey: "b.txt", TargetBucket: "t", TargetKey: "out/b.docx"},
-		{JobID: "job-3", SourceBucket: "src", SourceKey: "c.txt", TargetBucket: "t", TargetKey: "out/c.docx"},
+	now := time.Now().UTC()
+	jobs := []domain.PreprocessJob{
+		{ID: "job-1", DocumentID: "doc-1", SourceBucket: "src", SourceKey: "a.txt", SourceETag: "etag-1", TargetBucket: "t", TargetKey: "out/a.docx", Status: domain.StatusPending, MaxAttempts: domain.DefaultMaxAttempts, NextRunAt: now},
+		{ID: "job-2", DocumentID: "doc-2", SourceBucket: "src", SourceKey: "b.txt", SourceETag: "etag-2", TargetBucket: "t", TargetKey: "out/b.docx", Status: domain.StatusPending, MaxAttempts: domain.DefaultMaxAttempts, NextRunAt: now},
+		{ID: "job-3", DocumentID: "doc-3", SourceBucket: "src", SourceKey: "c.txt", SourceETag: "etag-3", TargetBucket: "t", TargetKey: "out/c.docx", Status: domain.StatusPending, MaxAttempts: domain.DefaultMaxAttempts, NextRunAt: now},
 	}
 
 	repo := newStubQueueRepo(jobs)

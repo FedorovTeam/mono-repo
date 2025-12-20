@@ -105,7 +105,7 @@ func normalizeConfig(cfg Config) Config {
 }
 
 func (s *Service) Process(ctx context.Context, job Job) error {
-	logger := s.logger.With("job_id", job.JobID, "correlation_id", job.CorrelationID)
+	logger := s.logger.With("job_id", job.ID, "correlation_id", job.CorrelationID)
 	logger.Info("start processing job")
 
 	jobState := job
@@ -123,7 +123,8 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	}
 
 	logger.Info("job completed successfully")
-	if err := s.repo.MarkDone(ctx, jobState, s.cfg.TargetMediaType); err != nil {
+	jobState.TargetMediaType = s.cfg.TargetMediaType
+	if err := s.repo.MarkDone(ctx, jobState); err != nil {
 		logger.Error("failed to mark job done", "error", err)
 		return err
 	}
@@ -135,13 +136,13 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 func (s *Service) handleJob(ctx context.Context, job *Job) error {
 	s.ensureFunctions()
 
-	tmpDir, err := os.MkdirTemp(s.cfg.WorkingDir, fmt.Sprintf("job-%s-", job.JobID))
+	tmpDir, err := os.MkdirTemp(s.cfg.WorkingDir, fmt.Sprintf("job-%s-", job.ID))
 	if err != nil {
 		return permanentError("tmp_dir", fmt.Errorf("create temp dir: %w", err))
 	}
 	defer os.RemoveAll(tmpDir)
 
-	outputDir := filepath.Join(s.cfg.OutputDir, job.JobID)
+	outputDir := filepath.Join(s.cfg.OutputDir, job.ID)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return permanentError("output_dir", fmt.Errorf("prepare output dir: %w", err))
 	}
@@ -277,7 +278,7 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.Pre
 	}
 
 	payload := ports.CallbackPayload{
-		JobID:        job.JobID,
+		JobID:        job.ID,
 		Status:       status.String(),
 		TargetBucket: job.TargetBucket,
 		TargetKey:    job.TargetKey,
