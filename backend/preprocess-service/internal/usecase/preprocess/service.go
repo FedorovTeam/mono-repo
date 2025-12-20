@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/usecase/ports"
 )
 
@@ -31,6 +32,7 @@ type Service struct {
 	callback   ports.CallbackSender
 	cfg        Config
 	logger     *slog.Logger
+	policy     domain.RetryPolicy
 
 	downloadSourceFn func(ctx context.Context, job Job, dir string) (string, error)
 	convertFn        func(ctx context.Context, sourcePath, outDir string) error
@@ -72,6 +74,7 @@ func NewService(repo ports.QueueRepository, downloader ports.StorageDownloader, 
 		callback:   callback,
 		cfg:        normalized,
 		logger:     logger,
+		policy:     domain.NewRetryPolicy(normalized.Backoff),
 	}
 
 	svc.downloadSourceFn = svc.downloadSource
@@ -224,7 +227,7 @@ func (s *Service) uploadResult(ctx context.Context, bucket, key, path string) er
 
 func (s *Service) failureDecision(job Job, err error) FailureUpdate {
 	var typed jobError
-	code := "processing_error"
+	code := string(domain.ErrorCodeProcessingError)
 	permanent := false
 
 	if errors.As(err, &typed) {
@@ -235,7 +238,7 @@ func (s *Service) failureDecision(job Job, err error) FailureUpdate {
 
 	message := err.Error()
 
-	if permanent || job.Attempts >= job.MaxAttempts {
+	if s.policy.ShouldStop(job.Attempts, job.MaxAttempts, permanent) {
 		return FailureUpdate{
 			Status:    StatusStopped,
 			NextRunAt: time.Now().UTC(),
@@ -252,14 +255,9 @@ func (s *Service) failureDecision(job Job, err error) FailureUpdate {
 		}
 	}
 
-	delay := s.cfg.Backoff * time.Duration(job.Attempts)
-	if delay <= 0 {
-		delay = s.cfg.Backoff
-	}
-
 	return FailureUpdate{
 		Status:    StatusFailed,
-		NextRunAt: time.Now().Add(delay).UTC(),
+		NextRunAt: s.policy.NextRun(time.Now(), job.Attempts),
 		Code:      code,
 		Message:   message,
 		Permanent: permanent,
@@ -289,7 +287,7 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status string, er
 		payload.Error = &ports.CallbackErrorPayload{Code: errInfo.Code, Message: errInfo.Message}
 	}
 
-	backoff := s.cfg.Backoff
+	backoff := s.policy.Delay(1)
 	if backoff <= 0 {
 		backoff = time.Second
 	}

@@ -1,13 +1,16 @@
 package preprocess
 
-import "preprocess-service/internal/usecase/ports"
+import (
+	"preprocess-service/internal/domain"
+	"preprocess-service/internal/usecase/ports"
+)
 
 const (
-	StatusDone       = "done"
-	StatusFailed     = "failed"
-	StatusPending    = "pending"
-	StatusProcessing = "processing"
-	StatusStopped    = "stopped"
+	StatusDone       = domain.StatusCompletedString
+	StatusFailed     = domain.StatusFailedString
+	StatusPending    = domain.StatusPendingString
+	StatusProcessing = domain.StatusProcessingString
+	StatusStopped    = domain.StatusStoppedString
 
 	DefaultTargetMediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	callbackMaxAttempts    = 3

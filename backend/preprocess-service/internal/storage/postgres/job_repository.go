@@ -11,15 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"preprocess-service/internal/domain"
-	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
-)
-
-const (
-	statusPending    = "pending"
-	statusProcessing = "processing"
-	statusDone       = "done"
-	statusFailed     = "failed"
-	statusStopped    = "stopped"
 )
 
 // JobRepository implements domain.JobRepository backed by PostgreSQL preprocess_queue.
@@ -64,7 +55,7 @@ func (r *JobRepository) Save(ctx context.Context, job domain.PreprocessJob) erro
 		nullableString(job.CallbackURL),
 		nullableString(job.CorrelationID),
 		nil,
-		mapStatusToDB(job.Status),
+		job.Status.ToDB(),
 		nullableString(job.ErrorCode),
 		nullableString(job.ErrorMessage),
 		string(details),
@@ -141,7 +132,7 @@ func (r *JobRepository) fetchJob(ctx context.Context, query string, args ...any)
 	job.ErrorCode = derefString(errorCode)
 	job.ErrorMessage = derefString(errorMessage)
 	job.UpdatedAt = updatedAt
-	job.Status = mapStatusFromDB(status)
+	job.Status = domain.StatusFromDB(status)
 
 	if len(errorDetails) > 0 {
 		details := make(map[string]string)
@@ -168,34 +159,4 @@ func derefString(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func mapStatusFromDB(status string) preprocessv1.PreprocessStatus {
-	switch status {
-	case statusPending:
-		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING
-	case statusProcessing:
-		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PROCESSING
-	case statusDone:
-		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_COMPLETED
-	case statusFailed, statusStopped:
-		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED
-	default:
-		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_UNSPECIFIED
-	}
-}
-
-func mapStatusToDB(status preprocessv1.PreprocessStatus) string {
-	switch status {
-	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PROCESSING:
-		return statusProcessing
-	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_COMPLETED:
-		return statusDone
-	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED:
-		return statusFailed
-	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING:
-		fallthrough
-	default:
-		return statusPending
-	}
 }
