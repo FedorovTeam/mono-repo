@@ -1,0 +1,41 @@
+# backend/table-extractor-service/charts/table-extractor-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "table-extractor-service.fullname" . }}
+  labels:
+    {{- include "table-extractor-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "table-extractor-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "table-extractor-service.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+            - name: grpc
+              containerPort: {{ .Values.service.grpcPort }}
+          env:
+            - name: SERVICE_NAME
+              value: {{ .Values.env.SERVICE_NAME | quote }}
+            - name: SERVICE_PORT
+              value: {{ .Values.env.SERVICE_PORT | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.env.GRPC_PORT | quote }}
+            - name: SERVICE_REGION
+              value: {{ .Values.env.SERVICE_REGION | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

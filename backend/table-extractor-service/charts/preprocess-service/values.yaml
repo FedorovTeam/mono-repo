@@ -1,0 +1,33 @@
+# backend/table-extractor-service/charts/table-extractor-service/values.yaml
+replicaCount: 1
+fullnameOverride: table-extractor-service
+
+image:
+  repository: harbor.tech.fedorov-team.tech/backend/table-extractor-service
+  pullPolicy: Always
+  tag: "latest"
+
+imagePullSecrets:
+  - name: regcred
+
+service:
+  type: ClusterIP
+  port: 8080
+  grpcPort: 9090
+
+env:
+  SERVICE_NAME: table-extractor-service
+  SERVICE_PORT: 8080
+  GRPC_PORT: 9090
+  SERVICE_REGION: local
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

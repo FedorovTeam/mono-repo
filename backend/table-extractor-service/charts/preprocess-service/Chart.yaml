@@ -1,0 +1,6 @@
+# backend/table-extractor-service/charts/table-extractor-service/Chart.yaml
+apiVersion: v2
+name: table-extractor-service
+version: 0.1.0
+description: table-extractor-service для конвертации doc/docx/pdf в docx
+appVersion: "1.0.0"

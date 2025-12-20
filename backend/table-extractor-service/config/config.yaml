@@ -1,0 +1,47 @@
+service:
+  name: table-extractor-service
+  port: 9090
+  queue_limit: 100
+  batch_size: 2
+  max_workers: 2
+  processing_timeout: 5m
+  cleanup_retention: 168h
+  retry:
+    max_attempts: 3
+    backoff_interval: 5s
+    max_backoff: 1m
+  default_artifacts_prefix: tables
+
+minio:
+  endpoint: api.minio.tech.fedorov-team.tech
+  access_key: "xUCM3lvYME7MrYTwegSA"
+  secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
+  use_ssl: true
+  artifacts_bucket: table-extractor-artifacts
+  default_artifacts_prefix: tables
+
+database:
+  driver: postgres
+  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/document?sslmode=disable"
+  max_connections: 5
+  connection_timeout: 5s
+
+storage:
+  dial_timeout: 5s
+  read_write_timeout: 30s
+  operation_timeout: 1m
+
+extractor:
+  mode: layout
+  detect_voting_tables: true
+  pages: all
+  pdfinfo_timeout: 10s
+  pdftotext_timeout: 20s
+  pdftoppm_timeout: 30s
+  max_parallel_commands: 2
+  temp_dir: ""
+
+observability:
+  logging_enabled: true
+  tracing:
+    enabled: false
