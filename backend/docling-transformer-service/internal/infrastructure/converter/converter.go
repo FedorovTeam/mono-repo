@@ -338,8 +338,27 @@ type DoclingConverter struct {
 	render           RenderConfig
 }
 
+// Option позволяет переопределить параметры DoclingConverter.
+type Option func(*DoclingConverter)
+
+// WithHTTPClient задаёт кастомный http.Client.
+func WithHTTPClient(client *http.Client) Option {
+	return func(c *DoclingConverter) {
+		if client != nil {
+			c.client = client
+		}
+	}
+}
+
+// WithBaseEndpoint переопределяет базовый endpoint Docling.
+func WithBaseEndpoint(endpoint string) Option {
+	return func(c *DoclingConverter) {
+		c.endpoint = strings.TrimRight(endpoint, "/")
+	}
+}
+
 // NewDoclingConverter создаёт конвертер с параметрами по умолчанию.
-func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
+func NewDoclingConverter(cfg Config, logger *zap.Logger, opts ...Option) *DoclingConverter {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -364,24 +383,37 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		skipOCROnTextPDF = *cfg.SkipOCROnTextPDF
 	}
 
-	httpClient := &http.Client{Timeout: 60 * time.Second}
-	if cfg.TraceHttpRequest {
-		httpClient.Transport = newLoggingTransport(httpClient.Transport, logger)
-	}
+	defaultClient := &http.Client{Timeout: 60 * time.Second}
 
-	return &DoclingConverter{
+	converter := &DoclingConverter{
 		endpoint:         strings.TrimRight(cfg.Endpoint, "/"),
 		apiKey:           cfg.APIKey,
 		defaultLanguage:  cfg.DefaultLanguage,
 		mode:             mode,
 		storage:          cfg.Storage,
-		client:           httpClient,
+		client:           defaultClient,
 		logger:           logger,
 		render:           cfg.Render,
 		ocrEngine:        ocrEngine,
 		ocrLang:          append([]string(nil), ocrLang...),
 		skipOCROnTextPDF: skipOCROnTextPDF,
 	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(converter)
+		}
+	}
+
+	if converter.client == nil {
+		converter.client = defaultClient
+	}
+
+	if cfg.TraceHttpRequest {
+		converter.client.Transport = newLoggingTransport(converter.client.Transport, logger)
+	}
+
+	return converter
 }
 
 func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, error) {
