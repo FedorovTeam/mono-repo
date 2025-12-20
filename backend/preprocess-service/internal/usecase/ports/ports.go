@@ -9,6 +9,7 @@ var (
 	ErrObjectNotFound     = errors.New("storage object not found")
 	ErrPreconditionFailed = errors.New("storage precondition failed")
 	ErrBucketNotFound     = errors.New("storage bucket not found")
+	ErrInvalidObjectKey   = errors.New("invalid object key")
 )
 
 type CallbackErrorInfo struct {
@@ -43,4 +44,16 @@ type DocumentConverter interface {
 
 type CallbackSender interface {
 	Send(ctx context.Context, url string, payload CallbackPayload) (temporary bool, err error)
+}
+
+type WorkspaceManager interface {
+	Prepare(jobID string) (Workspace, error)
+}
+
+type Workspace interface {
+	SourcePath(sourceKey string) (string, error)
+	OutputPath(sourceKey string) (string, error)
+	OutputDir() string
+	EnsureExists(path string) error
+	Cleanup() error
 }

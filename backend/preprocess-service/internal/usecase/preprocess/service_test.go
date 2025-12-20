@@ -9,8 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -173,36 +171,37 @@ func TestNotifyCallbackRetry(t *testing.T) {
 func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 	t.Helper()
 
-	workingDir := t.TempDir()
-	outputDir := t.TempDir()
+	fakeWorkspace := &fakeWorkspace{
+		sourcePath: "/tmp/preprocess/job-42/source.txt",
+		outputPath: "/tmp/preprocess/output/job-42/source.docx",
+		outputDir:  "/tmp/preprocess/output/job-42",
+	}
+	workspaceManager := &fakeWorkspaceManager{workspace: fakeWorkspace}
 
 	svc := &Service{
 		cfg: Config{
-			WorkingDir:      workingDir,
-			OutputDir:       outputDir,
 			TargetBucket:    "default-target",
 			TargetMediaType: DefaultTargetMediaType,
 		},
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspace: workspaceManager,
 	}
 
-	svc.downloadSourceFn = func(ctx context.Context, job Job, dir string) (string, error) {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	svc.downloadSourceFn = func(ctx context.Context, job Job, ws ports.Workspace) (string, error) {
+		path, err := ws.SourcePath(job.SourceKey)
+		if err != nil {
 			return "", err
 		}
-		sourcePath := filepath.Join(dir, "input.txt")
-		return sourcePath, os.WriteFile(sourcePath, []byte("test"), 0o644)
+		return path, nil
+	}
+
+	var convertedWithDir string
+	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) error {
+		convertedWithDir = ws.OutputDir()
+		return nil
 	}
 
 	var uploadedPath string
-	svc.convertFn = func(ctx context.Context, sourcePath, outDir string) error {
-		if err := os.MkdirAll(outDir, 0o755); err != nil {
-			return err
-		}
-		outputPath := svc.outputFilePath(sourcePath, outDir)
-		return os.WriteFile(outputPath, []byte("converted"), 0o644)
-	}
-
 	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error {
 		if bucket != "default-target" {
 			return fmt.Errorf("unexpected target bucket: %s", bucket)
@@ -229,12 +228,16 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 		t.Fatalf("handleJob returned error: %v", err)
 	}
 
-	expectedOutput := filepath.Join(outputDir, job.ID, "input.docx")
-	if _, err := os.Stat(expectedOutput); err != nil {
-		t.Fatalf("expected output file at %s: %v", expectedOutput, err)
+	if workspaceManager.preparedJobID != job.ID {
+		t.Fatalf("expected workspace prepared for job %s, got %s", job.ID, workspaceManager.preparedJobID)
 	}
-
-	if uploadedPath != expectedOutput {
+	if !fakeWorkspace.cleaned {
+		t.Fatalf("expected workspace cleanup to be called")
+	}
+	if convertedWithDir != fakeWorkspace.outputDir {
+		t.Fatalf("unexpected output dir passed to converter: %s", convertedWithDir)
+	}
+	if uploadedPath != fakeWorkspace.outputPath {
 		t.Fatalf("unexpected uploaded path: %s", uploadedPath)
 	}
 }
@@ -244,16 +247,24 @@ func TestProcessTemporaryFailureSchedulesRetry(t *testing.T) {
 
 	repo := &capturingRepo{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	workspace := &fakeWorkspace{
+		sourcePath: "/tmp/source",
+		outputPath: "/tmp/output/result.docx",
+		outputDir:  "/tmp/output",
+	}
 	svc := &Service{
 		repo:   repo,
 		cfg:    Config{WorkingDir: t.TempDir(), OutputDir: t.TempDir(), TargetMediaType: DefaultTargetMediaType, Backoff: time.Second},
 		logger: logger,
 		policy: domain.NewRetryPolicy(time.Second),
+		workspace: &fakeWorkspaceManager{
+			workspace: workspace,
+		},
 	}
-	svc.downloadSourceFn = func(ctx context.Context, job Job, dir string) (string, error) {
+	svc.downloadSourceFn = func(ctx context.Context, job Job, ws ports.Workspace) (string, error) {
 		return "", temporaryError(domain.ErrorCodeDownloadFailed, errors.New("network glitch"))
 	}
-	svc.convertFn = func(ctx context.Context, sourcePath, outDir string) error { return nil }
+	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) error { return nil }
 	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error { return nil }
 
 	job := Job{
@@ -296,16 +307,24 @@ func TestProcessPermanentFailureStops(t *testing.T) {
 
 	repo := &capturingRepo{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	workspace := &fakeWorkspace{
+		sourcePath: "/tmp/source",
+		outputPath: "/tmp/output/result.docx",
+		outputDir:  "/tmp/output",
+	}
 	svc := &Service{
 		repo:   repo,
 		cfg:    Config{WorkingDir: t.TempDir(), OutputDir: t.TempDir(), TargetMediaType: DefaultTargetMediaType, Backoff: time.Second},
 		logger: logger,
 		policy: domain.NewRetryPolicy(time.Second),
+		workspace: &fakeWorkspaceManager{
+			workspace: workspace,
+		},
 	}
-	svc.downloadSourceFn = func(ctx context.Context, job Job, dir string) (string, error) {
+	svc.downloadSourceFn = func(ctx context.Context, job Job, ws ports.Workspace) (string, error) {
 		return "", permanentError(domain.ErrorCodeSourceMissing, errors.New("not found"))
 	}
-	svc.convertFn = func(ctx context.Context, sourcePath, outDir string) error { return nil }
+	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) error { return nil }
 	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error { return nil }
 
 	job := Job{
@@ -341,4 +360,59 @@ func TestProcessPermanentFailureStops(t *testing.T) {
 	if update.NextRunAt.IsZero() {
 		t.Fatalf("expected next run time to be set, got %s", update.NextRunAt)
 	}
+}
+
+type fakeWorkspaceManager struct {
+	workspace     ports.Workspace
+	preparedJobID string
+	prepareErr    error
+}
+
+func (m *fakeWorkspaceManager) Prepare(jobID string) (ports.Workspace, error) {
+	m.preparedJobID = jobID
+	if m.prepareErr != nil {
+		return nil, m.prepareErr
+	}
+	return m.workspace, nil
+}
+
+type fakeWorkspace struct {
+	sourcePath    string
+	sourceErr     error
+	lastSourceKey string
+	outputPath    string
+	outputErr     error
+	lastOutputKey string
+	outputDir     string
+	existsErr     error
+	cleaned       bool
+}
+
+func (w *fakeWorkspace) SourcePath(sourceKey string) (string, error) {
+	w.lastSourceKey = sourceKey
+	if w.sourceErr != nil {
+		return "", w.sourceErr
+	}
+	return w.sourcePath, nil
+}
+
+func (w *fakeWorkspace) OutputPath(sourceKey string) (string, error) {
+	w.lastOutputKey = sourceKey
+	if w.outputErr != nil {
+		return "", w.outputErr
+	}
+	return w.outputPath, nil
+}
+
+func (w *fakeWorkspace) OutputDir() string {
+	return w.outputDir
+}
+
+func (w *fakeWorkspace) EnsureExists(path string) error {
+	return w.existsErr
+}
+
+func (w *fakeWorkspace) Cleanup() error {
+	w.cleaned = true
+	return nil
 }
