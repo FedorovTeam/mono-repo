@@ -1,0 +1,53 @@
+{
+  "pdfinfo": {
+    "pages": 1,
+    "producer": "fixtures",
+    "pdf_version": "1.7",
+    "title": "Voting sample",
+    "author": "QA",
+    "creation_date": "D:20250111",
+    "raw": "Pages: 1\nProducer: fixtures\nPDF version: 1.7\nTitle: Voting sample\nAuthor: QA\nCreationDate: D:20250111\n"
+  },
+  "detect_voting_tables": true,
+  "pages": "1-2",
+  "layout_text": "Депутат         Присутствует  За  Против  Воздержался  Не голосовал\nИванов И.И.     ☑            ☑   -      -             -\nПетров П.П.     ☑            ☑   -      -             -\nСидорова С.С.   ☑            -   ☑      -             -\n",
+  "tables": [
+    {
+      "headers": [
+        "Депутат",
+        "Присутствует",
+        "За",
+        "Против",
+        "Воздержался",
+        "Не голосовал"
+      ],
+      "rows": [
+        [
+          "Иванов И.И.",
+          "☑",
+          "☑",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "Петров П.П.",
+          "☑",
+          "☑",
+          "-",
+          "-",
+          "-"
+        ],
+        [
+          "Сидорова С.С.",
+          "☑",
+          "-",
+          "☑",
+          "-",
+          "-"
+        ]
+      ],
+      "page": 1
+    }
+  ]
+}

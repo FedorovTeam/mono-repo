@@ -3,6 +3,7 @@ package usecase
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -156,6 +157,128 @@ func TestProcessExtractionJobUploadsArtifacts(t *testing.T) {
 		Bucket:    job.Artifacts.DebugPrefix.Bucket,
 		ObjectKey: job.Artifacts.DebugPrefix.ObjectKey + "/page-1.txt",
 	}, []byte("debug"))
+}
+
+func TestProcessExtractionJobMarksFailedWhenDownloadFails(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 7, 1, 8, 0, 0, 0, time.UTC)
+	storage := &stubStorage{downloadErr: errors.New("missing object")}
+
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue:     repo,
+		Storage:   storage,
+		Extractor: &fakeExtractor{},
+		Clock:     fixedClock{now: now},
+	}, Config{
+		QueueLimit:             5,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	job, err := uc.SubmitExtraction(context.Background(), SubmitExtractionRequest{
+		DocumentID:        "doc-missing",
+		OriginalBucket:    "originals",
+		OriginalObjectKey: "absent.pdf",
+	})
+	require.NoError(t, err)
+
+	processed, err := uc.ProcessExtractionJob(context.Background())
+	require.NoError(t, err)
+	require.True(t, processed)
+
+	stored, err := uc.GetJob(context.Background(), job.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusFailed, stored.Status)
+	require.Equal(t, "download_error", stored.ErrorCode)
+	require.Equal(t, "download failed", stored.StatusReason)
+	require.NotNil(t, stored.FinishedAt)
+	require.WithinDuration(t, now, *stored.FinishedAt, time.Second)
+}
+
+func TestProcessExtractionJobMarksFailedWhenExtractorFails(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 7, 2, 9, 30, 0, 0, time.UTC)
+	storage := &stubStorage{
+		downloadData: []byte("%PDF-1.4 data"),
+	}
+
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue:     repo,
+		Storage:   storage,
+		Extractor: &fakeExtractor{err: errors.New("parse error")},
+		Clock:     fixedClock{now: now},
+	}, Config{
+		QueueLimit:             5,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	job, err := uc.SubmitExtraction(context.Background(), SubmitExtractionRequest{
+		DocumentID:        "doc-extractor",
+		OriginalBucket:    "originals",
+		OriginalObjectKey: "source.pdf",
+	})
+	require.NoError(t, err)
+
+	processed, err := uc.ProcessExtractionJob(context.Background())
+	require.NoError(t, err)
+	require.True(t, processed)
+
+	stored, err := uc.GetJob(context.Background(), job.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusFailed, stored.Status)
+	require.Equal(t, "extraction_error", stored.ErrorCode)
+	require.Equal(t, "extraction failed", stored.StatusReason)
+	require.NotNil(t, stored.FinishedAt)
+	require.WithinDuration(t, now, *stored.FinishedAt, time.Second)
+}
+
+func TestProcessExtractionJobMarksRetryableWhenUploadFails(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 7, 3, 7, 15, 0, 0, time.UTC)
+	storage := &stubStorage{
+		downloadData: []byte("%PDF-1.4 data"),
+		uploadErr:    errors.New("io timeout"),
+	}
+
+	extractor := &fakeExtractor{
+		result: ExtractionResult{
+			RawJSON:        []byte(`{"raw":true}`),
+			NormalizedJSON: []byte(`{"normalized":true}`),
+			Markdown:       []byte("# tables"),
+			Manifest:       []byte(`{"version":1}`),
+		},
+	}
+
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue:     repo,
+		Storage:   storage,
+		Extractor: extractor,
+		Clock:     fixedClock{now: now},
+	}, Config{
+		QueueLimit:             5,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	job, err := uc.SubmitExtraction(context.Background(), SubmitExtractionRequest{
+		DocumentID:        "doc-upload",
+		OriginalBucket:    "originals",
+		OriginalObjectKey: "source.pdf",
+	})
+	require.NoError(t, err)
+
+	processed, err := uc.ProcessExtractionJob(context.Background())
+	require.NoError(t, err)
+	require.True(t, processed)
+
+	stored, err := uc.GetJob(context.Background(), job.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusFailedRetryable, stored.Status)
+	require.Equal(t, "upload_error", stored.ErrorCode)
+	require.Equal(t, "upload failed", stored.StatusReason)
+	require.NotEmpty(t, storage.uploads)
+	require.Contains(t, stored.ErrorMessage, "io timeout")
 }
 
 func TestGetJobNotFound(t *testing.T) {
@@ -384,4 +507,29 @@ func (s *fakeStorage) assertObject(t *testing.T, location domain.ArtifactLocatio
 	actual, ok := s.objects[s.composeKey(location.Bucket, location.ObjectKey)]
 	require.True(t, ok, "object %s/%s not found", location.Bucket, location.ObjectKey)
 	require.Equal(t, expected, actual)
+}
+
+type stubStorage struct {
+	downloadData []byte
+	downloadErr  error
+	uploadErr    error
+	uploads      []string
+}
+
+func (s *stubStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) {
+	if s.downloadErr != nil {
+		return nil, s.downloadErr
+	}
+	return io.NopCloser(bytes.NewReader(s.downloadData)), nil
+}
+
+func (s *stubStorage) Upload(_ context.Context, _, objectKey, _ string, content io.Reader, _ int64) error {
+	defer func() {
+		s.uploads = append(s.uploads, objectKey)
+	}()
+	if s.uploadErr != nil {
+		return s.uploadErr
+	}
+	_, _ = io.ReadAll(content)
+	return nil
 }

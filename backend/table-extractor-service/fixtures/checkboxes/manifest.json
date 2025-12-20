@@ -1,0 +1,22 @@
+{
+  "source": "fixtures/checkboxes/document.base64",
+  "generated_at": "2025-01-11T08:00:00Z",
+  "detect_voting_tables": true,
+  "pages": "1-2",
+  "table_count": 1,
+  "processing": {
+    "pdfinfo_ms": 20,
+    "pdftotext_ms": 15,
+    "pdftoppm_ms": 18,
+    "parse_ms": 6
+  },
+  "pdfinfo": {
+    "pages": 1,
+    "producer": "fixtures",
+    "pdf_version": "1.7",
+    "title": "Voting sample",
+    "author": "QA",
+    "creation_date": "D:20250111",
+    "raw": "Pages: 1\nProducer: fixtures\nPDF version: 1.7\nTitle: Voting sample\nAuthor: QA\nCreationDate: D:20250111\n"
+  }
+}

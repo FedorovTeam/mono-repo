@@ -225,6 +225,26 @@ func TestCleanupAndRetryFailed(t *testing.T) {
 	require.Equal(t, domain.StatusPending, retryableUpdated.Status)
 }
 
+func TestCountActive(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+
+	pending := newJob("doc-pending")
+	processing := newJob("doc-processing")
+	processing.Status = domain.StatusProcessing
+	done := newJob("doc-done")
+	done.Status = domain.StatusDone
+
+	for _, job := range []domain.TableExtractionJob{pending, processing, done} {
+		_, _, err := repo.UpsertOrGetActive(ctx, job, 10)
+		require.NoError(t, err)
+	}
+
+	active, err := repo.CountActive(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, active)
+}
+
 func setupRepo(t *testing.T) (repository.TableExtractionRepository, *sql.DB) {
 	t.Helper()
 

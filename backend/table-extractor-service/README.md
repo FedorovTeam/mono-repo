@@ -101,3 +101,25 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - Каждый gRPC вызов логируется с `correlation_id`.
 - Воркер логирует жизненный цикл задачи: `acquired → processing → done/failed`, включая `attempt`, длительности этапов (download/extract/upload) и причины ошибок.
 - Метрики (если включены в `observability.*`): gauge по статусам очереди, счётчики `tasks_completed/tasks_failed`, гистограммы длительности обработки и размеров таблиц/страниц (если есть).
+
+## Локальный прогон (MinIO + gRPC)
+
+1. Поднимите MinIO:  
+   `docker run --rm -it -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin minio/minio:RELEASE.2024-11-07T23-46-52Z server /data --console-address ":9001"`  
+   Создайте бакеты `table-extractor-originals` и `table-extractor-artifacts`:  
+   `mc alias set local http://localhost:9000 minioadmin minioadmin --api S3v4 && mc mb local/table-extractor-originals && mc mb local/table-extractor-artifacts`.
+2. Скопируйте `config/config.yaml.example` → `config/config.yaml`, пропишите MinIO endpoint/ключи, при необходимости DSN Postgres. Миграции применяются автоматически при запуске сервиса.
+3. Запустите сервис: `CONFIG_PATH=config/config.yaml go run ./cmd/main.go`.
+4. Отправьте задачу через gRPC (пример для файла в MinIO):
+   ```bash
+   grpcurl -plaintext -d '{
+     "documentId": "doc-manual",
+     "originalBucket": "table-extractor-originals",
+     "originalObjectKey": "input/document.pdf",
+     "artifactsBucket": "table-extractor-artifacts",
+     "artifactsPrefix": "tables/doc-manual"
+   }' localhost:9090 backend.tableextractor.v1.TableExtractorService/ExtractTablesFromPdf
+   ```
+   Полученный `queueId` используйте в `GetTableExtractionJob`:
+   `grpcurl -plaintext -d '{"queueId":"<queueId>"}' localhost:9090 backend.tableextractor.v1.TableExtractorService/GetTableExtractionJob`.
+5. Проверьте артефакты в MinIO: `mc ls local/table-extractor-artifacts/tables/doc-manual/` и содержимое `tables.md`/`manifest.json`. Для быстрого сравнения можно использовать эталонные файлы в `fixtures/regular/` (PDF нужно сгенерировать из `document.base64`: `base64 -d fixtures/regular/document.base64 > /tmp/regular.pdf`). Подробный чек-лист — в `test.md`.

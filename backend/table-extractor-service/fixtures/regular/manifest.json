@@ -1,0 +1,22 @@
+{
+  "source": "fixtures/regular/document.base64",
+  "generated_at": "2025-01-10T12:00:00Z",
+  "detect_voting_tables": false,
+  "pages": "all",
+  "table_count": 1,
+  "processing": {
+    "pdfinfo_ms": 12,
+    "pdftotext_ms": 8,
+    "pdftoppm_ms": 5,
+    "parse_ms": 3
+  },
+  "pdfinfo": {
+    "pages": 2,
+    "producer": "fixtures",
+    "pdf_version": "1.7",
+    "title": "Fixture regular",
+    "author": "QA",
+    "creation_date": "D:20250110",
+    "raw": "Pages: 2\nProducer: fixtures\nPDF version: 1.7\nTitle: Fixture regular\nAuthor: QA\nCreationDate: D:20250110\n"
+  }
+}
