@@ -12,6 +12,11 @@ import (
 
 const DefaultConfigPath = "config/config.yaml"
 
+const (
+	StorageModeMinio      = "minio"
+	StorageModeFilesystem = "filesystem"
+)
+
 type ServiceConfig struct {
 	Name     string `yaml:"name"`
 	Port     int    `yaml:"port"`
@@ -35,6 +40,9 @@ type PreprocessConfig struct {
 	LibreOfficePath   string        `yaml:"libreoffice_path"`
 	WorkingDir        string        `yaml:"working_dir"`
 	OutputDir         string        `yaml:"output_dir"`
+	LocalSourceDir    string        `yaml:"local_source_dir"`
+	LocalTargetDir    string        `yaml:"local_target_dir"`
+	StorageMode       string        `yaml:"storage_mode"`
 	SourceBucket      string        `yaml:"source_bucket"`
 	TargetBucket      string        `yaml:"target_bucket"`
 	TargetKeyPrefix   string        `yaml:"target_key_prefix"`
@@ -97,4 +105,12 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c PreprocessConfig) StorageModeOrDefault() string {
+	mode := strings.ToLower(strings.TrimSpace(c.StorageMode))
+	if mode == "" {
+		return StorageModeMinio
+	}
+	return mode
 }
