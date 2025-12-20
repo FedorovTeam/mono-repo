@@ -84,8 +84,9 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 		id, document_id, original_bucket, original_object_key,
 		artifacts_bucket, artifacts_prefix,
 		status, status_reason, attempts, next_run_at, finished_at,
-		error_code, error_message, correlation_id, created_at, updated_at
-	) VALUES (%s)`, r.placeholders(16))
+		error_code, error_message, correlation_id, created_at, updated_at,
+		source_url, local_path
+	) VALUES (%s)`, r.placeholders(18))
 
 	args := []any{
 		job.ID.String(),
@@ -104,6 +105,8 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 		job.CorrelationID,
 		job.CreatedAt,
 		job.UpdatedAt,
+		job.SourceURL,
+		job.LocalPath,
 	}
 
 	if _, err := tx.ExecContext(ctx, insertQuery, args...); err != nil {
@@ -146,7 +149,7 @@ func (r *SQLRepository) SelectPendingBatchForUpdate(ctx context.Context, limit i
 
 	selectQuery := fmt.Sprintf(`SELECT 
 		id, document_id, original_bucket, original_object_key,
-		artifacts_bucket, artifacts_prefix,
+		artifacts_bucket, artifacts_prefix, source_url, local_path,
 		status, status_reason, attempts, next_run_at, finished_at,
 		error_code, error_message, correlation_id, created_at, updated_at
 		FROM table_extraction_queue
@@ -212,7 +215,7 @@ func (r *SQLRepository) Save(ctx context.Context, job domain.TableExtractionJob)
 func (r *SQLRepository) ListProcessingBefore(ctx context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error) {
 	query := fmt.Sprintf(`SELECT 
 		id, document_id, original_bucket, original_object_key,
-		artifacts_bucket, artifacts_prefix,
+		artifacts_bucket, artifacts_prefix, source_url, local_path,
 		status, status_reason, attempts, next_run_at, finished_at,
 		error_code, error_message, correlation_id, created_at, updated_at
 		FROM table_extraction_queue WHERE status = %s AND updated_at <= %s`,
@@ -272,7 +275,7 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 
 	query := fmt.Sprintf(`SELECT 
 		id, document_id, original_bucket, original_object_key,
-		artifacts_bucket, artifacts_prefix,
+		artifacts_bucket, artifacts_prefix, source_url, local_path,
 		status, status_reason, attempts, next_run_at, finished_at,
 		error_code, error_message, correlation_id, created_at, updated_at
 		FROM table_extraction_queue
@@ -343,7 +346,7 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 func (r *SQLRepository) GetByID(ctx context.Context, id uuid.UUID) (domain.TableExtractionJob, bool, error) {
 	query := fmt.Sprintf(`SELECT 
 		id, document_id, original_bucket, original_object_key,
-		artifacts_bucket, artifacts_prefix,
+		artifacts_bucket, artifacts_prefix, source_url, local_path,
 		status, status_reason, attempts, next_run_at, finished_at,
 		error_code, error_message, correlation_id, created_at, updated_at
 		FROM table_extraction_queue WHERE id = %s LIMIT 1`, r.placeholder(1))
@@ -409,7 +412,7 @@ func (r *SQLRepository) saveTx(ctx context.Context, tx *sql.Tx, job domain.Table
 func (r *SQLRepository) getActiveByDocumentID(ctx context.Context, tx *sql.Tx, documentID string) (domain.TableExtractionJob, bool, error) {
 	query := fmt.Sprintf(`SELECT 
 		id, document_id, original_bucket, original_object_key,
-		artifacts_bucket, artifacts_prefix,
+		artifacts_bucket, artifacts_prefix, source_url, local_path,
 		status, status_reason, attempts, next_run_at, finished_at,
 		error_code, error_message, correlation_id, created_at, updated_at
 		FROM table_extraction_queue WHERE document_id = %s AND status IN (%s, %s) LIMIT 1`,
@@ -445,6 +448,7 @@ func (r *SQLRepository) scanJob(row interface{ Scan(dest ...any) error }) (domai
 		statusReason                     string
 		originalBucket, originalKey      string
 		artifactsBucket, artifactsPrefix string
+		sourceURL, localPath             string
 		attempts                         int
 		nextRunAt                        sql.NullTime
 		finishedAt                       sql.NullTime
@@ -462,6 +466,8 @@ func (r *SQLRepository) scanJob(row interface{ Scan(dest ...any) error }) (domai
 		&originalKey,
 		&artifactsBucket,
 		&artifactsPrefix,
+		&sourceURL,
+		&localPath,
 		&status,
 		&statusReason,
 		&attempts,
@@ -487,6 +493,8 @@ func (r *SQLRepository) scanJob(row interface{ Scan(dest ...any) error }) (domai
 	job := domain.TableExtractionJob{
 		ID:              jobID,
 		DocumentID:      documentID,
+		SourceURL:       sourceURL,
+		LocalPath:       localPath,
 		Original:        domain.ArtifactLocation{Bucket: originalBucket, ObjectKey: originalKey},
 		ArtifactsBucket: artifactsBucket,
 		ArtifactsPrefix: artifactsPrefix,

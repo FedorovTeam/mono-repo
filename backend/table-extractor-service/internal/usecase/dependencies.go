@@ -31,13 +31,20 @@ type StorageClient interface {
 
 // FileCache отвечает за подготовку локальной копии исходного файла для извлечения таблиц.
 type FileCache interface {
-	Fetch(ctx context.Context, original domain.ArtifactLocation) (CachedFile, error)
+	Fetch(ctx context.Context, source SourceLocation) (CachedFile, error)
 }
 
 // CachedFile представляет локальную копию исходника с функцией очистки ресурсов.
 type CachedFile struct {
 	Path    string
 	Cleanup func()
+}
+
+// SourceLocation описывает возможные источники исходного PDF.
+type SourceLocation struct {
+	Original  domain.ArtifactLocation
+	SourceURL string
+	LocalPath string
 }
 
 // Extractor — Poppler-пайплайн, который получает путь к локальному PDF и возвращает артефакты.

@@ -32,6 +32,8 @@ type TableArtifacts struct {
 type TableExtractionJob struct {
 	ID              uuid.UUID
 	DocumentID      string
+	SourceURL       string
+	LocalPath       string
 	Original        ArtifactLocation
 	ArtifactsBucket string
 	ArtifactsPrefix string
