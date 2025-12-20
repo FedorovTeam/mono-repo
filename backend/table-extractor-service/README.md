@@ -47,6 +47,7 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - `storage.*` — таймауты HTTP-клиента к MinIO (`dial_timeout`, `read_write_timeout`, `operation_timeout`).
 - `extractor.mode` — режим извлечения (`layout`/`structured`), `extractor.detect_voting_tables` — включает детектор протоколов.
 - `extractor.pages` — диапазон страниц (`all`, `1-3`, `odd`, т.д. — в зависимости от реализации пайплайна).
+- `observability.logging_enabled` / `observability.tracing.enabled` — включение логов и трассировки.
 
 ## Интеграции и зависимости
 
@@ -54,13 +55,29 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - **MinIO**: источник PDF и место хранения артефактов (JSON/Markdown/manifest).
 - **Poppler**: `pdfinfo` и `pdftotext` (или другие утилиты poppler, которые использует твой пайплайн). Должны быть доступны внутри контейнера/окружения.
 
-## gRPC API (кратко)
+## gRPC API
 
-- `ExtractTablesFromPdf(...)` — поставить задачу в очередь (опционально `wait_for_result`).
-- `GetTableExtractionJob(queue_id)` — получить статус и пути артефактов.
-- `ListTableExtractionJobs(...)` (опционально) — список задач по фильтрам.
+### TableExtractorService
 
-`x-correlation-id` читается из gRPC metadata (или генерируется), возвращается в ответе и прокидывается в логи/внешние операции.
+- **ExtractTablesFromPdf** — постановка задачи в очередь.
+  - Обязательные поля: `document_id`, `original_bucket`, `original_object_key` (или `source_url` вместо пары bucket/object).
+  - Опциональные поля: `artifacts_bucket` (по умолчанию `minio.artifacts_bucket`), `artifacts_prefix` (по умолчанию `minio.default_artifacts_prefix/<document_id>/<queue_id>`), `correlation_id` (перезаписывает сгенерированный), `wait_for_result` (пока не используется — метод всегда возвращает сразу после enqueue).
+  - Ответ: `job.queue_id`, `status` (`pending|processing|done|failed|failed_retryable`), итоговые bucket/prefix, `correlation_id`.
+- **GetTableExtractionJob** — получение статуса по `queue_id`.
+  - Возвращает статус, `attempts`, `status_reason/error_code`, `artifacts` с готовыми путями, `created_at/updated_at`, `correlation_id`.
+
+`x-correlation-id` читается из gRPC metadata (или генерируется в хэндлере), возвращается в ответе и прокидывается в логи/MinIO запросы. Идемпотентность обеспечивается уникальным индексом по `document_id` и методом репозитория `UpsertOrGetActive`.
+
+## Очередь и статусы
+
+- Основная таблица: `table_extraction_queue` (PostgreSQL/SQLite), миграции лежат в `db/migrations`.
+- Статусы: `pending → processing → done/failed/failed_retryable`.
+- Контроль нагрузки:
+  - `service.queue_limit` — верхняя граница активных задач (`pending/processing`); при превышении вернётся `ResourceExhausted`.
+  - `service.batch_size` — размер выборки задач за проход воркера, `service.max_workers` — параллелизм.
+  - `service.retry.*` + `processing_timeout` управляют восстановлением зависших задач и бэк‑оффами.
+- Диагностика: `status_reason`, `attempts`, `next_run_at`, `error_code/error_message`, `correlation_id`.
+- Идемпотентность: уникальный индекс `uq_table_extraction_queue_active_document` по `document_id` для статусов `pending/processing`.
 
 ## Формат артефактов (MinIO)
 
@@ -91,8 +108,8 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - `internal/repository` — доступ к `table_extraction_queue` (enqueue, acquire через `FOR UPDATE SKIP LOCKED`, обновление статусов).
 - `internal/worker` — воркеры извлечения + maintenance цикл.
 - `internal/extractor` — пайплайн poppler: вызовы `pdfinfo/pdftotext`, парсинг таблиц, нормализация, рендер (JSON/MD), manifest.
-- `internal/infrastructure/storage` — клиент MinIO (download/upload), прокидывание `correlation_id`.
-- `internal/infrastructure/telemetry` — утилиты correlation-id и лог-контекст.
+- `internal/storage` — клиент MinIO (download/upload), прокидывание `correlation_id`.
+- `internal/telemetry` — утилиты correlation-id, логгер и tracer.
 - `proto/backend/tableextractor/v1` — gRPC контракт и сгенерированные артефакты.
 - `db/migrations/` — SQL миграции очереди.
 
@@ -101,6 +118,8 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - Каждый gRPC вызов логируется с `correlation_id`.
 - Воркер логирует жизненный цикл задачи: `acquired → processing → done/failed`, включая `attempt`, длительности этапов (download/extract/upload) и причины ошибок.
 - Метрики (если включены в `observability.*`): gauge по статусам очереди, счётчики `tasks_completed/tasks_failed`, гистограммы длительности обработки и размеров таблиц/страниц (если есть).
+  - Трассировки включаются через `observability.tracing.enabled`; gRPC сервер использует `otelgrpc` stats handler, провайдер инициализируется в `internal/telemetry`.
+  - Подключение метрик можно расширить через `go.opentelemetry.io/otel/metric` (зависимость уже добавлена).
 
 ## Локальный прогон (MinIO + gRPC)
 
@@ -123,3 +142,83 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
    Полученный `queueId` используйте в `GetTableExtractionJob`:
    `grpcurl -plaintext -d '{"queueId":"<queueId>"}' localhost:9090 backend.tableextractor.v1.TableExtractorService/GetTableExtractionJob`.
 5. Проверьте артефакты в MinIO: `mc ls local/table-extractor-artifacts/tables/doc-manual/` и содержимое `tables.md`/`manifest.json`. Для быстрого сравнения можно использовать эталонные файлы в `fixtures/regular/` (PDF нужно сгенерировать из `document.base64`: `base64 -d fixtures/regular/document.base64 > /tmp/regular.pdf`). Подробный чек-лист — в `test.md`.
+
+### Быстрые сценарии ручного тестирования
+
+1. **Постановка задачи** — вызвать `ExtractTablesFromPdf` (пример выше), убедиться, что вернулся `status=pending` и `correlation_id`.
+2. **Polling статуса** — повторно опросить `GetTableExtractionJob` и отследить переходы `pending → processing → done/failed`.
+3. **Проверка артефактов** — скачать `tables.md` и `manifest.json` из MinIO и сверить с эталонами `fixtures/*`.
+4. **Проверка лимитов** — установить `service.queue_limit=1`, отправить две заявки подряд: вторая должна завершиться `ResourceExhausted`.
+5. **Восстановление зависших задач** — временно уменьшить `processing_timeout`, запустить задачу и убедиться, что maintenance-цикл переводит её обратно в `pending` или помечает `failed`.
+
+## Code view
+
+Диаграмма отражает основные модули и зависимости `table-extractor-service`.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class ConfigLoader {
+      +Load(path) *config.Config
+    }
+
+    class Telemetry {
+      +NewLogger(enabled)
+      +SetupTracer(service, enabled)
+    }
+
+    class SQLRepository {
+      +UpsertOrGetActive(job, queueLimit)
+      +AcquirePendingBatch(limit, now)
+      +UpdateStatus(id, status, reason, code, msg)
+      +RetryFailed(maxAttempts, delay, now)
+    }
+
+    class MinioStorage {
+      +Download(bucket, key)
+      +Upload(bucket, key, contentType, reader)
+    }
+
+    class ExtractorAdapter {
+      +Extract(ctx, pdfPath) ExtractionResult
+    }
+
+    class TableExtractorUseCase {
+      +SubmitExtraction(req)
+      +ProcessExtractionJob(ctx)
+      +RestoreStuckProcessing(...)
+      +RetryFailed(...)
+      +CleanupFinished(...)
+    }
+
+    class GRPCHandler {
+      +ExtractTablesFromPdf(req)
+      +GetTableExtractionJob(req)
+    }
+
+    class GRPCServer {
+      +Run(ctx)
+    }
+
+    class WorkerRunner {
+      +Start(ctx)
+    }
+
+    class AppContainer {
+      +Build(ctx, configPath)
+    }
+
+    ConfigLoader --> AppContainer
+    Telemetry --> AppContainer
+    AppContainer --> SQLRepository
+    AppContainer --> MinioStorage
+    AppContainer --> ExtractorAdapter
+    AppContainer --> TableExtractorUseCase
+    TableExtractorUseCase --> SQLRepository
+    TableExtractorUseCase --> MinioStorage
+    TableExtractorUseCase --> ExtractorAdapter
+    TableExtractorUseCase --> WorkerRunner
+    TableExtractorUseCase --> GRPCHandler
+    GRPCHandler --> GRPCServer
+```
