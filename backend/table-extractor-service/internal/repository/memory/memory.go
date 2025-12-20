@@ -64,7 +64,11 @@ func (r *InMemoryRepository) UpsertOrGetActive(_ context.Context, job domain.Tab
 	return job, false, nil
 }
 
-func (r *InMemoryRepository) AcquirePendingBatch(_ context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
+func (r *InMemoryRepository) AcquirePendingBatch(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
+	return r.SelectPendingBatchForUpdate(ctx, limit, now)
+}
+
+func (r *InMemoryRepository) SelectPendingBatchForUpdate(_ context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -107,13 +111,6 @@ func (r *InMemoryRepository) AcquirePendingBatch(_ context.Context, limit int, n
 
 	result := make([]domain.TableExtractionJob, 0, len(candidates))
 	for _, job := range candidates {
-		aggregate := domain.NewTableExtractionJobAggregate(job)
-		updated, _, err := aggregate.StartProcessing(now)
-		if err != nil {
-			return nil, err
-		}
-		job = updated.Job()
-		r.data[job.ID] = job
 		result = append(result, job)
 	}
 

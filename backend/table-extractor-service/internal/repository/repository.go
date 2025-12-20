@@ -14,6 +14,7 @@ var ErrQueueLimitReached = errors.New("queue limit reached")
 
 type TableExtractionRepository interface {
 	UpsertOrGetActive(ctx context.Context, job domain.TableExtractionJob, queueLimit int) (domain.TableExtractionJob, bool, error)
+	SelectPendingBatchForUpdate(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error)
 	AcquirePendingBatch(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error)
 	GetByID(ctx context.Context, id uuid.UUID) (domain.TableExtractionJob, bool, error)
 	CountActive(ctx context.Context) (int, error)

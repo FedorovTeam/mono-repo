@@ -163,7 +163,7 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 	}
 
 	now := uc.clock.Now().UTC()
-	jobs, err := uc.queue.AcquirePendingBatch(ctx, uc.cfg.AcquireBatchSize, now)
+	jobs, err := uc.queue.SelectPendingBatchForUpdate(ctx, uc.cfg.AcquireBatchSize, now)
 	if err != nil {
 		return false, fmt.Errorf("acquire pending jobs: %w", err)
 	}
@@ -172,11 +172,23 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 	}
 
 	for _, job := range jobs {
-		if err := uc.processSingle(ctx, job); err != nil {
+		startTime := uc.clock.Now().UTC()
+		aggregate := domain.NewTableExtractionJobAggregate(job)
+		started, _, err := aggregate.StartProcessing(startTime)
+		if err != nil {
+			return false, fmt.Errorf("start processing job %s: %w", job.ID, err)
+		}
+		startedJob := started.Job()
+
+		if err := uc.queue.Save(ctx, startedJob); err != nil {
+			return false, fmt.Errorf("save processing job %s: %w", job.ID, err)
+		}
+
+		if err := uc.processSingle(ctx, startedJob); err != nil {
 			uc.logger.Error("failed to process extraction job",
 				zap.Error(err),
-				zap.String("queue_id", job.ID.String()),
-				zap.String("correlation_id", job.CorrelationID),
+				zap.String("queue_id", startedJob.ID.String()),
+				zap.String("correlation_id", startedJob.CorrelationID),
 			)
 		}
 	}

@@ -13,6 +13,7 @@ import (
 // QueueRepo описывает хранилище очереди задач извлечения таблиц.
 type QueueRepo interface {
 	UpsertOrGetActive(ctx context.Context, job domain.TableExtractionJob, queueLimit int) (domain.TableExtractionJob, bool, error)
+	SelectPendingBatchForUpdate(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error)
 	AcquirePendingBatch(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error)
 	Save(ctx context.Context, job domain.TableExtractionJob) error
 	ListProcessingBefore(ctx context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error)

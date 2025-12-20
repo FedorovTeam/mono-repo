@@ -76,9 +76,15 @@ func TestAcquirePendingBatch(t *testing.T) {
 	acquired, err := repo.AcquirePendingBatch(ctx, 2, now)
 	require.NoError(t, err)
 	require.Len(t, acquired, 2)
-	require.Equal(t, domain.StatusProcessing, acquired[0].Status)
-	require.Equal(t, domain.StatusProcessing, acquired[1].Status)
-	require.Equal(t, 1, acquired[0].Attempts)
+	require.Equal(t, domain.StatusPending, acquired[0].Status)
+	require.Equal(t, domain.StatusPending, acquired[1].Status)
+	require.Equal(t, 0, acquired[0].Attempts)
+	require.Equal(t, 0, acquired[1].Attempts)
+
+	storedFirst, ok, err := repo.GetByID(ctx, acquired[0].ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, domain.StatusPending, storedFirst.Status)
 
 	stillPending, ok, err := repo.GetByID(ctx, job3.ID)
 	require.NoError(t, err)
