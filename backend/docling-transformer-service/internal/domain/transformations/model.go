@@ -3,6 +3,7 @@ package transformations
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,22 @@ const (
 )
 
 var ErrPollingAttemptsExceeded = errors.New("conversion polling attempts exceeded")
+
+type DoclingRestartsExceededError struct {
+	Restarts    int
+	MaxRestarts int
+}
+
+func (e *DoclingRestartsExceededError) Error() string {
+	switch {
+	case e == nil:
+		return ""
+	case e.MaxRestarts > 0:
+		return fmt.Sprintf("docling restarts exceeded: %d/%d", e.Restarts, e.MaxRestarts)
+	default:
+		return fmt.Sprintf("docling restarts exceeded: %d", e.Restarts)
+	}
+}
 
 type TransformationTask struct {
 	ID               uuid.UUID

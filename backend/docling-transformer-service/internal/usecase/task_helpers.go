@@ -38,7 +38,23 @@ func buildFailureMessage(err error, task *transformations.TransformationTask) st
 	primaryID := ids.PrimaryID()
 	pollCount := task.DoclingPollCount
 
+	var restartErr *transformations.DoclingRestartsExceededError
 	switch {
+	case errors.As(err, &restartErr):
+		reason := "docling restarts limit exceeded"
+		if restartErr != nil {
+			if restartErr.MaxRestarts > 0 {
+				reason = fmt.Sprintf("docling restarts exceeded after %d/%d restarts", restartErr.Restarts, restartErr.MaxRestarts)
+			} else {
+				reason = fmt.Sprintf("docling restarts exceeded after %d restarts", restartErr.Restarts)
+			}
+		}
+
+		if primaryID != "" {
+			return fmt.Sprintf("docling task %s failed: %s", primaryID, reason)
+		}
+
+		return reason
 	case errors.Is(err, transformations.ErrPollingAttemptsExceeded):
 		return fmt.Sprintf("docling polling attempts exceeded for task %s after %d attempts", primaryID, pollCount)
 	case primaryID != "":

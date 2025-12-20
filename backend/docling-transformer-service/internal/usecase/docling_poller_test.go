@@ -19,6 +19,14 @@ import (
 	"go.uber.org/zap"
 )
 
+func retryCountForRestarts(restarts int) int {
+	if restarts <= 0 {
+		return 1
+	}
+
+	return 1 + restarts*2
+}
+
 func TestDoclingPollerRequeuesAfterWaitingLimit(t *testing.T) {
 	repoStub := &pollingRepoStub{}
 	conv := &converterWithTemporaryError{}
@@ -258,6 +266,40 @@ func TestDoclingPollerFailsOnDoclingFailureError(t *testing.T) {
 	}
 }
 
+func TestDoclingPollerStopsWhenRestartsExceeded(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	conv := &countingConverter{}
+	workerMetrics := metrics.NewWorkerMetrics(zap.NewNop())
+	poller := NewDoclingPoller(conv, repoStub, workerMetrics, zap.NewNop(), DoclingPollerConfig{InitialInterval: time.Second, MaxRestarts: 1})
+
+	task := &transformations.TransformationTask{
+		ID:            uuid.New(),
+		Status:        transformations.StatusDocling,
+		DoclingTaskID: "docling-task",
+		DoclingJobID:  "docling-job",
+		RetryCount:    retryCountForRestarts(1),
+		CreatedAt:     time.Now(),
+	}
+
+	_, err := poller.Poll(context.Background(), task)
+	if err == nil {
+		t.Fatalf("expected error after restart limit")
+	}
+
+	var restartsErr *transformations.DoclingRestartsExceededError
+	if !errors.As(err, &restartsErr) {
+		t.Fatalf("expected restart limit error, got %v", err)
+	}
+
+	if conv.statusCalls != 0 {
+		t.Fatalf("expected no status calls after limit, got %d", conv.statusCalls)
+	}
+
+	if repoStub.requeueCalls != 0 || repoStub.markWaitingCalls != 0 {
+		t.Fatalf("expected no requeue or waiting updates after limit, got requeue=%d waiting=%d", repoStub.requeueCalls, repoStub.markWaitingCalls)
+	}
+}
+
 type failingStatusConverter struct {
 	err error
 }
@@ -268,4 +310,17 @@ func (f *failingStatusConverter) Submit(context.Context, domain.ConvertRequest) 
 
 func (f *failingStatusConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
 	return domain.StatusCheckResult{}, f.err
+}
+
+type countingConverter struct {
+	statusCalls int
+}
+
+func (c *countingConverter) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
+	return domain.DoclingIdentifiers{}, nil
+}
+
+func (c *countingConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+	c.statusCalls++
+	return domain.StatusCheckResult{Result: &domain.ConvertResult{Content: []byte("# ok")}}, nil
 }
