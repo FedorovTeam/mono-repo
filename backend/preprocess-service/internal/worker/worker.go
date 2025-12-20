@@ -37,11 +37,12 @@ type Worker struct {
 }
 
 type Dependencies struct {
-	Repo       domain.PreprocessJobRepository
-	Downloader ports.StorageDownloader
-	Uploader   ports.StorageUploader
-	Converter  ports.DocumentConverter
-	Callback   ports.CallbackSender
+	Repo             domain.PreprocessJobRepository
+	Downloader       ports.StorageDownloader
+	Uploader         ports.StorageUploader
+	Converter        ports.DocumentConverter
+	WorkspaceManager ports.WorkspaceManager
+	Callback         ports.CallbackSender
 }
 
 func New(deps Dependencies, cfg Config, logger *slog.Logger) (*Worker, error) {
@@ -56,6 +57,9 @@ func New(deps Dependencies, cfg Config, logger *slog.Logger) (*Worker, error) {
 	}
 	if deps.Converter == nil {
 		return nil, fmt.Errorf("document converter is required")
+	}
+	if deps.WorkspaceManager == nil {
+		return nil, fmt.Errorf("workspace manager is required")
 	}
 	if deps.Callback == nil {
 		return nil, fmt.Errorf("callback sender is required")
@@ -77,7 +81,7 @@ func New(deps Dependencies, cfg Config, logger *slog.Logger) (*Worker, error) {
 		Backoff:         normalizedCfg.Backoff,
 	}
 
-	processor, err := preprocess.NewService(deps.Repo, deps.Downloader, deps.Uploader, deps.Converter, deps.Callback, serviceCfg, logger)
+	processor, err := preprocess.NewService(deps.Repo, deps.Downloader, deps.Uploader, deps.Converter, deps.WorkspaceManager, deps.Callback, serviceCfg, logger)
 	if err != nil {
 		return nil, err
 	}

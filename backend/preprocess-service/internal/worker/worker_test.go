@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"preprocess-service/internal/adapter/workspace"
 	"preprocess-service/internal/domain"
 	"preprocess-service/internal/usecase/ports"
 )
@@ -182,12 +183,17 @@ func TestWorkerMarksPermanentFailureAsStopped(t *testing.T) {
 	}
 
 	repo := newFailureRepo(job)
+	workspaceManager, err := workspace.NewFSManager(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("init workspace manager: %v", err)
+	}
 	w, err := New(Dependencies{
-		Repo:       repo,
-		Downloader: missingDownloader{},
-		Uploader:   &noopUploader{},
-		Converter:  noopConverter{},
-		Callback:   noopCallback{},
+		Repo:             repo,
+		Downloader:       missingDownloader{},
+		Uploader:         &noopUploader{},
+		Converter:        noopConverter{},
+		WorkspaceManager: workspaceManager,
+		Callback:         noopCallback{},
 	}, Config{
 		WorkingDir:      t.TempDir(),
 		OutputDir:       t.TempDir(),
@@ -243,13 +249,18 @@ func TestWorkerProcessesJobsConcurrently(t *testing.T) {
 
 	repo := newStubQueueRepo(jobs)
 	uploader := &noopUploader{}
+	workspaceManager, err := workspace.NewFSManager(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("init workspace manager: %v", err)
+	}
 
 	w, err := New(Dependencies{
-		Repo:       repo,
-		Downloader: noopDownloader{},
-		Uploader:   uploader,
-		Converter:  noopConverter{},
-		Callback:   noopCallback{},
+		Repo:             repo,
+		Downloader:       noopDownloader{},
+		Uploader:         uploader,
+		Converter:        noopConverter{},
+		WorkspaceManager: workspaceManager,
+		Callback:         noopCallback{},
 	}, Config{
 		WorkingDir:      t.TempDir(),
 		OutputDir:       t.TempDir(),

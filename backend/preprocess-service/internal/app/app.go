@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"preprocess-service/internal/adapter/libreoffice"
+	"preprocess-service/internal/adapter/workspace"
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/observability"
 	storageminio "preprocess-service/internal/storage/minio"
@@ -92,14 +93,21 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("init libreoffice converter: %w", err)
 	}
 
+	workspaceManager, err := workspace.NewFSManager(cfg.Preprocess.WorkingDir, cfg.Preprocess.OutputDir)
+	if err != nil {
+		dbpool.Close()
+		return nil, fmt.Errorf("init workspace manager: %w", err)
+	}
+
 	callbackClient := adaptercallback.NewClient(nil)
 
 	wrk, err := worker.New(worker.Dependencies{
-		Repo:       repo,
-		Downloader: storageAdapter,
-		Uploader:   storageAdapter,
-		Converter:  converter,
-		Callback:   callbackClient,
+		Repo:             repo,
+		Downloader:       storageAdapter,
+		Uploader:         storageAdapter,
+		Converter:        converter,
+		WorkspaceManager: workspaceManager,
+		Callback:         callbackClient,
 	}, workerCfg, logger)
 	if err != nil {
 		dbpool.Close()

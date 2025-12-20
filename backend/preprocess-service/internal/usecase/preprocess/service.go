@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"preprocess-service/internal/domain"
@@ -30,17 +27,18 @@ type Service struct {
 	downloader ports.StorageDownloader
 	uploader   ports.StorageUploader
 	converter  ports.DocumentConverter
+	workspace  ports.WorkspaceManager
 	callback   ports.CallbackSender
 	cfg        Config
 	logger     *slog.Logger
 	policy     domain.RetryPolicy
 
-	downloadSourceFn func(ctx context.Context, job Job, dir string) (string, error)
-	convertFn        func(ctx context.Context, sourcePath, outDir string) error
+	downloadSourceFn func(ctx context.Context, job Job, workspace ports.Workspace) (string, error)
+	convertFn        func(ctx context.Context, sourcePath string, workspace ports.Workspace) error
 	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
 }
 
-func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, callback ports.CallbackSender, cfg Config, logger *slog.Logger) (*Service, error) {
+func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, workspace ports.WorkspaceManager, callback ports.CallbackSender, cfg Config, logger *slog.Logger) (*Service, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("job repository is required")
 	}
@@ -53,6 +51,9 @@ func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDow
 	if converter == nil {
 		return nil, fmt.Errorf("document converter is required")
 	}
+	if workspace == nil {
+		return nil, fmt.Errorf("workspace manager is required")
+	}
 
 	normalized := normalizeConfig(cfg)
 
@@ -60,18 +61,12 @@ func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDow
 		logger = slog.Default()
 	}
 
-	if err := os.MkdirAll(normalized.WorkingDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create working dir: %w", err)
-	}
-	if err := os.MkdirAll(normalized.OutputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create output dir: %w", err)
-	}
-
 	svc := &Service{
 		repo:       repo,
 		downloader: downloader,
 		uploader:   uploader,
 		converter:  converter,
+		workspace:  workspace,
 		callback:   callback,
 		cfg:        normalized,
 		logger:     logger,
@@ -94,12 +89,6 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.TargetMediaType == "" {
 		cfg.TargetMediaType = DefaultTargetMediaType
-	}
-	if cfg.WorkingDir == "" {
-		cfg.WorkingDir = filepath.Join(os.TempDir(), "preprocess")
-	}
-	if cfg.OutputDir == "" {
-		cfg.OutputDir = filepath.Join(cfg.WorkingDir, "output")
 	}
 
 	return cfg
@@ -150,29 +139,30 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 func (s *Service) handleJob(ctx context.Context, job *Job) error {
 	s.ensureFunctions()
 
-	tmpDir, err := os.MkdirTemp(s.cfg.WorkingDir, fmt.Sprintf("job-%s-", job.ID))
+	workspace, err := s.workspace.Prepare(job.ID)
 	if err != nil {
-		return permanentError(domain.ErrorCodeTmpDir, fmt.Errorf("create temp dir: %w", err))
+		return permanentError(domain.ErrorCodeTmpDir, fmt.Errorf("prepare workspace: %w", err))
 	}
-	defer os.RemoveAll(tmpDir)
+	defer workspace.Cleanup()
 
-	outputDir := filepath.Join(s.cfg.OutputDir, job.ID)
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return permanentError(domain.ErrorCodeOutputDir, fmt.Errorf("prepare output dir: %w", err))
-	}
-
-	sourcePath, err := s.downloadSourceFn(ctx, *job, tmpDir)
+	sourcePath, err := s.downloadSourceFn(ctx, *job, workspace)
 	if err != nil {
 		return err
 	}
 
-	if err := s.convertFn(ctx, sourcePath, outputDir); err != nil {
+	if err := s.convertFn(ctx, sourcePath, workspace); err != nil {
 		return err
 	}
 
-	outputPath := s.outputFilePath(sourcePath, outputDir)
-	if _, statErr := os.Stat(outputPath); statErr != nil {
-		return permanentError(domain.ErrorCodeConvertMissingOut, fmt.Errorf("output file not found: %w", statErr))
+	outputPath, err := workspace.OutputPath(job.SourceKey)
+	if err != nil {
+		if errors.Is(err, ports.ErrInvalidObjectKey) {
+			return permanentError(domain.ErrorCodeSourceKeyInvalid, err)
+		}
+		return permanentError(domain.ErrorCodeOutputDir, fmt.Errorf("output path: %w", err))
+	}
+	if err := workspace.EnsureExists(outputPath); err != nil {
+		return permanentError(domain.ErrorCodeConvertMissingOut, fmt.Errorf("output file not found: %w", err))
 	}
 
 	targetBucket := job.TargetBucket
@@ -195,17 +185,14 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 	return nil
 }
 
-func (s *Service) downloadSource(ctx context.Context, job Job, dir string) (string, error) {
-	filename := filepath.Base(job.SourceKey)
-	if filename == "" {
-		return "", permanentError(domain.ErrorCodeSourceKeyInvalid, errors.New("empty source key"))
+func (s *Service) downloadSource(ctx context.Context, job Job, workspace ports.Workspace) (string, error) {
+	targetPath, err := workspace.SourcePath(job.SourceKey)
+	if err != nil {
+		if errors.Is(err, ports.ErrInvalidObjectKey) {
+			return "", permanentError(domain.ErrorCodeSourceKeyInvalid, err)
+		}
+		return "", permanentError(domain.ErrorCodeTmpDir, fmt.Errorf("prepare source path: %w", err))
 	}
-
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", permanentError(domain.ErrorCodeTmpDir, fmt.Errorf("prepare dir: %w", err))
-	}
-
-	targetPath := filepath.Join(dir, filename)
 
 	if err := s.downloader.Download(ctx, job.SourceBucket, job.SourceKey, job.SourceETag, targetPath); err != nil {
 		if errors.Is(err, ports.ErrObjectNotFound) || errors.Is(err, ports.ErrPreconditionFailed) {
@@ -217,11 +204,11 @@ func (s *Service) downloadSource(ctx context.Context, job Job, dir string) (stri
 	return targetPath, nil
 }
 
-func (s *Service) convertToDocx(ctx context.Context, sourcePath, outDir string) error {
+func (s *Service) convertToDocx(ctx context.Context, sourcePath string, workspace ports.Workspace) error {
 	convertCtx, cancel := context.WithTimeout(ctx, s.cfg.ConvertTimeout)
 	defer cancel()
 
-	if err := s.converter.Convert(convertCtx, sourcePath, outDir); err != nil {
+	if err := s.converter.Convert(convertCtx, sourcePath, workspace.OutputDir()); err != nil {
 		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
 			return temporaryError(domain.ErrorCodeConvertTimeout, fmt.Errorf("conversion timeout: %w", err))
 		}
@@ -279,16 +266,6 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.Pre
 		case <-time.After(backoff):
 		}
 	}
-}
-
-func (s *Service) outputFilePath(sourcePath, outDir string) string {
-	base := filepath.Base(sourcePath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	if name == "" {
-		name = base
-	}
-	return filepath.Join(outDir, name+".docx")
 }
 
 func (s *Service) ensureFunctions() {
