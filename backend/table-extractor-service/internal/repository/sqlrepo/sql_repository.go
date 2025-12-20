@@ -274,6 +274,40 @@ func (r *SQLRepository) Postpone(ctx context.Context, id uuid.UUID, nextRunAt ti
 	return nil
 }
 
+func (r *SQLRepository) ListProcessingBefore(ctx context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error) {
+	query := fmt.Sprintf(`SELECT 
+		id, document_id, original_bucket, original_object_key,
+		artifacts_bucket, artifacts_prefix,
+		status, status_reason, attempts, next_run_at, finished_at,
+		error_code, error_message, correlation_id, created_at, updated_at
+		FROM table_extraction_queue WHERE status = %s AND updated_at <= %s`,
+		r.placeholder(1),
+		r.placeholder(2),
+	)
+
+	rows, err := r.db.QueryContext(ctx, query, string(domain.StatusProcessing), updatedBefore)
+	if err != nil {
+		return nil, fmt.Errorf("list processing: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []domain.TableExtractionJob
+	for rows.Next() {
+		job, ok, err := r.scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			jobs = append(jobs, job)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate processing: %w", err)
+	}
+
+	return jobs, nil
+}
+
 func (r *SQLRepository) Cleanup(ctx context.Context, finishedBefore time.Time) (int, error) {
 	query := fmt.Sprintf(`DELETE FROM table_extraction_queue WHERE status IN (%s, %s) AND finished_at IS NOT NULL AND finished_at <= %s`,
 		r.placeholder(1),
@@ -306,6 +340,7 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 	nextRunPlaceholder := nextPlaceholder()
 	updatedPlaceholder := nextPlaceholder()
 	conditionStatusPlaceholder := nextPlaceholder()
+	retryableStatusPlaceholder := nextPlaceholder()
 
 	query := fmt.Sprintf(`UPDATE table_extraction_queue SET 
 		status = %s,
@@ -313,11 +348,12 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 		next_run_at = %s,
 		finished_at = NULL,
 		updated_at = %s
-		WHERE status = %s`,
+		WHERE status IN (%s, %s)`,
 		statusPlaceholder,
 		nextRunPlaceholder,
 		updatedPlaceholder,
 		conditionStatusPlaceholder,
+		retryableStatusPlaceholder,
 	)
 
 	args := []any{
@@ -325,6 +361,7 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 		now.Add(retryDelay),
 		now,
 		string(domain.StatusFailed),
+		string(domain.StatusFailedRetryable),
 	}
 
 	if maxAttempts > 0 {

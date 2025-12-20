@@ -320,3 +320,74 @@ func extractExtension(value string) string {
 	}
 	return strings.ToLower(strings.TrimPrefix(path.Ext(clean), "."))
 }
+
+func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, processingTimeout time.Duration, maxAttempts int, backoffInterval, maxBackoff time.Duration) (int, int, error) {
+	now := uc.clock.Now().UTC()
+	threshold := now
+	if processingTimeout > 0 {
+		threshold = now.Add(-processingTimeout)
+	}
+
+	jobs, err := uc.queue.ListProcessingBefore(ctx, threshold)
+	if err != nil {
+		return 0, 0, fmt.Errorf("list stuck processing: %w", err)
+	}
+
+	restored := 0
+	failed := 0
+
+	for _, job := range jobs {
+		if maxAttempts > 0 && job.Attempts >= maxAttempts {
+			if err := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "processing timeout exceeded", "processing_timeout", "processing exceeded timeout", &now); err != nil {
+				return restored, failed, fmt.Errorf("mark job failed: %w", err)
+			}
+			failed++
+			continue
+		}
+
+		delay := backoffDelay(job.Attempts, backoffInterval, maxBackoff)
+		nextRun := now.Add(delay)
+		if err := uc.queue.Postpone(ctx, job.ID, nextRun, "restored_after_timeout"); err != nil {
+			return restored, failed, fmt.Errorf("postpone job: %w", err)
+		}
+		restored++
+	}
+
+	return restored, failed, nil
+}
+
+func (uc *TableExtractorUseCase) RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration) (int, error) {
+	delay := retryDelay
+	if delay < 0 {
+		delay = 0
+	}
+	now := uc.clock.Now().UTC()
+	count, err := uc.queue.RetryFailed(ctx, maxAttempts, delay, now)
+	if err != nil {
+		return 0, fmt.Errorf("retry failed jobs: %w", err)
+	}
+	return count, nil
+}
+
+func (uc *TableExtractorUseCase) CleanupFinished(ctx context.Context, retention time.Duration) (int, error) {
+	if retention <= 0 {
+		return 0, nil
+	}
+	cutoff := uc.clock.Now().UTC().Add(-retention)
+	count, err := uc.queue.Cleanup(ctx, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup finished jobs: %w", err)
+	}
+	return count, nil
+}
+
+func backoffDelay(attempts int, base, max time.Duration) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	delay := base * time.Duration(attempts+1)
+	if max > 0 && delay > max {
+		return max
+	}
+	return delay
+}

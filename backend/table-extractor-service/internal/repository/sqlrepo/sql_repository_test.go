@@ -125,6 +125,34 @@ func TestPostpone(t *testing.T) {
 	require.Equal(t, "retry later", updated.StatusReason)
 }
 
+func TestListProcessingBefore(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	active := newJob("doc-processing")
+	active.Status = domain.StatusProcessing
+	active.Attempts = 1
+	active.CreatedAt = now.Add(-2 * time.Hour)
+	active.UpdatedAt = now.Add(-2 * time.Hour)
+
+	recent := newJob("doc-recent")
+	recent.Status = domain.StatusProcessing
+	recent.Attempts = 2
+	recent.CreatedAt = now.Add(-time.Hour)
+	recent.UpdatedAt = now.Add(-30 * time.Minute)
+
+	for _, job := range []domain.TableExtractionJob{active, recent} {
+		_, _, err := repo.UpsertOrGetActive(ctx, job, 10)
+		require.NoError(t, err)
+	}
+
+	stuck, err := repo.ListProcessingBefore(ctx, now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, stuck, 1)
+	require.Equal(t, active.ID, stuck[0].ID)
+}
+
 func TestCleanupAndRetryFailed(t *testing.T) {
 	repo, db := setupRepo(t)
 	ctx := context.Background()
@@ -148,6 +176,13 @@ func TestCleanupAndRetryFailed(t *testing.T) {
 	createdFailed, _, err := repo.UpsertOrGetActive(ctx, failedJob, 10)
 	require.NoError(t, err)
 
+	retryable := newJob("doc-retryable")
+	retryable.Status = domain.StatusFailedRetryable
+	retryable.Attempts = 2
+	retryable.FinishedAt = ptrTime(now.Add(-2 * time.Hour))
+	retryableJob, _, err := repo.UpsertOrGetActive(ctx, retryable, 10)
+	require.NoError(t, err)
+
 	cleaned, err := repo.Cleanup(ctx, now.Add(-24*time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, 1, cleaned)
@@ -168,11 +203,14 @@ func TestCleanupAndRetryFailed(t *testing.T) {
 		statuses = append(statuses, status)
 	}
 	require.NoError(t, rows.Err())
-	require.ElementsMatch(t, []string{string(domain.StatusFailed)}, statuses)
+	require.ElementsMatch(t, []string{
+		string(domain.StatusFailed),
+		string(domain.StatusFailedRetryable),
+	}, statuses)
 
 	retired, err := repo.RetryFailed(ctx, 3, time.Minute, now)
 	require.NoError(t, err)
-	require.Equal(t, 1, retired)
+	require.Equal(t, 2, retired)
 
 	updated, ok, err := repo.GetByID(ctx, createdFailed.ID)
 	require.NoError(t, err)
@@ -180,6 +218,11 @@ func TestCleanupAndRetryFailed(t *testing.T) {
 	require.Equal(t, domain.StatusPending, updated.Status)
 	require.Nil(t, updated.FinishedAt)
 	require.NotNil(t, updated.NextRunAt)
+
+	retryableUpdated, ok, err := repo.GetByID(ctx, retryableJob.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, domain.StatusPending, retryableUpdated.Status)
 }
 
 func setupRepo(t *testing.T) (repository.TableExtractionRepository, *sql.DB) {

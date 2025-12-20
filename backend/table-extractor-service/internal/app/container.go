@@ -85,6 +85,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 		QueueLimit:             cfg.Service.QueueLimit,
 		DefaultArtifactsBucket: cfg.Minio.ArtifactsBucket,
 		DefaultArtifactsPrefix: cfg.Minio.DefaultArtifactsPrefix,
+		AcquireBatchSize:       cfg.Service.BatchSize,
 	}, logger)
 
 	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.Port, tracerProvider)
@@ -92,9 +93,16 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 	processor := worker.Processor(uc)
 
 	workerRunner := worker.NewRunner(worker.Config{
-		MaxWorkers:        cfg.Service.MaxWorkers,
-		ProcessingTimeout: cfg.Service.ProcessingTimeout,
-		CleanupRetention:  cfg.Service.CleanupRetention,
+		BatchSize:           cfg.Service.BatchSize,
+		MaxWorkers:          cfg.Service.MaxWorkers,
+		ProcessingTimeout:   cfg.Service.ProcessingTimeout,
+		CleanupRetention:    cfg.Service.CleanupRetention,
+		MaintenanceInterval: cfg.Service.ProcessingTimeout / 5,
+		Retry: worker.RetryConfig{
+			MaxAttempts:     cfg.Service.Retry.MaxAttempts,
+			BackoffInterval: cfg.Service.Retry.BackoffInterval,
+			MaxBackoff:      cfg.Service.Retry.MaxBackoff,
+		},
 	}, processor, logger)
 
 	cleanup := func(ctx context.Context) error {
