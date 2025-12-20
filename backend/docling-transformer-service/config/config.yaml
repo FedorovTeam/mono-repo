@@ -27,6 +27,9 @@ docling:
   api_key: ""
   mode: upload_file
   default_language: ru
+  ocr_engine: easyocr
+  ocr_lang:
+    - ru
   status_initial_interval: 15s
   status_backoff_factor: 2
   status_max_interval: 2m

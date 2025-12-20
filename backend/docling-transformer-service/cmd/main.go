@@ -107,6 +107,8 @@ func main() {
 		Endpoint:         cfg.Docling.Endpoint,
 		APIKey:           cfg.Docling.APIKey,
 		DefaultLanguage:  cfg.Docling.DefaultLanguage,
+		OCREngine:        cfg.Docling.OCREngine,
+		OCRLang:          cfg.Docling.OCRLang,
 		Mode:             cfg.Docling.Mode,
 		TraceHttpRequest: cfg.Observability.LoggingEnabled,
 		Storage: converter.StorageConfig{

@@ -57,6 +57,8 @@ type DoclingConfig struct {
 	Endpoint              string               `yaml:"endpoint"`
 	APIKey                string               `yaml:"api_key"`
 	DefaultLanguage       string               `yaml:"default_language"`
+	OCREngine             string               `yaml:"ocr_engine"`
+	OCRLang               []string             `yaml:"ocr_lang"`
 	Mode                  string               `yaml:"mode"`
 	Storage               DoclingStorageConfig `yaml:"storage"`
 	StatusInitialInterval time.Duration        `yaml:"status_initial_interval"`
@@ -211,6 +213,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("docling.storage configuration is required for source_async mode")
 		}
 	}
+	if c.Docling.OCREngine == "" {
+		return fmt.Errorf("docling.ocr_engine is required")
+	}
 
 	if err := c.StatusBackoffPolicy().Validate(); err != nil {
 		return fmt.Errorf("docling status backoff: %w", err)
@@ -228,6 +233,14 @@ func (c *Config) applyDefaults() {
 
 	if c.Docling.Mode == "" {
 		c.Docling.Mode = "upload_file"
+	}
+
+	if c.Docling.OCREngine == "" {
+		c.Docling.OCREngine = "easyocr"
+	}
+
+	if c.Docling.OCRLang == nil && c.Docling.DefaultLanguage != "" {
+		c.Docling.OCRLang = []string{c.Docling.DefaultLanguage}
 	}
 
 	if c.Docling.Storage.Endpoint == "" && c.Docling.Storage.AccessKey == "" && c.Docling.Storage.SecretKey == "" && c.Docling.Storage.Bucket == "" {
