@@ -1,0 +1,61 @@
+service:
+  name: docling-transformer-service
+  grpc_port: 9090
+  max_workers: 1
+  queue_limit: 0
+  processing_timeout: 30m
+  io_timeout: 15s
+
+scheduler:
+  poll_interval: 5s
+  maintenance_interval: 30s
+  batch_size: 1 # очередь обрабатывается строго последовательно
+  retry_backoff: 10s
+  max_processing_retries: 3
+  cleanup_retention: 24h
+  failed_retry_delay: 5m
+  max_failed_retries: 3
+  docling_requeue_delay: 1m
+  docling_max_restarts: 3
+
+postgres:
+  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/docling_adapter?sslmode=disable"
+  max_connections: 10
+
+docling:
+  endpoint: https://docling.tech.fedorov-team.tech
+  api_key: ""
+  mode: upload_file
+  default_language: ru
+  ocr_engine: tesseract
+  ocr_lang:
+    - ru
+  skip_ocr_on_text_pdf: false
+  status_initial_interval: 15s
+  status_backoff_factor: 2
+  status_max_interval: 2m
+  status_max_attempts: 10
+  max_job_lifetime: 2h
+  storage:
+    endpoint: api.minio.tech.fedorov-team.tech
+    access_key: "xUCM3lvYME7MrYTwegSA"
+    secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
+    bucket: knowledge-md
+    region: us-east-1
+    use_ssl: true
+
+docling_render:
+  prefer_json: false
+
+minio:
+  endpoint: api.minio.tech.fedorov-team.tech
+  access_key: "xUCM3lvYME7MrYTwegSA"
+  secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
+  bucket: knowledge-md
+  region: us-east-1
+  use_ssl: true
+
+observability:
+  tracingEnabled: false
+  metricsEnabled: false
+  loggingEnabled: true

@@ -789,6 +789,10 @@ func (c *DoclingConverter) writeDoclingOptions(
 		return fmt.Errorf("write to_formats md: %w", err)
 	}
 
+	if strings.EqualFold(fileExt, "pdf") {
+		_ = writer.WriteField("pdf_backend", "pypdfium2") // или dlparse_v4 / dlparse_v2
+	}
+
 	// from_formats: тоже array, но нам достаточно одного значения
 	if fileExt != "" {
 		if err := writer.WriteField("from_formats", fileExt); err != nil {

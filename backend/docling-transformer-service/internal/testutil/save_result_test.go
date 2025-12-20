@@ -11,7 +11,7 @@ import (
 
 func TestSaveResultCreatesMarkdownFileInEnvDir(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv(docOutputDirEnv, dir)
+	t.Setenv(docOutputDirPath, dir)
 
 	path := SaveResult(t, sampleResult(), "docs/result")
 
@@ -37,7 +37,7 @@ func TestSaveResultPrefersFlagOverEnv(t *testing.T) {
 	envDir := t.TempDir()
 	flagDir := t.TempDir()
 
-	t.Setenv(docOutputDirEnv, envDir)
+	t.Setenv(docOutputDirPath, envDir)
 
 	restore := setFlagValue(t, docOutputDirFlagName, flagDir)
 	defer restore()

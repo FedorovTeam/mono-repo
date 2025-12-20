@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	inputPDFPath       = "backend/docling-transformer-service/testdata/input.pdf"
-	outputRelativePath = "docling/upload_file_result.md"
+	inputPDFPath       = "input_02.pdf"
+	outputRelativePath = "./upload_file_result.md"
 	defaultJobTimeout  = 5 * time.Minute
 )
 

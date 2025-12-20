@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 )
 
 const (
-	docOutputDirEnv      = "DOC_OUTPUT_DIR"
+	docOutputDirPath     = "./result/"
 	docOutputDirFlagName = "doc_output_dir"
 )
 
@@ -44,6 +45,8 @@ func SaveResult(t *testing.T, result domain.ConvertResult, relativePath string) 
 		t.Fatalf("не удалось создать директорию %s: %v", fullPath, err)
 	}
 
+	fmt.Println(result.MediaType)
+	fmt.Println(result.Charset)
 	if err := os.WriteFile(fullPath, result.Content, 0o644); err != nil {
 		t.Fatalf("не удалось сохранить результат в %s: %v", fullPath, err)
 	}
@@ -59,7 +62,7 @@ func resolveDocOutputDir(t *testing.T) string {
 		return dir
 	}
 
-	if dir := strings.TrimSpace(os.Getenv(docOutputDirEnv)); dir != "" {
+	if dir := strings.TrimSpace(docOutputDirPath); dir != "" {
 		ensureDirExists(t, dir)
 		return dir
 	}
