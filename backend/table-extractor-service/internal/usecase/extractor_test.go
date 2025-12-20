@@ -172,6 +172,141 @@ func TestGetJobNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+func TestRestoreStuckProcessingReschedules(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue: repo,
+		Clock: fixedClock{now: now},
+	}, Config{
+		QueueLimit:             10,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	stuckJob := domain.TableExtractionJob{
+		ID:              uuid.MustParse("00000000-0000-0000-0000-000000000010"),
+		DocumentID:      "doc-stuck",
+		Status:          domain.StatusProcessing,
+		Attempts:        1,
+		ArtifactsBucket: "artifacts",
+		ArtifactsPrefix: "tables/doc-stuck/stuck",
+		Original:        domain.ArtifactLocation{Bucket: "orig", ObjectKey: "doc-stuck.pdf"},
+		CreatedAt:       now.Add(-2 * time.Hour),
+		UpdatedAt:       now.Add(-time.Hour),
+	}
+	_, _, err := repo.UpsertOrGetActive(context.Background(), stuckJob, 10)
+	require.NoError(t, err)
+
+	restored, failed, err := uc.RestoreStuckProcessing(context.Background(), 30*time.Minute, 3, 5*time.Second, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, 1, restored)
+	require.Zero(t, failed)
+
+	updated, err := uc.GetJob(context.Background(), stuckJob.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusPending, updated.Status)
+	require.NotNil(t, updated.NextRunAt)
+	require.WithinDuration(t, now.Add(10*time.Second), *updated.NextRunAt, time.Millisecond)
+}
+
+func TestRestoreStuckProcessingMarksFailed(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue: repo,
+		Clock: fixedClock{now: now},
+	}, Config{
+		QueueLimit:             10,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	stuckJob := domain.TableExtractionJob{
+		ID:              uuid.MustParse("00000000-0000-0000-0000-000000000011"),
+		DocumentID:      "doc-failed",
+		Status:          domain.StatusProcessing,
+		Attempts:        5,
+		ArtifactsBucket: "artifacts",
+		ArtifactsPrefix: "tables/doc-failed/stuck",
+		Original:        domain.ArtifactLocation{Bucket: "orig", ObjectKey: "doc-failed.pdf"},
+		CreatedAt:       now.Add(-2 * time.Hour),
+		UpdatedAt:       now.Add(-time.Hour),
+	}
+	_, _, err := repo.UpsertOrGetActive(context.Background(), stuckJob, 10)
+	require.NoError(t, err)
+
+	restored, failed, err := uc.RestoreStuckProcessing(context.Background(), 20*time.Minute, 3, 5*time.Second, 20*time.Second)
+	require.NoError(t, err)
+	require.Zero(t, restored)
+	require.Equal(t, 1, failed)
+
+	updated, err := uc.GetJob(context.Background(), stuckJob.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusFailed, updated.Status)
+	require.NotNil(t, updated.FinishedAt)
+}
+
+func TestRetryFailedAndCleanupFinished(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue: repo,
+		Clock: fixedClock{now: now},
+	}, Config{
+		QueueLimit:             10,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	failedJob := domain.TableExtractionJob{
+		ID:              uuid.MustParse("00000000-0000-0000-0000-000000000012"),
+		DocumentID:      "doc-failed",
+		Status:          domain.StatusFailed,
+		Attempts:        1,
+		ArtifactsBucket: "artifacts",
+		ArtifactsPrefix: "tables/doc-failed/stuck",
+		Original:        domain.ArtifactLocation{Bucket: "orig", ObjectKey: "doc-failed.pdf"},
+		CreatedAt:       now.Add(-2 * time.Hour),
+		UpdatedAt:       now.Add(-2 * time.Hour),
+		FinishedAt:      ptrTime(now.Add(-time.Hour)),
+	}
+	_, _, err := repo.UpsertOrGetActive(context.Background(), failedJob, 10)
+	require.NoError(t, err)
+
+	doneJob := domain.TableExtractionJob{
+		ID:              uuid.MustParse("00000000-0000-0000-0000-000000000013"),
+		DocumentID:      "doc-done",
+		Status:          domain.StatusDone,
+		Attempts:        1,
+		ArtifactsBucket: "artifacts",
+		ArtifactsPrefix: "tables/doc-done/stuck",
+		Original:        domain.ArtifactLocation{Bucket: "orig", ObjectKey: "doc-done.pdf"},
+		CreatedAt:       now.Add(-3 * time.Hour),
+		UpdatedAt:       now.Add(-3 * time.Hour),
+		FinishedAt:      ptrTime(now.Add(-2 * time.Hour)),
+	}
+	_, _, err = repo.UpsertOrGetActive(context.Background(), doneJob, 10)
+	require.NoError(t, err)
+
+	retried, err := uc.RetryFailed(context.Background(), 3, 15*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, 1, retried)
+
+	updated, err := uc.GetJob(context.Background(), failedJob.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusPending, updated.Status)
+	require.NotNil(t, updated.NextRunAt)
+	require.WithinDuration(t, now.Add(15*time.Second), *updated.NextRunAt, time.Millisecond)
+
+	cleaned, err := uc.CleanupFinished(context.Background(), time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, 1, cleaned)
+
+	_, err = uc.GetJob(context.Background(), doneJob.ID)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 type fakeExtractor struct {
 	result ExtractionResult
 	err    error

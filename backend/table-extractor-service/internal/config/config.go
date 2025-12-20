@@ -22,6 +22,7 @@ type ServiceConfig struct {
 	Name                   string        `yaml:"name"`
 	Port                   int           `yaml:"port"`
 	QueueLimit             int           `yaml:"queue_limit"`
+	BatchSize              int           `yaml:"batch_size"`
 	MaxWorkers             int           `yaml:"max_workers"`
 	ProcessingTimeout      time.Duration `yaml:"processing_timeout"`
 	CleanupRetention       time.Duration `yaml:"cleanup_retention"`
@@ -84,6 +85,7 @@ func defaultConfig() Config {
 			Port:                   9090,
 			DefaultArtifactsPrefix: "tables",
 			MaxWorkers:             1,
+			BatchSize:              1,
 			QueueLimit:             100,
 			ProcessingTimeout:      5 * time.Minute,
 			CleanupRetention:       7 * 24 * time.Hour,

@@ -161,6 +161,23 @@ func (r *InMemoryRepository) Postpone(_ context.Context, id uuid.UUID, nextRunAt
 	return nil
 }
 
+func (r *InMemoryRepository) ListProcessingBefore(_ context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]domain.TableExtractionJob, 0)
+	for _, job := range r.data {
+		if job.Status != domain.StatusProcessing {
+			continue
+		}
+		if !job.UpdatedAt.Before(updatedBefore) && !job.UpdatedAt.Equal(updatedBefore) {
+			continue
+		}
+		result = append(result, job)
+	}
+	return result, nil
+}
+
 func (r *InMemoryRepository) Cleanup(_ context.Context, finishedBefore time.Time) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -189,7 +206,7 @@ func (r *InMemoryRepository) RetryFailed(_ context.Context, maxAttempts int, ret
 
 	updated := 0
 	for id, job := range r.data {
-		if job.Status != domain.StatusFailed {
+		if job.Status != domain.StatusFailed && job.Status != domain.StatusFailedRetryable {
 			continue
 		}
 		if maxAttempts > 0 && job.Attempts >= maxAttempts {
