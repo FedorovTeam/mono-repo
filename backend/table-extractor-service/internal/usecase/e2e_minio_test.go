@@ -75,6 +75,7 @@ func TestEndToEndWithMinioFixture(t *testing.T) {
 	uc := NewTableExtractorUseCase(Dependencies{
 		Queue:     repo,
 		Storage:   storage,
+		FileCache: newTestFileCache(storage),
 		Extractor: extractor,
 		Clock:     fixedClock{now: time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)},
 		IDGenerator: fixedIDGenerator{

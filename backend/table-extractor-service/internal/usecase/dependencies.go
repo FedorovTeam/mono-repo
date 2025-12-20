@@ -29,6 +29,17 @@ type StorageClient interface {
 	Upload(ctx context.Context, bucket, objectKey, contentType string, content io.Reader, size int64) error
 }
 
+// FileCache отвечает за подготовку локальной копии исходного файла для извлечения таблиц.
+type FileCache interface {
+	Fetch(ctx context.Context, original domain.ArtifactLocation) (CachedFile, error)
+}
+
+// CachedFile представляет локальную копию исходника с функцией очистки ресурсов.
+type CachedFile struct {
+	Path    string
+	Cleanup func()
+}
+
 // Extractor — Poppler-пайплайн, который получает путь к локальному PDF и возвращает артефакты.
 type Extractor interface {
 	Extract(ctx context.Context, pdfPath string) (ExtractionResult, error)

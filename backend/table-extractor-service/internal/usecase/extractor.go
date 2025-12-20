@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -50,6 +49,7 @@ type Config struct {
 type TableExtractorUseCase struct {
 	queue     QueueRepo
 	storage   StorageClient
+	fileCache FileCache
 	extractor Extractor
 	cfg       Config
 	clock     Clock
@@ -60,6 +60,7 @@ type TableExtractorUseCase struct {
 type Dependencies struct {
 	Queue       QueueRepo
 	Storage     StorageClient
+	FileCache   FileCache
 	Extractor   Extractor
 	Clock       Clock
 	IDGenerator IDGenerator
@@ -75,6 +76,7 @@ func NewTableExtractorUseCase(deps Dependencies, cfg Config, logger *zap.Logger)
 	return &TableExtractorUseCase{
 		queue:     deps.Queue,
 		storage:   deps.Storage,
+		fileCache: deps.FileCache,
 		extractor: deps.Extractor,
 		cfg:       cfg,
 		clock:     resolveClock(deps.Clock),
@@ -156,7 +158,7 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 
 // ProcessExtractionJob — бизнес-логика воркера: взять pending-задачу, извлечь таблицы и записать артефакты.
 func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool, error) {
-	if uc.extractor == nil || uc.storage == nil {
+	if uc.extractor == nil || uc.storage == nil || uc.fileCache == nil {
 		return false, ErrProcessorOffline
 	}
 
@@ -188,14 +190,18 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		return errors.Join(errors.New("missing original location"), statusErr)
 	}
 
-	originalFile, cleanup, err := uc.downloadOriginal(ctx, job)
+	cached, err := uc.fileCache.Fetch(ctx, job.Original)
 	if err != nil {
 		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "download failed", "download_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
 		return errors.Join(fmt.Errorf("download original: %w", err), statusErr)
 	}
-	defer cleanup()
+	defer func() {
+		if cached.Cleanup != nil {
+			cached.Cleanup()
+		}
+	}()
 
-	result, err := uc.extractor.Extract(ctx, originalFile)
+	result, err := uc.extractor.Extract(ctx, cached.Path)
 	if err != nil {
 		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "extraction failed", "extraction_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
 		return errors.Join(fmt.Errorf("extract tables: %w", err), statusErr)
@@ -250,35 +256,6 @@ func (uc *TableExtractorUseCase) uploadArtifacts(ctx context.Context, job domain
 	}
 
 	return nil
-}
-
-func (uc *TableExtractorUseCase) downloadOriginal(ctx context.Context, job domain.TableExtractionJob) (string, func(), error) {
-	reader, err := uc.storage.Download(ctx, job.Original.Bucket, job.Original.ObjectKey)
-	if err != nil {
-		return "", nil, err
-	}
-	defer func() { _ = reader.Close() }()
-
-	file, err := os.CreateTemp("", "table-extractor-*.pdf")
-	if err != nil {
-		return "", nil, err
-	}
-
-	if _, err := io.Copy(file, reader); err != nil {
-		_ = file.Close()
-		_ = os.Remove(file.Name())
-		return "", nil, err
-	}
-
-	if err := file.Close(); err != nil {
-		_ = os.Remove(file.Name())
-		return "", nil, err
-	}
-
-	cleanup := func() {
-		_ = os.Remove(file.Name())
-	}
-	return file.Name(), cleanup, nil
 }
 
 func (uc *TableExtractorUseCase) validateSources(req SubmitExtractionRequest) error {
