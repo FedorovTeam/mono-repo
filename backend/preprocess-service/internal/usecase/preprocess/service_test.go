@@ -1,4 +1,4 @@
-package worker
+package preprocess
 
 import (
 	"context"
@@ -13,6 +13,16 @@ import (
 	"testing"
 	"time"
 )
+
+type stubRepo struct{}
+
+func (stubRepo) MarkDone(ctx context.Context, job Job, targetMediaType string) error {
+	return nil
+}
+
+func (stubRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
+	return nil
+}
 
 func TestNotifyCallbackSuccess(t *testing.T) {
 	t.Helper()
@@ -45,21 +55,21 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	w := &Worker{
+	svc := &Service{
 		cfg:    Config{Backoff: 5 * time.Millisecond},
 		http:   server.Client(),
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	job := QueueJob{JobID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
+	job := Job{JobID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
 
-	w.notifyCallback(context.Background(), job, statusDone, callbackErrorInfo{})
+	svc.notifyCallback(context.Background(), job, StatusDone, callbackErrorInfo{})
 
 	if attempts != 1 {
 		t.Fatalf("expected single attempt, got %d", attempts)
 	}
 
-	if received.JobID != job.JobID || received.Status != statusDone {
+	if received.JobID != job.JobID || received.Status != StatusDone {
 		t.Fatalf("unexpected payload job/status: %#v", received)
 	}
 
@@ -102,16 +112,16 @@ func TestNotifyCallbackRetry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	w := &Worker{
+	svc := &Service{
 		cfg:    Config{Backoff: 5 * time.Millisecond},
 		http:   server.Client(),
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	job := QueueJob{JobID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
+	job := Job{JobID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
 	errInfo := callbackErrorInfo{Code: "convert_failed", Message: "conversion failed"}
 
-	w.notifyCallback(context.Background(), job, statusStopped, errInfo)
+	svc.notifyCallback(context.Background(), job, StatusStopped, errInfo)
 
 	if attempts != 2 {
 		t.Fatalf("expected two attempts, got %d", attempts)
@@ -132,17 +142,17 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 	workingDir := t.TempDir()
 	outputDir := t.TempDir()
 
-	w := &Worker{
+	svc := &Service{
 		cfg: Config{
 			WorkingDir:      workingDir,
 			OutputDir:       outputDir,
 			TargetBucket:    "default-target",
-			TargetMediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			TargetMediaType: DefaultTargetMediaType,
 		},
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	w.downloadSourceFn = func(ctx context.Context, job QueueJob, dir string) (string, error) {
+	svc.downloadSourceFn = func(ctx context.Context, job Job, dir string) (string, error) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", err
 		}
@@ -151,15 +161,15 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 	}
 
 	var uploadedPath string
-	w.convertFn = func(ctx context.Context, sourcePath, outDir string) error {
+	svc.convertFn = func(ctx context.Context, sourcePath, outDir string) error {
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
 			return err
 		}
-		outputPath := w.outputFilePath(sourcePath, outDir)
+		outputPath := svc.outputFilePath(sourcePath, outDir)
 		return os.WriteFile(outputPath, []byte("converted"), 0o644)
 	}
 
-	w.uploadResultFn = func(ctx context.Context, bucket, key, path string) error {
+	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error {
 		if bucket != "default-target" {
 			return fmt.Errorf("unexpected target bucket: %s", bucket)
 		}
@@ -168,14 +178,14 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 		return nil
 	}
 
-	job := QueueJob{
+	job := Job{
 		JobID:        "job-42",
 		SourceBucket: "source",
 		SourceKey:    "input.txt",
 		TargetKey:    "output/doc.docx",
 	}
 
-	if err := w.handleJob(context.Background(), &job); err != nil {
+	if err := svc.handleJob(context.Background(), &job); err != nil {
 		t.Fatalf("handleJob returned error: %v", err)
 	}
 

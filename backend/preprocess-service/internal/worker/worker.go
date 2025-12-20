@@ -1,17 +1,9 @@
 package worker
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -23,17 +15,7 @@ import (
 	"log/slog"
 
 	"preprocess-service/internal/config"
-)
-
-const (
-	defaultTargetMediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	statusDone             = "done"
-	statusFailed           = "failed"
-	statusPending          = "pending"
-	statusProcessing       = "processing"
-	statusStopped          = "stopped"
-
-	callbackMaxAttempts = 3
+	"preprocess-service/internal/usecase/preprocess"
 )
 
 // Config описывает настройки воркера предобработки.
@@ -64,34 +46,11 @@ type QueueJob struct {
 
 type Worker struct {
 	db        *pgxpool.Pool
-	minio     *minio.Client
 	cfg       Config
-	http      *http.Client
 	sem       *semaphore.Weighted
 	logger    *slog.Logger
 	waitGroup sync.WaitGroup
-
-	downloadSourceFn func(ctx context.Context, job QueueJob, dir string) (string, error)
-	convertFn        func(ctx context.Context, sourcePath, outDir string) error
-	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
-}
-
-type callbackPayload struct {
-	JobID        string                `json:"job_id"`
-	Status       string                `json:"status"`
-	TargetBucket string                `json:"target_bucket,omitempty"`
-	TargetKey    string                `json:"target_key,omitempty"`
-	Error        *callbackErrorPayload `json:"error,omitempty"`
-}
-
-type callbackErrorPayload struct {
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
-}
-
-type callbackErrorInfo struct {
-	Code    string
-	Message string
+	processor *preprocess.Service
 }
 
 func New(db *pgxpool.Pool, minioCfg config.MinioConfig, cfg Config, logger *slog.Logger) (*Worker, error) {
@@ -113,31 +72,30 @@ func New(db *pgxpool.Pool, minioCfg config.MinioConfig, cfg Config, logger *slog
 	}
 
 	normalizedCfg := normalizeConfig(cfg)
-	if normalizedCfg.LibreOfficePath == "" {
-		return nil, fmt.Errorf("libreoffice path is required")
+
+	serviceCfg := preprocess.Config{
+		LibreOfficePath: normalizedCfg.LibreOfficePath,
+		WorkingDir:      normalizedCfg.WorkingDir,
+		OutputDir:       normalizedCfg.OutputDir,
+		TargetBucket:    normalizedCfg.TargetBucket,
+		TargetMediaType: normalizedCfg.TargetMediaType,
+		ConvertTimeout:  normalizedCfg.ConvertTimeout,
+		Backoff:         normalizedCfg.Backoff,
 	}
 
-	if err := os.MkdirAll(normalizedCfg.WorkingDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create working dir: %w", err)
-	}
-	if err := os.MkdirAll(normalizedCfg.OutputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create output dir: %w", err)
-	}
-
-	w := &Worker{
-		db:     db,
-		minio:  minioClient,
-		cfg:    normalizedCfg,
-		http:   &http.Client{Timeout: 15 * time.Second},
-		sem:    semaphore.NewWeighted(normalizedCfg.Concurrency),
-		logger: logger,
+	queueRepo := preprocess.NewPGQueueRepository(db)
+	processor, err := preprocess.NewService(queueRepo, minioClient, serviceCfg, logger)
+	if err != nil {
+		return nil, err
 	}
 
-	w.downloadSourceFn = w.downloadSource
-	w.convertFn = w.convertToDocx
-	w.uploadResultFn = w.uploadResult
-
-	return w, nil
+	return &Worker{
+		db:        db,
+		cfg:       normalizedCfg,
+		sem:       semaphore.NewWeighted(normalizedCfg.Concurrency),
+		logger:    logger,
+		processor: processor,
+	}, nil
 }
 
 func normalizeConfig(cfg Config) Config {
@@ -153,32 +111,12 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 2 * time.Second
 	}
-	if cfg.TargetMediaType == "" {
-		cfg.TargetMediaType = defaultTargetMediaType
-	}
-	if cfg.WorkingDir == "" {
-		cfg.WorkingDir = filepath.Join(os.TempDir(), "preprocess")
-	}
-	if cfg.OutputDir == "" {
-		cfg.OutputDir = filepath.Join(cfg.WorkingDir, "output")
-	}
-
 	return cfg
 }
 
-func (w *Worker) ensureFunctions() {
-	if w.downloadSourceFn == nil {
-		w.downloadSourceFn = w.downloadSource
-	}
-	if w.convertFn == nil {
-		w.convertFn = w.convertToDocx
-	}
-	if w.uploadResultFn == nil {
-		w.uploadResultFn = w.uploadResult
-	}
-}
-
 func (w *Worker) Run(ctx context.Context) error {
+	w.ensureLogger()
+
 	ticker := time.NewTicker(w.cfg.PollInterval)
 	defer ticker.Stop()
 
@@ -239,7 +177,7 @@ func (w *Worker) pickJob(ctx context.Context) (QueueJob, bool, error) {
         ORDER BY next_run_at
         LIMIT 1
         FOR UPDATE SKIP LOCKED
-    `, statusPending, statusFailed)
+    `, preprocess.StatusPending, preprocess.StatusFailed)
 
 	var job QueueJob
 	err = row.Scan(&job.JobID, &job.SourceBucket, &job.SourceKey, &job.SourceETag, &job.TargetBucket, &job.TargetKey, &job.Attempts, &job.MaxAttempts, &job.CallbackURL, &job.CorrelationID)
@@ -256,7 +194,7 @@ func (w *Worker) pickJob(ctx context.Context) (QueueJob, bool, error) {
         UPDATE preprocess_queue
         SET status = $1, attempts = attempts + 1, started_at = now(), updated_at = now()
         WHERE job_id = $2
-    `, statusProcessing, job.JobID); err != nil {
+    `, preprocess.StatusProcessing, job.JobID); err != nil {
 		return QueueJob{}, false, err
 	}
 
@@ -268,294 +206,37 @@ func (w *Worker) pickJob(ctx context.Context) (QueueJob, bool, error) {
 }
 
 func (w *Worker) processJob(ctx context.Context, job QueueJob) {
+	w.ensureLogger()
 	logger := w.logger.With("job_id", job.JobID, "correlation_id", job.CorrelationID)
 	logger.Info("start processing job")
 
-	jobState := job
-
-	if err := w.handleJob(ctx, &jobState); err != nil {
-		logger.Error("job failed", "error", err)
-		status, code, message, updateErr := w.markFailed(ctx, jobState, err)
-		if updateErr != nil {
-			logger.Error("failed to update job status", "error", updateErr)
-		}
-		if status == statusStopped {
-			w.notifyCallback(ctx, jobState, status, callbackErrorInfo{Code: code, Message: message})
-		}
+	if w.processor == nil {
+		logger.Error("processor is not configured")
 		return
 	}
 
-	logger.Info("job completed successfully")
-	if err := w.markDone(ctx, jobState); err != nil {
-		logger.Error("failed to mark job done", "error", err)
-		return
-	}
-
-	w.notifyCallback(ctx, jobState, statusDone, callbackErrorInfo{})
-}
-
-func (w *Worker) handleJob(ctx context.Context, job *QueueJob) error {
-	w.ensureFunctions()
-
-	tmpDir, err := os.MkdirTemp(w.cfg.WorkingDir, fmt.Sprintf("job-%s-", job.JobID))
-	if err != nil {
-		return permanentError("tmp_dir", fmt.Errorf("create temp dir: %w", err))
-	}
-	defer os.RemoveAll(tmpDir)
-
-	outputDir := filepath.Join(w.cfg.OutputDir, job.JobID)
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return permanentError("output_dir", fmt.Errorf("prepare output dir: %w", err))
-	}
-
-	sourcePath, err := w.downloadSourceFn(ctx, *job, tmpDir)
-	if err != nil {
-		return err
-	}
-
-	if err := w.convertFn(ctx, sourcePath, outputDir); err != nil {
-		return err
-	}
-
-	outputPath := w.outputFilePath(sourcePath, outputDir)
-	if _, statErr := os.Stat(outputPath); statErr != nil {
-		return permanentError("convert_missing_output", fmt.Errorf("output file not found: %w", statErr))
-	}
-
-	targetBucket := job.TargetBucket
-	if targetBucket == "" {
-		targetBucket = w.cfg.TargetBucket
-	}
-
-	job.TargetBucket = targetBucket
-
-	if targetBucket == "" {
-		return permanentError("target_bucket_missing", errors.New("target bucket is required"))
-	}
-	if job.TargetKey == "" {
-		return permanentError("target_key_missing", errors.New("target key is required"))
-	}
-
-	if err := w.uploadResultFn(ctx, targetBucket, job.TargetKey, outputPath); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (w *Worker) downloadSource(ctx context.Context, job QueueJob, dir string) (string, error) {
-	filename := filepath.Base(job.SourceKey)
-	if filename == "" {
-		return "", permanentError("source_key_invalid", errors.New("empty source key"))
-	}
-
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", permanentError("tmp_dir", fmt.Errorf("prepare dir: %w", err))
-	}
-
-	targetPath := filepath.Join(dir, filename)
-
-	opts := minio.GetObjectOptions{}
-	if job.SourceETag != "" {
-		if err := opts.SetMatchETag(job.SourceETag); err != nil {
-			return "", permanentError("etag", fmt.Errorf("set etag: %w", err))
-		}
-	}
-
-	if err := w.minio.FGetObject(ctx, job.SourceBucket, job.SourceKey, targetPath, opts); err != nil {
-		var resp minio.ErrorResponse
-		if errors.As(err, &resp) {
-			switch resp.StatusCode {
-			case 404, 412:
-				return "", permanentError("source_missing", err)
-			}
-		}
-
-		return "", temporaryError("download_failed", err)
-	}
-
-	return targetPath, nil
-}
-
-func (w *Worker) convertToDocx(ctx context.Context, sourcePath, outDir string) error {
-	convertCtx, cancel := context.WithTimeout(ctx, w.cfg.ConvertTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(convertCtx, w.cfg.LibreOfficePath, "--headless", "--convert-to", "docx", "--outdir", outDir, sourcePath)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
-			return temporaryError("convert_timeout", fmt.Errorf("conversion timeout: %w", err))
-		}
-		return permanentError("convert_failed", fmt.Errorf("libreoffice error: %w; output: %s", err, strings.TrimSpace(string(output))))
-	}
-
-	return nil
-}
-
-func (w *Worker) uploadResult(ctx context.Context, bucket, key, path string) error {
-	opts := minio.PutObjectOptions{ContentType: w.cfg.TargetMediaType}
-	_, err := w.minio.FPutObject(ctx, bucket, key, path, opts)
-	if err != nil {
-		var resp minio.ErrorResponse
-		if errors.As(err, &resp) && resp.StatusCode == 404 {
-			return permanentError("target_bucket_missing", err)
-		}
-		return temporaryError("upload_failed", err)
-	}
-	return nil
-}
-
-func (w *Worker) markDone(ctx context.Context, job QueueJob) error {
-	finishedAt := time.Now().UTC()
-	_, err := w.db.Exec(ctx, `
-        UPDATE preprocess_queue
-        SET status = $2, finished_at = $3, updated_at = $3, target_bucket = $4, target_key = $5,
-            target_media_type = $6, error_code = NULL, error_message = NULL, error_details = '{}'::jsonb
-        WHERE job_id = $1
-    `, job.JobID, statusDone, finishedAt, job.TargetBucket, job.TargetKey, w.cfg.TargetMediaType)
-	return err
-}
-
-func (w *Worker) markFailed(ctx context.Context, job QueueJob, jobErr error) (string, string, string, error) {
-	finishedAt := time.Now().UTC()
-	status, nextRunAt, code, message, permanent := failureDecision(job, jobErr, w.cfg.Backoff)
-
-	details := map[string]any{
-		"code":      code,
-		"permanent": permanent,
-		"attempt":   job.Attempts,
-	}
-
-	detailsJSON, err := json.Marshal(details)
-	if err != nil {
-		w.logger.Error("failed to marshal error details", "error", err)
-	}
-
-	_, err = w.db.Exec(ctx, `
-        UPDATE preprocess_queue
-        SET status = $2, next_run_at = $3, finished_at = CASE WHEN $2 = $5 THEN $4 ELSE finished_at END,
-            error_code = $6, error_message = $7, error_details = COALESCE($8::jsonb, '{}'::jsonb),
-            target_bucket = COALESCE($9, target_bucket), target_key = COALESCE($10, target_key), updated_at = $4
-        WHERE job_id = $1
-    `, job.JobID, status, nextRunAt, finishedAt, statusStopped, code, message, string(detailsJSON), nullableString(job.TargetBucket), nullableString(job.TargetKey))
-	return status, code, message, err
-}
-
-func failureDecision(job QueueJob, err error, backoff time.Duration) (string, time.Time, string, string, bool) {
-	var typed jobError
-	code := "processing_error"
-	permanent := false
-
-	if errors.As(err, &typed) {
-		code = typed.Code
-		permanent = typed.Permanent
-		err = typed.Unwrap()
-	}
-
-	message := err.Error()
-
-	if permanent || job.Attempts >= job.MaxAttempts {
-		return statusStopped, time.Now().UTC(), code, message, permanent
-	}
-
-	delay := backoff * time.Duration(job.Attempts)
-	if delay <= 0 {
-		delay = backoff
-	}
-
-	return statusFailed, time.Now().Add(delay).UTC(), code, message, permanent
-}
-
-func (w *Worker) notifyCallback(ctx context.Context, job QueueJob, status string, errInfo callbackErrorInfo) {
-	if job.CallbackURL == "" || w.http == nil {
-		return
-	}
-
-	payload := callbackPayload{
-		JobID:        job.JobID,
-		Status:       status,
-		TargetBucket: job.TargetBucket,
-		TargetKey:    job.TargetKey,
-	}
-
-	if errInfo.Code != "" || errInfo.Message != "" {
-		payload.Error = &callbackErrorPayload{Code: errInfo.Code, Message: errInfo.Message}
-	}
-
-	backoff := w.cfg.Backoff
-	if backoff <= 0 {
-		backoff = time.Second
-	}
-
-	for attempt := 1; attempt <= callbackMaxAttempts; attempt++ {
-		temporary, err := w.sendCallbackRequest(ctx, job.CallbackURL, payload)
-		if err == nil {
-			return
-		}
-
-		w.logger.Error("callback delivery failed", "attempt", attempt, "temporary", temporary, "error", err, "callback_url", job.CallbackURL)
-
-		if !temporary || attempt == callbackMaxAttempts {
-			return
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(backoff):
-		}
+	if err := w.processor.Process(ctx, toUsecaseJob(job)); err != nil {
+		logger.Error("job processing finished with error", "error", err)
 	}
 }
 
-func (w *Worker) sendCallbackRequest(ctx context.Context, url string, payload callbackPayload) (bool, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return false, fmt.Errorf("marshal callback payload: %w", err)
+func (w *Worker) ensureLogger() {
+	if w.logger == nil {
+		w.logger = slog.Default()
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return false, fmt.Errorf("build callback request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := w.http.Do(req)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return false, err
-		}
-		return true, fmt.Errorf("send callback: %w", err)
-	}
-	defer resp.Body.Close()
-
-	io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-		return false, nil
-	}
-
-	if resp.StatusCode >= http.StatusInternalServerError {
-		return true, fmt.Errorf("callback responded with status %d", resp.StatusCode)
-	}
-
-	return false, fmt.Errorf("callback responded with status %d", resp.StatusCode)
 }
 
-func (w *Worker) outputFilePath(sourcePath, outDir string) string {
-	base := filepath.Base(sourcePath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	if name == "" {
-		name = base
+func toUsecaseJob(job QueueJob) preprocess.Job {
+	return preprocess.Job{
+		JobID:         job.JobID,
+		SourceBucket:  job.SourceBucket,
+		SourceKey:     job.SourceKey,
+		SourceETag:    job.SourceETag,
+		TargetBucket:  job.TargetBucket,
+		TargetKey:     job.TargetKey,
+		CallbackURL:   job.CallbackURL,
+		CorrelationID: job.CorrelationID,
+		Attempts:      job.Attempts,
+		MaxAttempts:   job.MaxAttempts,
 	}
-	return filepath.Join(outDir, name+".docx")
-}
-
-func nullableString(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
 }
