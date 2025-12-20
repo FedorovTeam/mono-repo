@@ -9,12 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"golang.org/x/sync/semaphore"
 	"log/slog"
 
-	"preprocess-service/internal/config"
+	"preprocess-service/internal/usecase/ports"
 	"preprocess-service/internal/usecase/preprocess"
 )
 
@@ -53,18 +51,33 @@ type Worker struct {
 	processor *preprocess.Service
 }
 
-func New(db *pgxpool.Pool, minioCfg config.MinioConfig, cfg Config, logger *slog.Logger) (*Worker, error) {
+type Dependencies struct {
+	Repo       ports.QueueRepository
+	Downloader ports.StorageDownloader
+	Uploader   ports.StorageUploader
+	Converter  ports.DocumentConverter
+	Callback   ports.CallbackSender
+}
+
+func New(db *pgxpool.Pool, deps Dependencies, cfg Config, logger *slog.Logger) (*Worker, error) {
 	if db == nil {
 		return nil, fmt.Errorf("db pool is required")
 	}
 
-	minioClient, err := minio.New(minioCfg.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(minioCfg.AccessKey, minioCfg.SecretKey, ""),
-		Secure: minioCfg.SSL,
-		Region: minioCfg.Region,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("init minio client: %w", err)
+	if deps.Repo == nil {
+		return nil, fmt.Errorf("queue repository is required")
+	}
+	if deps.Downloader == nil {
+		return nil, fmt.Errorf("storage downloader is required")
+	}
+	if deps.Uploader == nil {
+		return nil, fmt.Errorf("storage uploader is required")
+	}
+	if deps.Converter == nil {
+		return nil, fmt.Errorf("document converter is required")
+	}
+	if deps.Callback == nil {
+		return nil, fmt.Errorf("callback sender is required")
 	}
 
 	if logger == nil {
@@ -83,8 +96,7 @@ func New(db *pgxpool.Pool, minioCfg config.MinioConfig, cfg Config, logger *slog
 		Backoff:         normalizedCfg.Backoff,
 	}
 
-	queueRepo := preprocess.NewPGQueueRepository(db)
-	processor, err := preprocess.NewService(queueRepo, minioClient, serviceCfg, logger)
+	processor, err := preprocess.NewService(deps.Repo, deps.Downloader, deps.Uploader, deps.Converter, deps.Callback, serviceCfg, logger)
 	if err != nil {
 		return nil, err
 	}

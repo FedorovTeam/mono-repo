@@ -14,10 +14,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"preprocess-service/internal/adapter/libreoffice"
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/observability"
+	storageminio "preprocess-service/internal/storage/minio"
 	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
+	adaptercallback "preprocess-service/internal/transport/callback"
+	"preprocess-service/internal/usecase/preprocess"
 	"preprocess-service/internal/worker"
 )
 
@@ -69,7 +73,31 @@ func New(cfg config.Config) (*App, error) {
 		PollInterval:    cfg.Preprocess.PollInterval,
 	}
 
-	wrk, err := worker.New(dbpool, cfg.Minio, workerCfg, logger)
+	minioClient, err := storageminio.NewClient(cfg.Minio)
+	if err != nil {
+		dbpool.Close()
+		return nil, fmt.Errorf("init minio client: %w", err)
+	}
+
+	storageAdapter := storageminio.NewAdapter(minioClient)
+
+	converter, err := libreoffice.NewExecConverter(cfg.Preprocess.LibreOfficePath)
+	if err != nil {
+		dbpool.Close()
+		return nil, fmt.Errorf("init libreoffice converter: %w", err)
+	}
+
+	callbackClient := adaptercallback.NewClient(nil)
+
+	queueRepo := preprocess.NewPGQueueRepository(dbpool)
+
+	wrk, err := worker.New(dbpool, worker.Dependencies{
+		Repo:       queueRepo,
+		Downloader: storageAdapter,
+		Uploader:   storageAdapter,
+		Converter:  converter,
+		Callback:   callbackClient,
+	}, workerCfg, logger)
 	if err != nil {
 		dbpool.Close()
 		return nil, err

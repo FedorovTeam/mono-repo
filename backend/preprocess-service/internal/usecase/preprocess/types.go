@@ -1,6 +1,6 @@
 package preprocess
 
-import "time"
+import "preprocess-service/internal/usecase/ports"
 
 const (
 	StatusDone       = "done"
@@ -13,29 +13,9 @@ const (
 	callbackMaxAttempts    = 3
 )
 
-type Job struct {
-	JobID         string
-	SourceBucket  string
-	SourceKey     string
-	SourceETag    string
-	TargetBucket  string
-	TargetKey     string
-	CallbackURL   string
-	CorrelationID string
-	Attempts      int
-	MaxAttempts   int
-}
+type Job = ports.Job
 
-type FailureUpdate struct {
-	Status       string
-	NextRunAt    time.Time
-	Code         string
-	Message      string
-	Permanent    bool
-	TargetBucket string
-	TargetKey    string
-	Details      map[string]any
-}
+type FailureUpdate = ports.FailureUpdate
 
 type callbackErrorInfo struct {
 	Code    string

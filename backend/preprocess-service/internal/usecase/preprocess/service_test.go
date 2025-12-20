@@ -12,6 +12,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	callbackclient "preprocess-service/internal/transport/callback"
+	"preprocess-service/internal/usecase/ports"
 )
 
 type stubRepo struct{}
@@ -28,7 +31,7 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 	t.Helper()
 
 	attempts := 0
-	var received callbackPayload
+	var received ports.CallbackPayload
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
@@ -56,9 +59,9 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 	defer server.Close()
 
 	svc := &Service{
-		cfg:    Config{Backoff: 5 * time.Millisecond},
-		http:   server.Client(),
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cfg:      Config{Backoff: 5 * time.Millisecond},
+		callback: callbackclient.NewClient(server.Client()),
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
 	job := Job{JobID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
@@ -86,12 +89,12 @@ func TestNotifyCallbackRetry(t *testing.T) {
 	t.Helper()
 
 	attempts := 0
-	payloads := make([]callbackPayload, 0)
+	payloads := make([]ports.CallbackPayload, 0)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
-		var payload callbackPayload
+		var payload ports.CallbackPayload
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatalf("failed to read body: %v", err)
@@ -113,9 +116,9 @@ func TestNotifyCallbackRetry(t *testing.T) {
 	defer server.Close()
 
 	svc := &Service{
-		cfg:    Config{Backoff: 5 * time.Millisecond},
-		http:   server.Client(),
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cfg:      Config{Backoff: 5 * time.Millisecond},
+		callback: callbackclient.NewClient(server.Client()),
+		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
 	job := Job{JobID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}

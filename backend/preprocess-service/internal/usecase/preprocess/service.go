@@ -1,35 +1,17 @@
 package preprocess
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/minio/minio-go/v7"
+	"preprocess-service/internal/usecase/ports"
 )
-
-type callbackPayload struct {
-	JobID        string                `json:"job_id"`
-	Status       string                `json:"status"`
-	TargetBucket string                `json:"target_bucket,omitempty"`
-	TargetKey    string                `json:"target_key,omitempty"`
-	Error        *callbackErrorPayload `json:"error,omitempty"`
-}
-
-type callbackErrorPayload struct {
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
-}
 
 type Config struct {
 	LibreOfficePath string
@@ -42,29 +24,34 @@ type Config struct {
 }
 
 type Service struct {
-	repo   QueueRepository
-	minio  *minio.Client
-	http   *http.Client
-	cfg    Config
-	logger *slog.Logger
+	repo       ports.QueueRepository
+	downloader ports.StorageDownloader
+	uploader   ports.StorageUploader
+	converter  ports.DocumentConverter
+	callback   ports.CallbackSender
+	cfg        Config
+	logger     *slog.Logger
 
 	downloadSourceFn func(ctx context.Context, job Job, dir string) (string, error)
 	convertFn        func(ctx context.Context, sourcePath, outDir string) error
 	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
 }
 
-func NewService(repo QueueRepository, minioClient *minio.Client, cfg Config, logger *slog.Logger) (*Service, error) {
+func NewService(repo ports.QueueRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, callback ports.CallbackSender, cfg Config, logger *slog.Logger) (*Service, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("queue repository is required")
 	}
-	if minioClient == nil {
-		return nil, fmt.Errorf("minio client is required")
+	if downloader == nil {
+		return nil, fmt.Errorf("storage downloader is required")
+	}
+	if uploader == nil {
+		return nil, fmt.Errorf("storage uploader is required")
+	}
+	if converter == nil {
+		return nil, fmt.Errorf("document converter is required")
 	}
 
 	normalized := normalizeConfig(cfg)
-	if normalized.LibreOfficePath == "" {
-		return nil, fmt.Errorf("libreoffice path is required")
-	}
 
 	if logger == nil {
 		logger = slog.Default()
@@ -78,11 +65,13 @@ func NewService(repo QueueRepository, minioClient *minio.Client, cfg Config, log
 	}
 
 	svc := &Service{
-		repo:   repo,
-		minio:  minioClient,
-		http:   &http.Client{Timeout: 15 * time.Second},
-		cfg:    normalized,
-		logger: logger,
+		repo:       repo,
+		downloader: downloader,
+		uploader:   uploader,
+		converter:  converter,
+		callback:   callback,
+		cfg:        normalized,
+		logger:     logger,
 	}
 
 	svc.downloadSourceFn = svc.downloadSource
@@ -200,22 +189,10 @@ func (s *Service) downloadSource(ctx context.Context, job Job, dir string) (stri
 
 	targetPath := filepath.Join(dir, filename)
 
-	opts := minio.GetObjectOptions{}
-	if job.SourceETag != "" {
-		if err := opts.SetMatchETag(job.SourceETag); err != nil {
-			return "", permanentError("etag", fmt.Errorf("set etag: %w", err))
+	if err := s.downloader.Download(ctx, job.SourceBucket, job.SourceKey, job.SourceETag, targetPath); err != nil {
+		if errors.Is(err, ports.ErrObjectNotFound) || errors.Is(err, ports.ErrPreconditionFailed) {
+			return "", permanentError("source_missing", err)
 		}
-	}
-
-	if err := s.minio.FGetObject(ctx, job.SourceBucket, job.SourceKey, targetPath, opts); err != nil {
-		var resp minio.ErrorResponse
-		if errors.As(err, &resp) {
-			switch resp.StatusCode {
-			case http.StatusNotFound, http.StatusPreconditionFailed:
-				return "", permanentError("source_missing", err)
-			}
-		}
-
 		return "", temporaryError("download_failed", err)
 	}
 
@@ -226,25 +203,18 @@ func (s *Service) convertToDocx(ctx context.Context, sourcePath, outDir string) 
 	convertCtx, cancel := context.WithTimeout(ctx, s.cfg.ConvertTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(convertCtx, s.cfg.LibreOfficePath, "--headless", "--convert-to", "docx", "--outdir", outDir, sourcePath)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	if err := s.converter.Convert(convertCtx, sourcePath, outDir); err != nil {
 		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
 			return temporaryError("convert_timeout", fmt.Errorf("conversion timeout: %w", err))
 		}
-		return permanentError("convert_failed", fmt.Errorf("libreoffice error: %w; output: %s", err, strings.TrimSpace(string(output))))
+		return permanentError("convert_failed", err)
 	}
-
 	return nil
 }
 
 func (s *Service) uploadResult(ctx context.Context, bucket, key, path string) error {
-	opts := minio.PutObjectOptions{ContentType: s.cfg.TargetMediaType}
-	_, err := s.minio.FPutObject(ctx, bucket, key, path, opts)
-	if err != nil {
-		var resp minio.ErrorResponse
-		if errors.As(err, &resp) && resp.StatusCode == http.StatusNotFound {
+	if err := s.uploader.Upload(ctx, bucket, key, path, s.cfg.TargetMediaType); err != nil {
+		if errors.Is(err, ports.ErrBucketNotFound) {
 			return permanentError("target_bucket_missing", err)
 		}
 		return temporaryError("upload_failed", err)
@@ -304,11 +274,11 @@ func (s *Service) failureDecision(job Job, err error) FailureUpdate {
 }
 
 func (s *Service) notifyCallback(ctx context.Context, job Job, status string, errInfo callbackErrorInfo) {
-	if job.CallbackURL == "" || s.http == nil {
+	if job.CallbackURL == "" || s.callback == nil {
 		return
 	}
 
-	payload := callbackPayload{
+	payload := ports.CallbackPayload{
 		JobID:        job.JobID,
 		Status:       status,
 		TargetBucket: job.TargetBucket,
@@ -316,7 +286,7 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status string, er
 	}
 
 	if errInfo.Code != "" || errInfo.Message != "" {
-		payload.Error = &callbackErrorPayload{Code: errInfo.Code, Message: errInfo.Message}
+		payload.Error = &ports.CallbackErrorPayload{Code: errInfo.Code, Message: errInfo.Message}
 	}
 
 	backoff := s.cfg.Backoff
@@ -325,7 +295,7 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status string, er
 	}
 
 	for attempt := 1; attempt <= callbackMaxAttempts; attempt++ {
-		temporary, err := s.sendCallbackRequest(ctx, job.CallbackURL, payload)
+		temporary, err := s.callback.Send(ctx, job.CallbackURL, payload)
 		if err == nil {
 			return
 		}
@@ -342,40 +312,6 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status string, er
 		case <-time.After(backoff):
 		}
 	}
-}
-
-func (s *Service) sendCallbackRequest(ctx context.Context, url string, payload callbackPayload) (bool, error) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return false, fmt.Errorf("marshal callback payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return false, fmt.Errorf("build callback request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.http.Do(req)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return false, err
-		}
-		return true, fmt.Errorf("send callback: %w", err)
-	}
-	defer resp.Body.Close()
-
-	io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
-		return false, nil
-	}
-
-	if resp.StatusCode >= http.StatusInternalServerError {
-		return true, fmt.Errorf("callback responded with status %d", resp.StatusCode)
-	}
-
-	return false, fmt.Errorf("callback responded with status %d", resp.StatusCode)
 }
 
 func (s *Service) outputFilePath(sourcePath, outDir string) string {
