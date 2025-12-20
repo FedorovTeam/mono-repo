@@ -33,6 +33,9 @@ type pollingRepoStub struct {
 	lastRequeueNextPoll *time.Time
 	rescheduleCalls     int
 	lastRescheduleNext  time.Time
+	markFailedCalls     int
+	lastFailedMessage   string
+	lastFailedID        uuid.UUID
 }
 
 var _ repo.QueueRepository = (*pollingRepoStub)(nil)
@@ -59,7 +62,12 @@ func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) e
 	p.markDoneCalls++
 	return nil
 }
-func (p *pollingRepoStub) MarkFailed(context.Context, uuid.UUID, string) error { return nil }
+func (p *pollingRepoStub) MarkFailed(_ context.Context, id uuid.UUID, msg string) error {
+	p.markFailedCalls++
+	p.lastFailedID = id
+	p.lastFailedMessage = msg
+	return nil
+}
 func (p *pollingRepoStub) UpdateDoclingInfo(context.Context, uuid.UUID, string, string, int) error {
 	p.updateInfoCalls++
 	return nil
@@ -774,6 +782,37 @@ func TestQueueWorkerHandlesWaitingAndCompletionStates(t *testing.T) {
 
 	worker.handleSingle(context.Background(), &transformations.TransformationTask{ID: uuid.New()})
 	worker.handleSingle(context.Background(), &transformations.TransformationTask{ID: uuid.New()})
+}
+
+func TestQueueWorkerFailsAfterDoclingRestartsLimit(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	conv := &countingConverter{}
+
+	poller := NewDoclingPoller(conv, repoStub, metrics.NewWorkerMetrics(zap.NewNop()), zap.NewNop(), DoclingPollerConfig{MaxRestarts: 1})
+	executor := NewConversionExecutor(repoStub, conv, nil, poller, metrics.NewWorkerMetrics(zap.NewNop()), zap.NewNop(), ConversionExecutorConfig{MarkdownBucket: "md"})
+	worker := NewQueueWorker(repoStub, executor, metrics.NewWorkerMetrics(zap.NewNop()), zap.NewNop(), QueueWorkerConfig{})
+
+	task := &transformations.TransformationTask{
+		ID:            uuid.New(),
+		Status:        transformations.StatusDocling,
+		DoclingTaskID: "docling-task",
+		RetryCount:    retryCountForRestarts(1),
+	}
+
+	worker.handleSingle(context.Background(), task)
+
+	if repoStub.markFailedCalls != 1 {
+		t.Fatalf("expected task to be failed after restart limit, got %d markFailed calls", repoStub.markFailedCalls)
+	}
+	if repoStub.lastFailedID != task.ID {
+		t.Fatalf("expected failure recorded for %s, got %s", task.ID, repoStub.lastFailedID)
+	}
+	if !strings.Contains(repoStub.lastFailedMessage, "restarts") {
+		t.Fatalf("expected restart limit in failure message, got %q", repoStub.lastFailedMessage)
+	}
+	if conv.statusCalls != 0 {
+		t.Fatalf("expected no docling polling after limit, got %d status calls", conv.statusCalls)
+	}
 }
 
 func TestQueueWorkerSequentialProcessingWithBatchSizeOne(t *testing.T) {

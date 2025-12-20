@@ -46,8 +46,10 @@ sequenceDiagram
                 WK->>MN: PUT markdown_object_key в markdown_bucket с media_type
                 WK->>PG: MarkDone(status=done, finished_at)
             else статус pending/временная ошибка
-                alt превышен лимит поллинга (до/после запроса) или повтор ошибок
-                    WK->>PG: RequeueDoclingWaiting(status=pending, retry_count++, reset docling ids/poll_count,<br/>next_poll_at=requeue_delay)
+                alt превышен лимит рестартов
+                    WK->>PG: MarkFailed(status=failed, error=docling restarts exceeded)
+                else превышен лимит поллинга (до/после запроса) или повтор ошибок
+                    WK->>PG: RequeueDoclingWaiting(status=pending, retry_count++, reset docling ids/poll_count,<br/>next_poll_at=requeue_delay, clear docling ids)
                 else
                     WK->>PG: MarkDoclingWaiting(status=waiting_docling, next_poll_at=exp.backoff)
                 end

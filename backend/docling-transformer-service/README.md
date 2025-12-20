@@ -24,7 +24,7 @@ gRPC-обёртка над Docling, которая ставит конверта
 
 Основные параметры:
 - `service.*`: имя, `grpc_port`, параллелизм воркеров (`max_workers`), лимит очереди (`queue_limit`), таймауты обработки/IO.
-- `scheduler.*`: интервалы опроса/обслуживания, размер батча, backoff для ошибок обработки/submit‑лока, лимиты/паузы ретраев `processing`/`failed` задач, параметры реqueue Docling (`docling_requeue_delay`; поле `docling_max_restarts` есть в конфигурации, но логика его применения пока не задействована).
+- `scheduler.*`: интервалы опроса/обслуживания, размер батча, backoff для ошибок обработки/submit‑лока, лимиты/паузы ретраев `processing`/`failed` задач, параметры реqueue Docling (`docling_requeue_delay`; `docling_max_restarts` ограничивает число рестартов после потери задания Docling — при превышении задача завершается со статусом `failed` без нового submit).
 - `docling.*`: endpoint/API key/язык, режим `mode`, статусный backoff (`status_initial_interval`, `status_backoff_factor`, `status_max_interval`, `status_max_attempts`), `max_job_lifetime`, настройки хранилища Docling.
 - `minio.*`: endpoint, ключи, обязательный `bucket` для результата, `region`, `use_ssl`.
 - `postgres.*`: `dsn`, лимит коннектов.

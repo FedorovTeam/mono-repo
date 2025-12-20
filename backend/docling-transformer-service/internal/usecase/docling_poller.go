@@ -77,6 +77,10 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 		return nil, fmt.Errorf("docling task identifier is empty")
 	}
 
+	if p.isRestartLimitReached(task) {
+		return nil, p.buildRestartLimitError(task)
+	}
+
 	if p.isWaitingLimitReached(pollOffset) {
 		p.errors.Clear(task.ID)
 		if err := p.requeueDoclingTask(ctx, task, fmt.Sprintf("poll limit reached before status check (%d)", pollOffset)); err != nil {
@@ -171,6 +175,10 @@ func (p *DoclingPoller) isWaitingLimitReached(pollCount int) bool {
 }
 
 func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transformations.TransformationTask, reason string) error {
+	if p.isRestartLimitReached(task) {
+		return p.buildRestartLimitError(task)
+	}
+
 	var nextPollAt *time.Time
 	if p.cfg.RequeueDelay > 0 {
 		t := time.Now().Add(p.cfg.RequeueDelay)
@@ -199,6 +207,57 @@ func (p *DoclingPoller) requeueDoclingTask(ctx context.Context, task *transforma
 	)
 
 	return nil
+}
+
+func (p *DoclingPoller) doclingRestarts(task *transformations.TransformationTask) int {
+	if task == nil {
+		return 0
+	}
+
+	retryCount := task.RetryCount
+	if retryCount <= 1 {
+		return 0
+	}
+
+	restarts := retryCount - 1
+	if restarts < 0 {
+		restarts = 0
+	}
+
+	return restarts / 2
+}
+
+func (p *DoclingPoller) isRestartLimitReached(task *transformations.TransformationTask) bool {
+	if p.cfg.MaxRestarts <= 0 {
+		return false
+	}
+
+	return p.doclingRestarts(task) >= p.cfg.MaxRestarts
+}
+
+func (p *DoclingPoller) buildRestartLimitError(task *transformations.TransformationTask) error {
+	restarts := p.doclingRestarts(task)
+	err := &transformations.DoclingRestartsExceededError{
+		Restarts:    restarts,
+		MaxRestarts: p.cfg.MaxRestarts,
+	}
+
+	fields := []zap.Field{
+		zap.String("queue_id", task.ID.String()),
+		zap.Int("restarts", restarts),
+		zap.Int("max_restarts", p.cfg.MaxRestarts),
+	}
+
+	if task.DoclingTaskID != "" {
+		fields = append(fields, zap.String("docling_task_id", task.DoclingTaskID))
+	}
+	if task.DoclingJobID != "" {
+		fields = append(fields, zap.String("docling_job_id", task.DoclingJobID))
+	}
+
+	p.logger.Error("docling restarts limit reached", fields...)
+
+	return err
 }
 
 type pollErrorTracker struct {
