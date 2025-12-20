@@ -30,12 +30,20 @@ type TableArtifacts struct {
 }
 
 type TableExtractionJob struct {
-	ID            uuid.UUID
-	DocumentID    string
-	Status        TableExtractionStatus
-	StatusReason  string
-	Artifacts     TableArtifacts
-	CorrelationID string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID              uuid.UUID
+	DocumentID      string
+	Original        ArtifactLocation
+	ArtifactsBucket string
+	ArtifactsPrefix string
+	Artifacts       TableArtifacts
+	Status          TableExtractionStatus
+	StatusReason    string
+	Attempts        int
+	NextRunAt       *time.Time
+	FinishedAt      *time.Time
+	ErrorCode       string
+	ErrorMessage    string
+	CorrelationID   string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
