@@ -15,6 +15,8 @@ type NewTableExtractionJobParams struct {
 	ID uuid.UUID
 
 	DocumentID string
+	SourceURL  string
+	LocalPath  string
 	Original   ArtifactLocation
 
 	ArtifactsBucket string
@@ -42,6 +44,8 @@ func NewTableExtractionJob(params NewTableExtractionJobParams) (TableExtractionJ
 	job := TableExtractionJob{
 		ID:              jobID,
 		DocumentID:      strings.TrimSpace(params.DocumentID),
+		SourceURL:       strings.TrimSpace(params.SourceURL),
+		LocalPath:       strings.TrimSpace(params.LocalPath),
 		Original:        params.Original,
 		ArtifactsBucket: artifactsBucket,
 		ArtifactsPrefix: artifactsPrefix,
@@ -68,6 +72,11 @@ func (j TableExtractionJob) Validate() error {
 
 	if strings.TrimSpace(j.DocumentID) == "" {
 		return fmt.Errorf("%w: document_id is required", ErrInvalidJob)
+	}
+	if strings.TrimSpace(j.SourceURL) == "" && strings.TrimSpace(j.LocalPath) == "" {
+		if strings.TrimSpace(j.Original.Bucket) == "" || strings.TrimSpace(j.Original.ObjectKey) == "" {
+			return fmt.Errorf("%w: source is required (source_url/local_path or bucket+object)", ErrInvalidJob)
+		}
 	}
 	if strings.TrimSpace(j.CorrelationID) == "" {
 		return fmt.Errorf("%w: correlation_id is required", ErrInvalidJob)

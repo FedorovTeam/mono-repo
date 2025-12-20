@@ -30,6 +30,7 @@ type SubmitExtractionRequest struct {
 	OriginalBucket    string
 	OriginalObjectKey string
 	SourceURL         string
+	LocalPath         string
 	ArtifactsBucket   string
 	ArtifactsPrefix   string
 	WaitForResult     bool
@@ -131,6 +132,8 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 	job, err := domain.NewTableExtractionJob(domain.NewTableExtractionJobParams{
 		ID:              jobID,
 		DocumentID:      req.DocumentID,
+		SourceURL:       req.SourceURL,
+		LocalPath:       req.LocalPath,
 		Original:        domain.ArtifactLocation{Bucket: req.OriginalBucket, ObjectKey: req.OriginalObjectKey},
 		ArtifactsBucket: artifactsBucket,
 		ArtifactsPrefix: prefix,
@@ -195,17 +198,22 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.TableExtractionJob) error {
 	aggregate := domain.NewTableExtractionJobAggregate(job)
 
-	if job.Original.Bucket == "" || job.Original.ObjectKey == "" {
+	sourceProvided := strings.TrimSpace(job.SourceURL) != "" || strings.TrimSpace(job.LocalPath) != "" || (job.Original.Bucket != "" && job.Original.ObjectKey != "")
+	if !sourceProvided {
 		now := uc.clock.Now().UTC()
-		updated, _, transErr := aggregate.MarkFailed("original file is not set", "invalid_original", "original location is empty", false, now)
+		updated, _, transErr := aggregate.MarkFailed("original file is not set", "invalid_original", "source is empty", false, now)
 		if transErr != nil {
 			return errors.Join(errors.New("missing original location"), transErr)
 		}
 		saveErr := uc.queue.Save(ctx, updated.Job())
-		return errors.Join(errors.New("missing original location"), saveErr)
+		return errors.Join(errors.New("missing source"), saveErr)
 	}
 
-	cached, err := uc.fileCache.Fetch(ctx, job.Original)
+	cached, err := uc.fileCache.Fetch(ctx, SourceLocation{
+		Original:  job.Original,
+		SourceURL: job.SourceURL,
+		LocalPath: job.LocalPath,
+	})
 	if err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("download failed", "download_error", err.Error(), false, now)
@@ -293,16 +301,18 @@ func (uc *TableExtractorUseCase) uploadArtifacts(ctx context.Context, job domain
 }
 
 func (uc *TableExtractorUseCase) validateSources(req SubmitExtractionRequest) error {
-	if req.SourceURL == "" {
-		if req.OriginalBucket == "" || req.OriginalObjectKey == "" {
-			return fmt.Errorf("%w: original_bucket and original_object_key are required", ErrInvalidArgument)
-		}
-		return nil
+	hasSourceURL := strings.TrimSpace(req.SourceURL) != ""
+	hasLocalPath := strings.TrimSpace(req.LocalPath) != ""
+	hasBucketObject := strings.TrimSpace(req.OriginalBucket) != "" && strings.TrimSpace(req.OriginalObjectKey) != ""
+
+	if !hasSourceURL && !hasLocalPath && !hasBucketObject {
+		return fmt.Errorf("%w: provide source_url, local_path or original_bucket with original_object_key", ErrInvalidArgument)
 	}
 
-	if req.OriginalBucket != "" || req.OriginalObjectKey != "" {
-		return fmt.Errorf("%w: source_url cannot be combined with bucket/object", ErrInvalidArgument)
+	if (strings.TrimSpace(req.OriginalBucket) == "") != (strings.TrimSpace(req.OriginalObjectKey) == "") {
+		return fmt.Errorf("%w: both original_bucket and original_object_key must be set together", ErrInvalidArgument)
 	}
+
 	return nil
 }
 
@@ -310,6 +320,9 @@ func (uc *TableExtractorUseCase) isPDF(req SubmitExtractionRequest) bool {
 	ext := extractExtension(req.OriginalObjectKey)
 	if ext == "" && req.SourceURL != "" {
 		ext = extractExtension(req.SourceURL)
+	}
+	if ext == "" && req.LocalPath != "" {
+		ext = extractExtension(req.LocalPath)
 	}
 	return ext == "pdf"
 }

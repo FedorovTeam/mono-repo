@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -161,6 +163,67 @@ func TestProcessExtractionJobUploadsArtifacts(t *testing.T) {
 		Bucket:    job.Artifacts.DebugPrefix.Bucket,
 		ObjectKey: job.Artifacts.DebugPrefix.ObjectKey + "/page-1.txt",
 	}, []byte("debug"))
+}
+
+func TestProcessExtractionJobUsesSourceURLFilePath(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	storage := newFakeStorage()
+	tempFile, err := os.CreateTemp("", "table-extractor-source-*.pdf")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = os.Remove(tempFile.Name())
+	})
+
+	content := []byte("%PDF-1.7 local")
+	_, err = tempFile.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tempFile.Close())
+
+	sourceURL := "file://" + tempFile.Name()
+	jobID := uuid.MustParse("00000000-0000-0000-0000-000000000010")
+	extractor := &fakeExtractor{
+		result: ExtractionResult{
+			RawJSON:        []byte(`{"raw":true}`),
+			NormalizedJSON: []byte(`{"normalized":true}`),
+			Markdown:       []byte("# tables"),
+			Manifest:       []byte(`{"version":1}`),
+		},
+		expectedContent: content,
+	}
+
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue:       repo,
+		Storage:     storage,
+		FileCache:   newTestFileCache(storage),
+		Extractor:   extractor,
+		Clock:       fixedClock{now: time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)},
+		IDGenerator: fixedIDGenerator{id: jobID},
+	}, Config{
+		QueueLimit:             5,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	ctx := context.Background()
+	job, err := uc.SubmitExtraction(ctx, SubmitExtractionRequest{
+		DocumentID:    "doc-source-url",
+		SourceURL:     sourceURL,
+		CorrelationID: "corr-source-url",
+	})
+	require.NoError(t, err)
+
+	processed, err := uc.ProcessExtractionJob(ctx)
+	require.NoError(t, err)
+	require.True(t, processed)
+
+	storedJob, err := uc.GetJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusDone, storedJob.Status)
+	require.Equal(t, sourceURL, storedJob.SourceURL)
+	require.Empty(t, storedJob.Original.Bucket)
+	require.Empty(t, storedJob.Original.ObjectKey)
+
+	require.NotEmpty(t, extractor.last)
 }
 
 func TestProcessExtractionJobMarksFailedWhenDownloadFails(t *testing.T) {
@@ -435,11 +498,23 @@ func newJobFromFactory(t *testing.T, documentID string, createdAt time.Time) dom
 }
 
 type fakeExtractor struct {
-	result ExtractionResult
-	err    error
+	result          ExtractionResult
+	err             error
+	last            string
+	expectedContent []byte
 }
 
-func (f *fakeExtractor) Extract(_ context.Context, _ string) (ExtractionResult, error) {
+func (f *fakeExtractor) Extract(_ context.Context, path string) (ExtractionResult, error) {
+	f.last = path
+	if len(f.expectedContent) > 0 {
+		data, readErr := os.ReadFile(filepath.Clean(path))
+		if readErr != nil {
+			return ExtractionResult{}, readErr
+		}
+		if !bytes.Equal(data, f.expectedContent) {
+			return ExtractionResult{}, fmt.Errorf("unexpected content")
+		}
+	}
 	if f.err != nil {
 		return ExtractionResult{}, f.err
 	}
