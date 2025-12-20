@@ -90,6 +90,7 @@ func TestEndToEndWithMinioFixture(t *testing.T) {
 		DocumentID:        "doc-minio",
 		OriginalBucket:    originalBucket,
 		OriginalObjectKey: originalKey,
+		CorrelationID:     "corr-e2e",
 	})
 	require.NoError(t, err)
 

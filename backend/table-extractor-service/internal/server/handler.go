@@ -12,7 +12,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/mono-repo/table-extractor-service/internal/domain"
-	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 	"github.com/mono-repo/table-extractor-service/internal/usecase"
 	pb "github.com/mono-repo/table-extractor-service/proto/backend/tableextractor/v1"
 )
@@ -26,26 +25,21 @@ type Handler struct {
 	pb.UnimplementedTableExtractorServiceServer
 	uc     ExtractionUseCase
 	logger *zap.Logger
+	cids   CorrelationIDProvider
 }
 
-func NewHandler(uc ExtractionUseCase, logger *zap.Logger) *Handler {
+func NewHandler(uc ExtractionUseCase, correlationProvider CorrelationIDProvider, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Handler{uc: uc, logger: logger}
+	if correlationProvider == nil {
+		correlationProvider = defaultCorrelationIDProvider()
+	}
+	return &Handler{uc: uc, logger: logger, cids: correlationProvider}
 }
 
 func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTablesFromPdfRequest) (*pb.ExtractTablesFromPdfResponse, error) {
-	correlationID := telemetry.CorrelationIDFromContext(ctx)
-	if correlationID == "" {
-		ctx, correlationID = telemetry.EnsureCorrelationID(ctx)
-	}
-	ctx = telemetry.WithOutgoingCorrelationID(ctx, correlationID)
-	if req.GetCorrelationId() != "" {
-		correlationID = req.GetCorrelationId()
-		ctx = telemetry.ContextWithCorrelationID(ctx, correlationID)
-		ctx = telemetry.WithOutgoingCorrelationID(ctx, correlationID)
-	}
+	ctx, correlationID := h.resolveCorrelationID(ctx, req.GetCorrelationId())
 
 	job, err := h.uc.ExtractTablesFromPDF(ctx, usecase.ExtractTablesRequest{
 		DocumentID:        req.GetDocumentId(),
@@ -61,7 +55,7 @@ func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTable
 		return nil, h.mapError(err)
 	}
 
-	telemetry.SetCorrelationHeader(ctx, job.CorrelationID)
+	h.cids.SetHeader(ctx, job.CorrelationID)
 
 	return &pb.ExtractTablesFromPdfResponse{
 		Job:           toProtoJob(job),
@@ -70,16 +64,7 @@ func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTable
 }
 
 func (h *Handler) GetTableExtractionJob(ctx context.Context, req *pb.GetTableExtractionJobRequest) (*pb.GetTableExtractionJobResponse, error) {
-	correlationID := telemetry.CorrelationIDFromContext(ctx)
-	if correlationID == "" {
-		ctx, correlationID = telemetry.EnsureCorrelationID(ctx)
-	}
-	ctx = telemetry.WithOutgoingCorrelationID(ctx, correlationID)
-	if req.GetCorrelationId() != "" {
-		correlationID = req.GetCorrelationId()
-		ctx = telemetry.ContextWithCorrelationID(ctx, correlationID)
-		ctx = telemetry.WithOutgoingCorrelationID(ctx, correlationID)
-	}
+	ctx, _ = h.resolveCorrelationID(ctx, req.GetCorrelationId())
 
 	jobID, err := uuid.Parse(req.GetQueueId())
 	if err != nil {
@@ -91,12 +76,25 @@ func (h *Handler) GetTableExtractionJob(ctx context.Context, req *pb.GetTableExt
 		return nil, h.mapError(err)
 	}
 
-	telemetry.SetCorrelationHeader(ctx, job.CorrelationID)
+	h.cids.SetHeader(ctx, job.CorrelationID)
 
 	return &pb.GetTableExtractionJobResponse{
 		Job:           toProtoJob(job),
 		CorrelationId: job.CorrelationID,
 	}, nil
+}
+
+func (h *Handler) resolveCorrelationID(ctx context.Context, requestedID string) (context.Context, string) {
+	if requestedID != "" {
+		return h.cids.WithOutgoing(ctx, requestedID), requestedID
+	}
+
+	if existing := h.cids.FromContext(ctx); existing != "" {
+		return h.cids.WithOutgoing(ctx, existing), existing
+	}
+
+	ensuredCtx, generated := h.cids.Ensure(ctx)
+	return h.cids.WithOutgoing(ensuredCtx, generated), generated
 }
 
 func (h *Handler) mapError(err error) error {

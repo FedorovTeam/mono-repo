@@ -8,14 +8,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 )
 
 func (s *GRPCServer) buildUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		ctx, correlationID := telemetry.ExtractIncomingCorrelationID(ctx)
-		ctx = telemetry.InjectCorrelationID(ctx)
+		ctx, correlationID := s.cids.ExtractIncoming(ctx)
+		ctx = s.cids.WithOutgoing(ctx, correlationID)
 
 		start := time.Now()
 		var (

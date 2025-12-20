@@ -15,7 +15,6 @@ import (
 
 	"github.com/mono-repo/table-extractor-service/internal/domain"
 	"github.com/mono-repo/table-extractor-service/internal/repository/memory"
-	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 )
 
 func TestSubmitExtractionIdempotencyByDocument(t *testing.T) {
@@ -28,8 +27,8 @@ func TestSubmitExtractionIdempotencyByDocument(t *testing.T) {
 		DefaultArtifactsPrefix: "tables",
 	}, nil)
 
-	ctx, correlationID := telemetry.EnsureCorrelationID(context.Background())
-	job, err := uc.ExtractTablesFromPDF(ctx, ExtractTablesRequest{
+	correlationID := "corr-doc-1"
+	job, err := uc.ExtractTablesFromPDF(context.Background(), ExtractTablesRequest{
 		DocumentID:        "doc-1",
 		OriginalBucket:    "bucket",
 		OriginalObjectKey: "path/to.pdf",
@@ -66,6 +65,7 @@ func TestSubmitExtractionValidatesPdfExtension(t *testing.T) {
 		DocumentID:        "doc-1",
 		OriginalBucket:    "bucket",
 		OriginalObjectKey: "path/to.docx",
+		CorrelationID:     "corr-docx",
 	})
 	require.ErrorIs(t, err, ErrInvalidArgument)
 }
@@ -80,14 +80,13 @@ func TestSubmitExtractionQueueLimit(t *testing.T) {
 		DefaultArtifactsPrefix: "tables",
 	}, nil)
 
-	ctx, _ := telemetry.EnsureCorrelationID(context.Background())
-	_, err := uc.ExtractTablesFromPDF(ctx, ExtractTablesRequest{
+	_, err := uc.ExtractTablesFromPDF(context.Background(), ExtractTablesRequest{
 		DocumentID:      "doc-1",
 		SourceURL:       "https://example.com/source.pdf",
 		ArtifactsBucket: "artifacts",
 		ArtifactsPrefix: "tables/doc-1",
 		WaitForResult:   true,
-		CorrelationID:   "",
+		CorrelationID:   "corr-queue-1",
 	})
 	require.NoError(t, err)
 
@@ -95,6 +94,7 @@ func TestSubmitExtractionQueueLimit(t *testing.T) {
 		DocumentID:      "doc-2",
 		SourceURL:       "https://example.com/source2.pdf",
 		ArtifactsBucket: "artifacts",
+		CorrelationID:   "corr-queue-2",
 	})
 	require.ErrorIs(t, err, ErrQueueLimitReached)
 }
@@ -136,6 +136,7 @@ func TestProcessExtractionJobUploadsArtifacts(t *testing.T) {
 		DocumentID:        "doc-1",
 		OriginalBucket:    "originals",
 		OriginalObjectKey: originalKey,
+		CorrelationID:     "corr-upload-artifacts",
 	})
 	require.NoError(t, err)
 
@@ -179,6 +180,7 @@ func TestProcessExtractionJobMarksFailedWhenDownloadFails(t *testing.T) {
 		DocumentID:        "doc-missing",
 		OriginalBucket:    "originals",
 		OriginalObjectKey: "absent.pdf",
+		CorrelationID:     "corr-download-fail",
 	})
 	require.NoError(t, err)
 
@@ -217,6 +219,7 @@ func TestProcessExtractionJobMarksFailedWhenExtractorFails(t *testing.T) {
 		DocumentID:        "doc-extractor",
 		OriginalBucket:    "originals",
 		OriginalObjectKey: "source.pdf",
+		CorrelationID:     "corr-extractor-fail",
 	})
 	require.NoError(t, err)
 
@@ -265,6 +268,7 @@ func TestProcessExtractionJobMarksRetryableWhenUploadFails(t *testing.T) {
 		DocumentID:        "doc-upload",
 		OriginalBucket:    "originals",
 		OriginalObjectKey: "source.pdf",
+		CorrelationID:     "corr-upload-fail",
 	})
 	require.NoError(t, err)
 
