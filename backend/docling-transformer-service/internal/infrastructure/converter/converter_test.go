@@ -870,6 +870,57 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 	}
 }
 
+func TestNewDoclingConverterAppliesOptions(t *testing.T) {
+	var roundTrips int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/custom/v1/status/poll/task-42" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(taskStatusResponse{
+			TaskID:     path.Base(r.URL.Path),
+			TaskStatus: "pending",
+		})
+	}))
+	defer server.Close()
+
+	client := &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			atomic.AddInt32(&roundTrips, 1)
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+
+	conv := NewDoclingConverter(Config{
+		Endpoint:         "http://example.com",
+		TraceHttpRequest: true,
+	}, zap.NewNop(),
+		WithHTTPClient(client),
+		WithBaseEndpoint(server.URL+"/custom/"),
+	)
+
+	status, err := conv.CheckStatus(context.Background(), "task-42")
+	if err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if status.Status != "pending" {
+		t.Fatalf("unexpected status: %s", status.Status)
+	}
+
+	if got := atomic.LoadInt32(&roundTrips); got != 1 {
+		t.Fatalf("expected request via custom client, got %d round trips", got)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func pdfWithTextLayer() []byte {
 	return []byte("%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nstream\nBT /F1 12 Tf (Hello) Tj ET\nendstream\n")
 }
