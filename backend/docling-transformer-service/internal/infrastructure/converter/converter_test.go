@@ -151,7 +151,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 		t.Fatalf("unexpected media type: %s", status.Result.MediaType)
 	}
 
-	if status.Result.Charset != "utf-16" {
+	if status.Result.Charset != "utf-8" {
 		t.Fatalf("unexpected charset: %s", status.Result.Charset)
 	}
 
