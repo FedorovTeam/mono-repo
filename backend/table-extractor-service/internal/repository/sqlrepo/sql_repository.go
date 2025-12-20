@@ -39,6 +39,9 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
 	}
+	if err := job.Validate(); err != nil {
+		return domain.TableExtractionJob{}, false, fmt.Errorf("validate job: %w", err)
+	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -65,13 +68,6 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 		if count >= queueLimit {
 			return domain.TableExtractionJob{}, false, repository.ErrQueueLimitReached
 		}
-	}
-
-	if (job.Status == domain.StatusDone || job.Status == domain.StatusFailed) && job.FinishedAt == nil {
-		job.FinishedAt = &job.UpdatedAt
-	}
-	if job.Artifacts == (domain.TableArtifacts{}) {
-		job.Artifacts = domain.BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
 	}
 
 	var nextRunAt any
@@ -130,7 +126,6 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 		return domain.TableExtractionJob{}, false, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	job.Artifacts = domain.BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
 	return job, false, nil
 }
 

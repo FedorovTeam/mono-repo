@@ -112,9 +112,6 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 	}
 
 	correlationID := strings.TrimSpace(req.CorrelationID)
-	if correlationID == "" {
-		return domain.TableExtractionJob{}, fmt.Errorf("%w: correlation_id is required", ErrInvalidArgument)
-	}
 
 	now := uc.clock.Now().UTC()
 	artifactsBucket := req.ArtifactsBucket
@@ -131,21 +128,20 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 		prefix = path.Join(uc.cfg.DefaultArtifactsPrefix, req.DocumentID, jobID.String())
 	}
 
-	job := domain.TableExtractionJob{
+	job, err := domain.NewTableExtractionJob(domain.NewTableExtractionJobParams{
 		ID:              jobID,
 		DocumentID:      req.DocumentID,
 		Original:        domain.ArtifactLocation{Bucket: req.OriginalBucket, ObjectKey: req.OriginalObjectKey},
 		ArtifactsBucket: artifactsBucket,
 		ArtifactsPrefix: prefix,
-		Artifacts:       domain.BuildArtifacts(artifactsBucket, prefix),
-		Status:          domain.StatusPending,
-		Attempts:        0,
 		CorrelationID:   correlationID,
 		CreatedAt:       now,
-		UpdatedAt:       now,
+	})
+	if err != nil {
+		return domain.TableExtractionJob{}, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
 	}
 
-	job, _, err := uc.queue.UpsertOrGetActive(ctx, job, uc.cfg.QueueLimit)
+	job, _, err = uc.queue.UpsertOrGetActive(ctx, job, uc.cfg.QueueLimit)
 	if err != nil {
 		if errors.Is(err, repository.ErrQueueLimitReached) {
 			return domain.TableExtractionJob{}, ErrQueueLimitReached
