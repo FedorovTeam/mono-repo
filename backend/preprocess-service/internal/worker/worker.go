@@ -33,11 +33,11 @@ type Worker struct {
 	logger    *slog.Logger
 	waitGroup sync.WaitGroup
 	processor *preprocess.Service
-	repo      ports.QueueRepository
+	repo      domain.PreprocessJobRepository
 }
 
 type Dependencies struct {
-	Repo       ports.QueueRepository
+	Repo       domain.PreprocessJobRepository
 	Downloader ports.StorageDownloader
 	Uploader   ports.StorageUploader
 	Converter  ports.DocumentConverter
@@ -121,7 +121,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		default:
 		}
 
-		job, found, err := w.repo.NextJobForProcessing(ctx)
+		job, found, err := w.repo.NextForProcessing(ctx)
 		if err != nil {
 			w.logger.Error("failed to pick job", "error", err)
 			if !w.waitForNext(ctx, ticker) {

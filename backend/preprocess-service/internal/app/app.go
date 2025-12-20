@@ -52,7 +52,7 @@ func New(cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
 
-	repo := postgres.NewJobRepository(dbpool)
+	repo := postgres.NewPreprocessRepository(dbpool)
 	submitService, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		dbpool.Close()
@@ -94,10 +94,8 @@ func New(cfg config.Config) (*App, error) {
 
 	callbackClient := adaptercallback.NewClient(nil)
 
-	queueRepo := postgres.NewQueueRepository(dbpool)
-
 	wrk, err := worker.New(worker.Dependencies{
-		Repo:       queueRepo,
+		Repo:       repo,
 		Downloader: storageAdapter,
 		Uploader:   storageAdapter,
 		Converter:  converter,

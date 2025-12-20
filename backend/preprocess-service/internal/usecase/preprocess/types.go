@@ -2,7 +2,6 @@ package preprocess
 
 import (
 	"preprocess-service/internal/domain"
-	"preprocess-service/internal/usecase/ports"
 )
 
 const (
@@ -18,7 +17,7 @@ const (
 
 type Job = domain.PreprocessJob
 
-type FailureUpdate = ports.FailureUpdate
+type FailureUpdate = domain.FailureUpdate
 
 type callbackErrorInfo struct {
 	Code    domain.ErrorCode

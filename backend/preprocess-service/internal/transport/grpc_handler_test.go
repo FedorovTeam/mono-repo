@@ -11,7 +11,7 @@ import (
 )
 
 func TestSubmitPreprocessIdempotent(t *testing.T) {
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	service, err := submit.NewService(repo, "target", "converted")
 	if err != nil {
 		t.Fatalf("init service: %v", err)
@@ -53,7 +53,7 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 }
 
 func TestGetPreprocessStatus(t *testing.T) {
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	service, err := submit.NewService(repo, "target", "converted")
 	if err != nil {
 		t.Fatalf("init service: %v", err)
@@ -102,7 +102,7 @@ func TestGetPreprocessStatus(t *testing.T) {
 }
 
 func TestSubmitPreprocessUsesDefaults(t *testing.T) {
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	service, err := submit.NewService(repo, "default-target", "converted")
 	if err != nil {
 		t.Fatalf("init service: %v", err)

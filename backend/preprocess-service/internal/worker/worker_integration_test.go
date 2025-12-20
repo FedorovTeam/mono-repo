@@ -29,8 +29,8 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	db, terminate := setupPostgres(ctx, t)
 	defer terminate()
 
-	jobRepo := postgres.NewJobRepository(db)
-	service, err := submit.NewService(jobRepo, "target", "converted")
+	repo := postgres.NewPreprocessRepository(db)
+	service, err := submit.NewService(repo, "target", "converted")
 	if err != nil {
 		t.Fatalf("init submit service: %v", err)
 	}
@@ -49,9 +49,7 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 		t.Fatalf("submit failed: %v", err)
 	}
 
-	queueRepo := postgres.NewQueueRepository(db)
-
-	queueJob, found, err := queueRepo.NextJobForProcessing(ctx)
+	queueJob, found, err := repo.NextForProcessing(ctx)
 	if err != nil {
 		t.Fatalf("pickJob failed: %v", err)
 	}
@@ -71,7 +69,7 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	}
 
 	queueJob.TargetMediaType = preprocess.DefaultTargetMediaType
-	if err := queueRepo.MarkDone(ctx, queueJob); err != nil {
+	if err := repo.MarkDone(ctx, queueJob); err != nil {
 		t.Fatalf("markDone failed: %v", err)
 	}
 

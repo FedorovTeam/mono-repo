@@ -21,14 +21,13 @@ import (
 
 type stubRepo struct{}
 
-func (stubRepo) NextJobForProcessing(ctx context.Context) (Job, bool, error) {
+func (stubRepo) Create(ctx context.Context, job Job) error { return nil }
+func (stubRepo) FindBySource(ctx context.Context, bucket, key, etag string) (Job, bool, error) {
 	return Job{}, false, nil
 }
-
-func (stubRepo) MarkDone(ctx context.Context, job Job) error {
-	return nil
-}
-
+func (stubRepo) Get(ctx context.Context, id string) (Job, bool, error)    { return Job{}, false, nil }
+func (stubRepo) NextForProcessing(ctx context.Context) (Job, bool, error) { return Job{}, false, nil }
+func (stubRepo) MarkDone(ctx context.Context, job Job) error              { return nil }
 func (stubRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
 	return nil
 }
@@ -38,10 +37,16 @@ type capturingRepo struct {
 	statuses []Job
 }
 
-func (r *capturingRepo) NextJobForProcessing(ctx context.Context) (Job, bool, error) {
+func (r *capturingRepo) Create(ctx context.Context, job Job) error { return nil }
+func (r *capturingRepo) FindBySource(ctx context.Context, bucket, key, etag string) (Job, bool, error) {
 	return Job{}, false, nil
 }
-
+func (r *capturingRepo) Get(ctx context.Context, id string) (Job, bool, error) {
+	return Job{}, false, nil
+}
+func (r *capturingRepo) NextForProcessing(ctx context.Context) (Job, bool, error) {
+	return Job{}, false, nil
+}
 func (r *capturingRepo) MarkDone(ctx context.Context, job Job) error {
 	r.statuses = append(r.statuses, job)
 	return nil

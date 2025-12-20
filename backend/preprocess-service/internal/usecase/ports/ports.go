@@ -3,8 +3,6 @@ package ports
 import (
 	"context"
 	"errors"
-
-	"preprocess-service/internal/domain"
 )
 
 var (
@@ -12,8 +10,6 @@ var (
 	ErrPreconditionFailed = errors.New("storage precondition failed")
 	ErrBucketNotFound     = errors.New("storage bucket not found")
 )
-
-type FailureUpdate = domain.FailureUpdate
 
 type CallbackErrorInfo struct {
 	Code    string
@@ -47,10 +43,4 @@ type DocumentConverter interface {
 
 type CallbackSender interface {
 	Send(ctx context.Context, url string, payload CallbackPayload) (temporary bool, err error)
-}
-
-type QueueRepository interface {
-	NextJobForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error)
-	MarkDone(ctx context.Context, job domain.PreprocessJob) error
-	MarkFailed(ctx context.Context, job domain.PreprocessJob, update FailureUpdate) error
 }

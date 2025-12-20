@@ -26,7 +26,7 @@ type Config struct {
 }
 
 type Service struct {
-	repo       ports.QueueRepository
+	repo       domain.PreprocessJobRepository
 	downloader ports.StorageDownloader
 	uploader   ports.StorageUploader
 	converter  ports.DocumentConverter
@@ -40,9 +40,9 @@ type Service struct {
 	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
 }
 
-func NewService(repo ports.QueueRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, callback ports.CallbackSender, cfg Config, logger *slog.Logger) (*Service, error) {
+func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, callback ports.CallbackSender, cfg Config, logger *slog.Logger) (*Service, error) {
 	if repo == nil {
-		return nil, fmt.Errorf("queue repository is required")
+		return nil, fmt.Errorf("job repository is required")
 	}
 	if downloader == nil {
 		return nil, fmt.Errorf("storage downloader is required")
