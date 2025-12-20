@@ -88,7 +88,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 		AcquireBatchSize:       cfg.Service.BatchSize,
 	}, logger)
 
-	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.Port, tracerProvider)
+	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.Port, tracerProvider, nil)
 
 	processor := worker.Processor(uc)
 

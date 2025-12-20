@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
+	otelmetric "go.opentelemetry.io/otel/metric/noop"
 	"google.golang.org/grpc"
 
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
@@ -19,6 +20,13 @@ type GRPCServer struct {
 }
 
 func NewGRPCServer(port int, handler preprocessv1.PreprocessServiceServer, meter metric.Meter, logger *slog.Logger) (*GRPCServer, error) {
+	if meter == nil {
+		meter = otelmetric.NewMeterProvider().Meter("preprocess-service")
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, fmt.Errorf("listen grpc: %w", err)

@@ -17,7 +17,6 @@ import (
 
 	"github.com/mono-repo/table-extractor-service/internal/domain"
 	"github.com/mono-repo/table-extractor-service/internal/repository"
-	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 )
 
 var (
@@ -110,10 +109,9 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 		return domain.TableExtractionJob{}, fmt.Errorf("%w: only PDF documents are supported", ErrInvalidArgument)
 	}
 
-	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
-	if req.CorrelationID != "" {
-		correlationID = req.CorrelationID
-		ctx = telemetry.ContextWithCorrelationID(ctx, correlationID)
+	correlationID := strings.TrimSpace(req.CorrelationID)
+	if correlationID == "" {
+		return domain.TableExtractionJob{}, fmt.Errorf("%w: correlation_id is required", ErrInvalidArgument)
 	}
 
 	now := uc.clock.Now().UTC()
