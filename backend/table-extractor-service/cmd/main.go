@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/mono-repo/table-extractor-service/internal/app"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -31,11 +33,24 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if container.Cleanup != nil {
-			_ = container.Cleanup(shutdownCtx)
+			if err := container.Cleanup(shutdownCtx); err != nil {
+				container.Logger.Warn("cleanup finished with errors", zap.Error(err))
+			}
 		}
 	}()
 
-	if err := container.Server.Run(ctx); err != nil {
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		return container.Server.Run(groupCtx)
+	})
+	group.Go(func() error {
+		if container.Worker == nil {
+			return nil
+		}
+		return container.Worker.Start(groupCtx)
+	})
+
+	if err := group.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		container.Logger.Fatal("server failed", zap.Error(err))
 	}
 }
