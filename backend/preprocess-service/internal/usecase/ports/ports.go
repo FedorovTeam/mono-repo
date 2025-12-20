@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"preprocess-service/internal/domain"
 )
 
 var (
@@ -26,7 +28,7 @@ type Job struct {
 }
 
 type FailureUpdate struct {
-	Status       string
+	Status       domain.PreprocessStatus
 	NextRunAt    time.Time
 	Code         string
 	Message      string

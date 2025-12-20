@@ -55,7 +55,7 @@ func (r *JobRepository) Save(ctx context.Context, job domain.PreprocessJob) erro
 		nullableString(job.CallbackURL),
 		nullableString(job.CorrelationID),
 		nil,
-		job.Status.ToDB(),
+		toStatusString(job.Status),
 		nullableString(job.ErrorCode),
 		nullableString(job.ErrorMessage),
 		string(details),
@@ -132,7 +132,7 @@ func (r *JobRepository) fetchJob(ctx context.Context, query string, args ...any)
 	job.ErrorCode = derefString(errorCode)
 	job.ErrorMessage = derefString(errorMessage)
 	job.UpdatedAt = updatedAt
-	job.Status = domain.StatusFromDB(status)
+	job.Status = statusFromString(status)
 
 	if len(errorDetails) > 0 {
 		details := make(map[string]string)

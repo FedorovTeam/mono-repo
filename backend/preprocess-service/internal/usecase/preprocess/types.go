@@ -6,11 +6,11 @@ import (
 )
 
 const (
-	StatusDone       = domain.StatusCompletedString
-	StatusFailed     = domain.StatusFailedString
-	StatusPending    = domain.StatusPendingString
-	StatusProcessing = domain.StatusProcessingString
-	StatusStopped    = domain.StatusStoppedString
+	StatusDone       domain.PreprocessStatus = domain.StatusCompleted
+	StatusFailed     domain.PreprocessStatus = domain.StatusFailed
+	StatusPending    domain.PreprocessStatus = domain.StatusPending
+	StatusProcessing domain.PreprocessStatus = domain.StatusProcessing
+	StatusStopped    domain.PreprocessStatus = domain.StatusStopped
 
 	DefaultTargetMediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	callbackMaxAttempts    = 3

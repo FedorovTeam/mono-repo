@@ -49,7 +49,7 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 
 	return &preprocessv1.SubmitPreprocessResponse{
 		JobId:         job.ID,
-		Status:        job.Status.ToProto(),
+		Status:        toProtoStatus(job.Status),
 		ErrorMessage:  job.ErrorMessage,
 		CorrelationId: correlationID,
 	}, nil
@@ -75,7 +75,7 @@ func (h *PreprocessHandler) GetPreprocessStatus(ctx context.Context, req *prepro
 		SourceKey:     job.SourceKey,
 		TargetBucket:  job.TargetBucket,
 		TargetKey:     job.TargetKey,
-		Status:        job.Status.ToProto(),
+		Status:        toProtoStatus(job.Status),
 		ErrorMessage:  job.ErrorMessage,
 		ErrorCode:     job.ErrorCode,
 		ErrorDetails:  job.ErrorDetails,
