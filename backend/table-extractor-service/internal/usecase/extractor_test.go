@@ -150,6 +150,7 @@ func TestProcessExtractionJobUploadsArtifacts(t *testing.T) {
 	require.Equal(t, domain.StatusDone, storedJob.Status)
 	require.NotNil(t, storedJob.FinishedAt)
 	require.True(t, storedJob.FinishedAt.After(now.Add(-time.Millisecond)))
+	require.Equal(t, 1, storedJob.Attempts)
 
 	storage.assertObject(t, job.Artifacts.RawJSON, []byte(`{"raw":true}`))
 	storage.assertObject(t, job.Artifacts.NormalizedJSON, []byte(`{"normalized":true}`))

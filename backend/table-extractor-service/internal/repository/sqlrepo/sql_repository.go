@@ -135,6 +135,10 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 }
 
 func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
+	return r.SelectPendingBatchForUpdate(ctx, limit, now)
+}
+
+func (r *SQLRepository) SelectPendingBatchForUpdate(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -175,12 +179,6 @@ func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now 
 		if !ok {
 			continue
 		}
-		aggregate := domain.NewTableExtractionJobAggregate(job)
-		updated, _, err := aggregate.StartProcessing(now)
-		if err != nil {
-			return nil, err
-		}
-		job = updated.Job()
 		jobs = append(jobs, job)
 	}
 
@@ -188,21 +186,12 @@ func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now 
 		return nil, fmt.Errorf("iterate pending: %w", err)
 	}
 
-	if len(jobs) == 0 {
-		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit transaction: %w", err)
-		}
-		return nil, nil
-	}
-
-	for _, job := range jobs {
-		if err := r.saveTx(ctx, tx, job); err != nil {
-			return nil, err
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	if len(jobs) == 0 {
+		return nil, nil
 	}
 
 	return jobs, nil
