@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -62,6 +63,9 @@ func (s *GRPCServer) Run(ctx context.Context) error {
 
 	s.logger.Info("starting gRPC server", zap.String("address", address))
 	if err := grpcServer.Serve(lis); err != nil {
+		if errors.Is(err, grpc.ErrServerStopped) {
+			return nil
+		}
 		return fmt.Errorf("serve: %w", err)
 	}
 

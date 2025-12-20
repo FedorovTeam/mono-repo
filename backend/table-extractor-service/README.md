@@ -36,21 +36,17 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 
 Все параметры в `config/config.yaml`, путь задаётся `CONFIG_PATH` (по умолчанию `config/config.yaml`). Ключевые поля:
 
-- `service.name` / `service.grpc_port` — имя сервиса и порт gRPC (обычно `9090`).
-- `service.max_workers` — число параллельных воркеров (по умолчанию `1`).
+- `service.name` / `service.port` — имя сервиса и порт gRPC (обычно `9090`).
 - `service.queue_limit` — лимит активных задач (`pending/processing`), `0` отключает лимит.
-- `postgres.dsn` / `postgres.max_connections` — подключение к PostgreSQL и лимит пула.
-- `minio.endpoint` / `minio.access_key` / `minio.secret_key` / `minio.use_ssl` — доступ к MinIO.
-- `minio.artifacts_bucket` — бакет по умолчанию для результатов (если не указан в запросе).
-- `extractor.poppler_path` (опционально) — путь к утилитам poppler (`pdfinfo`, `pdftotext`), если не в `PATH`.
-- `extractor.mode` — режим извлечения (например `layout_text`, `structured`, etc. — зависит от реализации).
-- `extractor.pages` — диапазон страниц (например `all` или `1-3`), если включено.
-- `extractor.detect_voting_tables` — включает детектор “таблиц голосования/протокола” (если реализован).
-- `scheduler.poll_interval` / `scheduler.maintenance_interval` — шаги опроса очереди и обслуживания.
-- `scheduler.batch_size` — размер выборки задач (`SELECT … FOR UPDATE SKIP LOCKED`).
-- `scheduler.retry_backoff` / `scheduler.max_processing_retries` — экспоненциальная задержка и лимит повторов для временных ошибок.
-- `scheduler.failed_retry_delay` / `scheduler.max_failed_retries` — правила повторов задач после `failed_retryable` (если используется).
-- `scheduler.cleanup_retention` — TTL для `done/failed` записей (удаление/архив).
+- `service.max_workers` — число параллельных воркеров очереди.
+- `service.processing_timeout` — TTL обработки одной задачи (используется maintenance-циклом).
+- `service.retry.*` — политика повторов (кол-во попыток, `backoff_interval`, `max_backoff`).
+- `service.cleanup_retention` — TTL для `done/failed` записей (удаление/архив).
+- `minio.*` — endpoint/creds для MinIO + `artifacts_bucket` и `default_artifacts_prefix` по умолчанию.
+- `database.driver` / `database.dsn` — `postgres` или `sqlite`, DSN строки и параметры пула.
+- `storage.*` — таймауты HTTP-клиента к MinIO (`dial_timeout`, `read_write_timeout`, `operation_timeout`).
+- `extractor.mode` — режим извлечения (`layout`/`structured`), `extractor.detect_voting_tables` — включает детектор протоколов.
+- `extractor.pages` — диапазон страниц (`all`, `1-3`, `odd`, т.д. — в зависимости от реализации пайплайна).
 
 ## Интеграции и зависимости
 

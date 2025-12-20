@@ -1,11 +1,39 @@
 service:
   name: table-extractor-service
-  grpc_port: 9090
+  port: 9090
   queue_limit: 100
+  max_workers: 2
+  processing_timeout: 5m
+  cleanup_retention: 168h
+  retry:
+    max_attempts: 3
+    backoff_interval: 5s
+    max_backoff: 1m
   default_artifacts_prefix: tables
 
-storage:
+minio:
+  endpoint: http://localhost:9000
+  access_key: minioadmin
+  secret_key: minioadmin
+  use_ssl: false
   artifacts_bucket: table-extractor-artifacts
+  default_artifacts_prefix: tables
+
+database:
+  driver: sqlite
+  dsn: file:table-extractor.db?cache=shared&_pragma=foreign_keys(1)
+  max_connections: 5
+  connection_timeout: 5s
+
+storage:
+  dial_timeout: 5s
+  read_write_timeout: 30s
+  operation_timeout: 1m
+
+extractor:
+  mode: layout
+  detect_voting_tables: true
+  pages: all
 
 observability:
   logging_enabled: true

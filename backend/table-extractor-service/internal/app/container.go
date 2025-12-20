@@ -2,13 +2,20 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/mono-repo/table-extractor-service/db/migrations"
 	"github.com/mono-repo/table-extractor-service/internal/config"
 	"github.com/mono-repo/table-extractor-service/internal/repository"
-	"github.com/mono-repo/table-extractor-service/internal/repository/memory"
+	"github.com/mono-repo/table-extractor-service/internal/repository/sqlrepo"
 	"github.com/mono-repo/table-extractor-service/internal/server"
+	"github.com/mono-repo/table-extractor-service/internal/storage/database"
+	objectstorage "github.com/mono-repo/table-extractor-service/internal/storage/object"
 	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 	"github.com/mono-repo/table-extractor-service/internal/usecase"
+	"github.com/mono-repo/table-extractor-service/internal/worker"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
@@ -17,10 +24,13 @@ type Container struct {
 	Config         *config.Config
 	Logger         *zap.Logger
 	TracerProvider trace.TracerProvider
+	MinioClient    *minio.Client
+	DB             *sql.DB
 	Repository     repository.TableExtractionRepository
 	UseCase        *usecase.TableExtractorUseCase
 	Server         *server.GRPCServer
-	Cleanup        func(context.Context) error
+	Worker         *worker.Runner
+	Cleanup        func(ctx context.Context) error
 }
 
 func Build(ctx context.Context, configPath string) (*Container, error) {
@@ -36,23 +46,57 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 		return nil, err
 	}
 
-	repo := memory.NewInMemoryRepository()
+	minioClient, err := objectstorage.NewMinioClient(cfg.Minio, cfg.Storage)
+	if err != nil {
+		return nil, err
+	}
+
+	db, dialect, err := database.New(ctx, cfg.Database)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := migrations.Apply(ctx, db, logger); err != nil {
+		return nil, err
+	}
+
+	repo := sqlrepo.NewSQLRepository(db, dialect)
 
 	uc := usecase.NewTableExtractorUseCase(repo, usecase.Config{
 		QueueLimit:             cfg.Service.QueueLimit,
-		DefaultArtifactsBucket: cfg.Storage.ArtifactsBucket,
-		DefaultArtifactsPrefix: cfg.Service.DefaultArtifactsPrefix,
+		DefaultArtifactsBucket: cfg.Minio.ArtifactsBucket,
+		DefaultArtifactsPrefix: cfg.Minio.DefaultArtifactsPrefix,
 	}, logger)
 
-	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.GRPCPort, tracerProvider)
+	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.Port, tracerProvider)
+
+	workerRunner := worker.NewRunner(worker.Config{
+		MaxWorkers:        cfg.Service.MaxWorkers,
+		ProcessingTimeout: cfg.Service.ProcessingTimeout,
+		CleanupRetention:  cfg.Service.CleanupRetention,
+	}, logger)
+
+	cleanup := func(ctx context.Context) error {
+		var result error
+		if shutdownTracer != nil {
+			result = errors.Join(result, shutdownTracer(ctx))
+		}
+		if db != nil {
+			result = errors.Join(result, db.Close())
+		}
+		return result
+	}
 
 	return &Container{
 		Config:         cfg,
 		Logger:         logger,
 		TracerProvider: tracerProvider,
+		MinioClient:    minioClient,
+		DB:             db,
 		Repository:     repo,
 		UseCase:        uc,
 		Server:         grpcServer,
-		Cleanup:        shutdownTracer,
+		Worker:         workerRunner,
+		Cleanup:        cleanup,
 	}, nil
 }
