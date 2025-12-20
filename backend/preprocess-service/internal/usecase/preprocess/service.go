@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,7 +113,14 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 
 	if err := s.handleJob(ctx, &jobState); err != nil {
 		logger.Error("job failed", "error", err)
-		update := s.failureDecision(jobState, err)
+		failure := s.failureFromError(jobState, err)
+		now := time.Now().UTC()
+		updatedJob, update, failErr := jobState.MarkFailed(now, s.policy, failure)
+		if failErr != nil {
+			logger.Error("failed to compute failure update", "error", failErr)
+			return err
+		}
+		jobState = updatedJob
 		if err := s.repo.MarkFailed(ctx, jobState, update); err != nil {
 			logger.Error("failed to update job status", "error", err)
 		}
@@ -124,12 +132,18 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 
 	logger.Info("job completed successfully")
 	jobState.TargetMediaType = s.cfg.TargetMediaType
-	if err := s.repo.MarkDone(ctx, jobState); err != nil {
+	now := time.Now().UTC()
+	completedJob, err := jobState.MarkCompleted(now)
+	if err != nil {
+		logger.Error("failed to compute completion state", "error", err)
+		return err
+	}
+	if err := s.repo.MarkDone(ctx, completedJob); err != nil {
 		logger.Error("failed to mark job done", "error", err)
 		return err
 	}
 
-	s.notifyCallback(ctx, jobState, StatusDone, callbackErrorInfo{})
+	s.notifyCallback(ctx, completedJob, StatusDone, callbackErrorInfo{})
 	return nil
 }
 
@@ -138,13 +152,13 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 
 	tmpDir, err := os.MkdirTemp(s.cfg.WorkingDir, fmt.Sprintf("job-%s-", job.ID))
 	if err != nil {
-		return permanentError("tmp_dir", fmt.Errorf("create temp dir: %w", err))
+		return permanentError(domain.ErrorCodeTmpDir, fmt.Errorf("create temp dir: %w", err))
 	}
 	defer os.RemoveAll(tmpDir)
 
 	outputDir := filepath.Join(s.cfg.OutputDir, job.ID)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return permanentError("output_dir", fmt.Errorf("prepare output dir: %w", err))
+		return permanentError(domain.ErrorCodeOutputDir, fmt.Errorf("prepare output dir: %w", err))
 	}
 
 	sourcePath, err := s.downloadSourceFn(ctx, *job, tmpDir)
@@ -158,7 +172,7 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 
 	outputPath := s.outputFilePath(sourcePath, outputDir)
 	if _, statErr := os.Stat(outputPath); statErr != nil {
-		return permanentError("convert_missing_output", fmt.Errorf("output file not found: %w", statErr))
+		return permanentError(domain.ErrorCodeConvertMissingOut, fmt.Errorf("output file not found: %w", statErr))
 	}
 
 	targetBucket := job.TargetBucket
@@ -168,10 +182,10 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 	job.TargetBucket = targetBucket
 
 	if targetBucket == "" {
-		return permanentError("target_bucket_missing", errors.New("target bucket is required"))
+		return permanentError(domain.ErrorCodeTargetBucket, errors.New("target bucket is required"))
 	}
 	if job.TargetKey == "" {
-		return permanentError("target_key_missing", errors.New("target key is required"))
+		return permanentError(domain.ErrorCodeTargetKey, errors.New("target key is required"))
 	}
 
 	if err := s.uploadResultFn(ctx, targetBucket, job.TargetKey, outputPath); err != nil {
@@ -184,20 +198,20 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 func (s *Service) downloadSource(ctx context.Context, job Job, dir string) (string, error) {
 	filename := filepath.Base(job.SourceKey)
 	if filename == "" {
-		return "", permanentError("source_key_invalid", errors.New("empty source key"))
+		return "", permanentError(domain.ErrorCodeSourceKeyInvalid, errors.New("empty source key"))
 	}
 
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", permanentError("tmp_dir", fmt.Errorf("prepare dir: %w", err))
+		return "", permanentError(domain.ErrorCodeTmpDir, fmt.Errorf("prepare dir: %w", err))
 	}
 
 	targetPath := filepath.Join(dir, filename)
 
 	if err := s.downloader.Download(ctx, job.SourceBucket, job.SourceKey, job.SourceETag, targetPath); err != nil {
 		if errors.Is(err, ports.ErrObjectNotFound) || errors.Is(err, ports.ErrPreconditionFailed) {
-			return "", permanentError("source_missing", err)
+			return "", permanentError(domain.ErrorCodeSourceMissing, err)
 		}
-		return "", temporaryError("download_failed", err)
+		return "", temporaryError(domain.ErrorCodeDownloadFailed, err)
 	}
 
 	return targetPath, nil
@@ -209,9 +223,9 @@ func (s *Service) convertToDocx(ctx context.Context, sourcePath, outDir string) 
 
 	if err := s.converter.Convert(convertCtx, sourcePath, outDir); err != nil {
 		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
-			return temporaryError("convert_timeout", fmt.Errorf("conversion timeout: %w", err))
+			return temporaryError(domain.ErrorCodeConvertTimeout, fmt.Errorf("conversion timeout: %w", err))
 		}
-		return permanentError("convert_failed", err)
+		return permanentError(domain.ErrorCodeConvertFailed, err)
 	}
 	return nil
 }
@@ -219,57 +233,11 @@ func (s *Service) convertToDocx(ctx context.Context, sourcePath, outDir string) 
 func (s *Service) uploadResult(ctx context.Context, bucket, key, path string) error {
 	if err := s.uploader.Upload(ctx, bucket, key, path, s.cfg.TargetMediaType); err != nil {
 		if errors.Is(err, ports.ErrBucketNotFound) {
-			return permanentError("target_bucket_missing", err)
+			return permanentError(domain.ErrorCodeTargetBucket, err)
 		}
-		return temporaryError("upload_failed", err)
+		return temporaryError(domain.ErrorCodeUploadFailed, err)
 	}
 	return nil
-}
-
-func (s *Service) failureDecision(job Job, err error) FailureUpdate {
-	var typed jobError
-	code := string(domain.ErrorCodeProcessingError)
-	permanent := false
-
-	if errors.As(err, &typed) {
-		code = typed.Code
-		permanent = typed.Permanent
-		err = typed.Unwrap()
-	}
-
-	message := err.Error()
-
-	if s.policy.ShouldStop(job.Attempts, job.MaxAttempts, permanent) {
-		return FailureUpdate{
-			Status:    StatusStopped,
-			NextRunAt: time.Now().UTC(),
-			Code:      code,
-			Message:   message,
-			Permanent: permanent,
-			Details: map[string]any{
-				"code":      code,
-				"permanent": permanent,
-				"attempt":   job.Attempts,
-			},
-			TargetBucket: job.TargetBucket,
-			TargetKey:    job.TargetKey,
-		}
-	}
-
-	return FailureUpdate{
-		Status:    StatusFailed,
-		NextRunAt: s.policy.NextRun(time.Now(), job.Attempts),
-		Code:      code,
-		Message:   message,
-		Permanent: permanent,
-		Details: map[string]any{
-			"code":      code,
-			"permanent": permanent,
-			"attempt":   job.Attempts,
-		},
-		TargetBucket: job.TargetBucket,
-		TargetKey:    job.TargetKey,
-	}
 }
 
 func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.PreprocessStatus, errInfo callbackErrorInfo) {
@@ -285,7 +253,7 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.Pre
 	}
 
 	if errInfo.Code != "" || errInfo.Message != "" {
-		payload.Error = &ports.CallbackErrorPayload{Code: errInfo.Code, Message: errInfo.Message}
+		payload.Error = &ports.CallbackErrorPayload{Code: errInfo.Code.String(), Message: errInfo.Message}
 	}
 
 	backoff := s.policy.Delay(1)
@@ -333,4 +301,27 @@ func (s *Service) ensureFunctions() {
 	if s.uploadResultFn == nil {
 		s.uploadResultFn = s.uploadResult
 	}
+}
+
+func (s *Service) failureFromError(job Job, err error) domain.Failure {
+	var typed jobError
+	failure := domain.Failure{
+		Code:      domain.ErrorCodeProcessingError,
+		Message:   err.Error(),
+		Permanent: false,
+		Details: map[string]string{
+			"attempt": strconv.Itoa(job.Attempts),
+		},
+	}
+
+	if errors.As(err, &typed) {
+		failure.Code = typed.Code
+		failure.Permanent = typed.Permanent
+		failure.Message = typed.Error()
+	}
+
+	failure.Details["code"] = failure.Code.String()
+	failure.Details["permanent"] = strconv.FormatBool(failure.Permanent)
+
+	return failure
 }

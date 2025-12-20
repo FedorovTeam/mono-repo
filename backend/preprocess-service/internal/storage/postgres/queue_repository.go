@@ -49,13 +49,9 @@ func (r *QueueRepository) NextJobForProcessing(ctx context.Context) (domain.Prep
 		return domain.PreprocessJob{}, false, fmt.Errorf("select job: %w", err)
 	}
 
-	job.Attempts++
-	job.Status = domain.StatusProcessing
-	job.StartedAt = time.Now().UTC()
-	job.UpdatedAt = job.StartedAt
-
-	if err := job.Validate(); err != nil {
-		return domain.PreprocessJob{}, false, fmt.Errorf("validate job %s: %w", job.ID, err)
+	job, err = job.MarkProcessing(time.Now().UTC())
+	if err != nil {
+		return domain.PreprocessJob{}, false, err
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -74,30 +70,29 @@ func (r *QueueRepository) NextJobForProcessing(ctx context.Context) (domain.Prep
 }
 
 func (r *QueueRepository) MarkDone(ctx context.Context, job domain.PreprocessJob) error {
-	finishedAt := time.Now().UTC()
-
-	job.Status = domain.StatusCompleted
-	job.FinishedAt = finishedAt
-	job.UpdatedAt = finishedAt
-
-	if err := job.Validate(); err != nil {
-		return fmt.Errorf("validate job %s: %w", job.ID, err)
+	var err error
+	job, err = job.MarkCompleted(time.Now().UTC())
+	if err != nil {
+		return err
 	}
 
-	_, err := r.db.Exec(ctx, `
+	_, err = r.db.Exec(ctx, `
         UPDATE preprocess_queue
         SET status = $2, finished_at = $3, updated_at = $3, target_bucket = $4, target_key = $5,
             target_media_type = $6, error_code = NULL, error_message = NULL, error_details = '{}'::jsonb
         WHERE job_id = $1
-    `, job.ID, toStatusString(job.Status), finishedAt, job.TargetBucket, job.TargetKey, job.TargetMediaType)
+    `, job.ID, toStatusString(job.Status), job.FinishedAt, job.TargetBucket, job.TargetKey, job.TargetMediaType)
 	return err
 }
 
 func (r *QueueRepository) MarkFailed(ctx context.Context, job domain.PreprocessJob, update ports.FailureUpdate) error {
-	finishedAt := time.Now().UTC()
+	finishedAt := job.UpdatedAt
+	if finishedAt.IsZero() {
+		finishedAt = time.Now().UTC()
+	}
 
 	if update.Details == nil {
-		update.Details = map[string]any{}
+		update.Details = map[string]string{}
 	}
 
 	detailsJSON, err := json.Marshal(update.Details)
@@ -105,8 +100,6 @@ func (r *QueueRepository) MarkFailed(ctx context.Context, job domain.PreprocessJ
 		return fmt.Errorf("marshal error details: %w", err)
 	}
 
-	job.Status = update.Status
-	job.NextRunAt = update.NextRunAt
 	if update.TargetBucket != "" {
 		job.TargetBucket = update.TargetBucket
 	}
@@ -129,7 +122,7 @@ func (r *QueueRepository) MarkFailed(ctx context.Context, job domain.PreprocessJ
             error_code = $6, error_message = $7, error_details = COALESCE($8::jsonb, '{}'::jsonb),
             target_bucket = COALESCE($9, target_bucket), target_key = COALESCE($10, target_key), updated_at = $4
         WHERE job_id = $1
-    `, job.ID, toStatusString(update.Status), update.NextRunAt, finishedAt, toStatusString(domain.StatusStopped), update.Code, update.Message, string(detailsJSON), nullableString(update.TargetBucket), nullableString(update.TargetKey))
+    `, job.ID, toStatusString(update.Status), update.NextRunAt, finishedAt, toStatusString(domain.StatusStopped), update.Code.String(), update.Message, string(detailsJSON), nullableString(update.TargetBucket), nullableString(update.TargetKey))
 
 	return err
 }

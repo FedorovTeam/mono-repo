@@ -5,8 +5,23 @@ import "time"
 type ErrorCode string
 
 const (
-	ErrorCodeProcessingError ErrorCode = "processing_error"
+	ErrorCodeProcessingError   ErrorCode = "processing_error"
+	ErrorCodeTmpDir            ErrorCode = "tmp_dir"
+	ErrorCodeOutputDir         ErrorCode = "output_dir"
+	ErrorCodeSourceKeyInvalid  ErrorCode = "source_key_invalid"
+	ErrorCodeSourceMissing     ErrorCode = "source_missing"
+	ErrorCodeDownloadFailed    ErrorCode = "download_failed"
+	ErrorCodeConvertTimeout    ErrorCode = "convert_timeout"
+	ErrorCodeConvertFailed     ErrorCode = "convert_failed"
+	ErrorCodeConvertMissingOut ErrorCode = "convert_missing_output"
+	ErrorCodeTargetBucket      ErrorCode = "target_bucket_missing"
+	ErrorCodeTargetKey         ErrorCode = "target_key_missing"
+	ErrorCodeUploadFailed      ErrorCode = "upload_failed"
 )
+
+func (c ErrorCode) String() string {
+	return string(c)
+}
 
 // RetryPolicy описывает стратегию вычисления задержек и остановки задач.
 type RetryPolicy struct {

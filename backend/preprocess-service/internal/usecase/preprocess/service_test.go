@@ -3,6 +3,7 @@ package preprocess
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,6 +30,26 @@ func (stubRepo) MarkDone(ctx context.Context, job Job) error {
 }
 
 func (stubRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
+	return nil
+}
+
+type capturingRepo struct {
+	failures []FailureUpdate
+	statuses []Job
+}
+
+func (r *capturingRepo) NextJobForProcessing(ctx context.Context) (Job, bool, error) {
+	return Job{}, false, nil
+}
+
+func (r *capturingRepo) MarkDone(ctx context.Context, job Job) error {
+	r.statuses = append(r.statuses, job)
+	return nil
+}
+
+func (r *capturingRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
+	r.failures = append(r.failures, update)
+	r.statuses = append(r.statuses, job)
 	return nil
 }
 
@@ -127,7 +148,7 @@ func TestNotifyCallbackRetry(t *testing.T) {
 	}
 
 	job := Job{ID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
-	errInfo := callbackErrorInfo{Code: "convert_failed", Message: "conversion failed"}
+	errInfo := callbackErrorInfo{Code: domain.ErrorCodeConvertFailed, Message: "conversion failed"}
 
 	svc.notifyCallback(context.Background(), job, StatusStopped, errInfo)
 
@@ -139,7 +160,7 @@ func TestNotifyCallbackRetry(t *testing.T) {
 		t.Fatalf("expected two payloads, got %d", len(payloads))
 	}
 
-	if payloads[1].Error == nil || payloads[1].Error.Code != errInfo.Code || payloads[1].Error.Message != errInfo.Message {
+	if payloads[1].Error == nil || payloads[1].Error.Code != errInfo.Code.String() || payloads[1].Error.Message != errInfo.Message {
 		t.Fatalf("unexpected error payload: %+v", payloads[1].Error)
 	}
 }
@@ -210,5 +231,109 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 
 	if uploadedPath != expectedOutput {
 		t.Fatalf("unexpected uploaded path: %s", uploadedPath)
+	}
+}
+
+func TestProcessTemporaryFailureSchedulesRetry(t *testing.T) {
+	t.Helper()
+
+	repo := &capturingRepo{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := &Service{
+		repo:   repo,
+		cfg:    Config{WorkingDir: t.TempDir(), OutputDir: t.TempDir(), TargetMediaType: DefaultTargetMediaType, Backoff: time.Second},
+		logger: logger,
+		policy: domain.NewRetryPolicy(time.Second),
+	}
+	svc.downloadSourceFn = func(ctx context.Context, job Job, dir string) (string, error) {
+		return "", temporaryError(domain.ErrorCodeDownloadFailed, errors.New("network glitch"))
+	}
+	svc.convertFn = func(ctx context.Context, sourcePath, outDir string) error { return nil }
+	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error { return nil }
+
+	job := Job{
+		ID:           "job-temp",
+		DocumentID:   "doc-1",
+		SourceBucket: "src",
+		SourceKey:    "file.doc",
+		SourceETag:   "etag",
+		TargetBucket: "bucket",
+		TargetKey:    "out.docx",
+		Status:       StatusProcessing,
+		Attempts:     1,
+		MaxAttempts:  3,
+		NextRunAt:    time.Now().UTC(),
+	}
+
+	err := svc.Process(context.Background(), job)
+	if err == nil {
+		t.Fatalf("expected error from process")
+	}
+
+	if len(repo.failures) != 1 {
+		t.Fatalf("expected one failure update, got %d", len(repo.failures))
+	}
+
+	update := repo.failures[0]
+	if update.Status != domain.StatusFailed {
+		t.Fatalf("expected status failed, got %s", update.Status)
+	}
+	if update.Code != domain.ErrorCodeDownloadFailed {
+		t.Fatalf("unexpected error code: %s", update.Code)
+	}
+	if !update.NextRunAt.After(job.NextRunAt) {
+		t.Fatalf("expected next run to be scheduled in future, got %s", update.NextRunAt)
+	}
+}
+
+func TestProcessPermanentFailureStops(t *testing.T) {
+	t.Helper()
+
+	repo := &capturingRepo{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := &Service{
+		repo:   repo,
+		cfg:    Config{WorkingDir: t.TempDir(), OutputDir: t.TempDir(), TargetMediaType: DefaultTargetMediaType, Backoff: time.Second},
+		logger: logger,
+		policy: domain.NewRetryPolicy(time.Second),
+	}
+	svc.downloadSourceFn = func(ctx context.Context, job Job, dir string) (string, error) {
+		return "", permanentError(domain.ErrorCodeSourceMissing, errors.New("not found"))
+	}
+	svc.convertFn = func(ctx context.Context, sourcePath, outDir string) error { return nil }
+	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error { return nil }
+
+	job := Job{
+		ID:           "job-stop",
+		DocumentID:   "doc-2",
+		SourceBucket: "src",
+		SourceKey:    "file.doc",
+		SourceETag:   "etag",
+		TargetBucket: "bucket",
+		TargetKey:    "out.docx",
+		Status:       StatusProcessing,
+		Attempts:     2,
+		MaxAttempts:  2,
+		NextRunAt:    time.Now().UTC(),
+	}
+
+	err := svc.Process(context.Background(), job)
+	if err == nil {
+		t.Fatalf("expected error from process")
+	}
+
+	if len(repo.failures) != 1 {
+		t.Fatalf("expected one failure update, got %d", len(repo.failures))
+	}
+
+	update := repo.failures[0]
+	if update.Status != domain.StatusStopped {
+		t.Fatalf("expected status stopped, got %s", update.Status)
+	}
+	if update.Code != domain.ErrorCodeSourceMissing {
+		t.Fatalf("unexpected error code: %s", update.Code)
+	}
+	if update.NextRunAt.IsZero() {
+		t.Fatalf("expected next run time to be set, got %s", update.NextRunAt)
 	}
 }

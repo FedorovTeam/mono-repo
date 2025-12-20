@@ -1,9 +1,13 @@
 package preprocess
 
-import "fmt"
+import (
+	"fmt"
+
+	"preprocess-service/internal/domain"
+)
 
 type jobError struct {
-	Code      string
+	Code      domain.ErrorCode
 	Permanent bool
 	err       error
 }
@@ -16,11 +20,11 @@ func (e jobError) Unwrap() error {
 	return e.err
 }
 
-func temporaryError(code string, err error) error {
+func temporaryError(code domain.ErrorCode, err error) error {
 	return jobError{Code: code, Permanent: false, err: err}
 }
 
-func permanentError(code string, err error) error {
+func permanentError(code domain.ErrorCode, err error) error {
 	return jobError{Code: code, Permanent: true, err: err}
 }
 

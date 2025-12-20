@@ -3,7 +3,6 @@ package ports
 import (
 	"context"
 	"errors"
-	"time"
 
 	"preprocess-service/internal/domain"
 )
@@ -14,16 +13,7 @@ var (
 	ErrBucketNotFound     = errors.New("storage bucket not found")
 )
 
-type FailureUpdate struct {
-	Status       domain.PreprocessStatus
-	NextRunAt    time.Time
-	Code         string
-	Message      string
-	Permanent    bool
-	TargetBucket string
-	TargetKey    string
-	Details      map[string]any
-}
+type FailureUpdate = domain.FailureUpdate
 
 type CallbackErrorInfo struct {
 	Code    string
