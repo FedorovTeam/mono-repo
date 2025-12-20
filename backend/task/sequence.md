@@ -63,7 +63,7 @@ sequenceDiagram
     CL-->>MN: PUT file to uploadUrl (x-amz-meta-correlation-id set by presign if present)
     MN-->>WH: POST ObjectCreated notification (records[])
     loop each record
-        WH-->>WH: decode objectKey; extract document_id; correlation-id from metadata or new
+        WH-->>WH: decode objectKey, extract document_id, correlation-id from metadata or new
         WH->>DS: ConfirmUpload(document_id,bucket,objectKey,correlation-id)
         DS-->>WH: OK (store_original job scheduled OR error)
     end
@@ -127,9 +127,9 @@ sequenceDiagram
         SW->>PP: GetPreprocessStatus(job_id)\n(correlation-id)
         PP-->>SW: status=PENDING|PROCESSING|COMPLETED|FAILED + target_bucket/key
         alt COMPLETED
-            SW->>S: mark job completed; payload.preprocessed_bucket/key saved
+            SW->>S: mark job completed, payload.preprocessed_bucket/key saved
         else FAILED
-            SW->>S: mark job failed; payload.last_error
+            SW->>S: mark job failed, payload.last_error
         else not ready
             SW->>S: postpone pending next_run_at=now()+retry_delay
         end
@@ -159,7 +159,7 @@ sequenceDiagram
     else status == failed
         SW->>S: mark job failed + last_error
     else not ready
-        SW->>S: postpone pending next_run_at=now()+retry_delay; payload.queue_id/status saved
+        SW->>S: postpone pending next_run_at=now()+retry_delay, payload.queue_id/status saved
     end
 ```
 
@@ -211,7 +211,7 @@ sequenceDiagram
         SW->>DS: MarkPublished(commit_sha, PR info) + new status log
         SW->>S: mark job completed
     else TEMPORARY_FAILURE or transient gRPC errors
-        SW->>S: postpone pending next_run_at=now()+backoff; attempts++
+        SW->>S: postpone pending next_run_at=now()+backoff, attempts++
     else PERMANENT_FAILURE
         SW->>S: mark job failed + last_error
     end
@@ -240,7 +240,7 @@ sequenceDiagram
     end
 
     loop workerLoop
-        WK->>PG: AcquireBatch(waiting_docling due first; if any waiting_docling exists => block pending)
+        WK->>PG: AcquireBatch(waiting_docling due first, if any waiting_docling exists => block pending)
         alt no docling ids yet
             WK->>DL: POST /v1/convert/file/async OR /v1/convert/source/async (with X-Correlation-Id)
             alt submit ok
@@ -351,4 +351,110 @@ sequenceDiagram
         MA->>PG: retry failed older than delay (<= max_failed_retries)
         MA->>PG: cleanup done/failed older than retention
     end
+```
+
+
+## 7) Full flow
+```mermaid
+sequenceDiagram
+    participant CL as Client
+    participant GW as Gateway
+    participant ST as Storage
+    participant MN as MinIO
+    participant DS as DocumentService
+    participant SW as StageWorker
+    participant JF as JobFollower
+    participant PP as PreprocessService
+    participant TR as TransformerService
+    participant TE as TableExtractorService
+    participant GP as GitHubPublisher
+    participant DL as Docling
+    participant GH as GitHub
+
+    %% Upload
+    CL->>GW: uploadKnowledgeDocument
+    GW->>ST: GenerateUploadURL
+    ST-->>GW: presigned_url
+    GW->>DS: CreateDocument
+    GW-->>CL: upload_url
+
+    CL->>MN: PUT file
+    MN->>GW: ObjectCreated webhook
+    GW->>DS: ConfirmUpload
+
+    %% store_original
+    DS->>SW: enqueue store_original
+    SW->>DS: MarkStoredOriginal
+    SW->>DS: store_original completed
+
+    %% routing
+    DS->>JF: notify completed store_original
+    JF->>JF: resolve router
+
+    alt docx
+        JF->>DS: enqueue convert_to_markdown
+    else doc or pdf with preprocess
+        JF->>DS: enqueue preprocess_to_docx
+    else pdf with tables
+        JF->>DS: enqueue extract_tables
+    else fallback
+        JF->>DS: enqueue convert_to_markdown
+    end
+
+    %% preprocess_to_docx
+    opt preprocess_to_docx
+        DS->>SW: run preprocess_to_docx
+        SW->>PP: SubmitPreprocess
+        PP-->>SW: preprocess_job_id
+
+        loop poll preprocess status
+            SW->>PP: GetPreprocessStatus
+            PP-->>SW: status
+        end
+
+        SW->>DS: save preprocessed_bucket_key
+        SW->>DS: preprocess_to_docx completed
+        DS->>DS: enqueue convert_to_markdown
+    end
+
+    %% convert_to_markdown
+    DS->>SW: run convert_to_markdown
+    SW->>TR: ConvertDocumentToMarkdown
+    TR->>DL: submit convert
+    DL-->>TR: accepted
+
+    loop poll docling
+        TR->>DL: poll status
+        DL-->>TR: processing
+    end
+
+    DL-->>TR: result ready
+    TR->>MN: PUT markdown
+    TR-->>SW: status done
+    SW->>DS: MarkConvertedToMarkdown
+
+    %% extract_tables
+    opt extract_tables
+        DS->>SW: run extract_tables
+        SW->>TE: ExtractTablesFromPdf
+        TE-->>SW: table_job_id
+
+        loop poll table extractor
+            SW->>TE: GetTableExtractionJob
+            TE-->>SW: status
+        end
+
+        TE->>MN: PUT tables_md
+        SW->>DS: MarkConvertedToMarkdown
+    end
+
+    %% publish
+    DS->>SW: run publish_to_github
+    SW->>GP: PublishMarkdown
+    GP->>MN: Load markdown
+    GP->>GH: Commit or PR
+    GH-->>GP: result
+    GP-->>SW: commit_sha
+    SW->>DS: MarkPublished
+
 ```
