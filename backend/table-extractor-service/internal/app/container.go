@@ -62,7 +62,15 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 
 	repo := sqlrepo.NewSQLRepository(db, dialect)
 
-	uc := usecase.NewTableExtractorUseCase(repo, usecase.Config{
+	storageClient := objectstorage.NewMinioStorage(minioClient, cfg.Storage)
+
+	deps := usecase.Dependencies{
+		Queue:     repo,
+		Storage:   storageClient,
+		Extractor: nil,
+	}
+
+	uc := usecase.NewTableExtractorUseCase(deps, usecase.Config{
 		QueueLimit:             cfg.Service.QueueLimit,
 		DefaultArtifactsBucket: cfg.Minio.ArtifactsBucket,
 		DefaultArtifactsPrefix: cfg.Minio.DefaultArtifactsPrefix,
@@ -70,11 +78,16 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 
 	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.Port, tracerProvider)
 
+	var processor worker.Processor
+	if deps.Extractor != nil {
+		processor = uc
+	}
+
 	workerRunner := worker.NewRunner(worker.Config{
 		MaxWorkers:        cfg.Service.MaxWorkers,
 		ProcessingTimeout: cfg.Service.ProcessingTimeout,
 		CleanupRetention:  cfg.Service.CleanupRetention,
-	}, logger)
+	}, processor, logger)
 
 	cleanup := func(ctx context.Context) error {
 		var result error

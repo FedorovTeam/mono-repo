@@ -1,10 +1,14 @@
 package usecase
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,9 +24,10 @@ var (
 	ErrInvalidArgument   = errors.New("invalid argument")
 	ErrQueueLimitReached = errors.New("queue limit reached")
 	ErrNotFound          = errors.New("job not found")
+	ErrProcessorOffline  = errors.New("processor is not configured")
 )
 
-type ExtractTablesRequest struct {
+type SubmitExtractionRequest struct {
 	DocumentID        string
 	OriginalBucket    string
 	OriginalObjectKey string
@@ -33,41 +38,76 @@ type ExtractTablesRequest struct {
 	CorrelationID     string
 }
 
+// alias для совместимости с gRPC-слоем.
+type ExtractTablesRequest = SubmitExtractionRequest
+
 type Config struct {
 	QueueLimit             int
 	DefaultArtifactsBucket string
 	DefaultArtifactsPrefix string
+	AcquireBatchSize       int
 }
 
 type TableExtractorUseCase struct {
-	repo   repository.TableExtractionRepository
-	cfg    Config
-	logger *zap.Logger
+	queue     QueueRepo
+	storage   StorageClient
+	extractor Extractor
+	cfg       Config
+	clock     Clock
+	idGen     IDGenerator
+	logger    *zap.Logger
 }
 
-func NewTableExtractorUseCase(repo repository.TableExtractionRepository, cfg Config, logger *zap.Logger) *TableExtractorUseCase {
+type Dependencies struct {
+	Queue       QueueRepo
+	Storage     StorageClient
+	Extractor   Extractor
+	Clock       Clock
+	IDGenerator IDGenerator
+}
+
+func NewTableExtractorUseCase(deps Dependencies, cfg Config, logger *zap.Logger) *TableExtractorUseCase {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	if cfg.AcquireBatchSize <= 0 {
+		cfg.AcquireBatchSize = 1
+	}
 	return &TableExtractorUseCase{
-		repo:   repo,
-		cfg:    cfg,
-		logger: logger,
+		queue:     deps.Queue,
+		storage:   deps.Storage,
+		extractor: deps.Extractor,
+		cfg:       cfg,
+		clock:     resolveClock(deps.Clock),
+		idGen:     resolveIDGenerator(deps.IDGenerator),
+		logger:    logger,
 	}
 }
 
 func (uc *TableExtractorUseCase) ExtractTablesFromPDF(ctx context.Context, req ExtractTablesRequest) (domain.TableExtractionJob, error) {
+	return uc.SubmitExtraction(ctx, SubmitExtractionRequest(req))
+}
+
+func (uc *TableExtractorUseCase) GetJob(ctx context.Context, id uuid.UUID) (domain.TableExtractionJob, error) {
+	job, ok, err := uc.queue.GetByID(ctx, id)
+	if err != nil {
+		return domain.TableExtractionJob{}, err
+	}
+	if !ok {
+		return domain.TableExtractionJob{}, ErrNotFound
+	}
+	return job, nil
+}
+
+func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req SubmitExtractionRequest) (domain.TableExtractionJob, error) {
 	if strings.TrimSpace(req.DocumentID) == "" {
 		return domain.TableExtractionJob{}, fmt.Errorf("%w: document_id is required", ErrInvalidArgument)
 	}
-	if req.OriginalBucket == "" && req.SourceURL == "" {
-		return domain.TableExtractionJob{}, fmt.Errorf("%w: provide original_bucket/object_key or source_url", ErrInvalidArgument)
+	if err := uc.validateSources(req); err != nil {
+		return domain.TableExtractionJob{}, err
 	}
-	if req.OriginalBucket != "" && req.OriginalObjectKey == "" {
-		return domain.TableExtractionJob{}, fmt.Errorf("%w: original_object_key is required when original_bucket is set", ErrInvalidArgument)
-	}
-	if req.SourceURL != "" && (req.OriginalBucket != "" || req.OriginalObjectKey != "") {
-		return domain.TableExtractionJob{}, fmt.Errorf("%w: source_url and original bucket/object cannot be used together", ErrInvalidArgument)
+	if !uc.isPDF(req) {
+		return domain.TableExtractionJob{}, fmt.Errorf("%w: only PDF documents are supported", ErrInvalidArgument)
 	}
 
 	ctx, correlationID := telemetry.EnsureCorrelationID(ctx)
@@ -76,7 +116,7 @@ func (uc *TableExtractorUseCase) ExtractTablesFromPDF(ctx context.Context, req E
 		ctx = telemetry.ContextWithCorrelationID(ctx, correlationID)
 	}
 
-	now := time.Now().UTC()
+	now := uc.clock.Now().UTC()
 	artifactsBucket := req.ArtifactsBucket
 	if artifactsBucket == "" {
 		artifactsBucket = uc.cfg.DefaultArtifactsBucket
@@ -84,7 +124,8 @@ func (uc *TableExtractorUseCase) ExtractTablesFromPDF(ctx context.Context, req E
 	if artifactsBucket == "" {
 		return domain.TableExtractionJob{}, fmt.Errorf("%w: artifacts_bucket is required", ErrInvalidArgument)
 	}
-	jobID := uuid.New()
+
+	jobID := uc.idGen.New()
 	prefix := req.ArtifactsPrefix
 	if prefix == "" {
 		prefix = path.Join(uc.cfg.DefaultArtifactsPrefix, req.DocumentID, jobID.String())
@@ -104,7 +145,7 @@ func (uc *TableExtractorUseCase) ExtractTablesFromPDF(ctx context.Context, req E
 		UpdatedAt:       now,
 	}
 
-	job, _, err := uc.repo.UpsertOrGetActive(ctx, job, uc.cfg.QueueLimit)
+	job, _, err := uc.queue.UpsertOrGetActive(ctx, job, uc.cfg.QueueLimit)
 	if err != nil {
 		if errors.Is(err, repository.ErrQueueLimitReached) {
 			return domain.TableExtractionJob{}, ErrQueueLimitReached
@@ -115,13 +156,167 @@ func (uc *TableExtractorUseCase) ExtractTablesFromPDF(ctx context.Context, req E
 	return job, nil
 }
 
-func (uc *TableExtractorUseCase) GetJob(ctx context.Context, id uuid.UUID) (domain.TableExtractionJob, error) {
-	job, ok, err := uc.repo.GetByID(ctx, id)
+// ProcessExtractionJob — бизнес-логика воркера: взять pending-задачу, извлечь таблицы и записать артефакты.
+func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool, error) {
+	if uc.extractor == nil || uc.storage == nil {
+		return false, ErrProcessorOffline
+	}
+
+	now := uc.clock.Now().UTC()
+	jobs, err := uc.queue.AcquirePendingBatch(ctx, uc.cfg.AcquireBatchSize, now)
 	if err != nil {
-		return domain.TableExtractionJob{}, err
+		return false, fmt.Errorf("acquire pending jobs: %w", err)
 	}
-	if !ok {
-		return domain.TableExtractionJob{}, ErrNotFound
+	if len(jobs) == 0 {
+		return false, nil
 	}
-	return job, nil
+
+	for _, job := range jobs {
+		if err := uc.processSingle(ctx, job); err != nil {
+			uc.logger.Error("failed to process extraction job",
+				zap.Error(err),
+				zap.String("queue_id", job.ID.String()),
+				zap.String("correlation_id", job.CorrelationID),
+			)
+		}
+	}
+
+	return true, nil
+}
+
+func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.TableExtractionJob) error {
+	if job.Original.Bucket == "" || job.Original.ObjectKey == "" {
+		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "original file is not set", "invalid_original", "original location is empty", ptrTime(uc.clock.Now().UTC()))
+		return errors.Join(errors.New("missing original location"), statusErr)
+	}
+
+	originalFile, cleanup, err := uc.downloadOriginal(ctx, job)
+	if err != nil {
+		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "download failed", "download_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
+		return errors.Join(fmt.Errorf("download original: %w", err), statusErr)
+	}
+	defer cleanup()
+
+	result, err := uc.extractor.Extract(ctx, originalFile)
+	if err != nil {
+		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "extraction failed", "extraction_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
+		return errors.Join(fmt.Errorf("extract tables: %w", err), statusErr)
+	}
+
+	if err := uc.uploadArtifacts(ctx, job, result); err != nil {
+		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailedRetryable, "upload failed", "upload_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
+		return errors.Join(fmt.Errorf("upload artifacts: %w", err), statusErr)
+	}
+
+	finishedAt := uc.clock.Now().UTC()
+	if err := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusDone, "completed", "", "", &finishedAt); err != nil {
+		return fmt.Errorf("mark job done: %w", err)
+	}
+
+	return nil
+}
+
+func (uc *TableExtractorUseCase) uploadArtifacts(ctx context.Context, job domain.TableExtractionJob, result ExtractionResult) error {
+	uploads := []struct {
+		location    domain.ArtifactLocation
+		payload     []byte
+		contentType string
+	}{
+		{job.Artifacts.RawJSON, result.RawJSON, "application/json"},
+		{job.Artifacts.NormalizedJSON, result.NormalizedJSON, "application/json"},
+		{job.Artifacts.Markdown, result.Markdown, "text/markdown"},
+		{job.Artifacts.Manifest, result.Manifest, "application/json"},
+	}
+
+	for _, file := range uploads {
+		if len(file.payload) == 0 {
+			continue
+		}
+		if err := uc.storage.Upload(ctx, file.location.Bucket, file.location.ObjectKey, file.contentType, bytesReader(file.payload), int64(len(file.payload))); err != nil {
+			return fmt.Errorf("upload %s: %w", file.location.ObjectKey, err)
+		}
+	}
+
+	if len(result.DebugFiles) == 0 {
+		return nil
+	}
+
+	for name, payload := range result.DebugFiles {
+		if len(payload) == 0 {
+			continue
+		}
+		objectKey := path.Join(job.Artifacts.DebugPrefix.ObjectKey, filepath.Base(name))
+		if err := uc.storage.Upload(ctx, job.Artifacts.DebugPrefix.Bucket, objectKey, "text/plain", bytesReader(payload), int64(len(payload))); err != nil {
+			return fmt.Errorf("upload debug file %s: %w", objectKey, err)
+		}
+	}
+
+	return nil
+}
+
+func (uc *TableExtractorUseCase) downloadOriginal(ctx context.Context, job domain.TableExtractionJob) (string, func(), error) {
+	reader, err := uc.storage.Download(ctx, job.Original.Bucket, job.Original.ObjectKey)
+	if err != nil {
+		return "", nil, err
+	}
+	defer func() { _ = reader.Close() }()
+
+	file, err := os.CreateTemp("", "table-extractor-*.pdf")
+	if err != nil {
+		return "", nil, err
+	}
+
+	if _, err := io.Copy(file, reader); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return "", nil, err
+	}
+
+	if err := file.Close(); err != nil {
+		_ = os.Remove(file.Name())
+		return "", nil, err
+	}
+
+	cleanup := func() {
+		_ = os.Remove(file.Name())
+	}
+	return file.Name(), cleanup, nil
+}
+
+func (uc *TableExtractorUseCase) validateSources(req SubmitExtractionRequest) error {
+	if req.SourceURL == "" {
+		if req.OriginalBucket == "" || req.OriginalObjectKey == "" {
+			return fmt.Errorf("%w: original_bucket and original_object_key are required", ErrInvalidArgument)
+		}
+		return nil
+	}
+
+	if req.OriginalBucket != "" || req.OriginalObjectKey != "" {
+		return fmt.Errorf("%w: source_url cannot be combined with bucket/object", ErrInvalidArgument)
+	}
+	return nil
+}
+
+func (uc *TableExtractorUseCase) isPDF(req SubmitExtractionRequest) bool {
+	ext := extractExtension(req.OriginalObjectKey)
+	if ext == "" && req.SourceURL != "" {
+		ext = extractExtension(req.SourceURL)
+	}
+	return ext == "pdf"
+}
+
+func bytesReader(data []byte) io.Reader {
+	return bytes.NewReader(data)
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
+}
+
+func extractExtension(value string) string {
+	clean := value
+	if idx := strings.IndexAny(clean, "?#"); idx >= 0 {
+		clean = clean[:idx]
+	}
+	return strings.ToLower(strings.TrimPrefix(path.Ext(clean), "."))
 }
