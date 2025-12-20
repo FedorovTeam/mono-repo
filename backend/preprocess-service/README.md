@@ -3,14 +3,22 @@
 Сервис конвертирует входные файлы (`doc`/`docx`/`pdf`) в `docx` через установленный LibreOffice и сохраняет результат в MinIO. Очередь задач и состояния хранятся в PostgreSQL; взаимодействие с сервисом идёт через gRPC.
 
 ## Структура каталога
-- `cmd/main.go` — точка входа, чтение конфига и запуск HTTP/gRPC/воркера.
+- `cmd/main.go` — точка входа, чтение конфига, явный запуск миграций и сборка приложения.
+- `cmd/bootstrap` — создание внешних адаптеров (MinIO, LibreOffice, callback, workspace), подключение телеметрии и DI для `App`.
 - `internal/config` — разбор `config.yaml`, поддержка переменных окружения для PostgreSQL и MinIO.
-- `internal/app` — инициализация логирования, телеметрии, миграций, серверов и воркера.
+- `internal/app` — сборка HTTP/gRPC серверов и воркера на основе переданных интерфейсов, без побочных эффектов подключения адаптеров.
 - `internal/domain` — сущность задания и валидация входных параметров.
 - `internal/transport` — HTTP‑ручки (`/health`, `/ready`, `/metrics`) и gRPC сервер с метриками и correlation-id middleware.
 - `internal/storage/postgres` — репозиторий очереди на базе таблицы `preprocess_queue`.
 - `internal/worker` — цикл выборки задач, загрузка исходника из MinIO, запуск LibreOffice, выгрузка результата и callback.
 - `proto/preprocess.proto` — контракт gRPC (`SubmitPreprocess`, `GetPreprocessStatus`).
+
+## Порядок инициализации и DI
+1. `cmd/main.go` загружает конфигурацию и создаёт `slog` через `app.NewLogger`.
+2. Перед поднятием сервисов вызывается `bootstrap.RunMigrations`, чтобы прогнать встроенные миграции PostgreSQL явным шагом.
+3. `bootstrap.BuildDependencies` собирает инфраструктуру: подключает телеметрию, пул PostgreSQL и репозиторий, MinIO адаптер (скачивание/загрузка), LibreOffice‑конвертер, файловый workspace и callback‑клиент.
+4. `app.New` принимает `config.Config` и `app.Dependencies`, состоящие из интерфейсов портов (`PreprocessJobRepository`, `StorageDownloader/StorageUploader`, `DocumentConverter`, `WorkspaceManager`, `CallbackSender`, `Telemetry`). Это позволяет подменять реализации для тестов или локального раннера без запуска миграций и без создания внешних клиентов внутри `App`.
+5. Запуск (`App.Run`) стартует HTTP/gRPC серверы и воркер, используя переданные зависимости; завершение (`App.Close`) закрывает только пул БД и телеметрию, оставляя управление адаптерами на уровне DI.
 
 ## gRPC API
 - `SubmitPreprocess` принимает `source_bucket`, `source_key`, `source_etag`, `document_id`, опциональные `target_bucket`, `target_key`, `callback_url`, `correlation_id`. При пустых `target_bucket`/`target_key` подставляются значения из конфига: bucket берётся из `preprocess.target_bucket`, ключ строится как `<target_key_prefix>/<document_id>.docx` (или `<document_id>.docx`). `document_id`, `source_bucket`, `source_key`, `source_etag` обязательны; иначе вернётся `INVALID_ARGUMENT`. Идемпотентность обеспечивается уникальным ключом `(source_bucket, source_key, source_etag)`: при повторе вернётся существующий `job_id` и текущий статус. Поле `correlation_id` в ответе берётся из запроса.
@@ -21,7 +29,7 @@ HTTP сервер доступен на `service.port` (по умолчанию 
 
 ## Очередь в PostgreSQL
 - Таблица `preprocess_queue` содержит: `job_id` (UUID PK), `document_id`, `source_bucket/source_key/source_etag`, `target_bucket/target_key`, `target_media_type`, `status`, `attempts`, `max_attempts` (по умолчанию 5), `next_run_at`, `started_at`, `finished_at`, `error_code`, `error_message`, `error_details` (JSONB), `callback_url`, `correlation_id`, `created_at/updated_at`. Индексы: `(status, next_run_at)`, `(source_bucket, source_key)`, уникальный `(source_bucket, source_key, source_etag)`.
-- Миграции встроены в бинарник и выполняются при старте (`internal/app`). При необходимости можно отдельно прогнать `go run github.com/pressly/goose/v3/cmd/goose@v3.22.3 -dir db/migrations postgres "$POSTGRES_DSN" up`.
+- Миграции встроены в бинарник и выполняются при старте через `cmd/bootstrap.RunMigrations`. При необходимости можно отдельно прогнать `go run github.com/pressly/goose/v3/cmd/goose@v3.22.3 -dir db/migrations postgres "$POSTGRES_DSN" up`.
 
 ## Воркеры и ретраи
 - Воркер выбирает задания со статусами `pending` или `failed`, у которых `next_run_at <= now()`, блокирует строку через `FOR UPDATE SKIP LOCKED`, увеличивает `attempts` и переводит статус в `processing`.
@@ -41,7 +49,7 @@ HTTP сервер доступен на `service.port` (по умолчанию 
 
 ## Локальный запуск и тесты
 1. Настройте `config/config.yaml` для своей БД/MinIO и пути LibreOffice. Пример лежит в репозитории и копируется в образ `/app/config/config.yaml`.
-2. Примените миграции (опционально, они запустятся и при старте приложения):
+2. Примените миграции (опционально, они запустятся и при старте приложения через `bootstrap.RunMigrations`):
    ```bash
    POSTGRES_DSN="postgres://preprocess:preprocess_password@localhost:5432/preprocess?sslmode=disable" \
      go run github.com/pressly/goose/v3/cmd/goose@v3.22.3 -dir db/migrations postgres "$POSTGRES_DSN" up
