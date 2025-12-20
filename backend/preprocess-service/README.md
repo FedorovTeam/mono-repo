@@ -16,7 +16,7 @@
 ## Порядок инициализации и DI
 1. `cmd/main.go` загружает конфигурацию и создаёт `slog` через `app.NewLogger`.
 2. Перед поднятием сервисов вызывается `bootstrap.RunMigrations`, чтобы прогнать встроенные миграции PostgreSQL явным шагом.
-3. `bootstrap.BuildDependencies` собирает инфраструктуру: подключает телеметрию, пул PostgreSQL и репозиторий, MinIO адаптер (скачивание/загрузка), LibreOffice‑конвертер, файловый workspace и callback‑клиент.
+3. `bootstrap.BuildDependencies` собирает инфраструктуру: подключает телеметрию, пул PostgreSQL и репозиторий, storage‑адаптер (MinIO по умолчанию или файловый при `storage_mode=filesystem`), LibreOffice‑конвертер, файловый workspace и callback‑клиент.
 4. `app.New` принимает `config.Config` и `app.Dependencies`, состоящие из интерфейсов портов (`PreprocessJobRepository`, `StorageDownloader/StorageUploader`, `DocumentConverter`, `WorkspaceManager`, `CallbackSender`, `Telemetry`). Это позволяет подменять реализации для тестов или локального раннера без запуска миграций и без создания внешних клиентов внутри `App`.
 5. Запуск (`App.Run`) стартует HTTP/gRPC серверы и воркер, используя переданные зависимости; завершение (`App.Close`) закрывает только пул БД и телеметрию, оставляя управление адаптерами на уровне DI.
 
@@ -42,7 +42,7 @@ HTTP сервер доступен на `service.port` (по умолчанию 
 - `service`: `name`, `port` (HTTP), `grpc_port`, `region`.
 - `postgres`: `dsn` (используется и для readiness).
 - `minio`: `endpoint`, `access_key`, `secret_key`, `ssl`, `region`.
-- `preprocess`: `libreoffice_path` (обязателен), `working_dir`, `output_dir`, `target_bucket`, `target_key_prefix`, `target_media_type`, `worker_concurrency`, `convert_timeout`, `backoff`, `poll_interval`.
+- `preprocess`: `libreoffice_path` (обязателен), `working_dir`, `output_dir`, `storage_mode` (`minio`|`filesystem`), `local_source_dir`/`local_target_dir` (используются при `storage_mode=filesystem`), `target_bucket`, `target_key_prefix`, `target_media_type`, `worker_concurrency`, `convert_timeout`, `backoff`, `poll_interval`.
 - `logging`: `level` (`debug|info|warn|error`).
 
 Переменные окружения перекрывают только `CONFIG_PATH`, `POSTGRES_DSN`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_REGION`, `MINIO_SSL`. Рабочие директории создаются на старте; если `target_bucket` не передан клиентом, используется значение из конфига. `target_key` обязателен: либо приходит в запросе, либо формируется по `target_key_prefix` и `document_id`.
@@ -69,6 +69,20 @@ HTTP сервер доступен на `service.port` (по умолчанию 
    ```bash
    go test ./...
    ```
+
+### Локальная интеграция LibreOffice без MinIO
+Для отладки конвертации можно обойтись без MinIO, используя файловый адаптер:
+1. В `config/config.yaml` укажите:
+   ```yaml
+   preprocess:
+     storage_mode: filesystem
+     local_source_dir: ./tmp/source
+     local_target_dir: ./tmp/target
+   ```
+   Каталоги будут созданы автоматически.
+2. Положите исходный файл в `local_source_dir/<source_bucket>/<source_key>`, соблюдая структуру `key`, которую передадите в gRPC (например, `source_bucket=local-bucket`, `source_key=incoming/manual.docx` → `./tmp/source/local-bucket/incoming/manual.docx`).
+3. Запустите сервис и вызовите `SubmitPreprocess`, передав любые значения бакетов и `source_key` из шага 2. Файл скопируется в рабочее пространство, конвертация пройдет через локальный LibreOffice, а результат запишется в `local_target_dir/<target_bucket>/<target_key>`.
+4. Заберите готовый файл из `local_target_dir` или запросите статус через `GetPreprocessStatus` — координаты будут ссылаться на локальные пути с префиксом бакета, MinIO не понадобится.
 
 ## Быстрый стенд через docker-compose
 1. Поднимите сервис и зависимости:

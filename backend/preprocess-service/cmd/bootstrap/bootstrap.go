@@ -12,6 +12,7 @@ import (
 
 	"preprocess-service/db/migrations"
 	"preprocess-service/internal/adapter/libreoffice"
+	"preprocess-service/internal/adapter/storage/fs"
 	"preprocess-service/internal/adapter/workspace"
 	"preprocess-service/internal/app"
 	"preprocess-service/internal/config"
@@ -19,6 +20,7 @@ import (
 	storageminio "preprocess-service/internal/storage/minio"
 	"preprocess-service/internal/storage/postgres"
 	adaptercallback "preprocess-service/internal/transport/callback"
+	"preprocess-service/internal/usecase/ports"
 )
 
 // RunMigrations запускает встроенные миграции до старта сервиса.
@@ -59,13 +61,12 @@ func BuildDependencies(ctx context.Context, cfg config.Config, logger *slog.Logg
 
 	repo := postgres.NewPreprocessRepository(dbpool)
 
-	minioClient, err := storageminio.NewClient(cfg.Minio)
+	storageAdapter, err := buildStorageAdapter(cfg)
 	if err != nil {
 		dbpool.Close()
 		shutdownTelemetry(ctx, telemetry, logger)
-		return app.Dependencies{}, fmt.Errorf("init minio client: %w", err)
+		return app.Dependencies{}, fmt.Errorf("init storage adapter: %w", err)
 	}
-	storageAdapter := storageminio.NewAdapter(minioClient)
 
 	converter, err := libreoffice.NewExecConverter(cfg.Preprocess.LibreOfficePath)
 	if err != nil {
@@ -94,6 +95,24 @@ func BuildDependencies(ctx context.Context, cfg config.Config, logger *slog.Logg
 		WorkspaceManager: workspaceManager,
 		Callback:         callbackClient,
 	}, nil
+}
+
+func buildStorageAdapter(cfg config.Config) (interface {
+	ports.StorageDownloader
+	ports.StorageUploader
+}, error) {
+	switch cfg.Preprocess.StorageModeOrDefault() {
+	case config.StorageModeFilesystem:
+		return fs.NewAdapter(cfg.Preprocess.LocalSourceDir, cfg.Preprocess.LocalTargetDir)
+	case config.StorageModeMinio:
+		minioClient, err := storageminio.NewClient(cfg.Minio)
+		if err != nil {
+			return nil, fmt.Errorf("init minio client: %w", err)
+		}
+		return storageminio.NewAdapter(minioClient), nil
+	default:
+		return nil, fmt.Errorf("unsupported storage mode: %s", cfg.Preprocess.StorageMode)
+	}
 }
 
 func shutdownTelemetry(ctx context.Context, telemetry *observability.Telemetry, logger *slog.Logger) {

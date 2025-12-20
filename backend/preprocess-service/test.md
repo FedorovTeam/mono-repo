@@ -82,3 +82,25 @@
    }
    ```
 4. Для имитации ошибки можно временно вернуть 500 от вебхука — воркер сделает до трёх попыток, после чего статус станет `FAILED` и в payload появится блок `error`.
+
+## Локальный режим без MinIO (LibreOffice only)
+1. В `config/config.yaml` выставить:
+   ```yaml
+   preprocess:
+     storage_mode: filesystem
+     local_source_dir: ./tmp/source
+     local_target_dir: ./tmp/target
+   ```
+2. Скопировать входной файл в `local_source_dir/<source_bucket>/<source_key>` с тем же ключом, который будет в запросе (`source_bucket=local-bucket`, `source_key=incoming/manual.docx` → `./tmp/source/local-bucket/incoming/manual.docx`).
+3. Запустить сервис и отправить задачу:
+   ```bash
+   grpcurl -plaintext -d '{
+     "source_bucket": "local-bucket",
+     "source_key": "incoming/manual.docx",
+     "source_etag": "etag-local-1",
+     "target_bucket": "local-target",
+     "target_key": "converted/manual.docx",
+     "document_id": "doc-local-1"
+   }' localhost:9082 backend.preprocess.v1.PreprocessService/SubmitPreprocess
+   ```
+4. После завершения конвертации файл появится в `local_target_dir/local-target/converted/manual.docx`, а статусы можно проверить через `GetPreprocessStatus`. MinIO при этом не используется.

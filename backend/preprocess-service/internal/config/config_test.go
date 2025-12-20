@@ -27,6 +27,9 @@ preprocess:
   libreoffice_path: /usr/bin/libreoffice
   working_dir: /tmp/work
   output_dir: /tmp/out
+  local_source_dir: /tmp/source
+  local_target_dir: /tmp/target
+  storage_mode: filesystem
   source_bucket: preprocess-source
   target_bucket: preprocess-target
   target_key_prefix: converted
@@ -53,6 +56,18 @@ logging:
 
 	if cfg.Preprocess.LibreOfficePath != "/usr/bin/libreoffice" {
 		t.Fatalf("unexpected libreoffice path: %s", cfg.Preprocess.LibreOfficePath)
+	}
+
+	if cfg.Preprocess.StorageModeOrDefault() != StorageModeFilesystem {
+		t.Fatalf("unexpected storage mode: %s", cfg.Preprocess.StorageMode)
+	}
+
+	if cfg.Preprocess.LocalSourceDir != "/tmp/source" {
+		t.Fatalf("unexpected local source dir: %s", cfg.Preprocess.LocalSourceDir)
+	}
+
+	if cfg.Preprocess.LocalTargetDir != "/tmp/target" {
+		t.Fatalf("unexpected local target dir: %s", cfg.Preprocess.LocalTargetDir)
 	}
 
 	if cfg.Preprocess.TargetBucket != "preprocess-target" {
