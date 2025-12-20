@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"preprocess-service/cmd/bootstrap"
 	"preprocess-service/internal/app"
 	"preprocess-service/internal/config"
 )
@@ -18,7 +19,19 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	application, err := app.New(cfg)
+	logger := app.NewLogger(cfg.Logging.Level)
+	initCtx := context.Background()
+
+	if err := bootstrap.RunMigrations(initCtx, cfg.Postgres.DSN, logger); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
+	}
+
+	deps, err := bootstrap.BuildDependencies(initCtx, cfg, logger)
+	if err != nil {
+		log.Fatalf("failed to init dependencies: %v", err)
+	}
+
+	application, err := app.New(cfg, deps)
 	if err != nil {
 		log.Fatalf("failed to init app: %v", err)
 	}

@@ -2,29 +2,35 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"preprocess-service/db/migrations"
-	"strings"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"preprocess-service/internal/adapter/libreoffice"
-	"preprocess-service/internal/adapter/workspace"
 	"preprocess-service/internal/config"
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/observability"
-	storageminio "preprocess-service/internal/storage/minio"
-	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
-	adaptercallback "preprocess-service/internal/transport/callback"
+	"preprocess-service/internal/usecase/ports"
 	"preprocess-service/internal/usecase/submit"
 	"preprocess-service/internal/worker"
 )
+
+// Dependencies описывает внешний слой и инфраструктуру, необходимую приложению.
+type Dependencies struct {
+	Logger           *slog.Logger
+	Telemetry        *observability.Telemetry
+	DB               *pgxpool.Pool
+	Repo             domain.PreprocessJobRepository
+	Downloader       ports.StorageDownloader
+	Uploader         ports.StorageUploader
+	Converter        ports.DocumentConverter
+	WorkspaceManager ports.WorkspaceManager
+	Callback         ports.CallbackSender
+}
 
 type App struct {
 	cfg        config.Config
@@ -36,34 +42,45 @@ type App struct {
 	logger     *slog.Logger
 }
 
-func New(cfg config.Config) (*App, error) {
-	logger := newLogger(cfg.Logging.Level)
-
-	telemetry, err := observability.Setup(context.Background(), cfg.Service.Name)
-	if err != nil {
-		return nil, fmt.Errorf("init telemetry: %w", err)
+func New(cfg config.Config, deps Dependencies) (*App, error) {
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.Default()
 	}
 
-	if err := runMigrations(context.Background(), cfg.Postgres.DSN, logger); err != nil {
-		return nil, err
+	if deps.Repo == nil {
+		return nil, fmt.Errorf("job repository is required")
+	}
+	if deps.Downloader == nil {
+		return nil, fmt.Errorf("storage downloader is required")
+	}
+	if deps.Uploader == nil {
+		return nil, fmt.Errorf("storage uploader is required")
+	}
+	if deps.Converter == nil {
+		return nil, fmt.Errorf("document converter is required")
+	}
+	if deps.WorkspaceManager == nil {
+		return nil, fmt.Errorf("workspace manager is required")
+	}
+	if deps.Callback == nil {
+		return nil, fmt.Errorf("callback sender is required")
 	}
 
-	dbpool, err := pgxpool.New(context.Background(), cfg.Postgres.DSN)
+	submitService, err := submit.NewService(deps.Repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("connect postgres: %w", err)
-	}
-
-	repo := postgres.NewPreprocessRepository(dbpool)
-	submitService, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
-	if err != nil {
-		dbpool.Close()
 		return nil, fmt.Errorf("init submit service: %w", err)
 	}
 	handler := transport.NewPreprocessHandler(submitService)
 
-	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler, telemetry.Meter(), logger)
+	meter := deps.Telemetry.Meter()
+	var metricsHandler http.Handler
+	if deps.Telemetry != nil {
+		metricsHandler = deps.Telemetry.MetricsHandler
+	}
+
+	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler, meter, logger)
 	if err != nil {
-		dbpool.Close()
 		return nil, err
 	}
 
@@ -79,48 +96,25 @@ func New(cfg config.Config) (*App, error) {
 		PollInterval:    cfg.Preprocess.PollInterval,
 	}
 
-	minioClient, err := storageminio.NewClient(cfg.Minio)
-	if err != nil {
-		dbpool.Close()
-		return nil, fmt.Errorf("init minio client: %w", err)
-	}
-
-	storageAdapter := storageminio.NewAdapter(minioClient)
-
-	converter, err := libreoffice.NewExecConverter(cfg.Preprocess.LibreOfficePath)
-	if err != nil {
-		dbpool.Close()
-		return nil, fmt.Errorf("init libreoffice converter: %w", err)
-	}
-
-	workspaceManager, err := workspace.NewFSManager(cfg.Preprocess.WorkingDir, cfg.Preprocess.OutputDir)
-	if err != nil {
-		dbpool.Close()
-		return nil, fmt.Errorf("init workspace manager: %w", err)
-	}
-
-	callbackClient := adaptercallback.NewClient(nil)
-
 	wrk, err := worker.New(worker.Dependencies{
-		Repo:             repo,
-		Downloader:       storageAdapter,
-		Uploader:         storageAdapter,
-		Converter:        converter,
-		WorkspaceManager: workspaceManager,
-		Callback:         callbackClient,
+		Repo:             deps.Repo,
+		Downloader:       deps.Downloader,
+		Uploader:         deps.Uploader,
+		Converter:        deps.Converter,
+		WorkspaceManager: deps.WorkspaceManager,
+		Callback:         deps.Callback,
 	}, workerCfg, logger)
 	if err != nil {
-		dbpool.Close()
 		return nil, err
 	}
 
 	return &App{
 		cfg:        cfg,
-		httpServer: transport.NewHTTPServer(cfg.Service.Port, dbpool, telemetry.MetricsHandler, telemetry.Meter(), logger),
+		httpServer: transport.NewHTTPServer(cfg.Service.Port, deps.DB, metricsHandler, meter, logger),
 		grpcServer: grpcServer,
 		worker:     wrk,
-		db:         dbpool,
-		telemetry:  telemetry,
+		db:         deps.DB,
+		telemetry:  deps.Telemetry,
 		logger:     logger,
 	}, nil
 }
@@ -163,34 +157,4 @@ func (a *App) Close() {
 			a.logger.Error("shutdown telemetry", "error", err)
 		}
 	}
-}
-
-func newLogger(level string) *slog.Logger {
-	slogLevel := slog.LevelInfo
-	switch strings.ToLower(level) {
-	case "debug":
-		slogLevel = slog.LevelDebug
-	case "warn", "warning":
-		slogLevel = slog.LevelWarn
-	case "error":
-		slogLevel = slog.LevelError
-	}
-
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})
-	return slog.New(handler)
-}
-
-func runMigrations(ctx context.Context, dsn string, logger *slog.Logger) error {
-	sqlDB, err := sql.Open("pgx", dsn)
-	if err != nil {
-		return fmt.Errorf("open postgres connection: %w", err)
-	}
-	defer sqlDB.Close()
-
-	if err := migrations.Up(ctx, sqlDB); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
-	}
-
-	logger.Info("migrations applied")
-	return nil
 }
