@@ -27,7 +27,7 @@ docling:
   api_key: ""
   mode: upload_file
   default_language: ru
-  ocr_engine: easyocr
+  ocr_engine: pypdfium2
   ocr_lang:
     - ru
   skip_ocr_on_text_pdf: false
