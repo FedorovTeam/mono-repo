@@ -1,0 +1,6 @@
+Pages: 1
+Producer: fixtures
+PDF version: 1.7
+Title: Voting sample
+Author: QA
+CreationDate: D:20250111

@@ -1,0 +1,36 @@
+{
+  "pdfinfo": {
+    "pages": 2,
+    "producer": "fixtures",
+    "pdf_version": "1.7",
+    "title": "Fixture regular",
+    "author": "QA",
+    "creation_date": "D:20250110",
+    "raw": "Pages: 2\nProducer: fixtures\nPDF version: 1.7\nTitle: Fixture regular\nAuthor: QA\nCreationDate: D:20250110\n"
+  },
+  "detect_voting_tables": false,
+  "pages": "all",
+  "layout_text": "Product  Qty  Price\nLaptop   2    1200\nMonitor  4    800\n",
+  "tables": [
+    {
+      "headers": [
+        "Product",
+        "Quantity",
+        "Price"
+      ],
+      "rows": [
+        [
+          "Laptop",
+          "2",
+          "1200"
+        ],
+        [
+          "Monitor",
+          "4",
+          "800"
+        ]
+      ],
+      "page": 1
+    }
+  ]
+}

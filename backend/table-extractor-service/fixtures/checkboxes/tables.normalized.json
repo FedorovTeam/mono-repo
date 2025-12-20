@@ -1,0 +1,42 @@
+{
+  "tables": [
+    {
+      "name": "voting_table",
+      "headers": [
+        "deputy",
+        "present",
+        "for",
+        "against",
+        "abstained",
+        "no_vote"
+      ],
+      "rows": [
+        {
+          "deputy": "Иванов И.И.",
+          "present": "☑",
+          "for": "☑",
+          "against": "-",
+          "abstained": "-",
+          "no_vote": "-"
+        },
+        {
+          "deputy": "Петров П.П.",
+          "present": "☑",
+          "for": "☑",
+          "against": "-",
+          "abstained": "-",
+          "no_vote": "-"
+        },
+        {
+          "deputy": "Сидорова С.С.",
+          "present": "☑",
+          "for": "-",
+          "against": "☑",
+          "abstained": "-",
+          "no_vote": "-"
+        }
+      ],
+      "page": 1
+    }
+  ]
+}
