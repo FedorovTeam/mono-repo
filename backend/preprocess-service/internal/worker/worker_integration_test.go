@@ -17,6 +17,7 @@ import (
 
 	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
+	"preprocess-service/internal/usecase/preprocess"
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
 )
 
@@ -27,8 +28,8 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	db, terminate := setupPostgres(ctx, t)
 	defer terminate()
 
-repo := postgres.NewJobRepository(db)
-handler := transport.NewPreprocessHandler(repo, "target", "converted")
+	repo := postgres.NewJobRepository(db)
+	handler := transport.NewPreprocessHandler(repo, "target", "converted")
 
 	submitResp, err := handler.SubmitPreprocess(ctx, &preprocessv1.SubmitPreprocessRequest{
 		SourceBucket:  "source",
@@ -64,7 +65,8 @@ handler := transport.NewPreprocessHandler(repo, "target", "converted")
 		queueJob.TargetKey = "converted/result.docx"
 	}
 
-	if err := w.markDone(ctx, queueJob); err != nil {
+	repo := preprocess.NewPGQueueRepository(db)
+	if err := repo.MarkDone(ctx, toUsecaseJob(queueJob), preprocess.DefaultTargetMediaType); err != nil {
 		t.Fatalf("markDone failed: %v", err)
 	}
 
