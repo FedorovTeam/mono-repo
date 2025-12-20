@@ -120,6 +120,58 @@ func responseSnippet(body []byte) string {
 	return snippet
 }
 
+func formatDoclingErrors(items []errorItem) string {
+	var parts []string
+	for _, item := range items {
+		module := strings.TrimSpace(item.ModuleName)
+		component := strings.TrimSpace(item.ComponentType)
+		msg := strings.TrimSpace(item.ErrorMessage)
+
+		var prefix string
+		switch {
+		case module != "" && component != "":
+			prefix = fmt.Sprintf("%s/%s", component, module)
+		case module != "":
+			prefix = module
+		case component != "":
+			prefix = component
+		}
+
+		switch {
+		case prefix != "" && msg != "":
+			parts = append(parts, fmt.Sprintf("%s: %s", prefix, msg))
+		case msg != "":
+			parts = append(parts, msg)
+		case prefix != "":
+			parts = append(parts, prefix)
+		}
+	}
+
+	return strings.Join(parts, "; ")
+}
+
+func doclingFailureDetails(statusBody []byte, resultResp convertDocumentResponse, resultBody []byte, resultErr error) string {
+	var details []string
+
+	if formatted := formatDoclingErrors(resultResp.Errors); formatted != "" {
+		details = append(details, formatted)
+	}
+
+	if snippet := responseSnippet(resultBody); snippet != "" {
+		details = append(details, fmt.Sprintf("result=%s", snippet))
+	}
+
+	if resultErr != nil {
+		details = append(details, fmt.Sprintf("result_error=%v", resultErr))
+	}
+
+	if snippet := responseSnippet(statusBody); snippet != "" {
+		details = append(details, fmt.Sprintf("status_response=%s", snippet))
+	}
+
+	return strings.Join(details, "; ")
+}
+
 // Config описывает параметры HTTP-клиента Docling.
 type Config struct {
 	Endpoint         string
@@ -551,12 +603,25 @@ func (c *DoclingConverter) CheckStatus(ctx context.Context, taskID string) (doma
 		return domain.StatusCheckResult{Status: normalizedStatus, Result: nil}, nil
 
 	default:
-		c.logger.Warn("docling reported failure status", append(logFields,
-			zap.String("status", rawStatus),
-			zap.String("status_body", responseSnippet(body)),
-		)...)
+		resultResp, resultBody, resultErr := c.fetchResult(ctx, correlationID, taskID)
+		if resultErr != nil {
+			c.logger.Warn("docling result fetch after failure status errored", append(logFields,
+				zap.String("status", rawStatus),
+				zap.String("status_body", responseSnippet(body)),
+				zap.Error(resultErr),
+			)...)
+		}
 
-		return domain.StatusCheckResult{}, fmt.Errorf("docling status=%s for task %s: response=%s", rawStatus, taskID, responseSnippet(body))
+		details := doclingFailureDetails(body, resultResp, resultBody, resultErr)
+		if details == "" {
+			details = responseSnippet(body)
+		}
+
+		return domain.StatusCheckResult{}, &domain.DoclingFailureError{
+			TaskID:  taskID,
+			Status:  rawStatus,
+			Details: details,
+		}
 	}
 }
 

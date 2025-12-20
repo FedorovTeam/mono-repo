@@ -108,6 +108,11 @@ func (p *DoclingPoller) Poll(ctx context.Context, task *transformations.Transfor
 	p.metrics.RecordDoclingPolls(ctx, 1)
 
 	if checkErr != nil {
+		var doclingFailure *domain.DoclingFailureError
+		if errors.As(checkErr, &doclingFailure) {
+			return nil, checkErr
+		}
+
 		streak, signature := p.errors.Add(task.ID, checkErr)
 		if streak >= 2 {
 			if err := p.requeueDoclingTask(ctx, task, fmt.Sprintf("repeated docling status error (%s)", signature)); err != nil {

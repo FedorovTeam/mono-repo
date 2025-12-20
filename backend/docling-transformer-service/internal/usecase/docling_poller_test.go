@@ -218,3 +218,54 @@ func TestDoclingPollerRequeuesAfterRepeatedStatusErrors(t *testing.T) {
 		t.Fatalf("expected poll count reset after requeue, got %d", task.DoclingPollCount)
 	}
 }
+
+func TestDoclingPollerFailsOnDoclingFailureError(t *testing.T) {
+	repoStub := &pollingRepoStub{}
+	failureErr := &domain.DoclingFailureError{TaskID: "docling-task", Status: "failed", Details: "parser: boom"}
+	poller := NewDoclingPoller(&failingStatusConverter{err: failureErr}, repoStub, metrics.NewWorkerMetrics(zap.NewNop()), zap.NewNop(), DoclingPollerConfig{InitialInterval: time.Second})
+
+	task := &transformations.TransformationTask{
+		ID:            uuid.New(),
+		Status:        transformations.StatusDocling,
+		DoclingTaskID: "docling-task",
+		CreatedAt:     time.Now(),
+	}
+
+	_, err := poller.Poll(context.Background(), task)
+	if err == nil {
+		t.Fatal("expected docling failure error")
+	}
+
+	if errors.Is(err, ErrDoclingWaiting) {
+		t.Fatalf("expected fatal error, got waiting: %v", err)
+	}
+
+	var doclingErr *domain.DoclingFailureError
+	if !errors.As(err, &doclingErr) {
+		t.Fatalf("expected docling failure error, got %v", err)
+	}
+
+	if doclingErr.Details != failureErr.Details {
+		t.Fatalf("expected details %q, got %q", failureErr.Details, doclingErr.Details)
+	}
+
+	if repoStub.markWaitingCalls != 0 {
+		t.Fatalf("expected no waiting transitions on fatal error, got %d", repoStub.markWaitingCalls)
+	}
+
+	if repoStub.requeueCalls != 0 {
+		t.Fatalf("expected no requeue on fatal error, got %d", repoStub.requeueCalls)
+	}
+}
+
+type failingStatusConverter struct {
+	err error
+}
+
+func (f *failingStatusConverter) Submit(context.Context, domain.ConvertRequest) (domain.DoclingIdentifiers, error) {
+	return domain.DoclingIdentifiers{}, nil
+}
+
+func (f *failingStatusConverter) CheckStatus(context.Context, string) (domain.StatusCheckResult, error) {
+	return domain.StatusCheckResult{}, f.err
+}
