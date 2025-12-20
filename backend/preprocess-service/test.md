@@ -16,6 +16,15 @@
    CONFIG_PATH=./config/testdata/config.yaml go test ./...
    ```
 
+## Интеграционный тест LibreOffice (локальный режим)
+1. Убедитесь, что LibreOffice установлен локально и исполняемый файл доступен по пути из `preprocess.libreoffice_path` (например, `/usr/bin/libreoffice`).
+2. В `config/testdata/config.yaml` должен быть включён `storage_mode: filesystem` и актуальные пути для `local_source_dir`, `local_target_dir`, `working_dir` и `output_dir`.
+3. Запустите интеграционный тест, который использует реальный LibreOffice и локальные адаптеры файловой системы:
+   ```bash
+   CONFIG_PATH=./config/testdata/config.yaml go test -tags integration ./internal/worker -run TestLibreOfficeLocalConversion -count=1
+   ```
+4. После успешного прогона ожидайте конвертированный файл в `<preprocess.output_dir>/job-libreoffice-local/sample.docx` и копию результата в `<preprocess.output_dir>/<target_bucket>/job-libreoffice-local/converted.docx` для ручной проверки.
+
 ## Демонстрация через docker-compose
 1. Запустить стенд: `docker compose up -d` (PostgreSQL, MinIO и preprocess-service).
 2. Проверить готовность:
