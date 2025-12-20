@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"preprocess-service/internal/config"
 	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
 	"preprocess-service/internal/usecase/preprocess"
@@ -26,22 +28,26 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	t.Setenv("CONFIG_PATH", filepath.Join("config", "testdata", "config.yaml"))
+	cfg := config.LoadTestConfig(t)
+
 	db, terminate := setupPostgres(ctx, t)
 	defer terminate()
 
 	repo := postgres.NewPreprocessRepository(db)
-	service, err := submit.NewService(repo, "target", "converted")
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("init submit service: %v", err)
 	}
 	handler := transport.NewPreprocessHandler(service)
 
+	targetKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "file.docx")
 	submitResp, err := handler.SubmitPreprocess(ctx, &preprocessv1.SubmitPreprocessRequest{
-		SourceBucket:  "source",
-		SourceKey:     "docx/file.docx",
+		SourceBucket:  cfg.Preprocess.SourceBucket,
+		SourceKey:     path.Join("incoming", "file.docx"),
 		SourceEtag:    "etag-1",
-		TargetBucket:  "target",
-		TargetKey:     "out/file.docx",
+		TargetBucket:  cfg.Preprocess.TargetBucket,
+		TargetKey:     targetKey,
 		DocumentId:    "doc-1",
 		CorrelationId: "corr-1",
 	})
@@ -62,10 +68,10 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	}
 
 	if queueJob.TargetBucket == "" {
-		queueJob.TargetBucket = "target"
+		queueJob.TargetBucket = cfg.Preprocess.TargetBucket
 	}
 	if queueJob.TargetKey == "" {
-		queueJob.TargetKey = "converted/result.docx"
+		queueJob.TargetKey = path.Join(cfg.Preprocess.TargetKeyPrefix, "result.docx")
 	}
 
 	queueJob.TargetMediaType = preprocess.DefaultTargetMediaType

@@ -2,28 +2,42 @@ package transport
 
 import (
 	"context"
+	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"preprocess-service/internal/config"
 	"preprocess-service/internal/storage/memory"
 	"preprocess-service/internal/usecase/submit"
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
 )
 
+func loadTestConfig(t *testing.T) config.Config {
+	t.Helper()
+
+	t.Setenv("CONFIG_PATH", filepath.Join("config", "testdata", "config.yaml"))
+
+	return config.LoadTestConfig(t)
+}
+
 func TestSubmitPreprocessIdempotent(t *testing.T) {
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	service, err := submit.NewService(repo, "target", "converted")
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("init service: %v", err)
 	}
 	handler := NewPreprocessHandler(service)
 
+	targetKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "file.pdf")
 	req := &preprocessv1.SubmitPreprocessRequest{
-		SourceBucket:  "source",
-		SourceKey:     "docx/file.docx",
+		SourceBucket:  cfg.Preprocess.SourceBucket,
+		SourceKey:     path.Join("docx", "file.docx"),
 		SourceEtag:    "etag-1",
-		TargetBucket:  "target",
-		TargetKey:     "out/file.pdf",
+		TargetBucket:  cfg.Preprocess.TargetBucket,
+		TargetKey:     targetKey,
 		DocumentId:    "doc-1",
 		CorrelationId: "corr-1",
 	}
@@ -53,19 +67,22 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 }
 
 func TestGetPreprocessStatus(t *testing.T) {
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	service, err := submit.NewService(repo, "target", "converted")
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("init service: %v", err)
 	}
 	handler := NewPreprocessHandler(service)
 
+	targetKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "file.pdf")
 	submitResp, err := handler.SubmitPreprocess(context.Background(), &preprocessv1.SubmitPreprocessRequest{
-		SourceBucket:  "source",
-		SourceKey:     "docx/file.docx",
+		SourceBucket:  cfg.Preprocess.SourceBucket,
+		SourceKey:     path.Join("docx", "file.docx"),
 		SourceEtag:    "etag-2",
-		TargetBucket:  "target",
-		TargetKey:     "out/file.pdf",
+		TargetBucket:  cfg.Preprocess.TargetBucket,
+		TargetKey:     targetKey,
 		DocumentId:    "doc-2",
 		CorrelationId: "corr-3",
 	})
@@ -84,7 +101,7 @@ func TestGetPreprocessStatus(t *testing.T) {
 		t.Fatalf("unexpected job id: %s", statusResp.GetJobId())
 	}
 
-	if statusResp.GetTargetBucket() != "target" || statusResp.GetTargetKey() != "out/file.pdf" {
+	if statusResp.GetTargetBucket() != cfg.Preprocess.TargetBucket || statusResp.GetTargetKey() != targetKey {
 		t.Fatalf("unexpected target: %s/%s", statusResp.GetTargetBucket(), statusResp.GetTargetKey())
 	}
 
@@ -102,16 +119,18 @@ func TestGetPreprocessStatus(t *testing.T) {
 }
 
 func TestSubmitPreprocessUsesDefaults(t *testing.T) {
+	cfg := loadTestConfig(t)
+
 	repo := memory.NewRepository()
-	service, err := submit.NewService(repo, "default-target", "converted")
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
 	if err != nil {
 		t.Fatalf("init service: %v", err)
 	}
 	handler := NewPreprocessHandler(service)
 
 	req := &preprocessv1.SubmitPreprocessRequest{
-		SourceBucket:  "source",
-		SourceKey:     "docx/file.docx",
+		SourceBucket:  cfg.Preprocess.SourceBucket,
+		SourceKey:     path.Join("docx", "file.docx"),
 		SourceEtag:    "etag-3",
 		DocumentId:    "doc-3",
 		CorrelationId: "corr-4",
@@ -129,11 +148,11 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 		t.Fatalf("get status failed: %v", err)
 	}
 
-	if statusResp.GetTargetBucket() != "default-target" {
+	if statusResp.GetTargetBucket() != cfg.Preprocess.TargetBucket {
 		t.Fatalf("expected default target bucket, got %s", statusResp.GetTargetBucket())
 	}
 
-	expectedKey := "converted/doc-3.docx"
+	expectedKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "doc-3.docx")
 	if statusResp.GetTargetKey() != expectedKey {
 		t.Fatalf("expected default target key %s, got %s", expectedKey, statusResp.GetTargetKey())
 	}

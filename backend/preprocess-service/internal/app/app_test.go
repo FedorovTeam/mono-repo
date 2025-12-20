@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,26 +14,19 @@ import (
 )
 
 func TestNewAppWithoutTelemetry(t *testing.T) {
-	cfg := config.Config{
-		Service: config.ServiceConfig{
-			Name:     "preprocess-service",
-			Port:     0,
-			GRPCPort: 0,
-		},
-		Preprocess: config.PreprocessConfig{
-			LibreOfficePath:   "/usr/bin/soffice",
-			WorkingDir:        t.TempDir(),
-			OutputDir:         t.TempDir(),
-			SourceBucket:      "source",
-			TargetBucket:      "target",
-			TargetKeyPrefix:   "converted",
-			TargetMediaType:   "application/pdf",
-			WorkerConcurrency: 1,
-			ConvertTimeout:    time.Second,
-			Backoff:           time.Second,
-			PollInterval:      10 * time.Millisecond,
-		},
-	}
+	t.Setenv("CONFIG_PATH", filepath.Join("config", "testdata", "config.yaml"))
+
+	cfg := config.LoadTestConfig(t)
+	cfg.Service.Port = 0
+	cfg.Service.GRPCPort = 0
+	cfg.Preprocess.WorkingDir = t.TempDir()
+	cfg.Preprocess.OutputDir = t.TempDir()
+	cfg.Preprocess.LocalSourceDir = ""
+	cfg.Preprocess.LocalTargetDir = ""
+	cfg.Preprocess.ConvertTimeout = time.Second
+	cfg.Preprocess.Backoff = time.Second
+	cfg.Preprocess.PollInterval = 10 * time.Millisecond
+	cfg.Preprocess.WorkerConcurrency = 1
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
