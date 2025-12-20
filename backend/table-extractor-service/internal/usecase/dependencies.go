@@ -14,8 +14,7 @@ import (
 type QueueRepo interface {
 	UpsertOrGetActive(ctx context.Context, job domain.TableExtractionJob, queueLimit int) (domain.TableExtractionJob, bool, error)
 	AcquirePendingBatch(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error)
-	UpdateStatus(ctx context.Context, id uuid.UUID, status domain.TableExtractionStatus, statusReason, errorCode, errorMessage string, finishedAt *time.Time) error
-	Postpone(ctx context.Context, id uuid.UUID, nextRunAt time.Time, statusReason string) error
+	Save(ctx context.Context, job domain.TableExtractionJob) error
 	ListProcessingBefore(ctx context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error)
 	GetByID(ctx context.Context, id uuid.UUID) (domain.TableExtractionJob, bool, error)
 	CountActive(ctx context.Context) (int, error)

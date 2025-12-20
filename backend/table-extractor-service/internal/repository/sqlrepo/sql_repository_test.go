@@ -86,7 +86,7 @@ func TestAcquirePendingBatch(t *testing.T) {
 	require.Equal(t, domain.StatusPending, stillPending.Status)
 }
 
-func TestUpdateStatus(t *testing.T) {
+func TestSaveAppliesAggregateChanges(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
 
@@ -94,7 +94,11 @@ func TestUpdateStatus(t *testing.T) {
 	created, _, err := repo.UpsertOrGetActive(ctx, job, 10)
 	require.NoError(t, err)
 
-	err = repo.UpdateStatus(ctx, created.ID, domain.StatusDone, "finished", "", "", nil)
+	aggregate := domain.NewTableExtractionJobAggregate(created)
+	updatedAgg, _, err := aggregate.MarkDone("finished", time.Now().UTC())
+	require.NoError(t, err)
+
+	err = repo.Save(ctx, updatedAgg.Job())
 	require.NoError(t, err)
 
 	updated, ok, err := repo.GetByID(ctx, created.ID)
@@ -105,16 +109,22 @@ func TestUpdateStatus(t *testing.T) {
 	require.NotNil(t, updated.FinishedAt)
 }
 
-func TestPostpone(t *testing.T) {
+func TestSaveRestoresAfterTimeout(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
 
 	job := newJob("doc-1")
+	job.Status = domain.StatusProcessing
+	job.Attempts = 2
 	created, _, err := repo.UpsertOrGetActive(ctx, job, 10)
 	require.NoError(t, err)
 
 	nextRun := time.Now().UTC().Add(time.Hour)
-	err = repo.Postpone(ctx, created.ID, nextRun, "retry later")
+	aggregate := domain.NewTableExtractionJobAggregate(created)
+	restoredAgg, _, err := aggregate.RestoreAfterTimeout(nextRun, "retry later", time.Now().UTC())
+	require.NoError(t, err)
+
+	err = repo.Save(ctx, restoredAgg.Job())
 	require.NoError(t, err)
 
 	updated, ok, err := repo.GetByID(ctx, created.ID)

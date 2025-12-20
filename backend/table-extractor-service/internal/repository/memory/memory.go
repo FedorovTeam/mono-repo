@@ -55,6 +55,9 @@ func (r *InMemoryRepository) UpsertOrGetActive(_ context.Context, job domain.Tab
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
 	}
+	if job.Artifacts == (domain.TableArtifacts{}) {
+		job.Artifacts = domain.BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
+	}
 
 	r.data[job.ID] = job
 	r.byDoc[job.DocumentID] = job.ID
@@ -104,61 +107,17 @@ func (r *InMemoryRepository) AcquirePendingBatch(_ context.Context, limit int, n
 
 	result := make([]domain.TableExtractionJob, 0, len(candidates))
 	for _, job := range candidates {
-		job.Status = domain.StatusProcessing
-		job.Attempts++
-		job.NextRunAt = nil
-		job.UpdatedAt = now
+		aggregate := domain.NewTableExtractionJobAggregate(job)
+		updated, _, err := aggregate.StartProcessing(now)
+		if err != nil {
+			return nil, err
+		}
+		job = updated.Job()
 		r.data[job.ID] = job
 		result = append(result, job)
 	}
 
 	return result, nil
-}
-
-func (r *InMemoryRepository) UpdateStatus(_ context.Context, id uuid.UUID, status domain.TableExtractionStatus, statusReason, errorCode, errorMessage string, finishedAt *time.Time) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	job, ok := r.data[id]
-	if !ok {
-		return nil
-	}
-
-	now := time.Now().UTC()
-	job.Status = status
-	job.StatusReason = statusReason
-	job.ErrorCode = errorCode
-	job.ErrorMessage = errorMessage
-	job.UpdatedAt = now
-
-	if (status == domain.StatusDone || status == domain.StatusFailed) && job.FinishedAt == nil {
-		if finishedAt != nil {
-			job.FinishedAt = finishedAt
-		} else {
-			job.FinishedAt = &now
-		}
-	}
-
-	r.data[id] = job
-	return nil
-}
-
-func (r *InMemoryRepository) Postpone(_ context.Context, id uuid.UUID, nextRunAt time.Time, statusReason string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	job, ok := r.data[id]
-	if !ok {
-		return nil
-	}
-
-	job.Status = domain.StatusPending
-	job.StatusReason = statusReason
-	job.NextRunAt = &nextRunAt
-	job.FinishedAt = nil
-	job.UpdatedAt = time.Now().UTC()
-	r.data[id] = job
-	return nil
 }
 
 func (r *InMemoryRepository) ListProcessingBefore(_ context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error) {
@@ -213,17 +172,29 @@ func (r *InMemoryRepository) RetryFailed(_ context.Context, maxAttempts int, ret
 			continue
 		}
 
-		nextRun := now.Add(retryDelay)
-		job.Status = domain.StatusPending
-		job.StatusReason = ""
-		job.NextRunAt = &nextRun
-		job.FinishedAt = nil
-		job.UpdatedAt = now
+		aggregate := domain.NewTableExtractionJobAggregate(job)
+		updatedAgg, _, err := aggregate.Retry(now, retryDelay)
+		if err != nil {
+			return updated, err
+		}
+		job = updatedAgg.Job()
 		r.data[id] = job
 		updated++
 	}
 
 	return updated, nil
+}
+
+func (r *InMemoryRepository) Save(_ context.Context, job domain.TableExtractionJob) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if job.Artifacts == (domain.TableArtifacts{}) {
+		job.Artifacts = domain.BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
+	}
+	r.data[job.ID] = job
+	r.byDoc[job.DocumentID] = job.ID
+	return nil
 }
 
 func (r *InMemoryRepository) GetByID(_ context.Context, id uuid.UUID) (domain.TableExtractionJob, bool, error) {

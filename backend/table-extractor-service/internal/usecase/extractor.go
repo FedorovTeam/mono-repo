@@ -185,14 +185,26 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 }
 
 func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.TableExtractionJob) error {
+	aggregate := domain.NewTableExtractionJobAggregate(job)
+
 	if job.Original.Bucket == "" || job.Original.ObjectKey == "" {
-		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "original file is not set", "invalid_original", "original location is empty", ptrTime(uc.clock.Now().UTC()))
-		return errors.Join(errors.New("missing original location"), statusErr)
+		now := uc.clock.Now().UTC()
+		updated, _, transErr := aggregate.MarkFailed("original file is not set", "invalid_original", "original location is empty", false, now)
+		if transErr != nil {
+			return errors.Join(errors.New("missing original location"), transErr)
+		}
+		saveErr := uc.queue.Save(ctx, updated.Job())
+		return errors.Join(errors.New("missing original location"), saveErr)
 	}
 
 	cached, err := uc.fileCache.Fetch(ctx, job.Original)
 	if err != nil {
-		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "download failed", "download_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
+		now := uc.clock.Now().UTC()
+		updated, _, transErr := aggregate.MarkFailed("download failed", "download_error", err.Error(), false, now)
+		if transErr != nil {
+			return errors.Join(fmt.Errorf("download original: %w", err), transErr)
+		}
+		statusErr := uc.queue.Save(ctx, updated.Job())
 		return errors.Join(fmt.Errorf("download original: %w", err), statusErr)
 	}
 	defer func() {
@@ -203,17 +215,31 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 
 	result, err := uc.extractor.Extract(ctx, cached.Path)
 	if err != nil {
-		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "extraction failed", "extraction_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
+		now := uc.clock.Now().UTC()
+		updated, _, transErr := aggregate.MarkFailed("extraction failed", "extraction_error", err.Error(), false, now)
+		if transErr != nil {
+			return errors.Join(fmt.Errorf("extract tables: %w", err), transErr)
+		}
+		statusErr := uc.queue.Save(ctx, updated.Job())
 		return errors.Join(fmt.Errorf("extract tables: %w", err), statusErr)
 	}
 
 	if err := uc.uploadArtifacts(ctx, job, result); err != nil {
-		statusErr := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailedRetryable, "upload failed", "upload_error", err.Error(), ptrTime(uc.clock.Now().UTC()))
+		now := uc.clock.Now().UTC()
+		updated, _, transErr := aggregate.MarkFailed("upload failed", "upload_error", err.Error(), true, now)
+		if transErr != nil {
+			return errors.Join(fmt.Errorf("upload artifacts: %w", err), transErr)
+		}
+		statusErr := uc.queue.Save(ctx, updated.Job())
 		return errors.Join(fmt.Errorf("upload artifacts: %w", err), statusErr)
 	}
 
 	finishedAt := uc.clock.Now().UTC()
-	if err := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusDone, "completed", "", "", &finishedAt); err != nil {
+	updated, _, transErr := aggregate.MarkDone("completed", finishedAt)
+	if transErr != nil {
+		return fmt.Errorf("mark job done: %w", transErr)
+	}
+	if err := uc.queue.Save(ctx, updated.Job()); err != nil {
 		return fmt.Errorf("mark job done: %w", err)
 	}
 
@@ -312,8 +338,13 @@ func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, pro
 	failed := 0
 
 	for _, job := range jobs {
+		aggregate := domain.NewTableExtractionJobAggregate(job)
 		if maxAttempts > 0 && job.Attempts >= maxAttempts {
-			if err := uc.queue.UpdateStatus(ctx, job.ID, domain.StatusFailed, "processing timeout exceeded", "processing_timeout", "processing exceeded timeout", &now); err != nil {
+			updated, _, transErr := aggregate.MarkFailed("processing timeout exceeded", "processing_timeout", "processing exceeded timeout", false, now)
+			if transErr != nil {
+				return restored, failed, fmt.Errorf("mark job failed: %w", transErr)
+			}
+			if err := uc.queue.Save(ctx, updated.Job()); err != nil {
 				return restored, failed, fmt.Errorf("mark job failed: %w", err)
 			}
 			failed++
@@ -322,7 +353,11 @@ func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, pro
 
 		delay := backoffDelay(job.Attempts, backoffInterval, maxBackoff)
 		nextRun := now.Add(delay)
-		if err := uc.queue.Postpone(ctx, job.ID, nextRun, "restored_after_timeout"); err != nil {
+		updated, _, transErr := aggregate.RestoreAfterTimeout(nextRun, "restored_after_timeout", now)
+		if transErr != nil {
+			return restored, failed, fmt.Errorf("postpone job: %w", transErr)
+		}
+		if err := uc.queue.Save(ctx, updated.Job()); err != nil {
 			return restored, failed, fmt.Errorf("postpone job: %w", err)
 		}
 		restored++

@@ -70,6 +70,9 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 	if (job.Status == domain.StatusDone || job.Status == domain.StatusFailed) && job.FinishedAt == nil {
 		job.FinishedAt = &job.UpdatedAt
 	}
+	if job.Artifacts == (domain.TableArtifacts{}) {
+		job.Artifacts = domain.BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
+	}
 
 	var nextRunAt any
 	if job.NextRunAt != nil {
@@ -162,10 +165,7 @@ func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now 
 	}
 	defer rows.Close()
 
-	var (
-		jobs []domain.TableExtractionJob
-		ids  []string
-	)
+	var jobs []domain.TableExtractionJob
 
 	for rows.Next() {
 		job, ok, err := r.scanJob(rows)
@@ -175,12 +175,13 @@ func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now 
 		if !ok {
 			continue
 		}
-		job.Status = domain.StatusProcessing
-		job.Attempts++
-		job.NextRunAt = nil
-		job.UpdatedAt = now
+		aggregate := domain.NewTableExtractionJobAggregate(job)
+		updated, _, err := aggregate.StartProcessing(now)
+		if err != nil {
+			return nil, err
+		}
+		job = updated.Job()
 		jobs = append(jobs, job)
-		ids = append(ids, job.ID.String())
 	}
 
 	if err := rows.Err(); err != nil {
@@ -194,19 +195,10 @@ func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now 
 		return nil, nil
 	}
 
-	updateQuery := fmt.Sprintf(`UPDATE table_extraction_queue SET status = %s, attempts = attempts + 1, updated_at = %s, next_run_at = NULL WHERE id IN (%s)`,
-		r.placeholder(1),
-		r.placeholder(2),
-		r.placeholdersFrom(3, len(ids)),
-	)
-
-	args := []any{string(domain.StatusProcessing), now}
-	for _, id := range ids {
-		args = append(args, id)
-	}
-
-	if _, err := tx.ExecContext(ctx, updateQuery, args...); err != nil {
-		return nil, fmt.Errorf("mark processing: %w", err)
+	for _, job := range jobs {
+		if err := r.saveTx(ctx, tx, job); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -216,60 +208,19 @@ func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now 
 	return jobs, nil
 }
 
-func (r *SQLRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status domain.TableExtractionStatus, statusReason, errorCode, errorMessage string, finishedAt *time.Time) error {
-	now := time.Now().UTC()
-	updateFinishedAt := finishedAt
-	if (status == domain.StatusDone || status == domain.StatusFailed) && finishedAt == nil {
-		updateFinishedAt = &now
-	}
-
-	var finishedValue any
-	if updateFinishedAt != nil {
-		finishedValue = *updateFinishedAt
-	}
-
-	query := fmt.Sprintf(`UPDATE table_extraction_queue SET
-		status = %s,
-		status_reason = %s,
-		error_code = %s,
-		error_message = %s,
-		finished_at = %s,
-		updated_at = %s
-		WHERE id = %s`,
-		r.placeholder(1),
-		r.placeholder(2),
-		r.placeholder(3),
-		r.placeholder(4),
-		r.placeholder(5),
-		r.placeholder(6),
-		r.placeholder(7),
-	)
-
-	_, err := r.db.ExecContext(ctx, query, string(status), statusReason, errorCode, errorMessage, finishedValue, now, id.String())
+func (r *SQLRepository) Save(ctx context.Context, job domain.TableExtractionJob) error {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("update status: %w", err)
+		return fmt.Errorf("begin save: %w", err)
 	}
-	return nil
-}
+	defer tx.Rollback()
 
-func (r *SQLRepository) Postpone(ctx context.Context, id uuid.UUID, nextRunAt time.Time, statusReason string) error {
-	query := fmt.Sprintf(`UPDATE table_extraction_queue SET 
-		status = %s,
-		status_reason = %s,
-		next_run_at = %s,
-		finished_at = NULL,
-		updated_at = %s
-		WHERE id = %s`,
-		r.placeholder(1),
-		r.placeholder(2),
-		r.placeholder(3),
-		r.placeholder(4),
-		r.placeholder(5),
-	)
+	if err := r.saveTx(ctx, tx, job); err != nil {
+		return err
+	}
 
-	_, err := r.db.ExecContext(ctx, query, string(domain.StatusPending), statusReason, nextRunAt, time.Now().UTC(), id.String())
-	if err != nil {
-		return fmt.Errorf("postpone job: %w", err)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit save: %w", err)
 	}
 	return nil
 }
@@ -329,58 +280,80 @@ func (r *SQLRepository) Cleanup(ctx context.Context, finishedBefore time.Time) (
 }
 
 func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) (int, error) {
-	placeholderIndex := 1
-	nextPlaceholder := func() string {
-		value := r.placeholder(placeholderIndex)
-		placeholderIndex++
-		return value
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin retry: %w", err)
 	}
+	defer tx.Rollback()
 
-	statusPlaceholder := nextPlaceholder()
-	nextRunPlaceholder := nextPlaceholder()
-	updatedPlaceholder := nextPlaceholder()
-	conditionStatusPlaceholder := nextPlaceholder()
-	retryableStatusPlaceholder := nextPlaceholder()
-
-	query := fmt.Sprintf(`UPDATE table_extraction_queue SET 
-		status = %s,
-		status_reason = '',
-		next_run_at = %s,
-		finished_at = NULL,
-		updated_at = %s
+	query := fmt.Sprintf(`SELECT 
+		id, document_id, original_bucket, original_object_key,
+		artifacts_bucket, artifacts_prefix,
+		status, status_reason, attempts, next_run_at, finished_at,
+		error_code, error_message, correlation_id, created_at, updated_at
+		FROM table_extraction_queue
 		WHERE status IN (%s, %s)`,
-		statusPlaceholder,
-		nextRunPlaceholder,
-		updatedPlaceholder,
-		conditionStatusPlaceholder,
-		retryableStatusPlaceholder,
+		r.placeholder(1),
+		r.placeholder(2),
 	)
 
-	args := []any{
-		string(domain.StatusPending),
-		now.Add(retryDelay),
-		now,
-		string(domain.StatusFailed),
-		string(domain.StatusFailedRetryable),
-	}
-
+	args := []any{string(domain.StatusFailed), string(domain.StatusFailedRetryable)}
 	if maxAttempts > 0 {
-		attemptPlaceholder := nextPlaceholder()
-		query += fmt.Sprintf(" AND attempts < %s", attemptPlaceholder)
+		query += fmt.Sprintf(" AND attempts < %s", r.placeholder(len(args)+1))
 		args = append(args, maxAttempts)
 	}
 
-	result, err := r.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("retry failed: %w", err)
+	if r.dialect == database.DialectPostgres {
+		query += " FOR UPDATE SKIP LOCKED"
 	}
 
-	rows, err := result.RowsAffected()
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("retry rows affected: %w", err)
+		return 0, fmt.Errorf("select failed jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []domain.TableExtractionJob
+	for rows.Next() {
+		job, ok, err := r.scanJob(rows)
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+			continue
+		}
+		jobs = append(jobs, job)
 	}
 
-	return int(rows), nil
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate failed jobs: %w", err)
+	}
+
+	if len(jobs) == 0 {
+		if err := tx.Commit(); err != nil {
+			return 0, fmt.Errorf("commit retry: %w", err)
+		}
+		return 0, nil
+	}
+
+	updated := 0
+	for _, job := range jobs {
+		aggregate := domain.NewTableExtractionJobAggregate(job)
+		updatedAgg, _, err := aggregate.Retry(now, retryDelay)
+		if err != nil {
+			return updated, err
+		}
+		if err := r.saveTx(ctx, tx, updatedAgg.Job()); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit retry: %w", err)
+	}
+
+	return updated, nil
 }
 
 func (r *SQLRepository) GetByID(ctx context.Context, id uuid.UUID) (domain.TableExtractionJob, bool, error) {
@@ -408,6 +381,45 @@ func (r *SQLRepository) CountActive(ctx context.Context) (int, error) {
 	}
 
 	return count, nil
+}
+
+func (r *SQLRepository) saveTx(ctx context.Context, tx *sql.Tx, job domain.TableExtractionJob) error {
+	var nextRun any
+	if job.NextRunAt != nil {
+		nextRun = *job.NextRunAt
+	}
+
+	var finished any
+	if job.FinishedAt != nil {
+		finished = *job.FinishedAt
+	}
+
+	query := fmt.Sprintf(`UPDATE table_extraction_queue SET
+		status = %s,
+		status_reason = %s,
+		attempts = %s,
+		next_run_at = %s,
+		finished_at = %s,
+		error_code = %s,
+		error_message = %s,
+		updated_at = %s
+		WHERE id = %s`,
+		r.placeholder(1),
+		r.placeholder(2),
+		r.placeholder(3),
+		r.placeholder(4),
+		r.placeholder(5),
+		r.placeholder(6),
+		r.placeholder(7),
+		r.placeholder(8),
+		r.placeholder(9),
+	)
+
+	_, err := tx.ExecContext(ctx, query, string(job.Status), job.StatusReason, job.Attempts, nextRun, finished, job.ErrorCode, job.ErrorMessage, job.UpdatedAt, job.ID.String())
+	if err != nil {
+		return fmt.Errorf("update job %s: %w", job.ID, err)
+	}
+	return nil
 }
 
 func (r *SQLRepository) getActiveByDocumentID(ctx context.Context, tx *sql.Tx, documentID string) (domain.TableExtractionJob, bool, error) {
