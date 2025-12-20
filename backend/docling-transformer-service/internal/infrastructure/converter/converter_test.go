@@ -176,6 +176,191 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 	}
 }
 
+func TestDoclingConverterSkipsOCROnTextPDF(t *testing.T) {
+	var submitCalls int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			atomic.AddInt32(&submitCalls, 1)
+
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("failed to parse submit form: %v", err)
+			}
+
+			if engines := r.MultipartForm.Value["ocr_engine"]; len(engines) != 0 {
+				t.Fatalf("expected no ocr_engine field, got: %+v", engines)
+			}
+			if langs := r.MultipartForm.Value["ocr_lang"]; len(langs) != 0 {
+				t.Fatalf("expected no ocr_lang field, got: %+v", langs)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-ocr-skip"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{
+				TaskID:     path.Base(r.URL.Path),
+				TaskStatus: "success",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status:   "success",
+				Document: exportDocumentResponse{MdContent: ptr("# pdf")},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{
+		Endpoint: server.URL,
+	}, zap.NewNop())
+
+	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{
+		FileName:    "text.pdf",
+		Content:     pdfWithTextLayer(),
+		ContentType: "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if ids.TaskID != "task-ocr-skip" {
+		t.Fatalf("unexpected task id: %s", ids.TaskID)
+	}
+
+	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if submitCalls != 1 {
+		t.Fatalf("expected single submit call, got %d", submitCalls)
+	}
+}
+
+func TestDoclingConverterKeepsOCROnTextPDFWhenDisabled(t *testing.T) {
+	var receivedEngine, receivedLangs []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("failed to parse submit form: %v", err)
+			}
+
+			receivedEngine = r.MultipartForm.Value["ocr_engine"]
+			receivedLangs = r.MultipartForm.Value["ocr_lang"]
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-ocr-on"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{
+				TaskID:     path.Base(r.URL.Path),
+				TaskStatus: "success",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status:   "success",
+				Document: exportDocumentResponse{MdContent: ptr("# pdf")},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{
+		Endpoint:         server.URL,
+		SkipOCROnTextPDF: ptr(false),
+		OCREngine:        "easyocr",
+		OCRLang:          []string{"ru"},
+	}, zap.NewNop())
+
+	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{
+		FileName:    "text.pdf",
+		Content:     pdfWithTextLayer(),
+		ContentType: "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if !reflect.DeepEqual(receivedEngine, []string{"easyocr"}) {
+		t.Fatalf("expected ocr_engine to be sent, got: %+v", receivedEngine)
+	}
+
+	if !reflect.DeepEqual(receivedLangs, []string{"ru"}) {
+		t.Fatalf("expected ocr_lang to be sent, got: %+v", receivedLangs)
+	}
+}
+
+func TestDoclingConverterRunsOCROnImagePDF(t *testing.T) {
+	var receivedEngine []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == doclingSubmitPath:
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("failed to parse submit form: %v", err)
+			}
+
+			receivedEngine = r.MultipartForm.Value["ocr_engine"]
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(doclingSubmitResponse{TaskID: "task-ocr-image"})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{
+				TaskID:     path.Base(r.URL.Path),
+				TaskStatus: "success",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status:   "success",
+				Document: exportDocumentResponse{MdContent: ptr("# image")},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{
+		Endpoint:  server.URL,
+		OCREngine: "easyocr",
+	}, zap.NewNop())
+
+	ids, err := conv.Submit(context.Background(), domain.ConvertRequest{
+		FileName:    "image.pdf",
+		Content:     imageOnlyPDF(),
+		ContentType: "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {
+		t.Fatalf("unexpected status error: %v", err)
+	}
+
+	if !reflect.DeepEqual(receivedEngine, []string{"easyocr"}) {
+		t.Fatalf("expected ocr_engine for image pdf, got: %+v", receivedEngine)
+	}
+}
+
 func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 	var submitCalls, statusCalls int32
 	var receivedRequest convertDocumentsRequest
@@ -563,10 +748,6 @@ func TestDoclingConverterCheckStatusUnknownIncludesResponse(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T {
-	return &v
-}
-
 func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 	var attempts int32
 	var receivedOptions doclingOptions
@@ -635,4 +816,16 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 	if _, err := conv.CheckStatus(context.Background(), ids.TaskID); err != nil {
 		t.Fatalf("unexpected status error: %v", err)
 	}
+}
+
+func pdfWithTextLayer() []byte {
+	return []byte("%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nstream\nBT /F1 12 Tf (Hello) Tj ET\nendstream\n")
+}
+
+func imageOnlyPDF() []byte {
+	return []byte("%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nstream\nq 1 0 0 1 0 0 cm /Im0 Do\nendstream\n")
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }

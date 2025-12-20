@@ -59,6 +59,7 @@ type DoclingConfig struct {
 	DefaultLanguage       string               `yaml:"default_language"`
 	OCREngine             string               `yaml:"ocr_engine"`
 	OCRLang               []string             `yaml:"ocr_lang"`
+	SkipOCROnTextPDF      *bool                `yaml:"skip_ocr_on_text_pdf"`
 	Mode                  string               `yaml:"mode"`
 	Storage               DoclingStorageConfig `yaml:"storage"`
 	StatusInitialInterval time.Duration        `yaml:"status_initial_interval"`
@@ -237,6 +238,11 @@ func (c *Config) applyDefaults() {
 
 	if c.Docling.OCREngine == "" {
 		c.Docling.OCREngine = "easyocr"
+	}
+
+	if c.Docling.SkipOCROnTextPDF == nil {
+		defaultSkip := true
+		c.Docling.SkipOCROnTextPDF = &defaultSkip
 	}
 
 	if c.Docling.OCRLang == nil && c.Docling.DefaultLanguage != "" {

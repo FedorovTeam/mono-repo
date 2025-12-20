@@ -127,6 +127,7 @@ type Config struct {
 	DefaultLanguage  string
 	OCREngine        string
 	OCRLang          []string
+	SkipOCROnTextPDF *bool
 	Mode             string
 	Storage          StorageConfig
 	TraceHttpRequest bool
@@ -272,16 +273,17 @@ type doclingOptions struct {
 
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
 type DoclingConverter struct {
-	endpoint        string
-	apiKey          string
-	defaultLanguage string
-	ocrEngine       string
-	ocrLang         []string
-	mode            string
-	storage         StorageConfig
-	client          *http.Client
-	logger          *zap.Logger
-	render          RenderConfig
+	endpoint         string
+	apiKey           string
+	defaultLanguage  string
+	ocrEngine        string
+	ocrLang          []string
+	skipOCROnTextPDF bool
+	mode             string
+	storage          StorageConfig
+	client           *http.Client
+	logger           *zap.Logger
+	render           RenderConfig
 }
 
 // NewDoclingConverter создаёт конвертер с параметрами по умолчанию.
@@ -305,22 +307,28 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger) *DoclingConverter {
 		ocrLang = []string{cfg.DefaultLanguage}
 	}
 
+	skipOCROnTextPDF := true
+	if cfg.SkipOCROnTextPDF != nil {
+		skipOCROnTextPDF = *cfg.SkipOCROnTextPDF
+	}
+
 	httpClient := &http.Client{Timeout: 60 * time.Second}
 	if cfg.TraceHttpRequest {
 		httpClient.Transport = newLoggingTransport(httpClient.Transport, logger)
 	}
 
 	return &DoclingConverter{
-		endpoint:        strings.TrimRight(cfg.Endpoint, "/"),
-		apiKey:          cfg.APIKey,
-		defaultLanguage: cfg.DefaultLanguage,
-		mode:            mode,
-		storage:         cfg.Storage,
-		client:          httpClient,
-		logger:          logger,
-		render:          cfg.Render,
-		ocrEngine:       ocrEngine,
-		ocrLang:         append([]string(nil), ocrLang...),
+		endpoint:         strings.TrimRight(cfg.Endpoint, "/"),
+		apiKey:           cfg.APIKey,
+		defaultLanguage:  cfg.DefaultLanguage,
+		mode:             mode,
+		storage:          cfg.Storage,
+		client:           httpClient,
+		logger:           logger,
+		render:           cfg.Render,
+		ocrEngine:        ocrEngine,
+		ocrLang:          append([]string(nil), ocrLang...),
+		skipOCROnTextPDF: skipOCROnTextPDF,
 	}
 }
 
@@ -353,6 +361,70 @@ func resolveContentTypeAndExt(reqContentType, fileName string) (string, string, 
 
 func (c *DoclingConverter) selectLanguage() string {
 	return c.defaultLanguage
+}
+
+func isPDFContent(contentType, fileExt string) bool {
+	if strings.EqualFold(contentType, "application/pdf") {
+		return true
+	}
+
+	return strings.EqualFold(fileExt, "pdf")
+}
+
+func detectPDFHasTextLayer(content []byte) bool {
+	const maxScanBytes = 512 * 1024
+
+	if len(content) == 0 {
+		return false
+	}
+
+	if len(content) > maxScanBytes {
+		content = content[:maxScanBytes]
+	}
+
+	lower := bytes.ToLower(content)
+
+	if !bytes.HasPrefix(lower, []byte("%pdf")) && !bytes.Contains(lower, []byte("%pdf")) {
+		return false
+	}
+
+	if bytes.Contains(lower, []byte("/font")) {
+		return true
+	}
+
+	if bytes.Contains(lower, []byte("bt")) && bytes.Contains(lower, []byte("et")) && bytes.Contains(content, []byte("(")) {
+		return true
+	}
+
+	if bytes.Contains(lower, []byte("/contents")) && bytes.Contains(lower, []byte("text")) {
+		return true
+	}
+
+	return false
+}
+
+func (c *DoclingConverter) shouldUseOCROptions(contentType, fileExt string, content []byte) bool {
+	if !c.skipOCROnTextPDF {
+		return true
+	}
+
+	if !isPDFContent(contentType, fileExt) {
+		return true
+	}
+
+	if len(content) == 0 {
+		return true
+	}
+
+	if detectPDFHasTextLayer(content) {
+		c.logger.Debug("text layer detected, skipping ocr options",
+			zap.String("content_type", contentType),
+			zap.String("file_ext", fileExt),
+		)
+		return false
+	}
+
+	return true
 }
 
 func (c *DoclingConverter) ocrLanguages() []string {
@@ -392,7 +464,8 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 
 	switch c.mode {
 	case doclingModeSourceAsync:
-		ids, err := c.submitSourceAsyncWithRetry(ctx, correlationID, filename, contentType, fileExt, req)
+		useOCR := c.shouldUseOCROptions(contentType, fileExt, req.Content)
+		ids, err := c.submitSourceAsyncWithRetry(ctx, correlationID, filename, contentType, fileExt, req, useOCR)
 		if err != nil {
 			return domain.DoclingIdentifiers{}, err
 		}
@@ -412,7 +485,8 @@ func (c *DoclingConverter) Submit(ctx context.Context, req domain.ConvertRequest
 			return domain.DoclingIdentifiers{}, errors.New("empty document")
 		}
 
-		ids, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content)
+		useOCR := c.shouldUseOCROptions(contentType, fileExt, req.Content)
+		ids, err := c.submitWithRetry(ctx, correlationID, filename, contentType, fileExt, req.Content, useOCR)
 		if err != nil {
 			return domain.DoclingIdentifiers{}, err
 		}
@@ -492,11 +566,12 @@ func (c *DoclingConverter) submitWithRetry(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	content []byte,
+	useOCR bool,
 ) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
-		ids, err := c.submit(ctx, correlationID, filename, contentType, fileExt, content)
+		ids, err := c.submit(ctx, correlationID, filename, contentType, fileExt, content, useOCR)
 		if err == nil {
 			return ids, nil
 		}
@@ -537,11 +612,12 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
+	useOCR bool,
 ) (domain.DoclingIdentifiers, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= submitRetryAttempts; attempt++ {
-		ids, err := c.submitSourceAsync(ctx, correlationID, filename, contentType, fileExt, req)
+		ids, err := c.submitSourceAsync(ctx, correlationID, filename, contentType, fileExt, req, useOCR)
 		if err == nil {
 			return ids, nil
 		}
@@ -583,16 +659,19 @@ func (c *DoclingConverter) submitSourceAsyncWithRetry(
 func (c *DoclingConverter) writeDoclingOptions(
 	writer *multipart.Writer,
 	fileExt string,
+	useOCR bool,
 ) error {
-	if c.ocrEngine != "" {
-		if err := writer.WriteField("ocr_engine", c.ocrEngine); err != nil {
-			return fmt.Errorf("write ocr_engine: %w", err)
+	if useOCR {
+		if c.ocrEngine != "" {
+			if err := writer.WriteField("ocr_engine", c.ocrEngine); err != nil {
+				return fmt.Errorf("write ocr_engine: %w", err)
+			}
 		}
-	}
 
-	for _, lang := range c.ocrLanguages() {
-		if err := writer.WriteField("ocr_lang", lang); err != nil {
-			return fmt.Errorf("write ocr_lang: %w", err)
+		for _, lang := range c.ocrLanguages() {
+			if err := writer.WriteField("ocr_lang", lang); err != nil {
+				return fmt.Errorf("write ocr_lang: %w", err)
+			}
 		}
 	}
 
@@ -611,14 +690,17 @@ func (c *DoclingConverter) writeDoclingOptions(
 	return nil
 }
 
-func (c *DoclingConverter) buildDoclingOptions(fileExt string) doclingOptions {
+func (c *DoclingConverter) buildDoclingOptions(fileExt string, useOCR bool) doclingOptions {
 	opts := doclingOptions{
 		ToFormats: []string{"md"},
-		OCREngine: c.ocrEngine,
 	}
 
-	if langs := c.ocrLanguages(); len(langs) > 0 {
-		opts.OCRLang = langs
+	if useOCR {
+		opts.OCREngine = c.ocrEngine
+
+		if langs := c.ocrLanguages(); len(langs) > 0 {
+			opts.OCRLang = langs
+		}
 	}
 
 	if fileExt != "" {
@@ -632,6 +714,7 @@ func (c *DoclingConverter) submit(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	content []byte,
+	useOCR bool,
 ) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSubmitPath)
 
@@ -671,7 +754,7 @@ func (c *DoclingConverter) submit(
 		}
 	}
 
-	if err = c.writeDoclingOptions(writer, fileExt); err != nil {
+	if err = c.writeDoclingOptions(writer, fileExt, useOCR); err != nil {
 		return domain.DoclingIdentifiers{}, err
 	}
 
@@ -730,6 +813,7 @@ func (c *DoclingConverter) submitSourceAsync(
 	ctx context.Context,
 	correlationID, filename, contentType, fileExt string,
 	req domain.ConvertRequest,
+	useOCR bool,
 ) (domain.DoclingIdentifiers, error) {
 	endpoint := fmt.Sprintf("%s%s", c.endpoint, doclingSourceSubmitPath)
 
@@ -755,7 +839,7 @@ func (c *DoclingConverter) submitSourceAsync(
 				Region:    sourceStorage.Region,
 			},
 		},
-		Options: c.buildDoclingOptions(fileExt),
+		Options: c.buildDoclingOptions(fileExt, useOCR),
 	}
 
 	if req.TargetBucket != "" {
