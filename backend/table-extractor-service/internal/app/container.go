@@ -8,6 +8,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/mono-repo/table-extractor-service/db/migrations"
 	"github.com/mono-repo/table-extractor-service/internal/config"
+	"github.com/mono-repo/table-extractor-service/internal/extractor"
 	"github.com/mono-repo/table-extractor-service/internal/repository"
 	"github.com/mono-repo/table-extractor-service/internal/repository/sqlrepo"
 	"github.com/mono-repo/table-extractor-service/internal/server"
@@ -64,10 +65,20 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 
 	storageClient := objectstorage.NewMinioStorage(minioClient, cfg.Storage)
 
+	extractAdapter := extractor.NewAdapter(extractor.Config{
+		PdfInfoTimeout:      cfg.Extractor.PdfInfoTimeout,
+		PdftotextTimeout:    cfg.Extractor.PdftotextTimeout,
+		PdftoppmTimeout:     cfg.Extractor.PdftoppmTimeout,
+		MaxParallelCommands: cfg.Extractor.MaxParallel,
+		Pages:               cfg.Extractor.Pages,
+		DetectVotingTables:  cfg.Extractor.DetectVotingTables,
+		TempDir:             cfg.Extractor.TempDir,
+	})
+
 	deps := usecase.Dependencies{
 		Queue:     repo,
 		Storage:   storageClient,
-		Extractor: nil,
+		Extractor: extractAdapter,
 	}
 
 	uc := usecase.NewTableExtractorUseCase(deps, usecase.Config{
@@ -78,10 +89,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 
 	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.Port, tracerProvider)
 
-	var processor worker.Processor
-	if deps.Extractor != nil {
-		processor = uc
-	}
+	processor := worker.Processor(uc)
 
 	workerRunner := worker.NewRunner(worker.Config{
 		MaxWorkers:        cfg.Service.MaxWorkers,

@@ -58,9 +58,14 @@ type StorageConfig struct {
 }
 
 type ExtractorConfig struct {
-	Mode               string `yaml:"mode"`
-	DetectVotingTables bool   `yaml:"detect_voting_tables"`
-	Pages              string `yaml:"pages"`
+	Mode               string        `yaml:"mode"`
+	DetectVotingTables bool          `yaml:"detect_voting_tables"`
+	Pages              string        `yaml:"pages"`
+	PdfInfoTimeout     time.Duration `yaml:"pdfinfo_timeout"`
+	PdftotextTimeout   time.Duration `yaml:"pdftotext_timeout"`
+	PdftoppmTimeout    time.Duration `yaml:"pdftoppm_timeout"`
+	MaxParallel        int           `yaml:"max_parallel_commands"`
+	TempDir            string        `yaml:"temp_dir"`
 }
 
 type ObservabilityConfig struct {
@@ -110,6 +115,10 @@ func defaultConfig() Config {
 			Mode:               "layout",
 			DetectVotingTables: true,
 			Pages:              "all",
+			PdfInfoTimeout:     10 * time.Second,
+			PdftotextTimeout:   20 * time.Second,
+			PdftoppmTimeout:    30 * time.Second,
+			MaxParallel:        2,
 		},
 		Observability: ObservabilityConfig{
 			LoggingEnabled: true,
