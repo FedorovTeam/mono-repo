@@ -6,12 +6,17 @@ import (
 	"time"
 
 	"preprocess-service/internal/storage/memory"
+	"preprocess-service/internal/usecase/submit"
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
 )
 
 func TestSubmitPreprocessIdempotent(t *testing.T) {
 	repo := memory.NewJobRepository()
-	handler := NewPreprocessHandler(repo, "target", "converted")
+	service, err := submit.NewService(repo, "target", "converted")
+	if err != nil {
+		t.Fatalf("init service: %v", err)
+	}
+	handler := NewPreprocessHandler(service)
 
 	req := &preprocessv1.SubmitPreprocessRequest{
 		SourceBucket:  "source",
@@ -49,7 +54,11 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 
 func TestGetPreprocessStatus(t *testing.T) {
 	repo := memory.NewJobRepository()
-	handler := NewPreprocessHandler(repo, "target", "converted")
+	service, err := submit.NewService(repo, "target", "converted")
+	if err != nil {
+		t.Fatalf("init service: %v", err)
+	}
+	handler := NewPreprocessHandler(service)
 
 	submitResp, err := handler.SubmitPreprocess(context.Background(), &preprocessv1.SubmitPreprocessRequest{
 		SourceBucket:  "source",
@@ -94,7 +103,11 @@ func TestGetPreprocessStatus(t *testing.T) {
 
 func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	repo := memory.NewJobRepository()
-	handler := NewPreprocessHandler(repo, "default-target", "converted")
+	service, err := submit.NewService(repo, "default-target", "converted")
+	if err != nil {
+		t.Fatalf("init service: %v", err)
+	}
+	handler := NewPreprocessHandler(service)
 
 	req := &preprocessv1.SubmitPreprocessRequest{
 		SourceBucket:  "source",
