@@ -27,10 +27,10 @@ docling:
   api_key: ""
   mode: upload_file
   default_language: ru
-  ocr_engine: pypdfium2
+  ocr_engine: tesseract
   ocr_lang:
     - ru
-  skip_ocr_on_text_pdf: true
+  skip_ocr_on_text_pdf: false
   status_initial_interval: 15s
   status_backoff_factor: 2
   status_max_interval: 2m
