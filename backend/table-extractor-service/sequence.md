@@ -61,7 +61,59 @@ sequenceDiagram
     end
 ```
 
-Maintenance loop
+## 2) Worker loop — обработка очереди и метрики
+
+```mermaid
+sequenceDiagram
+    participant WK as Worker
+    participant PG as PostgreSQL Queue
+    participant ST as MinIO Storage
+    participant EX as Extractor (poppler/pipeline)
+    participant OT as Telemetry (logger/tracer)
+
+    loop poll (batch_size, max_workers)
+        WK->>PG: AcquirePendingBatch(limit, now)
+        alt jobs found
+            WK-->>OT: log correlation_id, queue_id, attempt
+            WK->>ST: Download(original_bucket/object_key)
+            WK->>EX: Extract(pdfPath)
+            EX-->>WK: result (raw, normalized, markdown, manifest, debug)
+            WK->>ST: Upload artifacts (raw.json, normalized.json, tables.md, manifest.json, debug/*)
+            WK->>PG: UpdateStatus(done, finished_at)
+        else no jobs
+            WK-->>WK: sleep backoff
+        end
+    end
+```
+
+## 3) Polling статуса — клиент GetTableExtractionJob
+
+```mermaid
+sequenceDiagram
+    participant CL as Client (gateway/document-service)
+    participant TE as TableExtractor gRPC
+    participant PG as PostgreSQL Queue
+
+    loop until done/failed
+        CL->>TE: GetTableExtractionJob(queue_id, correlation_id?)
+        TE-->>TE: EnsureCorrelationID() + set outgoing metadata
+        TE->>PG: GetByID(queue_id)
+        alt found
+            PG-->>TE: job(status, artifacts, attempts, status_reason)
+            TE-->>CL: job + correlation_id
+            alt status in [pending, processing]
+                CL-->>CL: wait backoff & retry
+            else
+                CL-->>CL: download artifacts from MinIO
+            end
+        else not found
+            TE-->>CL: NotFound
+            break
+        end
+    end
+```
+
+## 4) Maintenance loop
 ```mermaid
 sequenceDiagram
     participant MT as Maintenance
@@ -76,7 +128,7 @@ sequenceDiagram
 
 ```
 
-Интеграция с пайплайном (Docling → TableExtractor → Merge)
+## 5) Интеграция с пайплайном (Docling → TableExtractor → Merge)
 ```mermaid
 sequenceDiagram
     participant SW as StageWorker / Workflow

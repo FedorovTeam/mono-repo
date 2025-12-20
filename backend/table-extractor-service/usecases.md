@@ -12,6 +12,8 @@
 - **artifacts** — результаты извлечения таблиц (JSON/Markdown/manifest/debug).
 - **job** — запись в очереди `table_extraction_queue`.
 - **correlation_id** — берётся из gRPC metadata `x-correlation-id` или генерируется; возвращается в ответе.
+- **config.yaml** — единый источник настроек: порты gRPC, лимиты очереди, таймауты воркера, MinIO/DB, observability.
+- **metrics/tracing** — опциональные OTEL метрики/трейсы; логирование включается флагом `observability.logging_enabled`.
 
 ---
 
@@ -24,6 +26,13 @@
 - `failed_retryable` (опционально) — временная ошибка; будет повтор (по `max_failed_retries`).
 
 > Можно упростить до `pending/processing/done/failed`, как у тебя сейчас, но на практике `failed_retryable` помогает не смешивать “битый PDF” и “MinIO временно упал”.
+
+### Очередь и ограничения
+
+- Активные задачи (`pending/processing`) ограничены `service.queue_limit`; при превышении возвращается `ResourceExhausted`.
+- Идемпотентность обеспечивается уникальным индексом `uq_table_extraction_queue_active_document` по `document_id`.
+- `service.batch_size` управляет количеством задач за итерацию воркера; `service.max_workers` — параллелизм.
+- `service.processing_timeout` + `retry.*` задают правила восстановления зависших задач и бэк‑оффов при ретраях.
 
 ---
 
@@ -77,6 +86,13 @@
     - `artifacts_bucket`, `artifacts_prefix`
     - список артефактов (если `done`): `tables.md`, `tables.normalized.json`, `manifest.json`, `debug/*` (опционально).
 
+### Сценарий 2.1 — Polling статуса
+
+1. Клиент вызывает `GetTableExtractionJob(queue_id)` с backoff.
+2. При `pending/processing` повторяет запрос через задержку (учитывая клиентский таймаут).
+3. При `done/failed` скачивает артефакты из MinIO и отображает результат или ошибку.
+4. При `NotFound` проверяет, не очищена ли запись по `cleanup_retention` или неверен `queue_id`.
+
 ---
 
 ## Use case 3 — Фоновая обработка очереди (worker loop)
@@ -120,6 +136,12 @@
 - если временная (MinIO/network/IO) → `failed_retryable` или вернуть в `pending` с `next_poll_at=now()+backoff`
 - записать `last_error`, `error_code`.
 
+### Сценарий 3.1 — Метрики и наблюдаемость воркера
+
+- Логировать `queue_id`, `document_id`, `correlation_id`, длительность загрузки/извлечения/записи.
+- Считать gauge по статусам очереди (`CountByStatus`) и счётчики `tasks_completed/tasks_failed`.
+- Опционально экспортировать гистограммы времени обработки и размера документов (через OTEL metric SDK).
+
 ---
 
 ## Use case 4 — Maintenance loop (восстановление, ретраи, очистка)
@@ -139,6 +161,13 @@
     - удалять/архивировать `done/failed` старше `cleanup_retention` (по желанию).
     - артефакты в MinIO можно не удалять автоматически (или удалять отдельным джобом).
 
+### Сценарий 4.1 — Проверка лимитов и идемпотентности
+
+1. Установить `service.queue_limit=1`.
+2. Отправить первую задачу — ожидается `pending`.
+3. Отправить вторую задачу с тем же `document_id` — ожидается возврат существующей записи без дубля.
+4. Отправить третью задачу с другим `document_id`, пока первая в `pending/processing` — ожидается `ResourceExhausted`.
+
 ---
 
 ## Use case 5 — Интеграция с Document pipeline (опционально)
@@ -157,3 +186,11 @@
 > Важно: table-extractor-service сам **не обязан** мёрджить с docling markdown — это отдельная ответственность, чтобы сервис оставался простым и детерминированным.
 
 ---
+
+## Запуск и ручное тестирование
+
+1. Скопировать `config/config.yaml.example` → `config/config.yaml`, указать MinIO (`artifacts_bucket`, `default_artifacts_prefix`), базу (`sqlite` или `postgres`), таймауты `processing_timeout`/`retry`.
+2. Запустить сервис и воркер: `CONFIG_PATH=config/config.yaml go run ./cmd/main.go` (gRPC поднимется на `service.port`).
+3. Отправить задачу через `grpcurl` (пример в README/test.md) и зафиксировать `queue_id` и `correlation_id`.
+4. Мониторить статус через `GetTableExtractionJob(queue_id)` до `done/failed`, скачать `tables.md`/`manifest.json` из MinIO и сверить с эталоном `fixtures/`.
+5. Негативные проверки: передать `.txt` вместо PDF → `InvalidArgument`; превысить `queue_limit` → `ResourceExhausted`; симулировать недоступность MinIO → задача уходит в `failed_retryable` и восстанавливается maintenance-циклом.
