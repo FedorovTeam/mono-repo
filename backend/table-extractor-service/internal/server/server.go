@@ -20,17 +20,22 @@ type GRPCServer struct {
 	uc     ExtractionUseCase
 	port   int
 	tracer trace.TracerProvider
+	cids   CorrelationIDProvider
 }
 
-func NewGRPCServer(logger *zap.Logger, uc ExtractionUseCase, port int, tracerProvider trace.TracerProvider) *GRPCServer {
+func NewGRPCServer(logger *zap.Logger, uc ExtractionUseCase, port int, tracerProvider trace.TracerProvider, correlationProvider CorrelationIDProvider) *GRPCServer {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	if correlationProvider == nil {
+		correlationProvider = defaultCorrelationIDProvider()
 	}
 	return &GRPCServer{
 		logger: logger,
 		uc:     uc,
 		port:   port,
 		tracer: tracerProvider,
+		cids:   correlationProvider,
 	}
 }
 
@@ -50,7 +55,7 @@ func (s *GRPCServer) Run(ctx context.Context) error {
 		grpc.UnaryInterceptor(s.buildUnaryInterceptor()),
 	)
 
-	pb.RegisterTableExtractorServiceServer(grpcServer, NewHandler(s.uc, s.logger))
+	pb.RegisterTableExtractorServiceServer(grpcServer, NewHandler(s.uc, s.cids, s.logger))
 
 	go func() {
 		<-ctx.Done()
