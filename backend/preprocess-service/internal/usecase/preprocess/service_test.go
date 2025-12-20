@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"preprocess-service/internal/domain"
 	callbackclient "preprocess-service/internal/transport/callback"
 	"preprocess-service/internal/usecase/ports"
 )
@@ -23,7 +24,7 @@ func (stubRepo) NextJobForProcessing(ctx context.Context) (Job, bool, error) {
 	return Job{}, false, nil
 }
 
-func (stubRepo) MarkDone(ctx context.Context, job Job, targetMediaType string) error {
+func (stubRepo) MarkDone(ctx context.Context, job Job) error {
 	return nil
 }
 
@@ -68,7 +69,7 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	job := Job{JobID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
+	job := Job{ID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
 
 	svc.notifyCallback(context.Background(), job, StatusDone, callbackErrorInfo{})
 
@@ -76,7 +77,7 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 		t.Fatalf("expected single attempt, got %d", attempts)
 	}
 
-	if received.JobID != job.JobID || received.Status != StatusDone.String() {
+	if received.JobID != job.ID || received.Status != StatusDone.String() {
 		t.Fatalf("unexpected payload job/status: %#v", received)
 	}
 
@@ -125,7 +126,7 @@ func TestNotifyCallbackRetry(t *testing.T) {
 		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
-	job := Job{JobID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
+	job := Job{ID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
 	errInfo := callbackErrorInfo{Code: "convert_failed", Message: "conversion failed"}
 
 	svc.notifyCallback(context.Background(), job, StatusStopped, errInfo)
@@ -186,17 +187,23 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 	}
 
 	job := Job{
-		JobID:        "job-42",
-		SourceBucket: "source",
-		SourceKey:    "input.txt",
-		TargetKey:    "output/doc.docx",
+		ID:            "job-42",
+		DocumentID:    "doc-42",
+		SourceBucket:  "source",
+		SourceKey:     "input.txt",
+		SourceETag:    "etag-42",
+		TargetKey:     "output/doc.docx",
+		Status:        StatusPending,
+		MaxAttempts:   domain.DefaultMaxAttempts,
+		NextRunAt:     time.Now().UTC(),
+		CorrelationID: "corr-42",
 	}
 
 	if err := svc.handleJob(context.Background(), &job); err != nil {
 		t.Fatalf("handleJob returned error: %v", err)
 	}
 
-	expectedOutput := filepath.Join(outputDir, job.JobID, "input.docx")
+	expectedOutput := filepath.Join(outputDir, job.ID, "input.docx")
 	if _, err := os.Stat(expectedOutput); err != nil {
 		t.Fatalf("expected output file at %s: %v", expectedOutput, err)
 	}

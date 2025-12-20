@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/usecase/ports"
 	"preprocess-service/internal/usecase/preprocess"
 )
@@ -141,7 +142,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		w.waitGroup.Add(1)
-		go func(job ports.Job) {
+		go func(job domain.PreprocessJob) {
 			defer w.waitGroup.Done()
 			defer w.sem.Release(1)
 			w.processJob(ctx, job)
@@ -159,9 +160,9 @@ func (w *Worker) waitForNext(ctx context.Context, ticker *time.Ticker) bool {
 	}
 }
 
-func (w *Worker) processJob(ctx context.Context, job ports.Job) {
+func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
 	w.ensureLogger()
-	logger := w.logger.With("job_id", job.JobID, "correlation_id", job.CorrelationID)
+	logger := w.logger.With("job_id", job.ID, "correlation_id", job.CorrelationID)
 	logger.Info("start processing job")
 
 	if w.processor == nil {

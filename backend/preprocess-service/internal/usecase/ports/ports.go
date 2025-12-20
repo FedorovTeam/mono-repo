@@ -14,19 +14,6 @@ var (
 	ErrBucketNotFound     = errors.New("storage bucket not found")
 )
 
-type Job struct {
-	JobID         string
-	SourceBucket  string
-	SourceKey     string
-	SourceETag    string
-	TargetBucket  string
-	TargetKey     string
-	CallbackURL   string
-	CorrelationID string
-	Attempts      int
-	MaxAttempts   int
-}
-
 type FailureUpdate struct {
 	Status       domain.PreprocessStatus
 	NextRunAt    time.Time
@@ -73,7 +60,7 @@ type CallbackSender interface {
 }
 
 type QueueRepository interface {
-	NextJobForProcessing(ctx context.Context) (Job, bool, error)
-	MarkDone(ctx context.Context, job Job, targetMediaType string) error
-	MarkFailed(ctx context.Context, job Job, update FailureUpdate) error
+	NextJobForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error)
+	MarkDone(ctx context.Context, job domain.PreprocessJob) error
+	MarkFailed(ctx context.Context, job domain.PreprocessJob, update FailureUpdate) error
 }

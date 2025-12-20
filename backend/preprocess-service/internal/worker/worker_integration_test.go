@@ -59,8 +59,8 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 		t.Fatal("expected job to be available")
 	}
 
-	if queueJob.JobID != submitResp.GetJobId() {
-		t.Fatalf("unexpected job id: %s", queueJob.JobID)
+	if queueJob.ID != submitResp.GetJobId() {
+		t.Fatalf("unexpected job id: %s", queueJob.ID)
 	}
 
 	if queueJob.TargetBucket == "" {
@@ -70,7 +70,8 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 		queueJob.TargetKey = "converted/result.docx"
 	}
 
-	if err := queueRepo.MarkDone(ctx, queueJob, preprocess.DefaultTargetMediaType); err != nil {
+	queueJob.TargetMediaType = preprocess.DefaultTargetMediaType
+	if err := queueRepo.MarkDone(ctx, queueJob); err != nil {
 		t.Fatalf("markDone failed: %v", err)
 	}
 
