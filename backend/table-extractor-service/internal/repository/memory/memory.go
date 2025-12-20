@@ -29,6 +29,10 @@ func (r *InMemoryRepository) UpsertOrGetActive(_ context.Context, job domain.Tab
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if job.ID == uuid.Nil {
+		job.ID = uuid.New()
+	}
+
 	if existingID, ok := r.byDoc[job.DocumentID]; ok {
 		existing := r.data[existingID]
 		if existing.Status == domain.StatusPending || existing.Status == domain.StatusProcessing {
@@ -55,8 +59,8 @@ func (r *InMemoryRepository) UpsertOrGetActive(_ context.Context, job domain.Tab
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
 	}
-	if job.Artifacts == (domain.TableArtifacts{}) {
-		job.Artifacts = domain.BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
+	if err := job.Validate(); err != nil {
+		return domain.TableExtractionJob{}, false, err
 	}
 
 	r.data[job.ID] = job
@@ -186,8 +190,8 @@ func (r *InMemoryRepository) Save(_ context.Context, job domain.TableExtractionJ
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if job.Artifacts == (domain.TableArtifacts{}) {
-		job.Artifacts = domain.BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
+	if err := job.Validate(); err != nil {
+		return err
 	}
 	r.data[job.ID] = job
 	r.byDoc[job.DocumentID] = job.ID

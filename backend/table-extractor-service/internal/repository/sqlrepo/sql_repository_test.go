@@ -22,7 +22,7 @@ func TestUpsertOrGetActiveIdempotent(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
 
-	job := newJob("doc-1")
+	job := newJob(t, "doc-1")
 
 	created, existed, err := repo.UpsertOrGetActive(ctx, job, 10)
 	require.NoError(t, err)
@@ -48,11 +48,11 @@ func TestUpsertOrGetActiveQueueLimit(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
 
-	_, existed, err := repo.UpsertOrGetActive(ctx, newJob("doc-1"), 1)
+	_, existed, err := repo.UpsertOrGetActive(ctx, newJob(t, "doc-1"), 1)
 	require.NoError(t, err)
 	require.False(t, existed)
 
-	_, _, err = repo.UpsertOrGetActive(ctx, newJob("doc-2"), 1)
+	_, _, err = repo.UpsertOrGetActive(ctx, newJob(t, "doc-2"), 1)
 	require.ErrorIs(t, err, repository.ErrQueueLimitReached)
 }
 
@@ -61,11 +61,11 @@ func TestAcquirePendingBatch(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	job1 := newJob("doc-1")
+	job1 := newJob(t, "doc-1")
 	job1.NextRunAt = nil
-	job2 := newJob("doc-2")
+	job2 := newJob(t, "doc-2")
 	job2.NextRunAt = ptrTime(now.Add(-time.Minute))
-	job3 := newJob("doc-3")
+	job3 := newJob(t, "doc-3")
 	job3.NextRunAt = ptrTime(now.Add(time.Hour))
 
 	for _, job := range []domain.TableExtractionJob{job1, job2, job3} {
@@ -96,7 +96,7 @@ func TestSaveAppliesAggregateChanges(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
 
-	job := newJob("doc-1")
+	job := newJob(t, "doc-1")
 	created, _, err := repo.UpsertOrGetActive(ctx, job, 10)
 	require.NoError(t, err)
 
@@ -119,7 +119,7 @@ func TestSaveRestoresAfterTimeout(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
 
-	job := newJob("doc-1")
+	job := newJob(t, "doc-1")
 	job.Status = domain.StatusProcessing
 	job.Attempts = 2
 	created, _, err := repo.UpsertOrGetActive(ctx, job, 10)
@@ -146,13 +146,13 @@ func TestListProcessingBefore(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	active := newJob("doc-processing")
+	active := newJob(t, "doc-processing")
 	active.Status = domain.StatusProcessing
 	active.Attempts = 1
 	active.CreatedAt = now.Add(-2 * time.Hour)
 	active.UpdatedAt = now.Add(-2 * time.Hour)
 
-	recent := newJob("doc-recent")
+	recent := newJob(t, "doc-recent")
 	recent.Status = domain.StatusProcessing
 	recent.Attempts = 2
 	recent.CreatedAt = now.Add(-time.Hour)
@@ -174,7 +174,7 @@ func TestCleanupAndRetryFailed(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	doneJob := newJob("doc-done")
+	doneJob := newJob(t, "doc-done")
 	doneJob.Status = domain.StatusDone
 	doneJob.FinishedAt = ptrTime(now.Add(-48 * time.Hour))
 	_, _, err := repo.UpsertOrGetActive(ctx, doneJob, 10)
@@ -185,14 +185,14 @@ func TestCleanupAndRetryFailed(t *testing.T) {
 	require.NotNil(t, storedDone.FinishedAt)
 	require.True(t, storedDone.FinishedAt.Before(now.Add(-24*time.Hour)))
 
-	failedJob := newJob("doc-failed")
+	failedJob := newJob(t, "doc-failed")
 	failedJob.Status = domain.StatusFailed
 	failedJob.Attempts = 1
 	failedJob.FinishedAt = ptrTime(now.Add(-time.Hour))
 	createdFailed, _, err := repo.UpsertOrGetActive(ctx, failedJob, 10)
 	require.NoError(t, err)
 
-	retryable := newJob("doc-retryable")
+	retryable := newJob(t, "doc-retryable")
 	retryable.Status = domain.StatusFailedRetryable
 	retryable.Attempts = 2
 	retryable.FinishedAt = ptrTime(now.Add(-2 * time.Hour))
@@ -245,11 +245,15 @@ func TestCountActive(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
 
-	pending := newJob("doc-pending")
-	processing := newJob("doc-processing")
+	pending := newJob(t, "doc-pending")
+	processing := newJob(t, "doc-processing")
 	processing.Status = domain.StatusProcessing
-	done := newJob("doc-done")
-	done.Status = domain.StatusDone
+	done := newJob(t, "doc-done")
+	startedDone, _, err := domain.NewTableExtractionJobAggregate(done).StartProcessing(done.CreatedAt)
+	require.NoError(t, err)
+	doneAgg, _, err := startedDone.MarkDone("finished", done.CreatedAt)
+	require.NoError(t, err)
+	done = doneAgg.Job()
 
 	for _, job := range []domain.TableExtractionJob{pending, processing, done} {
 		_, _, err := repo.UpsertOrGetActive(ctx, job, 10)
@@ -276,21 +280,21 @@ func setupRepo(t *testing.T) (repository.TableExtractionRepository, *sql.DB) {
 	return sqlrepo.NewSQLRepository(db, database.DialectSQLite), db
 }
 
-func newJob(documentID string) domain.TableExtractionJob {
+func newJob(t *testing.T, documentID string) domain.TableExtractionJob {
+	t.Helper()
 	jobID := uuid.New()
 	prefix := path.Join("tables", documentID, jobID.String())
-	return domain.TableExtractionJob{
+	job, err := domain.NewTableExtractionJob(domain.NewTableExtractionJobParams{
 		ID:              jobID,
 		DocumentID:      documentID,
 		Original:        domain.ArtifactLocation{Bucket: "originals", ObjectKey: documentID + ".pdf"},
 		ArtifactsBucket: "artifacts",
 		ArtifactsPrefix: prefix,
-		Artifacts:       domain.BuildArtifacts("artifacts", prefix),
-		Status:          domain.StatusPending,
 		CorrelationID:   "corr-" + documentID,
 		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
-	}
+	})
+	require.NoError(t, err)
+	return job
 }
 
 func ptrTime(value time.Time) *time.Time {
