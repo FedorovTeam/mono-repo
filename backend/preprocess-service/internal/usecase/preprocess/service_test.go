@@ -19,6 +19,10 @@ import (
 
 type stubRepo struct{}
 
+func (stubRepo) NextJobForProcessing(ctx context.Context) (Job, bool, error) {
+	return Job{}, false, nil
+}
+
 func (stubRepo) MarkDone(ctx context.Context, job Job, targetMediaType string) error {
 	return nil
 }

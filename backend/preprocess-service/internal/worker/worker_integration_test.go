@@ -6,6 +6,7 @@ package worker
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,11 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"os/exec"
 
 	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
 	"preprocess-service/internal/usecase/preprocess"
+	"preprocess-service/internal/usecase/submit"
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
 )
 
@@ -28,8 +29,12 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	db, terminate := setupPostgres(ctx, t)
 	defer terminate()
 
-	repo := postgres.NewJobRepository(db)
-	handler := transport.NewPreprocessHandler(repo, "target", "converted")
+	jobRepo := postgres.NewJobRepository(db)
+	service, err := submit.NewService(jobRepo, "target", "converted")
+	if err != nil {
+		t.Fatalf("init submit service: %v", err)
+	}
+	handler := transport.NewPreprocessHandler(service)
 
 	submitResp, err := handler.SubmitPreprocess(ctx, &preprocessv1.SubmitPreprocessRequest{
 		SourceBucket:  "source",
@@ -44,9 +49,9 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 		t.Fatalf("submit failed: %v", err)
 	}
 
-	w := &Worker{db: db, cfg: Config{TargetMediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}}
+	queueRepo := postgres.NewQueueRepository(db)
 
-	queueJob, found, err := w.pickJob(ctx)
+	queueJob, found, err := queueRepo.NextJobForProcessing(ctx)
 	if err != nil {
 		t.Fatalf("pickJob failed: %v", err)
 	}
@@ -65,8 +70,7 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 		queueJob.TargetKey = "converted/result.docx"
 	}
 
-	repo := preprocess.NewPGQueueRepository(db)
-	if err := repo.MarkDone(ctx, toUsecaseJob(queueJob), preprocess.DefaultTargetMediaType); err != nil {
+	if err := queueRepo.MarkDone(ctx, queueJob, preprocess.DefaultTargetMediaType); err != nil {
 		t.Fatalf("markDone failed: %v", err)
 	}
 

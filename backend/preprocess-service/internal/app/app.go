@@ -21,7 +21,7 @@ import (
 	"preprocess-service/internal/storage/postgres"
 	"preprocess-service/internal/transport"
 	adaptercallback "preprocess-service/internal/transport/callback"
-	"preprocess-service/internal/usecase/preprocess"
+	"preprocess-service/internal/usecase/submit"
 	"preprocess-service/internal/worker"
 )
 
@@ -53,7 +53,12 @@ func New(cfg config.Config) (*App, error) {
 	}
 
 	repo := postgres.NewJobRepository(dbpool)
-	handler := transport.NewPreprocessHandler(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	submitService, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	if err != nil {
+		dbpool.Close()
+		return nil, fmt.Errorf("init submit service: %w", err)
+	}
+	handler := transport.NewPreprocessHandler(submitService)
 
 	grpcServer, err := transport.NewGRPCServer(cfg.Service.GRPCPort, handler, telemetry.Meter(), logger)
 	if err != nil {
@@ -89,9 +94,9 @@ func New(cfg config.Config) (*App, error) {
 
 	callbackClient := adaptercallback.NewClient(nil)
 
-	queueRepo := preprocess.NewPGQueueRepository(dbpool)
+	queueRepo := postgres.NewQueueRepository(dbpool)
 
-	wrk, err := worker.New(dbpool, worker.Dependencies{
+	wrk, err := worker.New(worker.Dependencies{
 		Repo:       queueRepo,
 		Downloader: storageAdapter,
 		Uploader:   storageAdapter,

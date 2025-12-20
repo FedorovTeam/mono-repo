@@ -71,6 +71,7 @@ type CallbackSender interface {
 }
 
 type QueueRepository interface {
+	NextJobForProcessing(ctx context.Context) (Job, bool, error)
 	MarkDone(ctx context.Context, job Job, targetMediaType string) error
 	MarkFailed(ctx context.Context, job Job, update FailureUpdate) error
 }
