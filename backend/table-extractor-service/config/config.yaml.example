@@ -1,0 +1,13 @@
+service:
+  name: table-extractor-service
+  grpc_port: 9090
+  queue_limit: 100
+  default_artifacts_prefix: tables
+
+storage:
+  artifacts_bucket: table-extractor-artifacts
+
+observability:
+  logging_enabled: true
+  tracing:
+    enabled: false
