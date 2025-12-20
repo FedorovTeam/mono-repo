@@ -122,6 +122,7 @@ func TestProcessExtractionJobUploadsArtifacts(t *testing.T) {
 	uc := NewTableExtractorUseCase(Dependencies{
 		Queue:       repo,
 		Storage:     storage,
+		FileCache:   newTestFileCache(storage),
 		Extractor:   extractor,
 		Clock:       fixedClock{now: now},
 		IDGenerator: fixedIDGenerator{id: jobID},
@@ -168,6 +169,7 @@ func TestProcessExtractionJobMarksFailedWhenDownloadFails(t *testing.T) {
 	uc := NewTableExtractorUseCase(Dependencies{
 		Queue:     repo,
 		Storage:   storage,
+		FileCache: newTestFileCache(storage),
 		Extractor: &fakeExtractor{},
 		Clock:     fixedClock{now: now},
 	}, Config{
@@ -207,6 +209,7 @@ func TestProcessExtractionJobMarksFailedWhenExtractorFails(t *testing.T) {
 	uc := NewTableExtractorUseCase(Dependencies{
 		Queue:     repo,
 		Storage:   storage,
+		FileCache: newTestFileCache(storage),
 		Extractor: &fakeExtractor{err: errors.New("parse error")},
 		Clock:     fixedClock{now: now},
 	}, Config{
@@ -256,6 +259,7 @@ func TestProcessExtractionJobMarksRetryableWhenUploadFails(t *testing.T) {
 	uc := NewTableExtractorUseCase(Dependencies{
 		Queue:     repo,
 		Storage:   storage,
+		FileCache: newTestFileCache(storage),
 		Extractor: extractor,
 		Clock:     fixedClock{now: now},
 	}, Config{

@@ -13,6 +13,7 @@ import (
 	"github.com/mono-repo/table-extractor-service/internal/repository/sqlrepo"
 	"github.com/mono-repo/table-extractor-service/internal/server"
 	"github.com/mono-repo/table-extractor-service/internal/storage/database"
+	"github.com/mono-repo/table-extractor-service/internal/storage/filecache"
 	objectstorage "github.com/mono-repo/table-extractor-service/internal/storage/object"
 	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 	"github.com/mono-repo/table-extractor-service/internal/usecase"
@@ -64,6 +65,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 	repo := sqlrepo.NewSQLRepository(db, dialect)
 
 	storageClient := objectstorage.NewMinioStorage(minioClient, cfg.Storage)
+	fileCache := filecache.NewTempCache(storageClient)
 
 	extractAdapter := extractor.NewAdapter(extractor.Config{
 		PdfInfoTimeout:      cfg.Extractor.PdfInfoTimeout,
@@ -78,6 +80,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 	deps := usecase.Dependencies{
 		Queue:     repo,
 		Storage:   storageClient,
+		FileCache: fileCache,
 		Extractor: extractAdapter,
 	}
 
