@@ -3,25 +3,27 @@ package memory
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
+	"time"
 
 	"preprocess-service/internal/domain"
 )
 
-type JobRepository struct {
-	mu       sync.RWMutex
+type Repository struct {
+	mu       sync.Mutex
 	jobs     map[string]domain.PreprocessJob
 	bySource map[string]string
 }
 
-func NewJobRepository() *JobRepository {
-	return &JobRepository{
+func NewRepository() *Repository {
+	return &Repository{
 		jobs:     make(map[string]domain.PreprocessJob),
 		bySource: make(map[string]string),
 	}
 }
 
-func (r *JobRepository) Save(_ context.Context, job domain.PreprocessJob) error {
+func (r *Repository) Create(_ context.Context, job domain.PreprocessJob) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -31,9 +33,9 @@ func (r *JobRepository) Save(_ context.Context, job domain.PreprocessJob) error 
 	return nil
 }
 
-func (r *JobRepository) FindBySource(_ context.Context, bucket, key, etag string) (domain.PreprocessJob, bool, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *Repository) FindBySource(_ context.Context, bucket, key, etag string) (domain.PreprocessJob, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	jobID, ok := r.bySource[r.sourceKey(bucket, key, etag)]
 	if !ok {
@@ -48,9 +50,9 @@ func (r *JobRepository) FindBySource(_ context.Context, bucket, key, etag string
 	return cloneJob(job), true, nil
 }
 
-func (r *JobRepository) Get(_ context.Context, id string) (domain.PreprocessJob, bool, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+func (r *Repository) Get(_ context.Context, id string) (domain.PreprocessJob, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	job, ok := r.jobs[id]
 	if !ok {
@@ -60,7 +62,60 @@ func (r *JobRepository) Get(_ context.Context, id string) (domain.PreprocessJob,
 	return cloneJob(job), true, nil
 }
 
-func (r *JobRepository) sourceKey(bucket, key, etag string) string {
+func (r *Repository) NextForProcessing(_ context.Context) (domain.PreprocessJob, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now().UTC()
+	candidates := make([]domain.PreprocessJob, 0, len(r.jobs))
+	for _, job := range r.jobs {
+		if (job.Status == domain.StatusPending || job.Status == domain.StatusFailed) && !job.NextRunAt.After(now) {
+			candidates = append(candidates, job)
+		}
+	}
+
+	if len(candidates) == 0 {
+		return domain.PreprocessJob{}, false, nil
+	}
+
+	slices.SortFunc(candidates, func(a, b domain.PreprocessJob) int {
+		switch {
+		case a.NextRunAt.Before(b.NextRunAt):
+			return -1
+		case a.NextRunAt.After(b.NextRunAt):
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	job := candidates[0]
+	updated, err := job.MarkProcessing(now)
+	if err != nil {
+		return domain.PreprocessJob{}, false, err
+	}
+	r.jobs[updated.ID] = cloneJob(updated)
+
+	return cloneJob(updated), true, nil
+}
+
+func (r *Repository) MarkDone(_ context.Context, job domain.PreprocessJob) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.jobs[job.ID] = cloneJob(job)
+	return nil
+}
+
+func (r *Repository) MarkFailed(_ context.Context, job domain.PreprocessJob, _ domain.FailureUpdate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.jobs[job.ID] = cloneJob(job)
+	return nil
+}
+
+func (r *Repository) sourceKey(bucket, key, etag string) string {
 	return fmt.Sprintf("%s|%s|%s", bucket, key, etag)
 }
 

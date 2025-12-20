@@ -34,7 +34,23 @@ func newStubQueueRepo(jobs []domain.PreprocessJob) *stubQueueRepo {
 	}
 }
 
-func (r *stubQueueRepo) NextJobForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error) {
+func (r *stubQueueRepo) Create(_ context.Context, job domain.PreprocessJob) error {
+	select {
+	case r.jobs <- job:
+	default:
+	}
+	return nil
+}
+
+func (r *stubQueueRepo) FindBySource(_ context.Context, _, _, _ string) (domain.PreprocessJob, bool, error) {
+	return domain.PreprocessJob{}, false, nil
+}
+
+func (r *stubQueueRepo) Get(_ context.Context, _ string) (domain.PreprocessJob, bool, error) {
+	return domain.PreprocessJob{}, false, nil
+}
+
+func (r *stubQueueRepo) NextForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error) {
 	select {
 	case job := <-r.jobs:
 		job.Attempts++
@@ -55,7 +71,7 @@ func (r *stubQueueRepo) MarkDone(_ context.Context, job domain.PreprocessJob) er
 	return nil
 }
 
-func (r *stubQueueRepo) MarkFailed(_ context.Context, job domain.PreprocessJob, _ ports.FailureUpdate) error {
+func (r *stubQueueRepo) MarkFailed(_ context.Context, job domain.PreprocessJob, _ domain.FailureUpdate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -97,18 +113,30 @@ func (noopCallback) Send(_ context.Context, _ string, _ ports.CallbackPayload) (
 type failureRepo struct {
 	job         domain.PreprocessJob
 	returned    bool
-	failures    []ports.FailureUpdate
-	updatesChan chan ports.FailureUpdate
+	failures    []domain.FailureUpdate
+	updatesChan chan domain.FailureUpdate
 }
 
 func newFailureRepo(job domain.PreprocessJob) *failureRepo {
 	return &failureRepo{
 		job:         job,
-		updatesChan: make(chan ports.FailureUpdate, 1),
+		updatesChan: make(chan domain.FailureUpdate, 1),
 	}
 }
 
-func (r *failureRepo) NextJobForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error) {
+func (r *failureRepo) Create(context.Context, domain.PreprocessJob) error {
+	return nil
+}
+
+func (r *failureRepo) FindBySource(context.Context, string, string, string) (domain.PreprocessJob, bool, error) {
+	return domain.PreprocessJob{}, false, nil
+}
+
+func (r *failureRepo) Get(context.Context, string) (domain.PreprocessJob, bool, error) {
+	return domain.PreprocessJob{}, false, nil
+}
+
+func (r *failureRepo) NextForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error) {
 	if r.returned {
 		return domain.PreprocessJob{}, false, nil
 	}
@@ -124,7 +152,7 @@ func (r *failureRepo) MarkDone(_ context.Context, job domain.PreprocessJob) erro
 	return fmt.Errorf("unexpected MarkDone call for job %s", job.ID)
 }
 
-func (r *failureRepo) MarkFailed(_ context.Context, job domain.PreprocessJob, update ports.FailureUpdate) error {
+func (r *failureRepo) MarkFailed(_ context.Context, job domain.PreprocessJob, update domain.FailureUpdate) error {
 	r.failures = append(r.failures, update)
 	r.updatesChan <- update
 	return nil
@@ -182,7 +210,7 @@ func TestWorkerMarksPermanentFailureAsStopped(t *testing.T) {
 		errCh <- w.Run(ctx)
 	}()
 
-	var update ports.FailureUpdate
+	var update domain.FailureUpdate
 	select {
 	case update = <-repo.updatesChan:
 	case <-time.After(time.Second):

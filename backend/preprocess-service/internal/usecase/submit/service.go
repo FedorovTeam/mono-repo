@@ -34,12 +34,12 @@ type StatusQuery struct {
 }
 
 type Service struct {
-	repo            domain.JobRepository
+	repo            domain.PreprocessJobRepository
 	targetBucket    string
 	targetKeyPrefix string
 }
 
-func NewService(repo domain.JobRepository, targetBucket, targetKeyPrefix string) (*Service, error) {
+func NewService(repo domain.PreprocessJobRepository, targetBucket, targetKeyPrefix string) (*Service, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("job repository is required")
 	}
@@ -100,8 +100,8 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		return domain.PreprocessJob{}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
 
-	if err := s.repo.Save(ctx, job); err != nil {
-		return domain.PreprocessJob{}, fmt.Errorf("save job: %w", err)
+	if err := s.repo.Create(ctx, job); err != nil {
+		return domain.PreprocessJob{}, fmt.Errorf("create job: %w", err)
 	}
 
 	return job, nil

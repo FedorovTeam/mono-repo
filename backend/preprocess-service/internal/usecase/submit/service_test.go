@@ -13,7 +13,7 @@ import (
 func TestSubmitPreprocessIdempotent(t *testing.T) {
 	t.Helper()
 
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	svc, err := NewService(repo, "target", "converted")
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
@@ -52,7 +52,7 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	t.Helper()
 
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	svc, err := NewService(repo, "default-target", "converted")
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
@@ -82,7 +82,7 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 func TestSubmitPreprocessValidatesInput(t *testing.T) {
 	t.Helper()
 
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	svc, err := NewService(repo, "target", "converted")
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
@@ -101,7 +101,7 @@ func TestSubmitPreprocessValidatesInput(t *testing.T) {
 func TestGetStatusReturnsJob(t *testing.T) {
 	t.Helper()
 
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	svc, err := NewService(repo, "target", "converted")
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
@@ -119,7 +119,7 @@ func TestGetStatusReturnsJob(t *testing.T) {
 		CorrelationID: "corr-1",
 	}
 
-	if err := repo.Save(context.Background(), job); err != nil {
+	if err := repo.Create(context.Background(), job); err != nil {
 		t.Fatalf("save fixture: %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestGetStatusReturnsJob(t *testing.T) {
 func TestGetStatusNotFound(t *testing.T) {
 	t.Helper()
 
-	repo := memory.NewJobRepository()
+	repo := memory.NewRepository()
 	svc, err := NewService(repo, "target", "converted")
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
