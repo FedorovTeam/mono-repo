@@ -22,7 +22,7 @@ minio:
 
 database:
   driver: postgres
-  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/document?sslmode=disable"
+  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/extractor?sslmode=disable"
   max_connections: 5
   connection_timeout: 5s
 
