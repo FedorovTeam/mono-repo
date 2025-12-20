@@ -76,7 +76,7 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 		t.Fatalf("expected single attempt, got %d", attempts)
 	}
 
-	if received.JobID != job.JobID || received.Status != StatusDone {
+	if received.JobID != job.JobID || received.Status != StatusDone.String() {
 		t.Fatalf("unexpected payload job/status: %#v", received)
 	}
 

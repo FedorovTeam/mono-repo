@@ -271,14 +271,14 @@ func (s *Service) failureDecision(job Job, err error) FailureUpdate {
 	}
 }
 
-func (s *Service) notifyCallback(ctx context.Context, job Job, status string, errInfo callbackErrorInfo) {
+func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.PreprocessStatus, errInfo callbackErrorInfo) {
 	if job.CallbackURL == "" || s.callback == nil {
 		return
 	}
 
 	payload := ports.CallbackPayload{
 		JobID:        job.JobID,
-		Status:       status,
+		Status:       status.String(),
 		TargetBucket: job.TargetBucket,
 		TargetKey:    job.TargetKey,
 	}

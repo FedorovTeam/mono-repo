@@ -37,7 +37,7 @@ func (r *QueueRepository) NextJobForProcessing(ctx context.Context) (ports.Job, 
         ORDER BY next_run_at
         LIMIT 1
         FOR UPDATE SKIP LOCKED
-    `, domain.StatusPending.ToDB(), domain.StatusFailed.ToDB())
+    `, toStatusString(domain.StatusPending), toStatusString(domain.StatusFailed))
 
 	var job ports.Job
 	err = row.Scan(
@@ -65,7 +65,7 @@ func (r *QueueRepository) NextJobForProcessing(ctx context.Context) (ports.Job, 
         UPDATE preprocess_queue
         SET status = $1, attempts = attempts + 1, started_at = now(), updated_at = now()
         WHERE job_id = $2
-    `, domain.StatusProcessing.ToDB(), job.JobID); err != nil {
+    `, toStatusString(domain.StatusProcessing), job.JobID); err != nil {
 		return ports.Job{}, false, fmt.Errorf("mark processing: %w", err)
 	}
 
@@ -83,7 +83,7 @@ func (r *QueueRepository) MarkDone(ctx context.Context, job ports.Job, targetMed
         SET status = $2, finished_at = $3, updated_at = $3, target_bucket = $4, target_key = $5,
             target_media_type = $6, error_code = NULL, error_message = NULL, error_details = '{}'::jsonb
         WHERE job_id = $1
-    `, job.JobID, domain.StatusCompleted.ToDB(), finishedAt, job.TargetBucket, job.TargetKey, targetMediaType)
+    `, job.JobID, toStatusString(domain.StatusCompleted), finishedAt, job.TargetBucket, job.TargetKey, targetMediaType)
 	return err
 }
 
@@ -105,7 +105,7 @@ func (r *QueueRepository) MarkFailed(ctx context.Context, job ports.Job, update 
             error_code = $6, error_message = $7, error_details = COALESCE($8::jsonb, '{}'::jsonb),
             target_bucket = COALESCE($9, target_bucket), target_key = COALESCE($10, target_key), updated_at = $4
         WHERE job_id = $1
-    `, job.JobID, update.Status, update.NextRunAt, finishedAt, domain.StatusStopped.ToDB(), update.Code, update.Message, string(detailsJSON), nullableString(update.TargetBucket), nullableString(update.TargetKey))
+    `, job.JobID, toStatusString(update.Status), update.NextRunAt, finishedAt, toStatusString(domain.StatusStopped), update.Code, update.Message, string(detailsJSON), nullableString(update.TargetBucket), nullableString(update.TargetKey))
 
 	return err
 }
