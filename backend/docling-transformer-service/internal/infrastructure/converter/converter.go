@@ -994,7 +994,7 @@ func (c *DoclingConverter) fetchStatus(ctx context.Context, correlationID, taskI
 
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		return taskStatusResponse{}, nil, fmt.Errorf("read docling status response: %w", readErr)
+		return taskStatusResponse{}, nil, fmt.Errorf("read docling status response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -1040,7 +1040,7 @@ func (c *DoclingConverter) fetchResult(ctx context.Context, correlationID, taskI
 
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
-		return convertDocumentResponse{}, nil, fmt.Errorf("read docling result response: %w", readErr)
+		return convertDocumentResponse{}, nil, fmt.Errorf("read docling result response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -1064,20 +1064,40 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 
 	doc := resp.Document
 
-	charset := ""
-	if doc.Charset != nil {
-		charset = *doc.Charset
-	}
+	// Go-строки и []byte тут всегда UTF-8. Даже если Docling присылает charset —
+	// безопаснее отдавать/сохранять как utf-8, иначе клиенты могут неправильно
+	// интерпретировать скачиваемый файл.
+	charset := "utf-8"
 
 	markdown := c.selectMarkdown(doc)
 	if markdown != "" {
-		return domain.ConvertResult{Content: []byte(markdown), MediaType: "text/markdown", Charset: charset}, nil
+		fixed, changed := repairShiftedCyrillic(markdown)
+		if changed {
+			c.logger.Warn("docling returned shifted cyrillic, content repaired",
+				zap.String("filename", doc.Filename),
+			)
+		}
+		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/markdown", Charset: charset}, nil
 	}
-	if html := firstNonEmpty(doc.HtmlContent); html != "" {
-		return domain.ConvertResult{Content: []byte(html), MediaType: "text/html", Charset: charset}, nil
+
+	if html := strings.TrimSpace(firstNonEmpty(doc.HtmlContent)); html != "" {
+		fixed, changed := repairShiftedCyrillic(html)
+		if changed {
+			c.logger.Warn("docling returned shifted cyrillic, content repaired",
+				zap.String("filename", doc.Filename),
+			)
+		}
+		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/html", Charset: charset}, nil
 	}
-	if text := firstNonEmpty(doc.TextContent); text != "" {
-		return domain.ConvertResult{Content: []byte(text), MediaType: "text/plain", Charset: charset}, nil
+
+	if text := strings.TrimSpace(firstNonEmpty(doc.TextContent)); text != "" {
+		fixed, changed := repairShiftedCyrillic(text)
+		if changed {
+			c.logger.Warn("docling returned shifted cyrillic, content repaired",
+				zap.String("filename", doc.Filename),
+			)
+		}
+		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/plain", Charset: charset}, nil
 	}
 
 	return domain.ConvertResult{}, errors.New("docling response has empty content")
