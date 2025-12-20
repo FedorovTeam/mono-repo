@@ -176,6 +176,58 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 	}
 }
 
+func TestDoclingConverterReturnsDoclingErrorsOnFailure(t *testing.T) {
+	var statusCalls, resultCalls int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingStatusPath):
+			atomic.AddInt32(&statusCalls, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(taskStatusResponse{
+				TaskID:     path.Base(r.URL.Path),
+				TaskStatus: "failed",
+			})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, doclingResultPath):
+			atomic.AddInt32(&resultCalls, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(convertDocumentResponse{
+				Status: "failed",
+				Errors: []errorItem{
+					{ComponentType: "converter", ModuleName: "parser", ErrorMessage: "boom"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	conv := NewDoclingConverter(Config{Endpoint: server.URL}, zap.NewNop())
+
+	_, err := conv.CheckStatus(context.Background(), "task-failed")
+	if err == nil {
+		t.Fatal("expected failure error")
+	}
+
+	var failureErr *domain.DoclingFailureError
+	if !errors.As(err, &failureErr) {
+		t.Fatalf("expected docling failure error, got %v", err)
+	}
+
+	if failureErr.TaskID != "task-failed" {
+		t.Fatalf("unexpected task id in error: %s", failureErr.TaskID)
+	}
+
+	if !strings.Contains(err.Error(), "parser") || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected docling error details in message, got %s", err.Error())
+	}
+
+	if statusCalls != 1 || resultCalls != 1 {
+		t.Fatalf("expected single status and result calls, got status=%d result=%d", statusCalls, resultCalls)
+	}
+}
+
 func TestDoclingConverterSkipsOCROnTextPDF(t *testing.T) {
 	var submitCalls int32
 
