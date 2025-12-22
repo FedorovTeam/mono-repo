@@ -125,6 +125,14 @@ func (w *Worker) Run(ctx context.Context) error {
 		default:
 		}
 
+		if err := w.repo.RequeueStuck(ctx, w.cfg.ConvertTimeout, w.cfg.Backoff); err != nil {
+			w.logger.Error("failed to requeue stuck jobs", "error", err)
+			if !w.waitForNext(ctx, ticker) {
+				return ctx.Err()
+			}
+			continue
+		}
+
 		job, found, err := w.repo.NextForProcessing(ctx)
 		if err != nil {
 			w.logger.Error("failed to pick job", "error", err)

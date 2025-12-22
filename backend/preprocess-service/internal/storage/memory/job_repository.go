@@ -99,6 +99,40 @@ func (r *Repository) NextForProcessing(_ context.Context) (domain.PreprocessJob,
 	return cloneJob(updated), true, nil
 }
 
+func (r *Repository) RequeueStuck(_ context.Context, convertTimeout, backoff time.Duration) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if convertTimeout < 0 {
+		convertTimeout = 0
+	}
+	if backoff < 0 {
+		backoff = 0
+	}
+
+	now := time.Now().UTC()
+	staleStartedBefore := now.Add(-(convertTimeout + backoff))
+	nextRun := now.Add(backoff)
+
+	for id, job := range r.jobs {
+		if job.Status != domain.StatusProcessing {
+			continue
+		}
+		if job.StartedAt.IsZero() || !job.StartedAt.Before(staleStartedBefore) {
+			continue
+		}
+
+		job.Status = domain.StatusFailed
+		job.Attempts++
+		job.NextRunAt = nextRun
+		job.UpdatedAt = now
+
+		r.jobs[id] = cloneJob(job)
+	}
+
+	return nil
+}
+
 func (r *Repository) MarkDone(_ context.Context, job domain.PreprocessJob) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

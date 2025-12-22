@@ -83,6 +83,89 @@ func TestPreprocessRepository_NextForProcessingLocksAndMarksProcessing(t *testin
 	}
 }
 
+func TestPreprocessRepository_RequeueStuckMakesProcessingAvailable(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("create mock pool: %v", err)
+	}
+	defer mock.Close()
+
+	repo := NewPreprocessRepository(mock)
+
+	now := time.Now().UTC()
+	convertTimeout := 2 * time.Minute
+	backoff := 30 * time.Second
+
+	job := domain.PreprocessJob{
+		ID:           "job-stuck",
+		DocumentID:   "doc-stuck",
+		SourceBucket: "bucket",
+		SourceKey:    "key",
+		SourceETag:   "etag",
+		Status:       domain.StatusProcessing,
+		Attempts:     1,
+		MaxAttempts:  3,
+		NextRunAt:    now.Add(-time.Minute),
+		StartedAt:    now.Add(-(convertTimeout + backoff + time.Minute)),
+		CreatedAt:    now.Add(-2 * time.Minute),
+		UpdatedAt:    now.Add(-time.Minute),
+	}
+
+	mock.ExpectExec("UPDATE preprocess_queue").
+		WithArgs(
+			toStatusString(domain.StatusFailed),
+			pgxmock.AnyArg(),
+			pgxmock.AnyArg(),
+			toStatusString(domain.StatusProcessing),
+			pgxmock.AnyArg(),
+		).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	if err := repo.RequeueStuck(ctx, convertTimeout, backoff); err != nil {
+		t.Fatalf("RequeueStuck returned error: %v", err)
+	}
+
+	requeuedAttempts := job.Attempts + 1
+	availableAt := now.Add(-time.Second)
+
+	rows := pgxmock.NewRows(jobColumnNames()).
+		AddRow(job.ID, job.DocumentID, job.SourceBucket, job.SourceKey, job.SourceETag, nil, nil, nil, nil, nil,
+			toStatusString(domain.StatusFailed), requeuedAttempts, job.MaxAttempts, availableAt, &job.StartedAt, nil, nil, nil, []byte("{}"), job.CreatedAt, job.UpdatedAt)
+
+	mock.ExpectBeginTx(pgx.TxOptions{})
+	mock.ExpectQuery("SELECT .*FOR UPDATE SKIP LOCKED").
+		WithArgs(toStatusString(domain.StatusPending), toStatusString(domain.StatusFailed)).
+		WillReturnRows(rows)
+	mock.ExpectExec("UPDATE preprocess_queue").
+		WithArgs(
+			toStatusString(domain.StatusProcessing),
+			requeuedAttempts+1,
+			pgxmock.AnyArg(),
+			job.ID,
+		).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectCommit()
+
+	picked, found, err := repo.NextForProcessing(ctx)
+	if err != nil {
+		t.Fatalf("NextForProcessing returned error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected job to be found after requeue")
+	}
+	if picked.Status != domain.StatusProcessing {
+		t.Fatalf("expected status processing, got %s", picked.Status)
+	}
+	if picked.Attempts != requeuedAttempts+1 {
+		t.Fatalf("expected attempts to increase to %d, got %d", requeuedAttempts+1, picked.Attempts)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestPreprocessRepository_MarkFailedUpdatesStatus(t *testing.T) {
 	ctx := context.Background()
 	mock, err := pgxmock.NewPool()

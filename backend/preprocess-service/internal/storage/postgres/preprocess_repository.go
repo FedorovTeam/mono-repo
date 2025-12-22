@@ -97,6 +97,36 @@ func (r *PreprocessRepository) Get(ctx context.Context, id string) (domain.Prepr
     `, id)
 }
 
+func (r *PreprocessRepository) RequeueStuck(ctx context.Context, convertTimeout, backoff time.Duration) error {
+	if backoff < 0 {
+		backoff = 0
+	}
+	if convertTimeout < 0 {
+		convertTimeout = 0
+	}
+
+	now := time.Now().UTC()
+	staleStartedBefore := now.Add(-(convertTimeout + backoff))
+	nextRunAt := now.Add(backoff)
+
+	_, err := r.db.Exec(ctx, `
+        UPDATE preprocess_queue
+        SET status = $1, attempts = attempts + 1, next_run_at = $2, updated_at = $3
+        WHERE status = $4 AND started_at IS NOT NULL AND started_at < $5
+    `,
+		toStatusString(domain.StatusFailed),
+		nextRunAt,
+		now,
+		toStatusString(domain.StatusProcessing),
+		staleStartedBefore,
+	)
+	if err != nil {
+		return fmt.Errorf("requeue stuck jobs: %w", err)
+	}
+
+	return nil
+}
+
 func (r *PreprocessRepository) NextForProcessing(ctx context.Context) (domain.PreprocessJob, bool, error) {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
