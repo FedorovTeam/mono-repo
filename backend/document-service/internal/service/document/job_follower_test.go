@@ -136,6 +136,45 @@ func TestJobFollowerSchedulesPreprocessWhenEnabled(t *testing.T) {
 	require.Equal(t, "etag-preprocess", payload.OriginalETag)
 }
 
+func TestPreprocessConversionForcesDocxExtension(t *testing.T) {
+	repo := &followerRepo{
+		jobs: []domain.ProcessingJob{
+			{
+				TaskID:     "job-preprocess",
+				DocumentID: "doc-1",
+				Stage:      domain.JobStagePreprocessToDocx,
+				Status:     domain.JobStatusCompleted,
+				Payload: (domain.PreprocessPayload{
+					OriginalBucket:        "orig-bucket",
+					OriginalObjectKey:     "incoming/file.doc",
+					PreprocessedBucket:    "prep-bucket",
+					PreprocessedObjectKey: "processed/file.docx",
+					TargetObjectKey:       "processed/file.docx",
+					FilenameExtension:     "doc",
+				}).ToMap(),
+			},
+		},
+		document: &domain.Document{
+			ID:                "doc-1",
+			Status:            domain.DocumentStatusStoredOriginal,
+			OriginalBucket:    "orig-bucket",
+			OriginalObjectKey: "incoming/file.doc",
+		},
+	}
+
+	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{}))
+
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.createdJobs, 1)
+	require.Equal(t, domain.JobStageConvertToMarkdown, repo.createdJobs[0].Stage)
+	payload := domain.ConvertPayloadFromMap(repo.createdJobs[0].Payload)
+	require.Equal(t, "docx", payload.FilenameExtension)
+	require.Equal(t, "processed/file.docx", payload.PreprocessedObjectKey)
+	require.Equal(t, "prep-bucket", payload.PreprocessedBucket)
+}
+
 func TestScheduleNextUsesOriginalETag(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-id",

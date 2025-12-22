@@ -272,6 +272,16 @@ func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.
 	preprocessPayload := domain.PreprocessPayloadFromMap(payload)
 	originalBucket := firstNonEmpty(preprocessPayload.PreprocessedBucket, preprocessPayload.OriginalBucket)
 	originalKey := firstNonEmpty(preprocessPayload.PreprocessedObjectKey, preprocessPayload.OriginalObjectKey)
+	filenameExtension := firstNonEmpty(
+		fileExtension(preprocessPayload.PreprocessedObjectKey),
+		fileExtension(preprocessPayload.TargetObjectKey),
+	)
+	if preprocessPayload.PreprocessedObjectKey != "" || preprocessPayload.TargetObjectKey != "" {
+		filenameExtension = "docx"
+	}
+	if filenameExtension == "" {
+		filenameExtension = firstNonEmpty(preprocessPayload.FilenameExtension, "docx")
+	}
 
 	correlationID := correlationFromDoc(doc)
 	if preprocessPayload.CorrelationID != "" {
@@ -285,6 +295,6 @@ func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.
 		PreprocessedBucket:    preprocessPayload.PreprocessedBucket,
 		PreprocessedObjectKey: preprocessPayload.PreprocessedObjectKey,
 		TargetObjectKey:       preprocessPayload.TargetObjectKey,
-		FilenameExtension:     firstNonEmpty(preprocessPayload.FilenameExtension, "docx"),
+		FilenameExtension:     filenameExtension,
 	}, correlationID
 }
