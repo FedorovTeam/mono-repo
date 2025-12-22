@@ -45,6 +45,7 @@ stage_worker:
   batch_size: 5
   convert_batch_size: 1
   retry_delay: 1m
+  preprocess_retry_delay: 15s
   grace_period: 15s
   wait_markdown: true
 router:
