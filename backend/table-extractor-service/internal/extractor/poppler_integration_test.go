@@ -54,6 +54,7 @@ func TestPopplerIntegration(t *testing.T) {
 		PdfInfoTimeout:      cfg.Extractor.PdfInfoTimeout,
 		PdftotextTimeout:    cfg.Extractor.PdftotextTimeout,
 		PdftoppmTimeout:     cfg.Extractor.PdftoppmTimeout,
+		PdftoppmDPI:         cfg.Extractor.PdftoppmDPI,
 		MaxParallelCommands: cfg.Extractor.MaxParallel,
 		Pages:               cfg.Extractor.Pages,
 		DetectVotingTables:  cfg.Extractor.DetectVotingTables,

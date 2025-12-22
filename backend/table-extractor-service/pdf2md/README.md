@@ -12,6 +12,8 @@
 - `pdftotext`
 - `pdftoppm`
 
+Рекомендованный DPI рендера для устойчивого поиска галочек — 200 (`pdftoppm -png -r 200 ...`), нужен Poppler с поддержкой `pdftotext -bbox`.
+
 На Ubuntu/Debian:
 
 ```bash

@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/mono-repo/table-extractor-service/internal/usecase"
+	"pdf2md"
 )
 
 const (
 	defaultPdfInfoTimeout  = 10 * time.Second
 	defaultPdftotextTimout = 20 * time.Second
 	defaultPdftoppmTimeout = 30 * time.Second
+	defaultPdftoppmDPI     = 200
 	defaultPdfinfo         = "pdfinfo"
 	defaultPdftotext       = "pdftotext"
 	defaultPdftoppm        = "pdftoppm"
@@ -41,6 +43,7 @@ type Config struct {
 	PdfInfoTimeout      time.Duration
 	PdftotextTimeout    time.Duration
 	PdftoppmTimeout     time.Duration
+	PdftoppmDPI         int
 	MaxParallelCommands int
 	Pages               string
 	DetectVotingTables  bool
@@ -58,16 +61,29 @@ type CommandResult struct {
 	Stderr []byte
 }
 
-// TableParser converts layout text into structured tables and Markdown.
+// TableParser converts extracted poppler artifacts into structured tables and Markdown.
 // Keeping this interface separate makes it easier to replace parsing logic in tests.
 type TableParser interface {
-	ParseTables(layoutText string) ParsedTables
+	ParseTables(input ParseInput) (ParsedTables, error)
 	RenderMarkdown(tables ParsedTables) string
+}
+
+// ParseInput aggregates text and rendering artifacts required for table parsing.
+// LayoutText is a plain-text representation (from `pdftotext -layout`), BBoxHTML
+// keeps the raw XHTML from `pdftotext -bbox`, and PagePNGs map page numbers to
+// rendered PNG bytes from `pdftoppm`.
+type ParseInput struct {
+	LayoutText string
+	BBoxHTML   string
+	PagePNGs   map[int][]byte
+	StartPage  int
 }
 
 type ParsedTables struct {
 	RawTables        []RawTable
 	NormalizedTables []NormalizedTable
+	HeaderText       string
+	Document         *pdf2md.Document `json:"-"`
 }
 
 type RawTable struct {
@@ -136,13 +152,22 @@ func NewAdapter(cfg Config) *Adapter {
 	if cfg.PdftoppmPath == "" {
 		cfg.PdftoppmPath = defaultPdftoppm
 	}
+	if cfg.PdftoppmDPI <= 0 {
+		cfg.PdftoppmDPI = defaultPdftoppmDPI
+	}
 
 	runner := NewExternalCommandRunner(cfg.MaxParallelCommands)
+
+	var parser TableParser = DefaultParser{}
+	if cfg.DetectVotingTables {
+		cfg.Mode = modeBBox
+		parser = NewVotingTableParser()
+	}
 
 	return &Adapter{
 		cfg:    cfg,
 		runner: runner,
-		parser: DefaultParser{},
+		parser: parser,
 		now:    time.Now,
 	}
 }
@@ -152,6 +177,11 @@ func NewAdapter(cfg Config) *Adapter {
 func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.ExtractionResult, error) {
 	if strings.TrimSpace(pdfPath) == "" {
 		return usecase.ExtractionResult{}, errors.New("pdf path is required")
+	}
+
+	startPage, _ := parsePageRange(a.cfg.Pages)
+	if startPage == 0 {
+		startPage = 1
 	}
 
 	manifest := Manifest{
@@ -170,23 +200,55 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	manifest.PDFInfo = parsePDFInfo(string(infoRes.Stdout))
 
 	textStart := time.Now()
-	pdftotextArgs := a.buildPdftotextArgs(pdfPath)
-	textRes, err := a.runner.Run(ctx, a.cfg.PdftotextTimeout, a.cfg.PdftotextPath, pdftotextArgs...)
+	pdftotextMode := a.cfg.Mode
+	if a.cfg.DetectVotingTables {
+		pdftotextMode = modeBBox
+	}
+	mainTextRes, err := a.runPdftotext(ctx, pdfPath, pdftotextMode)
 	manifest.Processing.PdftotextMs = durationMs(textStart)
 	if err != nil {
-		return usecase.ExtractionResult{}, fmt.Errorf("pdftotext: %w (stderr: %s)", err, string(textRes.Stderr))
+		return usecase.ExtractionResult{}, fmt.Errorf("pdftotext: %w (stderr: %s)", err, string(mainTextRes.Stderr))
 	}
-	layoutText := string(textRes.Stdout)
+	layoutText := string(mainTextRes.Stdout)
+	bboxHTML := ""
+	layoutOutput := mainTextRes.Stdout
+	layoutStderr := mainTextRes.Stderr
+	bboxOutput := []byte(nil)
+	bboxStderr := []byte(nil)
+
+	if pdftotextMode == modeBBox {
+		bboxOutput = mainTextRes.Stdout
+		bboxStderr = mainTextRes.Stderr
+		bboxHTML = layoutText
+
+		layoutStart := time.Now()
+		layoutRes, layoutErr := a.runPdftotext(ctx, pdfPath, modeLayout)
+		manifest.Processing.PdftotextMs += durationMs(layoutStart)
+		if layoutErr != nil {
+			return usecase.ExtractionResult{}, fmt.Errorf("pdftotext (layout): %w (stderr: %s)", layoutErr, string(layoutRes.Stderr))
+		}
+		layoutText = string(layoutRes.Stdout)
+		layoutOutput = layoutRes.Stdout
+		layoutStderr = layoutRes.Stderr
+	}
 
 	ppmStart := time.Now()
-	debugFiles, err := a.renderCheckboxes(ctx, pdfPath)
+	pagePNGs, debugFiles, err := a.renderCheckboxes(ctx, pdfPath)
 	manifest.Processing.PdftoppmMs = durationMs(ppmStart)
 	if err != nil {
 		return usecase.ExtractionResult{}, err
 	}
 
 	parseStart := time.Now()
-	parsed := a.parser.ParseTables(layoutText)
+	parsed, err := a.parser.ParseTables(ParseInput{
+		LayoutText: layoutText,
+		BBoxHTML:   bboxHTML,
+		PagePNGs:   pagePNGs,
+		StartPage:  startPage,
+	})
+	if err != nil {
+		return usecase.ExtractionResult{}, fmt.Errorf("parse tables: %w", err)
+	}
 	manifest.Processing.ParseMs = durationMs(parseStart)
 	manifest.TableCount = len(parsed.NormalizedTables)
 
@@ -195,12 +257,14 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 		DetectVotingTables bool       `json:"detect_voting_tables"`
 		Pages              string     `json:"pages"`
 		LayoutText         string     `json:"layout_text"`
+		BBoxHTML           string     `json:"bbox_html,omitempty"`
 		Tables             []RawTable `json:"tables"`
 	}{
 		PDFInfo:            manifest.PDFInfo,
 		DetectVotingTables: a.cfg.DetectVotingTables,
 		Pages:              a.cfg.Pages,
 		LayoutText:         layoutText,
+		BBoxHTML:           bboxHTML,
 		Tables:             parsed.RawTables,
 	}, "", "  ")
 	if err != nil {
@@ -226,12 +290,18 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 		debugFiles = make(map[string][]byte)
 	}
 	debugFiles["pdfinfo.txt"] = infoRes.Stdout
-	debugFiles["pdftotext.layout.txt"] = textRes.Stdout
+	debugFiles["pdftotext.layout.txt"] = layoutOutput
+	if len(layoutStderr) > 0 {
+		debugFiles["pdftotext.stderr.txt"] = layoutStderr
+	}
+	if len(bboxOutput) > 0 {
+		debugFiles["pdftotext.bbox.html"] = bboxOutput
+	}
+	if len(bboxStderr) > 0 {
+		debugFiles["pdftotext.bbox.stderr.txt"] = bboxStderr
+	}
 	if len(infoRes.Stderr) > 0 {
 		debugFiles["pdfinfo.stderr.txt"] = infoRes.Stderr
-	}
-	if len(textRes.Stderr) > 0 {
-		debugFiles["pdftotext.stderr.txt"] = textRes.Stderr
 	}
 
 	return usecase.ExtractionResult{
@@ -243,8 +313,8 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	}, nil
 }
 
-func (a *Adapter) buildPdftotextArgs(pdfPath string) []string {
-	args := []string{pdftotextModeArg(a.cfg.Mode)}
+func (a *Adapter) runPdftotext(ctx context.Context, pdfPath string, mode string) (CommandResult, error) {
+	args := []string{pdftotextModeArg(mode)}
 	start, end := parsePageRange(a.cfg.Pages)
 	if start > 0 {
 		args = append(args, "-f", fmt.Sprint(start))
@@ -253,18 +323,18 @@ func (a *Adapter) buildPdftotextArgs(pdfPath string) []string {
 		args = append(args, "-l", fmt.Sprint(end))
 	}
 	args = append(args, pdfPath, "-")
-	return args
+	return a.runner.Run(ctx, a.cfg.PdftotextTimeout, a.cfg.PdftotextPath, args...)
 }
 
-func (a *Adapter) renderCheckboxes(ctx context.Context, pdfPath string) (map[string][]byte, error) {
+func (a *Adapter) renderCheckboxes(ctx context.Context, pdfPath string) (map[int][]byte, map[string][]byte, error) {
 	tmpDir, err := os.MkdirTemp(a.cfg.TempDir, "tables-extractor-*")
 	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
+		return nil, nil, fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	prefix := filepath.Join(tmpDir, "page")
-	args := []string{"-png"}
+	args := []string{"-png", "-r", fmt.Sprint(a.cfg.PdftoppmDPI)}
 	start, end := parsePageRange(a.cfg.Pages)
 	if start > 0 {
 		args = append(args, "-f", fmt.Sprint(start))
@@ -276,23 +346,27 @@ func (a *Adapter) renderCheckboxes(ctx context.Context, pdfPath string) (map[str
 
 	res, err := a.runner.Run(ctx, a.cfg.PdftoppmTimeout, a.cfg.PdftoppmPath, args...)
 	if err != nil {
-		return nil, fmt.Errorf("pdftoppm: %w (stderr: %s)", err, string(res.Stderr))
+		return nil, nil, fmt.Errorf("pdftoppm: %w (stderr: %s)", err, string(res.Stderr))
 	}
 
 	files, err := filepath.Glob(prefix + "-*.png")
 	if err != nil {
-		return nil, fmt.Errorf("scan pdftoppm output: %w", err)
+		return nil, nil, fmt.Errorf("scan pdftoppm output: %w", err)
 	}
-	debug := make(map[string][]byte)
+	pagePNGs := make(map[int][]byte, len(files))
+	debug := make(map[string][]byte, len(files))
 	for _, p := range files {
 		base := filepath.Base(p)
 		data, readErr := os.ReadFile(p)
 		if readErr != nil {
-			return nil, fmt.Errorf("read rendered page %s: %w", base, readErr)
+			return nil, nil, fmt.Errorf("read rendered page %s: %w", base, readErr)
 		}
 		debug[filepath.Join("checkboxes", base)] = data
+		if n := parseSuffixPage(base); n > 0 {
+			pagePNGs[n] = data
+		}
 	}
-	return debug, nil
+	return pagePNGs, debug, nil
 }
 
 func durationMs(start time.Time) int64 {
@@ -307,6 +381,7 @@ var (
 	reAuthor     = regexp.MustCompile(`(?i)^author:\s+(.*)$`)
 	reCreateDate = regexp.MustCompile(`(?i)^creationdate:\s+(.*)$`)
 	pageRangeRe  = regexp.MustCompile(`^\s*(\d+)(?:\s*-\s*(\d+))?\s*$`)
+	pageSuffixRe = regexp.MustCompile(`-(\d+)\.png$`)
 )
 
 func parsePDFInfo(output string) PDFInfo {
@@ -363,6 +438,14 @@ func parseInt(value string) int {
 	var result int
 	fmt.Sscanf(value, "%d", &result)
 	return result
+}
+
+func parseSuffixPage(name string) int {
+	m := pageSuffixRe.FindStringSubmatch(name)
+	if len(m) != 2 {
+		return 0
+	}
+	return parseInt(m[1])
 }
 
 func normalizeMode(mode string) string {

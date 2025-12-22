@@ -8,8 +8,8 @@ import (
 // DefaultParser extracts simple columnar tables from pdftotext -layout output.
 type DefaultParser struct{}
 
-func (DefaultParser) ParseTables(layoutText string) ParsedTables {
-	lines := strings.Split(layoutText, "\n")
+func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
+	lines := strings.Split(input.LayoutText, "\n")
 	current := make([]string, 0, len(lines))
 	var rawTables []RawTable
 
@@ -67,11 +67,15 @@ func (DefaultParser) ParseTables(layoutText string) ParsedTables {
 	return ParsedTables{
 		RawTables:        rawTables,
 		NormalizedTables: normTables,
-	}
+	}, nil
 }
 
 func (DefaultParser) RenderMarkdown(tables ParsedTables) string {
 	var b strings.Builder
+	if strings.TrimSpace(tables.HeaderText) != "" {
+		b.WriteString(tables.HeaderText)
+		b.WriteString("\n\n")
+	}
 	for i, t := range tables.NormalizedTables {
 		if i > 0 {
 			b.WriteString("\n\n")
