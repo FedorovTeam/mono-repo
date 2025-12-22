@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,6 +24,7 @@ type Config struct {
 	TargetMediaType string
 	OutputDir       string
 	Concurrency     int64
+	ProcessTimeout  time.Duration
 	ConvertTimeout  time.Duration
 	Backoff         time.Duration
 	PollInterval    time.Duration
@@ -77,6 +80,7 @@ func New(deps Dependencies, cfg Config, logger *slog.Logger) (*Worker, error) {
 		OutputDir:       normalizedCfg.OutputDir,
 		TargetBucket:    normalizedCfg.TargetBucket,
 		TargetMediaType: normalizedCfg.TargetMediaType,
+		ProcessTimeout:  normalizedCfg.ProcessTimeout,
 		ConvertTimeout:  normalizedCfg.ConvertTimeout,
 		Backoff:         normalizedCfg.Backoff,
 	}
@@ -101,6 +105,9 @@ func normalizeConfig(cfg Config) Config {
 	}
 	if cfg.ConvertTimeout <= 0 {
 		cfg.ConvertTimeout = 2 * time.Minute
+	}
+	if cfg.ProcessTimeout <= 0 {
+		cfg.ProcessTimeout = cfg.ConvertTimeout + time.Minute
 	}
 	if cfg.Backoff <= 0 {
 		cfg.Backoff = 30 * time.Second
@@ -177,6 +184,13 @@ func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
 	logger := w.logger.With("job_id", job.ID, "correlation_id", job.CorrelationID)
 	logger.Info("start processing job")
 
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.Error("job panicked", "panic", recovered)
+			w.handleJobPanic(ctx, job, recovered)
+		}
+	}()
+
 	if w.processor == nil {
 		logger.Error("processor is not configured")
 		return
@@ -190,5 +204,35 @@ func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
 func (w *Worker) ensureLogger() {
 	if w.logger == nil {
 		w.logger = slog.Default()
+	}
+}
+
+func (w *Worker) handleJobPanic(ctx context.Context, job domain.PreprocessJob, recovered any) {
+	w.ensureLogger()
+
+	failure := domain.Failure{
+		Code:      domain.ErrorCodeProcessingError,
+		Message:   fmt.Sprintf("panic: %v", recovered),
+		Permanent: false,
+		Details: map[string]string{
+			"attempt": strconv.Itoa(job.Attempts),
+			"panic":   fmt.Sprint(recovered),
+			"stack":   string(debug.Stack()),
+		},
+	}
+	failure.Details["code"] = failure.Code.String()
+	failure.Details["permanent"] = strconv.FormatBool(failure.Permanent)
+
+	policy := domain.NewRetryPolicy(w.cfg.Backoff)
+	now := time.Now().UTC()
+	updatedJob, update, err := job.MarkFailed(now, policy, failure)
+	if err != nil {
+		w.logger.Error("failed to compute panic failure update", "error", err)
+		return
+	}
+
+	repoCtx := context.WithoutCancel(ctx)
+	if err := w.repo.MarkFailed(repoCtx, updatedJob, update); err != nil {
+		w.logger.Error("failed to mark job as failed after panic", "error", err)
 	}
 }

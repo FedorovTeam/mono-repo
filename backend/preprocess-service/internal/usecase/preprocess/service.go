@@ -18,6 +18,7 @@ type Config struct {
 	OutputDir       string
 	TargetBucket    string
 	TargetMediaType string
+	ProcessTimeout  time.Duration
 	ConvertTimeout  time.Duration
 	Backoff         time.Duration
 }
@@ -84,6 +85,9 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.ConvertTimeout <= 0 {
 		cfg.ConvertTimeout = 2 * time.Minute
 	}
+	if cfg.ProcessTimeout <= 0 {
+		cfg.ProcessTimeout = cfg.ConvertTimeout + time.Minute
+	}
 	if cfg.Backoff <= 0 {
 		cfg.Backoff = 30 * time.Second
 	}
@@ -98,25 +102,16 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	logger := s.logger.With("job_id", job.ID, "correlation_id", job.CorrelationID)
 	logger.Info("start processing job")
 
+	processCtx, cancel := context.WithTimeout(ctx, s.cfg.ProcessTimeout)
+	defer cancel()
+
 	jobState := job
 
-	if err := s.handleJob(ctx, &jobState); err != nil {
-		logger.Error("job failed", "error", err)
-		failure := s.failureFromError(jobState, err)
-		now := time.Now().UTC()
-		updatedJob, update, failErr := jobState.MarkFailed(now, s.policy, failure)
-		if failErr != nil {
-			logger.Error("failed to compute failure update", "error", failErr)
-			return err
-		}
-		jobState = updatedJob
-		if err := s.repo.MarkFailed(ctx, jobState, update); err != nil {
-			logger.Error("failed to update job status", "error", err)
-		}
-		if update.Status == StatusStopped {
-			s.notifyCallback(ctx, jobState, StatusStopped, callbackErrorInfo{Code: update.Code, Message: update.Message})
-		}
-		return err
+	if err := s.handleJob(processCtx, &jobState); err != nil {
+		return s.handleFailure(processCtx, logger, jobState, err)
+	}
+	if err := processCtx.Err(); err != nil {
+		return s.handleFailure(processCtx, logger, jobState, err)
 	}
 
 	logger.Info("job completed successfully")
@@ -127,13 +122,37 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 		logger.Error("failed to compute completion state", "error", err)
 		return err
 	}
-	if err := s.repo.MarkDone(ctx, completedJob); err != nil {
+	if err := s.repo.MarkDone(processCtx, completedJob); err != nil {
 		logger.Error("failed to mark job done", "error", err)
 		return err
 	}
 
-	s.notifyCallback(ctx, completedJob, StatusDone, callbackErrorInfo{})
+	s.notifyCallback(processCtx, completedJob, StatusDone, callbackErrorInfo{})
 	return nil
+}
+
+func (s *Service) handleFailure(ctx context.Context, logger *slog.Logger, job Job, err error) error {
+	logger.Error("job failed", "error", err)
+
+	repoCtx := context.WithoutCancel(ctx)
+
+	failure := s.failureFromError(job, err)
+	now := time.Now().UTC()
+	updatedJob, update, failErr := job.MarkFailed(now, s.policy, failure)
+	if failErr != nil {
+		logger.Error("failed to compute failure update", "error", failErr)
+		return err
+	}
+
+	if err := s.repo.MarkFailed(repoCtx, updatedJob, update); err != nil {
+		logger.Error("failed to update job status", "error", err)
+	}
+
+	if update.Status == StatusStopped {
+		s.notifyCallback(repoCtx, updatedJob, StatusStopped, callbackErrorInfo{Code: update.Code, Message: update.Message})
+	}
+
+	return err
 }
 
 func (s *Service) handleJob(ctx context.Context, job *Job) error {
