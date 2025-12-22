@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap/zaptest"
+
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/storage/memory"
 	"preprocess-service/internal/usecase/submit"
@@ -25,11 +27,11 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("init service: %v", err)
 	}
-	handler := NewPreprocessHandler(service)
+	handler := NewPreprocessHandler(service, zaptest.NewLogger(t))
 
 	targetKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "file.pdf")
 	req := &preprocessv1.SubmitPreprocessRequest{
@@ -70,11 +72,11 @@ func TestGetPreprocessStatus(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("init service: %v", err)
 	}
-	handler := NewPreprocessHandler(service)
+	handler := NewPreprocessHandler(service, zaptest.NewLogger(t))
 
 	targetKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "file.pdf")
 	submitResp, err := handler.SubmitPreprocess(context.Background(), &preprocessv1.SubmitPreprocessRequest{
@@ -122,11 +124,11 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("init service: %v", err)
 	}
-	handler := NewPreprocessHandler(service)
+	handler := NewPreprocessHandler(service, zaptest.NewLogger(t))
 
 	req := &preprocessv1.SubmitPreprocessRequest{
 		SourceBucket:  cfg.Preprocess.SourceBucket,

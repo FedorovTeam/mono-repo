@@ -60,7 +60,7 @@ func TestPopplerIntegration(t *testing.T) {
 		DetectVotingTables:  cfg.Extractor.DetectVotingTables,
 		TempDir:             tempDir,
 		Mode:                cfg.Extractor.Mode,
-	})
+	}, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

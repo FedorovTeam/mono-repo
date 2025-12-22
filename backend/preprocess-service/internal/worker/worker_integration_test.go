@@ -16,6 +16,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/domain"
@@ -39,11 +40,11 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	defer terminate()
 
 	repo := postgres.NewPreprocessRepository(db)
-	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("init submit service: %v", err)
 	}
-	handler := transport.NewPreprocessHandler(service)
+	handler := transport.NewPreprocessHandler(service, zaptest.NewLogger(t))
 
 	targetKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "file.docx")
 	submitResp, err := handler.SubmitPreprocess(ctx, &preprocessv1.SubmitPreprocessRequest{

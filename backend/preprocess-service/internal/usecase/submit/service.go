@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"preprocess-service/internal/domain"
 )
@@ -37,43 +38,69 @@ type Service struct {
 	repo            domain.PreprocessJobRepository
 	targetBucket    string
 	targetKeyPrefix string
+	logger          *zap.Logger
 }
 
-func NewService(repo domain.PreprocessJobRepository, targetBucket, targetKeyPrefix string) (*Service, error) {
+func NewService(repo domain.PreprocessJobRepository, targetBucket, targetKeyPrefix string, logger *zap.Logger) (*Service, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("job repository is required")
+	}
+	if logger == nil {
+		logger = zap.NewNop()
 	}
 
 	return &Service{
 		repo:            repo,
 		targetBucket:    targetBucket,
 		targetKeyPrefix: strings.TrimSuffix(targetKeyPrefix, "/"),
+		logger:          logger,
 	}, nil
 }
 
 func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (domain.PreprocessJob, error) {
+	logger := s.logger.With(
+		zap.String("document_id", cmd.DocumentID),
+		zap.String("correlation_id", cmd.CorrelationID),
+		zap.String("source_bucket", cmd.SourceBucket),
+		zap.String("source_key", cmd.SourceKey),
+	)
+
 	targetBucket := cmd.TargetBucket
 	if targetBucket == "" {
 		targetBucket = s.targetBucket
+		logger.Debug("using default target bucket", zap.String("target_bucket", targetBucket))
 	}
 
 	targetKey := cmd.TargetKey
 	if targetKey == "" {
 		targetKey = s.defaultTargetKey(cmd.DocumentID)
+		logger.Debug("using default target key", zap.String("target_key", targetKey))
 	}
 
 	if targetBucket == "" || targetKey == "" {
 		return domain.PreprocessJob{}, fmt.Errorf("%w: target_bucket and target_key are required", ErrInvalidRequest)
 	}
+	logger = logger.With(
+		zap.String("target_bucket", targetBucket),
+		zap.String("target_key", targetKey),
+	)
 
 	existing, found, err := s.repo.FindBySource(ctx, cmd.SourceBucket, cmd.SourceKey, cmd.SourceETag)
 	if err != nil {
+		logger.Error("failed to find job by source", zap.Error(err))
 		return domain.PreprocessJob{}, fmt.Errorf("find job by source: %w", err)
 	}
+	logger.Info("checked existing job by source", zap.Bool("found", found))
 	if found {
 		if existing.ErrorDetails == nil {
 			existing.ErrorDetails = map[string]string{}
 		}
+		logger.Info("returning existing preprocess job",
+			zap.String("job_id", existing.ID),
+			zap.String("status", existing.Status.String()),
+			zap.String("target_bucket", existing.TargetBucket),
+			zap.String("target_key", existing.TargetKey),
+		)
 		return existing, nil
 	}
 
@@ -97,12 +124,28 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 	}
 
 	if err := job.Validate(); err != nil {
+		logger.Error("invalid preprocess job", zap.Error(err), zap.String("status", job.Status.String()))
 		return domain.PreprocessJob{}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
+	logger.Debug("preprocess job validated",
+		zap.String("job_id", job.ID),
+		zap.String("status", job.Status.String()),
+	)
 
 	if err := s.repo.Create(ctx, job); err != nil {
+		logger.Error("failed to create preprocess job",
+			zap.Error(err),
+			zap.String("job_id", job.ID),
+			zap.String("status", job.Status.String()),
+		)
 		return domain.PreprocessJob{}, fmt.Errorf("create job: %w", err)
 	}
+	logger.Info("preprocess job created",
+		zap.String("job_id", job.ID),
+		zap.String("status", job.Status.String()),
+		zap.String("target_bucket", job.TargetBucket),
+		zap.String("target_key", job.TargetKey),
+	)
 
 	return job, nil
 }
