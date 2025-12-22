@@ -3,7 +3,7 @@ service:
   grpc_port: 9090
 
 logging:
-  level: info
+  level: debug
   encoding: json
   development: false
 
