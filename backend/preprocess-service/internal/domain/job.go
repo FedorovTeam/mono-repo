@@ -17,11 +17,14 @@ type PreprocessJob struct {
 	CallbackURL     string
 	CorrelationID   string
 	Status          PreprocessStatus
+	ProcessingStage ProcessingStage
 	Attempts        int
 	MaxAttempts     int
 	NextRunAt       time.Time
 	StartedAt       time.Time
 	FinishedAt      time.Time
+	StageStartedAt  time.Time
+	StageUpdatedAt  time.Time
 	ErrorMessage    string
 	ErrorCode       string
 	ErrorDetails    map[string]string
@@ -68,6 +71,9 @@ func (j PreprocessJob) Validate() error {
 	if j.Status == StatusUnspecified {
 		return fmt.Errorf("status is required")
 	}
+	if !j.ProcessingStage.IsValid() {
+		return fmt.Errorf("processing stage is required")
+	}
 	if j.Attempts < 0 {
 		return fmt.Errorf("attempts cannot be negative")
 	}
@@ -77,6 +83,9 @@ func (j PreprocessJob) Validate() error {
 	if j.NextRunAt.IsZero() {
 		return fmt.Errorf("next run time is required")
 	}
+	if j.StageUpdatedAt.IsZero() {
+		return fmt.Errorf("stage update time is required")
+	}
 	return nil
 }
 
@@ -84,6 +93,9 @@ func (j PreprocessJob) MarkProcessing(now time.Time) (PreprocessJob, error) {
 	j.Attempts++
 	j.Status = StatusProcessing
 	j.StartedAt = now
+	j.ProcessingStage = StageDownloading
+	j.StageStartedAt = now
+	j.StageUpdatedAt = now
 	j.UpdatedAt = now
 
 	if j.NextRunAt.IsZero() {
@@ -96,6 +108,12 @@ func (j PreprocessJob) MarkProcessing(now time.Time) (PreprocessJob, error) {
 func (j PreprocessJob) MarkCompleted(now time.Time) (PreprocessJob, error) {
 	j.Status = StatusCompleted
 	j.FinishedAt = now
+	if j.ProcessingStage == StageUnspecified {
+		j.ProcessingStage = StageCallback
+	}
+	if j.StageUpdatedAt.IsZero() {
+		j.StageUpdatedAt = now
+	}
 	j.UpdatedAt = now
 
 	return j, j.Validate()
@@ -107,6 +125,9 @@ func (j PreprocessJob) MarkFailed(now time.Time, policy RetryPolicy, failure Fai
 	j.ErrorCode = failure.Code.String()
 	j.ErrorMessage = failure.Message
 	j.ErrorDetails = failure.Details
+	if j.StageUpdatedAt.IsZero() {
+		j.StageUpdatedAt = now
+	}
 	j.UpdatedAt = now
 
 	if policy.ShouldStop(j.Attempts, j.MaxAttempts, failure.Permanent) {

@@ -119,6 +119,9 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	}
 
 	logger.Info("job completed successfully")
+	if err := s.updateStage(processCtx, &jobState, domain.StageCallback, jobState.ProcessingStage != domain.StageCallback); err != nil {
+		return s.handleFailure(processCtx, logger, jobState, err)
+	}
 	jobState.TargetMediaType = s.cfg.TargetMediaType
 	now := time.Now().UTC()
 	completedJob, err := jobState.MarkCompleted(now)
@@ -132,6 +135,9 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	}
 
 	s.notifyCallback(processCtx, completedJob, StatusDone, callbackErrorInfo{})
+	if err := s.touchStage(processCtx, &jobState); err != nil {
+		logger.Warn("failed to update callback stage heartbeat", zap.Error(err))
+	}
 	return nil
 }
 
@@ -166,6 +172,9 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 		zap.String("job_id", job.ID),
 		zap.String("correlation_id", job.CorrelationID),
 	)
+	if err := s.updateStage(ctx, job, domain.StageDownloading, true); err != nil {
+		return err
+	}
 	logger.Debug("preparing workspace for job")
 	workspace, err := s.workspace.Prepare(job.ID)
 	if err != nil {
@@ -174,13 +183,22 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 	defer workspace.Cleanup()
 
 	logger.Debug("workspace prepared", zap.String("output_dir", workspace.OutputDir()))
-	sourcePath, err := s.downloadSourceFn(ctx, *job, workspace)
-	if err != nil {
+	var sourcePath string
+	if err := s.runStage(ctx, job, domain.StageDownloading, false, func() error {
+		path, err := s.downloadSourceFn(ctx, *job, workspace)
+		if err == nil {
+			sourcePath = path
+		}
+		return err
+	}); err != nil {
 		return err
 	}
 
 	logger.Debug("source downloaded", zap.String("source_path", sourcePath))
-	if _, err := s.convertFn(ctx, sourcePath, workspace); err != nil {
+	if err := s.runStage(ctx, job, domain.StageConverting, true, func() error {
+		_, err := s.convertFn(ctx, sourcePath, workspace)
+		return err
+	}); err != nil {
 		return err
 	}
 
@@ -191,9 +209,6 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 			return permanentError(domain.ErrorCodeSourceKeyInvalid, err)
 		}
 		return permanentError(domain.ErrorCodeOutputDir, fmt.Errorf("output path: %w", err))
-	}
-	if err := workspace.EnsureExists(outputPath); err != nil {
-		return permanentError(domain.ErrorCodeConvertMissingOut, fmt.Errorf("output file not found: %w", err))
 	}
 
 	targetBucket := job.TargetBucket
@@ -209,7 +224,12 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 		return permanentError(domain.ErrorCodeTargetKey, errors.New("target key is required"))
 	}
 
-	if err := s.uploadResultFn(ctx, targetBucket, job.TargetKey, outputPath); err != nil {
+	if err := s.runStage(ctx, job, domain.StageUploading, true, func() error {
+		if err := workspace.EnsureExists(outputPath); err != nil {
+			return permanentError(domain.ErrorCodeConvertMissingOut, fmt.Errorf("output file not found: %w", err))
+		}
+		return s.uploadResultFn(ctx, targetBucket, job.TargetKey, outputPath)
+	}); err != nil {
 		return err
 	}
 
@@ -346,6 +366,53 @@ func (s *Service) ensureFunctions() {
 	if s.uploadResultFn == nil {
 		s.uploadResultFn = s.uploadResult
 	}
+}
+
+func (s *Service) runStage(ctx context.Context, job *Job, stage domain.ProcessingStage, resetStart bool, action func() error) error {
+	if err := s.updateStage(ctx, job, stage, resetStart); err != nil {
+		return err
+	}
+
+	err := action()
+
+	if hbErr := s.touchStage(ctx, job); hbErr != nil {
+		return hbErr
+	}
+
+	return err
+}
+
+func (s *Service) updateStage(ctx context.Context, job *Job, stage domain.ProcessingStage, resetStart bool) error {
+	if s.repo == nil {
+		return temporaryError(domain.ErrorCodeProcessingError, errors.New("stage repository is not configured"))
+	}
+
+	now := time.Now().UTC()
+
+	var startedAt *time.Time
+	if resetStart || job.ProcessingStage != stage || job.StageStartedAt.IsZero() {
+		job.StageStartedAt = now
+		startedAt = &job.StageStartedAt
+	}
+
+	job.ProcessingStage = stage
+	job.StageUpdatedAt = now
+
+	update := domain.StageUpdate{
+		Stage:          stage,
+		StageStartedAt: startedAt,
+		StageUpdatedAt: job.StageUpdatedAt,
+	}
+
+	if err := s.repo.UpdateStage(ctx, job.ID, update); err != nil {
+		return temporaryError(domain.ErrorCodeProcessingError, fmt.Errorf("update processing stage: %w", err))
+	}
+
+	return nil
+}
+
+func (s *Service) touchStage(ctx context.Context, job *Job) error {
+	return s.updateStage(ctx, job, job.ProcessingStage, false)
 }
 
 func (s *Service) failureFromError(job Job, err error) domain.Failure {

@@ -33,13 +33,17 @@ func (stubRepo) MarkDone(ctx context.Context, job Job) error              { retu
 func (stubRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
 	return nil
 }
+func (stubRepo) UpdateStage(ctx context.Context, jobID string, update domain.StageUpdate) error {
+	return nil
+}
 func (stubRepo) TryAcquireWorkerLock(ctx context.Context) (domain.LockHandle, bool, error) {
 	return stubLock{}, true, nil
 }
 
 type capturingRepo struct {
-	failures []FailureUpdate
-	statuses []Job
+	failures     []FailureUpdate
+	statuses     []Job
+	stageUpdates []domain.StageUpdate
 }
 
 func (r *capturingRepo) Create(ctx context.Context, job Job) error { return nil }
@@ -63,6 +67,15 @@ func (r *capturingRepo) MarkDone(ctx context.Context, job Job) error {
 func (r *capturingRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
 	r.failures = append(r.failures, update)
 	r.statuses = append(r.statuses, job)
+	return nil
+}
+func (r *capturingRepo) UpdateStage(ctx context.Context, jobID string, update domain.StageUpdate) error {
+	cloned := update
+	if update.StageStartedAt != nil {
+		ts := update.StageStartedAt.UTC()
+		cloned.StageStartedAt = &ts
+	}
+	r.stageUpdates = append(r.stageUpdates, cloned)
 	return nil
 }
 func (r *capturingRepo) TryAcquireWorkerLock(ctx context.Context) (domain.LockHandle, bool, error) {
@@ -202,6 +215,7 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 		},
 		logger:    zap.NewNop(),
 		workspace: workspaceManager,
+		repo:      stubRepo{},
 	}
 
 	svc.downloadSourceFn = func(ctx context.Context, job Job, ws ports.Workspace) (string, error) {
@@ -383,6 +397,70 @@ func TestProcessPermanentFailureStops(t *testing.T) {
 	}
 }
 
+func TestProcessUpdatesProcessingStages(t *testing.T) {
+	t.Helper()
+
+	repo := &capturingRepo{}
+	workspace := &fakeWorkspace{
+		sourcePath: "/tmp/source",
+		outputPath: "/tmp/output/result.docx",
+		outputDir:  "/tmp/output",
+	}
+	svc, err := NewService(
+		repo,
+		noopDownloader{},
+		noopUploader{},
+		noopConverter{},
+		&fakeWorkspaceManager{workspace: workspace},
+		nil,
+		Config{WorkingDir: t.TempDir(), OutputDir: t.TempDir(), TargetMediaType: DefaultTargetMediaType, Backoff: time.Second},
+		zap.NewNop(),
+	)
+	if err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	job := Job{
+		ID:              "job-stage",
+		DocumentID:      "doc-stage",
+		SourceBucket:    "src",
+		SourceKey:       "file.doc",
+		SourceETag:      "etag",
+		TargetBucket:    "bucket",
+		TargetKey:       "out.docx",
+		Status:          StatusProcessing,
+		Attempts:        0,
+		MaxAttempts:     3,
+		NextRunAt:       time.Now().UTC(),
+		ProcessingStage: domain.StageDownloading,
+		StageStartedAt:  time.Now().UTC(),
+		StageUpdatedAt:  time.Now().UTC(),
+	}
+
+	if err := svc.Process(context.Background(), job); err != nil {
+		t.Fatalf("process returned error: %v", err)
+	}
+
+	if len(repo.stageUpdates) < 6 {
+		t.Fatalf("expected stage updates, got %d", len(repo.stageUpdates))
+	}
+
+	if !containsStagesInOrder(repo.stageUpdates, []domain.ProcessingStage{
+		domain.StageDownloading,
+		domain.StageConverting,
+		domain.StageUploading,
+		domain.StageCallback,
+	}) {
+		t.Fatalf("expected stage updates to follow processing order, got %+v", repo.stageUpdates)
+	}
+
+	for _, update := range repo.stageUpdates {
+		if update.StageUpdatedAt.IsZero() {
+			t.Fatal("expected stage update timestamps to be set")
+		}
+	}
+}
+
 func TestConvertFailureAddsConverterDetails(t *testing.T) {
 	t.Helper()
 
@@ -513,4 +591,40 @@ type failingConverter struct {
 
 func (c failingConverter) Convert(context.Context, string, string) (ports.ConvertResult, error) {
 	return c.result, c.err
+}
+
+type noopDownloader struct{}
+
+func (noopDownloader) Download(context.Context, string, string, string, string) error {
+	return nil
+}
+
+type noopUploader struct{}
+
+func (noopUploader) Upload(context.Context, string, string, string, string) error {
+	return nil
+}
+
+type noopConverter struct{}
+
+func (noopConverter) Convert(context.Context, string, string) (ports.ConvertResult, error) {
+	return ports.ConvertResult{}, nil
+}
+
+func containsStagesInOrder(updates []domain.StageUpdate, expected []domain.ProcessingStage) bool {
+	if len(expected) == 0 {
+		return true
+	}
+
+	index := 0
+	for _, update := range updates {
+		if update.Stage == expected[index] {
+			index++
+			if index == len(expected) {
+				return true
+			}
+		}
+	}
+
+	return false
 }

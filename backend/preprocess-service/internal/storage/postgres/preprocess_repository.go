@@ -60,11 +60,11 @@ func (r *PreprocessRepository) Create(ctx context.Context, job domain.Preprocess
         INSERT INTO preprocess_queue (
             job_id, document_id, source_bucket, source_key, source_etag, target_bucket, target_key,
             callback_url, correlation_id, target_media_type, status, attempts, max_attempts, next_run_at,
-            started_at, finished_at, error_code, error_message, error_details, created_at, updated_at
+            started_at, finished_at, processing_stage, stage_started_at, stage_updated_at, error_code, error_message, error_details, created_at, updated_at
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12, $13, $14,
-            $15, $16, $17, $18, COALESCE($19::jsonb, '{}'::jsonb), $20, $21
+            $15, $16, $17, $18, $19, $20, $21, COALESCE($22::jsonb, '{}'::jsonb), $23, $24
         )
     `,
 		normalized.ID,
@@ -83,6 +83,9 @@ func (r *PreprocessRepository) Create(ctx context.Context, job domain.Preprocess
 		normalized.NextRunAt,
 		nullableTime(normalized.StartedAt),
 		nullableTime(normalized.FinishedAt),
+		toStageString(normalized.ProcessingStage),
+		nullableTime(normalized.StageStartedAt),
+		normalized.StageUpdatedAt,
 		nullableString(normalized.ErrorCode),
 		nullableString(normalized.ErrorMessage),
 		string(detailsJSON),
@@ -207,9 +210,9 @@ func (r *PreprocessRepository) NextForProcessing(ctx context.Context) (domain.Pr
 
 	if _, err := tx.Exec(ctx, `
         UPDATE preprocess_queue
-        SET status = $1, attempts = $2, started_at = $3, updated_at = $3
-        WHERE job_id = $4
-    `, toStatusString(updatedJob.Status), updatedJob.Attempts, updatedJob.StartedAt, updatedJob.ID); err != nil {
+        SET status = $1, attempts = $2, started_at = $3, processing_stage = $4, stage_started_at = $5, stage_updated_at = $3, updated_at = $3
+        WHERE job_id = $6
+    `, toStatusString(updatedJob.Status), updatedJob.Attempts, updatedJob.StartedAt, toStageString(updatedJob.ProcessingStage), nullableTime(updatedJob.StageStartedAt), updatedJob.ID); err != nil {
 		return domain.PreprocessJob{}, false, fmt.Errorf("mark processing: %w", err)
 	}
 
@@ -231,9 +234,11 @@ func (r *PreprocessRepository) MarkDone(ctx context.Context, job domain.Preproce
 	_, err = r.db.Exec(ctx, `
         UPDATE preprocess_queue
         SET status = $2, finished_at = $3, updated_at = $3, target_bucket = $4, target_key = $5,
-            target_media_type = $6, error_code = NULL, error_message = NULL, error_details = '{}'::jsonb
+            target_media_type = $6, processing_stage = $7, stage_started_at = COALESCE($8, stage_started_at), stage_updated_at = $9,
+            error_code = NULL, error_message = NULL, error_details = '{}'::jsonb
         WHERE job_id = $1
-    `, completed.ID, toStatusString(completed.Status), completed.FinishedAt, completed.TargetBucket, completed.TargetKey, completed.TargetMediaType)
+    `, completed.ID, toStatusString(completed.Status), completed.FinishedAt, completed.TargetBucket, completed.TargetKey, completed.TargetMediaType,
+		toStageString(completed.ProcessingStage), nullableTime(completed.StageStartedAt), completed.StageUpdatedAt)
 	if err == nil {
 		r.logJob(zap.InfoLevel, "preprocess job marked done", completed, job.Status, completed.Status)
 	}
@@ -276,12 +281,39 @@ func (r *PreprocessRepository) MarkFailed(ctx context.Context, job domain.Prepro
         UPDATE preprocess_queue
         SET status = $2, next_run_at = $3, finished_at = CASE WHEN $2 = $5 THEN $4 ELSE finished_at END,
             error_code = $6, error_message = $7, error_details = COALESCE($8::jsonb, '{}'::jsonb),
-            target_bucket = COALESCE($9, target_bucket), target_key = COALESCE($10, target_key), updated_at = $4
+            target_bucket = COALESCE($9, target_bucket), target_key = COALESCE($10, target_key),
+            processing_stage = $11, stage_started_at = COALESCE($12, stage_started_at), stage_updated_at = $13, updated_at = $4
         WHERE job_id = $1
-    `, job.ID, toStatusString(update.Status), update.NextRunAt, finishedAt, toStatusString(domain.StatusStopped), update.Code.String(), update.Message, string(detailsJSON), nullableString(update.TargetBucket), nullableString(update.TargetKey))
+    `, job.ID, toStatusString(update.Status), update.NextRunAt, finishedAt, toStatusString(domain.StatusStopped), update.Code.String(), update.Message, string(detailsJSON), nullableString(update.TargetBucket), nullableString(update.TargetKey),
+		toStageString(job.ProcessingStage), nullableTime(job.StageStartedAt), job.StageUpdatedAt)
 
 	if err == nil {
 		r.logJob(zap.InfoLevel, "preprocess job marked failed", job, job.Status, update.Status)
+	}
+
+	return err
+}
+
+func (r *PreprocessRepository) UpdateStage(ctx context.Context, jobID string, update domain.StageUpdate) error {
+	if err := update.Validate(); err != nil {
+		return fmt.Errorf("validate stage update: %w", err)
+	}
+
+	stageStarted := nullableTimePtr(update.StageStartedAt)
+
+	_, err := r.db.Exec(ctx, `
+        UPDATE preprocess_queue
+        SET processing_stage = $2, stage_started_at = COALESCE($3, stage_started_at), stage_updated_at = $4, updated_at = $4
+        WHERE job_id = $1
+    `, jobID, toStageString(update.Stage), stageStarted, update.StageUpdatedAt)
+
+	if err == nil {
+		r.logJob(zap.DebugLevel, "preprocess job stage updated", domain.PreprocessJob{
+			ID:              jobID,
+			ProcessingStage: update.Stage,
+			StageStartedAt:  derefTime(stageStarted),
+			StageUpdatedAt:  update.StageUpdatedAt,
+		}, domain.StatusUnspecified, domain.StatusUnspecified)
 	}
 
 	return err
@@ -305,8 +337,8 @@ func (r *PreprocessRepository) fetchJob(ctx context.Context, query string, args 
 
 const jobColumns = `
     job_id, document_id, source_bucket, source_key, source_etag, target_bucket, target_key,
-    callback_url, correlation_id, target_media_type, status, attempts, max_attempts, next_run_at,
-    started_at, finished_at, error_code, error_message, error_details, created_at, updated_at
+    callback_url, correlation_id, target_media_type, status, processing_stage, attempts, max_attempts, next_run_at,
+    started_at, finished_at, stage_started_at, stage_updated_at, error_code, error_message, error_details, created_at, updated_at
 `
 
 func scanJob(row pgx.Row) (domain.PreprocessJob, error) {
@@ -320,6 +352,7 @@ func scanJob(row pgx.Row) (domain.PreprocessJob, error) {
 		errorCode    *string
 		errorMessage *string
 		errorDetails []byte
+		stage        string
 		createdAt    time.Time
 		updatedAt    time.Time
 		status       string
@@ -328,6 +361,8 @@ func scanJob(row pgx.Row) (domain.PreprocessJob, error) {
 		maxAttempts  int
 		startedAt    *time.Time
 		finishedAt   *time.Time
+		stageStarted *time.Time
+		stageUpdated time.Time
 	)
 
 	if err := row.Scan(
@@ -342,11 +377,14 @@ func scanJob(row pgx.Row) (domain.PreprocessJob, error) {
 		&correlation,
 		&targetMedia,
 		&status,
+		&stage,
 		&attempts,
 		&maxAttempts,
 		&nextRunAt,
 		&startedAt,
 		&finishedAt,
+		&stageStarted,
+		&stageUpdated,
 		&errorCode,
 		&errorMessage,
 		&errorDetails,
@@ -362,11 +400,14 @@ func scanJob(row pgx.Row) (domain.PreprocessJob, error) {
 	job.CallbackURL = derefString(callbackURL)
 	job.CorrelationID = derefString(correlation)
 	job.Status = statusFromString(status)
+	job.ProcessingStage = stageFromString(stage)
 	job.Attempts = attempts
 	job.MaxAttempts = maxAttempts
 	job.NextRunAt = nextRunAt
 	job.StartedAt = derefTime(startedAt)
 	job.FinishedAt = derefTime(finishedAt)
+	job.StageStartedAt = derefTime(stageStarted)
+	job.StageUpdatedAt = stageUpdated
 	job.ErrorCode = derefString(errorCode)
 	job.ErrorMessage = derefString(errorMessage)
 	job.CreatedAt = createdAt
@@ -392,6 +433,20 @@ func normalizeJob(job domain.PreprocessJob) domain.PreprocessJob {
 
 	now := time.Now().UTC()
 
+	if !job.ProcessingStage.IsValid() {
+		job.ProcessingStage = domain.StageDownloading
+	}
+	if job.StageUpdatedAt.IsZero() {
+		switch {
+		case !job.CreatedAt.IsZero():
+			job.StageUpdatedAt = job.CreatedAt
+		default:
+			job.StageUpdatedAt = now
+		}
+	}
+	if job.StageStartedAt.IsZero() {
+		job.StageStartedAt = job.StageUpdatedAt
+	}
 	if job.MaxAttempts <= 0 {
 		job.MaxAttempts = domain.DefaultMaxAttempts
 	}
@@ -449,6 +504,14 @@ func nullableTime(value time.Time) *time.Time {
 		return nil
 	}
 	return &value
+}
+
+func nullableTimePtr(value *time.Time) *time.Time {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	v := value.UTC()
+	return &v
 }
 
 func derefTime(value *time.Time) time.Time {

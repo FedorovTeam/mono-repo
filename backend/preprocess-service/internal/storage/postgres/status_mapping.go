@@ -35,3 +35,33 @@ func statusFromString(value string) domain.PreprocessStatus {
 		return domain.StatusUnspecified
 	}
 }
+
+func toStageString(stage domain.ProcessingStage) string {
+	switch stage {
+	case domain.StageDownloading:
+		return "downloading"
+	case domain.StageConverting:
+		return "converting"
+	case domain.StageUploading:
+		return "uploading"
+	case domain.StageCallback:
+		return "callback"
+	default:
+		return ""
+	}
+}
+
+func stageFromString(value string) domain.ProcessingStage {
+	switch value {
+	case "downloading":
+		return domain.StageDownloading
+	case "converting":
+		return domain.StageConverting
+	case "uploading":
+		return domain.StageUploading
+	case "callback":
+		return domain.StageCallback
+	default:
+		return domain.StageUnspecified
+	}
+}

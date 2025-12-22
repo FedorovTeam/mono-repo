@@ -133,20 +133,23 @@ func TestWorkerRecoversFromProcessorPanic(t *testing.T) {
 	repo := memory.NewRepository()
 	now := time.Now().UTC()
 	job := domain.PreprocessJob{
-		ID:           "job-panic",
-		DocumentID:   "doc-panic",
-		SourceBucket: "source",
-		SourceKey:    "key.docx",
-		SourceETag:   "etag-1",
-		TargetBucket: "target",
-		TargetKey:    "result.docx",
-		Status:       domain.StatusPending,
-		ErrorDetails: map[string]string{},
-		Attempts:     0,
-		MaxAttempts:  domain.DefaultMaxAttempts,
-		NextRunAt:    now,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:              "job-panic",
+		DocumentID:      "doc-panic",
+		SourceBucket:    "source",
+		SourceKey:       "key.docx",
+		SourceETag:      "etag-1",
+		TargetBucket:    "target",
+		TargetKey:       "result.docx",
+		Status:          domain.StatusPending,
+		ErrorDetails:    map[string]string{},
+		Attempts:        0,
+		MaxAttempts:     domain.DefaultMaxAttempts,
+		NextRunAt:       now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		ProcessingStage: domain.StageDownloading,
+		StageStartedAt:  now,
+		StageUpdatedAt:  now,
 	}
 
 	if err := repo.Create(ctx, job); err != nil {
@@ -387,6 +390,9 @@ func newTestJob(id string, nextRunAt time.Time) domain.PreprocessJob {
 		ErrorDetails:    map[string]string{},
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		ProcessingStage: domain.StageDownloading,
+		StageStartedAt:  now,
+		StageUpdatedAt:  now,
 	}
 }
 

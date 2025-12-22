@@ -182,6 +182,27 @@ func (r *Repository) sourceKey(bucket, key, etag string) string {
 	return fmt.Sprintf("%s|%s|%s", bucket, key, etag)
 }
 
+func (r *Repository) UpdateStage(_ context.Context, jobID string, update domain.StageUpdate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	job, ok := r.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("job %s not found", jobID)
+	}
+
+	job.ProcessingStage = update.Stage
+	if update.StageStartedAt != nil {
+		job.StageStartedAt = update.StageStartedAt.UTC()
+	}
+	job.StageUpdatedAt = update.StageUpdatedAt.UTC()
+	job.UpdatedAt = update.StageUpdatedAt.UTC()
+
+	r.jobs[jobID] = cloneJob(job)
+
+	return nil
+}
+
 func cloneJob(job domain.PreprocessJob) domain.PreprocessJob {
 	if job.ErrorDetails == nil {
 		job.ErrorDetails = map[string]string{}
