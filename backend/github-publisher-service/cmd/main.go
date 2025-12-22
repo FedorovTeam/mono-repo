@@ -32,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	_, zapSugar, syncLogger, err := logger.Init(cfg.Logging)
+	baseLogger, zapSugar, syncLogger, err := logger.Init(cfg.Logging)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to init logger: %v\n", err)
 		os.Exit(1)
@@ -67,7 +67,7 @@ func main() {
 		Backoff:      cfg.Processing.Backoff,
 	}
 
-	processingWorker, err := worker.New(ctx, workerCfg)
+	processingWorker, err := worker.New(ctx, workerCfg, baseLogger)
 	if err != nil {
 		zapSugar.Fatalf("failed to init processing worker: %v", err)
 	}
@@ -81,7 +81,7 @@ func main() {
 	grpcServer := grpc.NewServer(observability.GRPCServerOptions(otelProviders)...)
 	httpClient := &http.Client{Timeout: 15 * time.Second, Transport: observability.HTTPTransport(otelProviders, nil)}
 	publisherAdapter := github.NewPublisher(cfg.GitHub, httpClient)
-	publisher := service.NewPublisherServer(cfg, publisherAdapter, minioStorage)
+	publisher := service.NewPublisherServer(cfg, baseLogger, publisherAdapter, minioStorage)
 
 	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, publisher)
 	go func() {

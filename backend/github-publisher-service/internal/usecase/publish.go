@@ -5,13 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"backend-github-publisher-service/internal/domain"
+	"go.uber.org/zap"
 )
 
 type PublishUseCase struct {
@@ -22,9 +22,14 @@ type PublishUseCase struct {
 	defaultOwner        string
 	defaultRepository   string
 	defaultBranch       string
+	logger              *zap.Logger
 }
 
-func NewPublishUseCase(publisher domain.GitHubPublisher, markdown domain.MarkdownProvider, idempotency domain.IdempotencyStore, retryResolver domain.RetryPolicyResolver, defaultOwner, defaultRepository, defaultBranch string) *PublishUseCase {
+func NewPublishUseCase(logger *zap.Logger, publisher domain.GitHubPublisher, markdown domain.MarkdownProvider, idempotency domain.IdempotencyStore, retryResolver domain.RetryPolicyResolver, defaultOwner, defaultRepository, defaultBranch string) *PublishUseCase {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	return &PublishUseCase{
 		publisher:           publisher,
 		markdown:            markdown,
@@ -33,6 +38,7 @@ func NewPublishUseCase(publisher domain.GitHubPublisher, markdown domain.Markdow
 		defaultOwner:        defaultOwner,
 		defaultRepository:   defaultRepository,
 		defaultBranch:       defaultBranch,
+		logger:              logger,
 	}
 }
 
@@ -85,13 +91,20 @@ func (u *PublishUseCase) Execute(ctx context.Context, cmd domain.PublishCommand)
 	}
 
 	policy := u.retryPolicyResolver.Resolve(cmd.RetryPolicy)
-	log.Printf("correlation_id=%s resolved retry policy: attempts=%d initial=%s max=%s", cmd.CorrelationID, policy.MaxAttempts, policy.InitialBackoff, policy.MaxBackoff)
+	u.logger.Info("resolved retry policy",
+		zap.String("correlation_id", cmd.CorrelationID),
+		zap.Int("attempt", int(cmd.Attempt)),
+		zap.Int("max_attempts", policy.MaxAttempts),
+		zap.Duration("initial_backoff", policy.InitialBackoff),
+		zap.Duration("max_backoff", policy.MaxBackoff),
+	)
 
 	attempts := 0
 	var lastResp *domain.PublishResult
 
 	for attempts < policy.MaxAttempts {
 		attempts++
+		attemptNumber := attempts + int(cmd.Attempt)
 		resp := u.publishOnce(ctx, publishAttempt{
 			owner:         owner,
 			repository:    repository,
@@ -103,7 +116,14 @@ func (u *PublishUseCase) Execute(ctx context.Context, cmd domain.PublishCommand)
 			commitMessage: commitMessage,
 		})
 
-		log.Printf("correlation_id=%s publish attempt status=%v error_code=%v commit=%s pr=%d", cmd.CorrelationID, resp.Status, resp.ErrorCode, resp.CommitSHA, resp.PullRequestNumber)
+		u.logger.Info("publish attempt finished",
+			zap.String("correlation_id", cmd.CorrelationID),
+			zap.Int("status", int(resp.Status)),
+			zap.Int("error_code", int(resp.ErrorCode)),
+			zap.String("commit_sha", resp.CommitSHA),
+			zap.Int64("pr_number", resp.PullRequestNumber),
+			zap.Int("attempt", attemptNumber),
+		)
 
 		if resp.Status != domain.PublishStatusTemporaryFailure {
 			if resp.Status == domain.PublishStatusSuccess {
@@ -117,7 +137,15 @@ func (u *PublishUseCase) Execute(ctx context.Context, cmd domain.PublishCommand)
 		if attempts >= policy.MaxAttempts {
 			break
 		}
-		log.Printf("correlation_id=%s temporary publish failure, retry in %s (attempt %d/%d)", cmd.CorrelationID, delay, attempts, policy.MaxAttempts)
+		u.logger.Info("temporary publish failure, scheduling retry",
+			zap.String("correlation_id", cmd.CorrelationID),
+			zap.Int("status", int(resp.Status)),
+			zap.Int("error_code", int(resp.ErrorCode)),
+			zap.String("commit_sha", resp.CommitSHA),
+			zap.Int64("pr_number", resp.PullRequestNumber),
+			zap.Int("attempt", attemptNumber),
+			zap.Duration("retry_in", delay),
+		)
 		select {
 		case <-ctx.Done():
 			resp.RetryAfter = delay
