@@ -140,10 +140,18 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 		nextStage := f.router.NextStageAfterStore(doc)
 		switch nextStage {
 		case domain.JobStagePreprocessToDocx:
+			originalETag := strings.TrimSpace(latestVersion(doc).OriginalETag)
+			if originalETag == "" {
+				originalETag = strings.TrimSpace(domain.StoreOriginalPayloadFromMap(job.Payload).OriginalETag)
+			}
+			if originalETag == "" {
+				return fmt.Errorf("original etag is required to schedule preprocess for document %s", doc.ID)
+			}
+
 			payload := domain.PreprocessPayload{
 				OriginalBucket:     doc.OriginalBucket,
 				OriginalObjectKey:  doc.OriginalObjectKey,
-				OriginalETag:       latestVersion(doc).OriginalETag,
+				OriginalETag:       originalETag,
 				FilenameExtension:  fileExtension(firstNonEmpty(doc.OriginalObjectKey, doc.Name)),
 				JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
 			}.ToMap()

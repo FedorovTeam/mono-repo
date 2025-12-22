@@ -53,6 +53,9 @@ func (uc *ConfirmUpload) Execute(ctx context.Context, in ConfirmUploadInput) (*d
 	if err != nil {
 		return nil, fmt.Errorf("storage validation failed: %w", err)
 	}
+	if strings.TrimSpace(etag) == "" {
+		return nil, errors.New("etag is required")
+	}
 
 	payload := domain.StoreOriginalPayload{Bucket: in.Bucket, ObjectKey: in.ObjectKey, OriginalETag: etag}.ToMap()
 	job := &domain.ProcessingJob{
