@@ -108,6 +108,10 @@ func (r *Runner) workerLoop(ctx context.Context) error {
 			return err
 		}
 
+		r.logger.Debug("worker tick started",
+			zap.Duration("poll_period", r.pollPeriod),
+		)
+
 		processCtx := ctx
 		cancel := func() {}
 		if r.cfg.ProcessingTimeout > 0 {
@@ -120,11 +124,15 @@ func (r *Runner) workerLoop(ctx context.Context) error {
 			r.logger.Error("process extraction job failed", zap.Error(err))
 		}
 		if !processed {
+			r.logger.Debug("no jobs processed on tick",
+				zap.Duration("next_delay", delay.cur),
+			)
 			if err := r.wait(ctx, delay.next()); err != nil {
 				return err
 			}
 			continue
 		}
+		r.logger.Debug("job processed on tick")
 		delay.reset()
 	}
 }
@@ -144,6 +152,10 @@ func (r *Runner) maintenanceLoop(ctx context.Context) error {
 			r.logger.Warn("failed to restore stuck processing jobs", zap.Error(err))
 		} else if restored > 0 || failed > 0 {
 			r.logger.Info("restored stuck jobs", zap.Int("restored", restored), zap.Int("marked_failed", failed))
+		} else {
+			r.logger.Debug("no stuck jobs to restore",
+				zap.Duration("processing_timeout", r.cfg.ProcessingTimeout),
+			)
 		}
 
 		retried, err := r.processor.RetryFailed(ctx, r.cfg.Retry.MaxAttempts, r.cfg.Retry.BackoffInterval)
@@ -151,6 +163,10 @@ func (r *Runner) maintenanceLoop(ctx context.Context) error {
 			r.logger.Warn("failed to retry jobs", zap.Error(err))
 		} else if retried > 0 {
 			r.logger.Info("retried failed jobs", zap.Int("count", retried))
+		} else {
+			r.logger.Debug("no failed jobs to retry",
+				zap.Int("max_attempts", r.cfg.Retry.MaxAttempts),
+			)
 		}
 
 		cleaned, err := r.processor.CleanupFinished(ctx, r.cfg.CleanupRetention)
@@ -158,6 +174,10 @@ func (r *Runner) maintenanceLoop(ctx context.Context) error {
 			r.logger.Warn("failed to cleanup finished jobs", zap.Error(err))
 		} else if cleaned > 0 {
 			r.logger.Info("cleaned finished jobs", zap.Int("removed", cleaned))
+		} else {
+			r.logger.Debug("no finished jobs to cleanup",
+				zap.Duration("cleanup_retention", r.cfg.CleanupRetention),
+			)
 		}
 	}
 }

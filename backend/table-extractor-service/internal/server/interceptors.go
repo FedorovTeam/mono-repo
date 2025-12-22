@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 func (s *GRPCServer) buildUnaryInterceptor() grpc.UnaryServerInterceptor {
@@ -16,6 +17,16 @@ func (s *GRPCServer) buildUnaryInterceptor() grpc.UnaryServerInterceptor {
 		ctx = s.cids.WithOutgoing(ctx, correlationID)
 
 		start := time.Now()
+		requestSize := 0
+		if msg, ok := req.(proto.Message); ok {
+			requestSize = proto.Size(msg)
+		}
+
+		s.logger.Debug("gRPC call started",
+			zap.String("method", info.FullMethod),
+			zap.String("correlation_id", correlationID),
+			zap.Int("request_size", requestSize),
+		)
 		var (
 			resp interface{}
 			err  error
@@ -52,7 +63,7 @@ func (s *GRPCServer) buildUnaryInterceptor() grpc.UnaryServerInterceptor {
 			fields = append(fields, zap.String("code", st.Code().String()))
 			s.logger.Error("gRPC request failed", append(fields, zap.Error(err))...)
 		} else {
-			s.logger.Info("gRPC request handled", fields...)
+			s.logger.Debug("gRPC request handled", fields...)
 		}
 
 		return resp, err

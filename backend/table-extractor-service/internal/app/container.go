@@ -64,8 +64,8 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 
 	repo := sqlrepo.NewSQLRepository(db, dialect)
 
-	storageClient := objectstorage.NewMinioStorage(minioClient, cfg.Storage)
-	fileCache := filecache.NewTempCache(storageClient)
+	storageClient := objectstorage.NewMinioStorage(minioClient, cfg.Storage, logger)
+	fileCache := filecache.NewTempCache(storageClient, logger)
 
 	extractAdapter := extractor.NewAdapter(extractor.Config{
 		PdfInfoPath:         cfg.Extractor.PdfInfoPath,
