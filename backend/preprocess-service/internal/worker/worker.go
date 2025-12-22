@@ -121,6 +121,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.ensureLogger()
 
 	if err := w.acquireLock(ctx); err != nil {
+		w.waitGroup.Wait()
 		return err
 	}
 
@@ -149,10 +150,16 @@ func (w *Worker) Run(ctx context.Context) error {
 			continue
 		}
 
+		if err := w.sem.Acquire(ctx, 1); err != nil {
+			w.waitGroup.Wait()
+			return err
+		}
+
 		w.logger.Debug("picking next job for processing")
 		job, found, err := w.repo.NextForProcessing(ctx)
 		if err != nil {
 			w.logger.Error("failed to pick job", zap.Error(err))
+			w.sem.Release(1)
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
@@ -161,6 +168,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		if !found {
 			w.logger.Debug("no jobs ready for processing, waiting for next tick")
+			w.sem.Release(1)
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
@@ -171,9 +179,6 @@ func (w *Worker) Run(ctx context.Context) error {
 			zap.String("job_id", job.ID),
 			zap.String("correlation_id", job.CorrelationID),
 		)
-		if err := w.sem.Acquire(ctx, 1); err != nil {
-			return err
-		}
 
 		w.waitGroup.Add(1)
 		go func(job domain.PreprocessJob) {
@@ -199,19 +204,28 @@ func (w *Worker) acquireLock(ctx context.Context) error {
 		return fmt.Errorf("worker repo is not configured")
 	}
 
-	lock, acquired, err := w.repo.TryAcquireWorkerLock(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire worker lock: %w", err)
+	for {
+		lock, acquired, err := w.repo.TryAcquireWorkerLock(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire worker lock: %w", err)
+		}
+
+		if acquired {
+			w.lock = lock
+			w.logger.Info("worker lock acquired")
+			return nil
+		}
+
+		w.logger.Info("worker lock is held, waiting for release")
+
+		timer := time.NewTimer(w.cfg.PollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-
-	if !acquired {
-		return fmt.Errorf("worker lock is already held")
-	}
-
-	w.lock = lock
-	w.logger.Info("worker lock acquired")
-
-	return nil
 }
 
 func (w *Worker) releaseLock(ctx context.Context) {
