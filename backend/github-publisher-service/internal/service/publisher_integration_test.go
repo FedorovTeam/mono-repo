@@ -3,21 +3,21 @@ package service
 import (
 	infragithub "backend-github-publisher-service/internal/infrastructure/github"
 	"backend-github-publisher-service/pkg/config"
-	"bytes"
 	"context"
 	"encoding/json"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"strings"
 	"testing"
 
 	githubpublisherv1 "backend-github-publisher-service/proto/backend/githubpublisher/v1"
 	"github.com/dnaeon/go-vcr/cassette"
 	"github.com/dnaeon/go-vcr/recorder"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -40,6 +40,22 @@ func (s *stubStorage) LoadMarkdown(ctx context.Context, bucket, key string) ([]b
 		return nil, s.err
 	}
 	return []byte(s.data), nil
+}
+
+func newObservedLogger(level zapcore.Level) (*zap.Logger, *observer.ObservedLogs) {
+	core, logs := observer.New(level)
+	return zap.New(core), logs
+}
+
+func correlationLogged(logs *observer.ObservedLogs, correlationID string) bool {
+	for _, entry := range logs.All() {
+		for _, field := range entry.Context {
+			if field.Key == "correlation_id" && field.String == correlationID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestPublishMarkdownIntegration(t *testing.T) {
@@ -110,12 +126,13 @@ func TestPublishMarkdownIntegration(t *testing.T) {
 		},
 	}
 
+	logger := zap.NewNop()
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	storageStub := &stubStorage{data: "# Hi"}
 	httpClient := &http.Client{Transport: rec}
 	publisher := infragithub.NewPublisher(cfg.GitHub, httpClient)
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, storageStub))
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, logger, publisher, storageStub))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
@@ -203,11 +220,12 @@ func TestPublishMarkdownIntegration_RepositoryWithSlashAndEmptyOwner(t *testing.
 		},
 	}
 
+	logger := zap.NewNop()
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	storageStub := &stubStorage{data: "# Hi"}
 	publisher := infragithub.NewPublisher(cfg.GitHub, server.Client())
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, storageStub))
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, logger, publisher, storageStub))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
@@ -249,10 +267,11 @@ func TestPublishMarkdownIntegration_RepositoryWithSlashAndEmptyOwner(t *testing.
 func TestPublishMarkdownIntegration_RepositoryWithSlashOwnerMismatch(t *testing.T) {
 	cfg := &config.Config{GitHub: config.GitHubConfig{Token: "token"}}
 
+	logger := zap.NewNop()
 	lis := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	publisher := infragithub.NewPublisher(cfg.GitHub, &http.Client{})
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, &stubStorage{data: "# Hi"}))
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, logger, publisher, &stubStorage{data: "# Hi"}))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
@@ -296,10 +315,7 @@ func TestPublishMarkdownIntegration_GitHubError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var logBuf bytes.Buffer
-	originalWriter := log.Writer()
-	log.SetOutput(&logBuf)
-	t.Cleanup(func() { log.SetOutput(originalWriter) })
+	logger, observedLogs := newObservedLogger(zapcore.InfoLevel)
 
 	cfg := &config.Config{
 		GitHub: config.GitHubConfig{
@@ -316,7 +332,7 @@ func TestPublishMarkdownIntegration_GitHubError(t *testing.T) {
 	grpcServer := grpc.NewServer()
 	storageStub := &stubStorage{data: "# fail"}
 	publisher := infragithub.NewPublisher(cfg.GitHub, server.Client())
-	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, publisher, storageStub))
+	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, NewPublisherServer(cfg, logger, publisher, storageStub))
 
 	go func() {
 		_ = grpcServer.Serve(lis)
@@ -354,7 +370,7 @@ func TestPublishMarkdownIntegration_GitHubError(t *testing.T) {
 	if resp.GetErrorCode() != githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_SERVER_ERROR {
 		t.Fatalf("unexpected error code: %v", resp.GetErrorCode())
 	}
-	if !strings.Contains(logBuf.String(), "corr-error") {
+	if !correlationLogged(observedLogs, "corr-error") {
 		t.Fatalf("correlation id not logged")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"backend-github-publisher-service/internal/infrastructure/storage"
 	"backend-github-publisher-service/pkg/config"
 	"context"
+	"go.uber.org/zap"
 	"strings"
 
 	"backend-github-publisher-service/internal/domain"
@@ -24,10 +25,10 @@ type PublisherServer struct {
 }
 
 // NewPublisherServer создаёт сервер публикации.
-func NewPublisherServer(cfg *config.Config, publisher domain.GitHubPublisher, storage storage.MarkdownLoader) *PublisherServer {
+func NewPublisherServer(cfg *config.Config, logger *zap.Logger, publisher domain.GitHubPublisher, storage storage.MarkdownLoader) *PublisherServer {
 	retryResolver := usecase.NewRetryPolicyResolver(domain.RetryPolicy{InitialBackoff: cfg.Retry.InitialBackoff, MaxBackoff: cfg.Retry.MaxBackoff, MaxAttempts: cfg.Retry.MaxAttempts})
 	idempotency := usecase.NewMemoryIdempotencyStore()
-	uc := usecase.NewPublishUseCase(publisher, storage, idempotency, retryResolver, cfg.GitHub.Owner, cfg.GitHub.Repository, cfg.GitHub.DefaultBranch)
+	uc := usecase.NewPublishUseCase(logger, publisher, storage, idempotency, retryResolver, cfg.GitHub.Owner, cfg.GitHub.Repository, cfg.GitHub.DefaultBranch)
 
 	header := cfg.GitHub.CorrelationHeader
 	if header == "" {

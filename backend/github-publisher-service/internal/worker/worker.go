@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 )
 
 // Config описывает параметры фонового воркера публикации.
@@ -37,10 +37,11 @@ type Worker struct {
 	maxAttempts  int
 	backoff      time.Duration
 	stage        string
+	logger       *zap.Logger
 }
 
 // New создаёт воркер и соединение с БД.
-func New(ctx context.Context, cfg Config) (*Worker, error) {
+func New(ctx context.Context, cfg Config, logger *zap.Logger) (*Worker, error) {
 	if cfg.DSN == "" {
 		return nil, errors.New("processing.dsn is required")
 	}
@@ -65,6 +66,10 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		backoff = 5 * time.Second
 	}
 
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	pool, err := pgxpool.New(ctx, cfg.DSN)
 	if err != nil {
 		return nil, err
@@ -76,6 +81,7 @@ func New(ctx context.Context, cfg Config) (*Worker, error) {
 		maxAttempts:  maxAttempts,
 		backoff:      backoff,
 		stage:        stage,
+		logger:       logger,
 	}, nil
 }
 
@@ -113,7 +119,7 @@ func (w *Worker) processLoop(ctx context.Context) {
 
 		tx, err := w.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 		if err != nil {
-			log.Printf("worker: begin tx: %v", err)
+			w.logError("begin transaction", nil, err)
 			return
 		}
 
@@ -123,18 +129,18 @@ func (w *Worker) processLoop(ctx context.Context) {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return
 			}
-			log.Printf("worker: select job: %v", err)
+			w.logError("select job", nil, err)
 			return
 		}
 
 		if err := w.handleJob(ctx, tx, job); err != nil {
 			_ = tx.Rollback(ctx)
-			log.Printf("worker: handle job %s: %v", job.TaskID, err)
+			w.logError("handle job", job, err)
 			continue
 		}
 
 		if err := tx.Commit(ctx); err != nil {
-			log.Printf("worker: commit job %s: %v", job.TaskID, err)
+			w.logError("commit job", job, err)
 		}
 	}
 }
@@ -232,4 +238,41 @@ func (w *Worker) insertEvent(ctx context.Context, tx pgx.Tx, jobID, status, even
         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, '{}'::jsonb, now())
     `, jobID, w.stage, status, eventType, message)
 	return err
+}
+
+func (w *Worker) logError(message string, j *job, err error) {
+	fields := w.jobFields(j)
+	fields = append(fields, zap.Error(err))
+	w.logger.With(fields...).Error(message)
+}
+
+func (w *Worker) jobFields(j *job) []zap.Field {
+	correlationID := ""
+	stage := w.stage
+	taskID := ""
+	documentID := ""
+	attempts := 0
+	status := ""
+
+	if j != nil {
+		taskID = j.TaskID
+		documentID = j.DocumentID
+		attempts = j.Attempts
+		status = j.Status
+		if j.Stage != "" {
+			stage = j.Stage
+		}
+		if cid, ok := j.Payload["correlation_id"].(string); ok {
+			correlationID = cid
+		}
+	}
+
+	return []zap.Field{
+		zap.String("task_id", taskID),
+		zap.String("stage", stage),
+		zap.Int("attempts", attempts),
+		zap.String("document_id", documentID),
+		zap.String("correlation_id", correlationID),
+		zap.String("status", status),
+	}
 }

@@ -4,6 +4,7 @@ import (
 	githubclient "backend-github-publisher-service/internal/infrastructure/github"
 	"context"
 	"errors"
+	"go.uber.org/zap"
 	"net/http"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestPublishUseCase_ReturnsValidationError(t *testing.T) {
-	uc := NewPublishUseCase(&mocks.GitHubPublisher{}, nil, NewMemoryIdempotencyStore(), NewRetryPolicyResolver(domain.RetryPolicy{MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}), "", "", "")
+	uc := NewPublishUseCase(zap.NewNop(), &mocks.GitHubPublisher{}, nil, NewMemoryIdempotencyStore(), NewRetryPolicyResolver(domain.RetryPolicy{MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}), "", "", "")
 
 	_, err := uc.Execute(context.Background(), domain.PublishCommand{})
 	var validationErr *domain.ValidationError
@@ -25,7 +26,7 @@ func TestPublishUseCase_ReturnsValidationError(t *testing.T) {
 func TestPublishUseCase_LoadsContentFromStorage(t *testing.T) {
 	markdown := &stubMarkdown{data: []byte("# hi")}
 	publisher := &mocks.GitHubPublisher{CommitResult: "commit-1"}
-	uc := NewPublishUseCase(publisher, markdown, NewMemoryIdempotencyStore(), NewRetryPolicyResolver(domain.RetryPolicy{MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}), "owner", "repo", "main")
+	uc := NewPublishUseCase(zap.NewNop(), publisher, markdown, NewMemoryIdempotencyStore(), NewRetryPolicyResolver(domain.RetryPolicy{MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}), "owner", "repo", "main")
 
 	result, err := uc.Execute(context.Background(), domain.PublishCommand{Path: "docs/a.md", Bucket: "b", ObjectKey: "k"})
 	if err != nil {
@@ -50,7 +51,7 @@ func TestPublishUseCase_IdempotencyHit(t *testing.T) {
 	store := NewMemoryIdempotencyStore()
 	store.Save("idem", &domain.PublishResult{Status: domain.PublishStatusSuccess, CommitSHA: "cached"})
 	publisher := &mocks.GitHubPublisher{}
-	uc := NewPublishUseCase(publisher, nil, store, NewRetryPolicyResolver(domain.RetryPolicy{MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}), "owner", "repo", "main")
+	uc := NewPublishUseCase(zap.NewNop(), publisher, nil, store, NewRetryPolicyResolver(domain.RetryPolicy{MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}), "owner", "repo", "main")
 
 	result, err := uc.Execute(context.Background(), domain.PublishCommand{Path: "p.md", IdempotencyKey: "idem"})
 	if err != nil {
@@ -75,7 +76,7 @@ func TestPublishUseCase_RetryOnTemporaryFailure(t *testing.T) {
 	}
 
 	policy := domain.RetryPolicy{MaxAttempts: 3, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond}
-	uc := NewPublishUseCase(publisher, nil, NewMemoryIdempotencyStore(), NewRetryPolicyResolver(policy), "owner", "repo", "main")
+	uc := NewPublishUseCase(zap.NewNop(), publisher, nil, NewMemoryIdempotencyStore(), NewRetryPolicyResolver(policy), "owner", "repo", "main")
 
 	result, err := uc.Execute(context.Background(), domain.PublishCommand{Path: "p.md", Content: "data"})
 	if err != nil {
