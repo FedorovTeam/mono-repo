@@ -42,6 +42,8 @@ interface UploadResponse {
   errors?: { message: string }[];
 }
 
+const KNOWLEDGE_ROOT = 'knowledge/docs';
+
 export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [repository, setRepository] = useState('docs');
@@ -87,7 +89,7 @@ export default function HomePage() {
           return { path: null, error: 'Введите номер стенограммы' };
         }
         return {
-          path: `plenary/${formatWithLeadingZeros(session)}/transcripts/stenogramma-${formatWithLeadingZeros(transcript)}.md`,
+          path: `${KNOWLEDGE_ROOT}/plenary/${formatWithLeadingZeros(session)}/transcripts/stenogramma-${formatWithLeadingZeros(transcript)}.md`,
           error: null,
         };
       }
@@ -98,7 +100,7 @@ export default function HomePage() {
       }
 
       return {
-        path: `plenary/${formatWithLeadingZeros(session)}/votings/question-${formatWithLeadingZeros(question)}.md`,
+        path: `${KNOWLEDGE_ROOT}/plenary/${formatWithLeadingZeros(session)}/votings/question-${formatWithLeadingZeros(question)}.md`,
         error: null,
       };
     };
@@ -110,7 +112,7 @@ export default function HomePage() {
       }
 
       if (bibliographyFields.type === 'deputies') {
-        return { path: `bibliography/deputies/${slug}.md`, error: null };
+        return { path: `${KNOWLEDGE_ROOT}/bibliography/deputies/${slug}.md`, error: null };
       }
 
       return { path: null, error: 'Неизвестная категория библиографии' };
