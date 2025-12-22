@@ -59,7 +59,7 @@ func BuildDependencies(ctx context.Context, cfg config.Config, logger *zap.Logge
 		return app.Dependencies{}, fmt.Errorf("connect postgres: %w", err)
 	}
 
-	repo := postgres.NewPreprocessRepository(dbpool)
+	repo := postgres.NewPreprocessRepository(dbpool, logger)
 
 	storageAdapter, err := buildStorageAdapter(cfg, logger)
 	if err != nil {

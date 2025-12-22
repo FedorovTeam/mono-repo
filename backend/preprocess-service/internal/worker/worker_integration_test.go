@@ -39,7 +39,7 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	db, terminate := setupPostgres(ctx, t)
 	defer terminate()
 
-	repo := postgres.NewPreprocessRepository(db)
+	repo := postgres.NewPreprocessRepository(db, zaptest.NewLogger(t))
 	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("init submit service: %v", err)

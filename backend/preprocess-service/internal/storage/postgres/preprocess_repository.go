@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"preprocess-service/internal/domain"
 )
@@ -16,15 +18,24 @@ import (
 type pgxPool interface {
 	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 type PreprocessRepository struct {
-	db pgxPool
+	db     pgxPool
+	logger *zap.Logger
 }
 
-func NewPreprocessRepository(db pgxPool) *PreprocessRepository {
-	return &PreprocessRepository{db: db}
+func NewPreprocessRepository(db pgxPool, logger *zap.Logger) *PreprocessRepository {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	return &PreprocessRepository{
+		db:     db,
+		logger: logger,
+	}
 }
 
 func (r *PreprocessRepository) Create(ctx context.Context, job domain.PreprocessJob) error {
@@ -76,6 +87,8 @@ func (r *PreprocessRepository) Create(ctx context.Context, job domain.Preprocess
 		return fmt.Errorf("insert job: %w", err)
 	}
 
+	r.logJob(zap.InfoLevel, "preprocess job created", normalized, domain.StatusUnspecified, normalized.Status)
+
 	return nil
 }
 
@@ -109,10 +122,11 @@ func (r *PreprocessRepository) RequeueStuck(ctx context.Context, convertTimeout,
 	staleStartedBefore := now.Add(-(convertTimeout + backoff))
 	nextRunAt := now.Add(backoff)
 
-	_, err := r.db.Exec(ctx, `
+	rows, err := r.db.Query(ctx, `
         UPDATE preprocess_queue
         SET status = $1, attempts = attempts + 1, next_run_at = $2, updated_at = $3
         WHERE status = $4 AND started_at IS NOT NULL AND started_at < $5
+        RETURNING job_id, correlation_id, attempts, next_run_at
     `,
 		toStatusString(domain.StatusFailed),
 		nextRunAt,
@@ -122,6 +136,32 @@ func (r *PreprocessRepository) RequeueStuck(ctx context.Context, convertTimeout,
 	)
 	if err != nil {
 		return fmt.Errorf("requeue stuck jobs: %w", err)
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			jobID         string
+			correlationID *string
+			attempts      int
+			updatedNext   time.Time
+		)
+
+		if err := rows.Scan(&jobID, &correlationID, &attempts, &updatedNext); err != nil {
+			return fmt.Errorf("scan requeued job: %w", err)
+		}
+
+		r.logJob(zap.InfoLevel, "requeued stuck preprocess job", domain.PreprocessJob{
+			ID:            jobID,
+			CorrelationID: derefString(correlationID),
+			Attempts:      attempts,
+			NextRunAt:     updatedNext,
+		}, domain.StatusProcessing, domain.StatusFailed)
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate requeued jobs: %w", err)
 	}
 
 	return nil
@@ -171,6 +211,8 @@ func (r *PreprocessRepository) NextForProcessing(ctx context.Context) (domain.Pr
 		return domain.PreprocessJob{}, false, fmt.Errorf("commit tx: %w", err)
 	}
 
+	r.logJob(zap.InfoLevel, "preprocess job picked for processing", updatedJob, job.Status, updatedJob.Status)
+
 	return updatedJob, true, nil
 }
 
@@ -186,6 +228,9 @@ func (r *PreprocessRepository) MarkDone(ctx context.Context, job domain.Preproce
             target_media_type = $6, error_code = NULL, error_message = NULL, error_details = '{}'::jsonb
         WHERE job_id = $1
     `, completed.ID, toStatusString(completed.Status), completed.FinishedAt, completed.TargetBucket, completed.TargetKey, completed.TargetMediaType)
+	if err == nil {
+		r.logJob(zap.InfoLevel, "preprocess job marked done", completed, job.Status, completed.Status)
+	}
 	return err
 }
 
@@ -215,6 +260,7 @@ func (r *PreprocessRepository) MarkFailed(ctx context.Context, job domain.Prepro
 	if update.Status == domain.StatusStopped {
 		job.FinishedAt = finishedAt
 	}
+	job.NextRunAt = update.NextRunAt
 
 	if err := job.Validate(); err != nil {
 		return fmt.Errorf("validate job %s: %w", job.ID, err)
@@ -227,6 +273,10 @@ func (r *PreprocessRepository) MarkFailed(ctx context.Context, job domain.Prepro
             target_bucket = COALESCE($9, target_bucket), target_key = COALESCE($10, target_key), updated_at = $4
         WHERE job_id = $1
     `, job.ID, toStatusString(update.Status), update.NextRunAt, finishedAt, toStatusString(domain.StatusStopped), update.Code.String(), update.Message, string(detailsJSON), nullableString(update.TargetBucket), nullableString(update.TargetKey))
+
+	if err == nil {
+		r.logJob(zap.InfoLevel, "preprocess job marked failed", job, job.Status, update.Status)
+	}
 
 	return err
 }
@@ -364,6 +414,28 @@ func derefString(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func (r *PreprocessRepository) logJob(level zapcore.Level, message string, job domain.PreprocessJob, statusFrom, statusTo domain.PreprocessStatus) {
+	if r.logger == nil {
+		return
+	}
+
+	fields := []zap.Field{
+		zap.String("job_id", job.ID),
+		zap.String("status_from", statusFrom.String()),
+		zap.String("status_to", statusTo.String()),
+		zap.Int("attempts", job.Attempts),
+		zap.Time("next_run_at", job.NextRunAt),
+	}
+
+	if job.CorrelationID != "" {
+		fields = append(fields, zap.String("correlation_id", job.CorrelationID))
+	}
+
+	if ce := r.logger.Check(level, message); ce != nil {
+		ce.Write(fields...)
+	}
 }
 
 func nullableTime(value time.Time) *time.Time {
