@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/mono-repo/table-extractor-service/internal/usecase"
-	"pdf2md"
+	"github.com/mono-repo/table-extractor-service/internal/voting"
 )
 
 const (
@@ -83,7 +83,7 @@ type ParsedTables struct {
 	RawTables        []RawTable
 	NormalizedTables []NormalizedTable
 	HeaderText       string
-	Document         *pdf2md.Document `json:"-"`
+	Document         *voting.Document `json:"-"`
 }
 
 type RawTable struct {
