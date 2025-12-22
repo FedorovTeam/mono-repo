@@ -38,6 +38,12 @@ func NewPreprocessRepository(db pgxPool, logger *zap.Logger) *PreprocessReposito
 	}
 }
 
+// TryAcquireWorkerLock пытается захватить распределённый замок на воркер очереди.
+// Реализован через pg_advisory_lock с фиксированным ключом, чтобы сериализовать работу нескольких реплик.
+func (r *PreprocessRepository) TryAcquireWorkerLock(ctx context.Context) (domain.LockHandle, bool, error) {
+	return NewWorkerLocker(r.db).TryLock(ctx)
+}
+
 func (r *PreprocessRepository) Create(ctx context.Context, job domain.PreprocessJob) error {
 	normalized := normalizeJob(job)
 

@@ -37,6 +37,7 @@ type Worker struct {
 	waitGroup sync.WaitGroup
 	processor *preprocess.Service
 	repo      domain.PreprocessJobRepository
+	lock      domain.LockHandle
 }
 
 type Dependencies struct {
@@ -119,6 +120,12 @@ func normalizeConfig(cfg Config) Config {
 func (w *Worker) Run(ctx context.Context) error {
 	w.ensureLogger()
 
+	if err := w.acquireLock(ctx); err != nil {
+		return err
+	}
+
+	defer w.releaseLock(context.Background())
+
 	ticker := time.NewTicker(w.cfg.PollInterval)
 	defer ticker.Stop()
 
@@ -185,6 +192,39 @@ func (w *Worker) waitForNext(ctx context.Context, ticker *time.Ticker) bool {
 	case <-ticker.C:
 		return true
 	}
+}
+
+func (w *Worker) acquireLock(ctx context.Context) error {
+	if w.repo == nil {
+		return fmt.Errorf("worker repo is not configured")
+	}
+
+	lock, acquired, err := w.repo.TryAcquireWorkerLock(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire worker lock: %w", err)
+	}
+
+	if !acquired {
+		return fmt.Errorf("worker lock is already held")
+	}
+
+	w.lock = lock
+	w.logger.Info("worker lock acquired")
+
+	return nil
+}
+
+func (w *Worker) releaseLock(ctx context.Context) {
+	if w.lock == nil {
+		return
+	}
+
+	if err := w.lock.Release(ctx); err != nil {
+		w.logger.Error("failed to release worker lock", zap.Error(err))
+		return
+	}
+
+	w.logger.Info("worker lock released")
 }
 
 func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
