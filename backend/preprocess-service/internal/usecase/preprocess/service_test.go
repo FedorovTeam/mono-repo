@@ -473,6 +473,7 @@ func TestConvertFailureAddsConverterDetails(t *testing.T) {
 	}
 	converterResult := ports.ConvertResult{
 		ExitCode: 3,
+		Output:   "convert stdout\nconvert stderr",
 		Stdout:   "sample stdout",
 		Stderr:   "sample stderr",
 		Duration: 1500 * time.Millisecond,
@@ -515,16 +516,13 @@ func TestConvertFailureAddsConverterDetails(t *testing.T) {
 	}
 
 	details := repo.failures[0].Details
-	if details["converter_exit_code"] != "3" {
-		t.Fatalf("unexpected converter exit code detail: %s", details["converter_exit_code"])
+	if details["lo_exit_code"] != "3" {
+		t.Fatalf("unexpected converter exit code detail: %s", details["lo_exit_code"])
 	}
-	if details["converter_stdout"] != converterResult.Stdout {
-		t.Fatalf("unexpected converter stdout detail: %s", details["converter_stdout"])
+	if details["lo_output"] != converterResult.Output {
+		t.Fatalf("unexpected converter output detail: %s", details["lo_output"])
 	}
-	if details["converter_stderr"] != converterResult.Stderr {
-		t.Fatalf("unexpected converter stderr detail: %s", details["converter_stderr"])
-	}
-	if details["converter_duration_ms"] == "" {
+	if details["lo_duration_ms"] == "" {
 		t.Fatalf("expected converter duration to be recorded, got empty string")
 	}
 }
