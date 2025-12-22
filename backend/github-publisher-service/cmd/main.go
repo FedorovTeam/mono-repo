@@ -4,11 +4,11 @@ import (
 	"backend-github-publisher-service/internal/infrastructure/github"
 	"backend-github-publisher-service/internal/infrastructure/storage"
 	"backend-github-publisher-service/pkg/config"
+	"backend-github-publisher-service/pkg/logger"
 	"backend-github-publisher-service/pkg/observability"
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -28,23 +28,35 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
 	}
+
+	_, zapSugar, syncLogger, err := logger.Init(cfg.Logging)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to init logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := syncLogger(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to sync logger: %v\n", err)
+		}
+	}()
 
 	otelProviders, shutdownTelemetry, err := observability.Setup(context.Background(), cfg.Observability)
 	if err != nil {
-		log.Fatalf("failed to init observability: %v", err)
+		zapSugar.Fatalf("failed to init observability: %v", err)
 	}
 	defer func() {
 		if err := shutdownTelemetry(context.Background()); err != nil {
-			log.Printf("failed to shutdown observability: %v", err)
+			zapSugar.Warnf("failed to shutdown observability: %v", err)
 		}
 	}()
 
 	addr := fmt.Sprintf(":%d", cfg.Service.GRPCPort)
 	minioStorage, err := storage.NewMinioMarkdownLoader(cfg.Minio)
 	if err != nil {
-		log.Fatalf("failed to init minio client: %v", err)
+		zapSugar.Fatalf("failed to init minio client: %v", err)
 	}
 
 	workerCfg := worker.Config{
@@ -57,13 +69,13 @@ func main() {
 
 	processingWorker, err := worker.New(ctx, workerCfg)
 	if err != nil {
-		log.Fatalf("failed to init processing worker: %v", err)
+		zapSugar.Fatalf("failed to init processing worker: %v", err)
 	}
 	defer processingWorker.Close()
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		zapSugar.Fatalf("failed to listen: %v", err)
 	}
 
 	grpcServer := grpc.NewServer(observability.GRPCServerOptions(otelProviders)...)
@@ -73,7 +85,7 @@ func main() {
 
 	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, publisher)
 	go func() {
-		log.Printf("starting processing worker for stage=%s", workerCfg.Stage)
+		zapSugar.Infof("starting processing worker for stage=%s", workerCfg.Stage)
 		processingWorker.Run(ctx)
 	}()
 
@@ -82,9 +94,9 @@ func main() {
 		grpcServer.GracefulStop()
 	}()
 
-	log.Printf("github-publisher-service gRPC server listening on %s", addr)
+	zapSugar.Infof("github-publisher-service gRPC server listening on %s", addr)
 
 	if err := grpcServer.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-		log.Fatalf("gRPC server stopped: %v", err)
+		zapSugar.Fatalf("gRPC server stopped: %v", err)
 	}
 }

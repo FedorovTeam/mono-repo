@@ -13,6 +13,7 @@ const defaultConfigPath = "config/config.yaml"
 // Config описывает настройки сервиса и GitHub клиента.
 type Config struct {
 	Service       ServiceConfig       `yaml:"service"`
+	Logging       LoggingConfig       `yaml:"logging"`
 	GitHub        GitHubConfig        `yaml:"github"`
 	Minio         MinioConfig         `yaml:"minio"`
 	Observability ObservabilityConfig `yaml:"observability"`
@@ -24,6 +25,13 @@ type Config struct {
 type ServiceConfig struct {
 	Name     string `yaml:"name"`
 	GRPCPort int    `yaml:"grpc_port"`
+}
+
+// LoggingConfig описывает настройки логирования.
+type LoggingConfig struct {
+	Level       string `yaml:"level"`
+	Encoding    string `yaml:"encoding"`
+	Development bool   `yaml:"development"`
 }
 
 // GitHubConfig хранит параметры доступа к GitHub API.
@@ -90,6 +98,13 @@ func Load() (*Config, error) {
 
 	if cfg.GitHub.CorrelationHeader == "" {
 		cfg.GitHub.CorrelationHeader = "X-Correlation-ID"
+	}
+
+	if cfg.Logging.Level == "" {
+		cfg.Logging.Level = "info"
+	}
+	if cfg.Logging.Encoding == "" {
+		cfg.Logging.Encoding = "json"
 	}
 
 	if cfg.Observability.ServiceName == "" {

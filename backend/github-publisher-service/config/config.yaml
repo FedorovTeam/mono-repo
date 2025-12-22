@@ -2,6 +2,11 @@ service:
   name: github-publisher-service
   grpc_port: 9090
 
+logging:
+  level: info
+  encoding: json
+  development: false
+
 github:
   base_url: https://api.github.com
   owner: FedorovTeam
