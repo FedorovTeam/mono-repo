@@ -18,6 +18,7 @@ preprocess:
   libreoffice_path: /usr/bin/libreoffice
   working_dir: /tmp/preprocess-service/work
   output_dir: /tmp/preprocess-service/output # итоговый DOCX сохраняется здесь, воркер использует подкаталог с job_id
+  # Обработка выполняется строго последовательно: параллельность воркера отключена.
   storage_mode: minio # minio | filesystem (для локального режима без хранилища S3)
   local_source_dir: "" # используется при storage_mode=filesystem
   local_target_dir: "" # используется при storage_mode=filesystem
@@ -25,7 +26,6 @@ preprocess:
   target_bucket: preprocess-artifacts
   target_key_prefix: converted
   target_media_type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
-  worker_concurrency: 2
   convert_timeout: 5m
   backoff: 30s
   poll_interval: 2s

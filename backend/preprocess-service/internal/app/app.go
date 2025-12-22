@@ -99,7 +99,7 @@ func New(cfg config.Config, deps Dependencies) (*App, error) {
 		TargetBucket:    cfg.Preprocess.TargetBucket,
 		TargetMediaType: cfg.Preprocess.TargetMediaType,
 		ProcessTimeout:  cfg.Preprocess.ProcessTimeout,
-		Concurrency:     cfg.Preprocess.WorkerConcurrency,
+		Concurrency:     1,
 		ConvertTimeout:  cfg.Preprocess.ConvertTimeout,
 		Backoff:         cfg.Preprocess.Backoff,
 		PollInterval:    cfg.Preprocess.PollInterval,

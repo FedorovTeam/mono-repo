@@ -26,7 +26,6 @@ func TestNewAppWithoutTelemetry(t *testing.T) {
 	cfg.Preprocess.ConvertTimeout = time.Second
 	cfg.Preprocess.Backoff = time.Second
 	cfg.Preprocess.PollInterval = 10 * time.Millisecond
-	cfg.Preprocess.WorkerConcurrency = 1
 
 	logger := zaptest.NewLogger(t)
 
