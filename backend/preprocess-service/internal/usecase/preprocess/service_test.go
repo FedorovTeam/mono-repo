@@ -23,7 +23,10 @@ func (stubRepo) Create(ctx context.Context, job Job) error { return nil }
 func (stubRepo) FindBySource(ctx context.Context, bucket, key, etag string) (Job, bool, error) {
 	return Job{}, false, nil
 }
-func (stubRepo) Get(ctx context.Context, id string) (Job, bool, error)    { return Job{}, false, nil }
+func (stubRepo) Get(ctx context.Context, id string) (Job, bool, error) { return Job{}, false, nil }
+func (stubRepo) RequeueStuck(ctx context.Context, convertTimeout, backoff time.Duration) error {
+	return nil
+}
 func (stubRepo) NextForProcessing(ctx context.Context) (Job, bool, error) { return Job{}, false, nil }
 func (stubRepo) MarkDone(ctx context.Context, job Job) error              { return nil }
 func (stubRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
@@ -41,6 +44,9 @@ func (r *capturingRepo) FindBySource(ctx context.Context, bucket, key, etag stri
 }
 func (r *capturingRepo) Get(ctx context.Context, id string) (Job, bool, error) {
 	return Job{}, false, nil
+}
+func (r *capturingRepo) RequeueStuck(ctx context.Context, convertTimeout, backoff time.Duration) error {
+	return nil
 }
 func (r *capturingRepo) NextForProcessing(ctx context.Context) (Job, bool, error) {
 	return Job{}, false, nil

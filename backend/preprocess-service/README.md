@@ -33,6 +33,7 @@ HTTP сервер доступен на `service.port` (по умолчанию 
 
 ## Воркеры и ретраи
 - Воркер выбирает задания со статусами `pending` или `failed`, у которых `next_run_at <= now()`, блокирует строку через `FOR UPDATE SKIP LOCKED`, увеличивает `attempts` и переводит статус в `processing`.
+- Перед выборкой воркер реанимирует застрявшие задачи: если статус `processing`, а `started_at` старше `convert_timeout + backoff`, запись переводится в `failed`, `attempts` увеличивается и назначается новое `next_run_at = now() + backoff`.
 - Настройки по умолчанию: параллелизм 1 поток (`preprocess.worker_concurrency`), таймаут конвертации 2 минуты (`convert_timeout`), задержка между опросами очереди 2 секунды (`poll_interval`), backoff 30 секунд (`backoff`), целевой медиатип результата `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
 - Скачивание исходника использует `source_etag` как `If-Match`; 404/412 считаются постоянной ошибкой `source_missing`. Конвертация выполняется LibreOffice (`--convert-to docx`) в подкаталог `output_dir/<job_id>`. Загрузка результата в MinIO происходит в переданный или дефолтный бакет/ключ с указанным `target_media_type`.
 - Ошибки маркируются через `error_code/error_message/error_details`; при временной ошибке задача получает статус `failed` и `next_run_at = now() + backoff*attempt`. При постоянной ошибке или превышении `max_attempts` статус становится `stopped`, заполняется `finished_at`.
