@@ -50,7 +50,7 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - `extractor.pdfinfo_path` / `extractor.pdftotext_path` / `extractor.pdftoppm_path` — явные пути к бинарям poppler (по умолчанию используются команды из `$PATH`).
 - `extractor.pdftoppm_dpi` — DPI рендера PNG для поиска галочек (по умолчанию 200).
 - `extractor.pages` — диапазон страниц (`all`, `1-3`, `odd`, т.д. — в зависимости от реализации пайплайна).
-- `observability.logging_enabled` / `observability.tracing.enabled` — включение логов и трассировки.
+- `observability.logging_enabled` / `observability.log_level` / `observability.tracing.enabled` — включение логов, уровень (`debug|info|warn|error`, по умолчанию `info`) и трассировка; логи пишутся в JSON-формате.
 
 ## Интеграции и зависимости
 
@@ -123,6 +123,7 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - Метрики (если включены в `observability.*`): gauge по статусам очереди, счётчики `tasks_completed/tasks_failed`, гистограммы длительности обработки и размеров таблиц/страниц (если есть).
   - Трассировки включаются через `observability.tracing.enabled`; gRPC сервер использует `otelgrpc` stats handler, провайдер инициализируется в `internal/telemetry`.
   - Подключение метрик можно расширить через `go.opentelemetry.io/otel/metric` (зависимость уже добавлена).
+- Уровень логирования задаётся через `observability.log_level` (значения: `debug`, `info`, `warn`, `error`) и применяется на старте сервиса; формат логов — структурированный JSON в stdout/stderr от `zap`.
 
 ## Локальный прогон (MinIO + gRPC)
 

@@ -75,6 +75,7 @@ type ExtractorConfig struct {
 
 type ObservabilityConfig struct {
 	LoggingEnabled bool          `yaml:"logging_enabled"`
+	LogLevel       string        `yaml:"log_level"`
 	Tracing        TracingConfig `yaml:"tracing"`
 }
 
@@ -132,6 +133,7 @@ func defaultConfig() Config {
 		},
 		Observability: ObservabilityConfig{
 			LoggingEnabled: true,
+			LogLevel:       "info",
 			Tracing: TracingConfig{
 				Enabled: false,
 			},

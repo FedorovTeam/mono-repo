@@ -38,7 +38,7 @@ type Container struct {
 func Build(ctx context.Context, configPath string) (*Container, error) {
 	cfg := config.MustLoad(configPath)
 
-	logger, err := telemetry.NewLogger(cfg.Observability.LoggingEnabled)
+	logger, err := telemetry.NewLogger(cfg.Observability.LoggingEnabled, cfg.Observability.LogLevel)
 	if err != nil {
 		return nil, err
 	}
