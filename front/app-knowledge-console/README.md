@@ -34,3 +34,15 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Uploading knowledge documents
+
+The upload form now builds the repository path automatically based on structured fields:
+
+- **Category** – choose between:
+  - _Пленарное заседание_ – requires the session number and document type:
+    - **Стенограмма** – needs the transcript number, generating a path like `plenary/05/transcripts/stenogramma-03.md`.
+    - **Протокол голосования** – needs the voting question number, generating a path like `plenary/05/votings/question-12.md`.
+  - _Библиография_ → **Депутаты** – requires a slug/identifier, generating a path like `bibliography/deputies/ivanov-ivan.md`.
+
+The computed path is shown as a preview and is sent to the GraphQL mutation; manual path entry is no longer required.
