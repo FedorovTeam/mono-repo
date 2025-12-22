@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/mono-repo/table-extractor-service/db/migrations"
 	"github.com/mono-repo/table-extractor-service/internal/domain"
@@ -295,7 +294,7 @@ func setupRepo(t *testing.T) (repository.TableExtractionRepository, *sql.DB) {
 	})
 
 	ctx := context.Background()
-	require.NoError(t, migrations.Apply(ctx, db, zap.NewNop()))
+	require.NoError(t, migrations.Up(ctx, db, string(database.DialectSQLite)))
 
 	return sqlrepo.NewSQLRepository(db, database.DialectSQLite), db
 }

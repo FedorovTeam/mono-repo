@@ -63,7 +63,7 @@ func TestEndToEndWithMinioFixture(t *testing.T) {
 		_ = db.Close()
 	})
 
-	require.NoError(t, migrations.Apply(ctx, db, zap.NewNop()))
+	require.NoError(t, migrations.Up(ctx, db, string(database.DialectSQLite)))
 
 	repo := sqlrepo.NewSQLRepository(db, database.DialectSQLite)
 	storage := &minioStorage{client: client}

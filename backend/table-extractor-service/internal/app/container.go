@@ -58,7 +58,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 		return nil, err
 	}
 
-	if err := migrations.Apply(ctx, db, logger); err != nil {
+	if err := migrations.Up(ctx, db, string(dialect)); err != nil {
 		return nil, err
 	}
 
