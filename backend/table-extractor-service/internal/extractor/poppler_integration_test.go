@@ -4,9 +4,7 @@
 package extractor
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -68,13 +66,16 @@ func TestPopplerIntegration(t *testing.T) {
 
 	_, currentFile, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
-	pdfPath := prepareTestPDF(t, projectRoot)
+	pdfPath := filepath.Join(projectRoot, "testdata", "input.pdf")
+	require.FileExists(t, pdfPath, "тестовый PDF отсутствует в testdata")
 	result, err := adapter.Extract(ctx, pdfPath)
 	require.NoError(t, err)
 
-	tmpOutput := t.TempDir()
-	markdownPath := filepath.Join(tmpOutput, "tables.md")
-	manifestPath := filepath.Join(tmpOutput, "manifest.json")
+	outputDir := filepath.Join(projectRoot, "testdata")
+	require.NoError(t, os.MkdirAll(outputDir, 0o755))
+
+	markdownPath := filepath.Join(outputDir, "tables.md")
+	manifestPath := filepath.Join(outputDir, "manifest.json")
 
 	require.NoError(t, os.WriteFile(markdownPath, result.Markdown, 0o644))
 	require.NoError(t, os.WriteFile(manifestPath, result.Manifest, 0o644))
@@ -104,30 +105,4 @@ func TestPopplerIntegration(t *testing.T) {
 
 	_, hasLayout := result.DebugFiles["pdftotext.layout.txt"]
 	require.True(t, hasLayout, "должен быть сохранён вывод pdftotext")
-}
-
-func prepareTestPDF(t *testing.T, projectRoot string) string {
-	t.Helper()
-
-	pdfPath := filepath.Join(projectRoot, "testdata", "input.pdf")
-	if _, err := os.Stat(pdfPath); err == nil {
-		return pdfPath
-	}
-
-	base64Path := filepath.Join(projectRoot, "fixtures", "regular", "document.base64")
-	data, err := os.ReadFile(base64Path)
-	require.NoError(t, err, "не удалось прочитать base64 фикстуру")
-
-	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(data)))
-	n, err := base64.StdEncoding.Decode(decoded, bytes.TrimSpace(data))
-	require.NoError(t, err, "не удалось декодировать base64 PDF")
-
-	require.NoError(t, os.MkdirAll(filepath.Dir(pdfPath), 0o755))
-	require.NoError(t, os.WriteFile(pdfPath, decoded[:n], 0o644))
-
-	t.Cleanup(func() {
-		_ = os.Remove(pdfPath)
-	})
-
-	return pdfPath
 }
