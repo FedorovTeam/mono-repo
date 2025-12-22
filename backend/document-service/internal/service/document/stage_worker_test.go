@@ -672,6 +672,7 @@ func TestHandleConvertUsesPreprocessedSourceWhenPresent(t *testing.T) {
 		PreprocessedBucket:    "prep-bucket",
 		PreprocessedObjectKey: "docs/doc.docx",
 		TargetObjectKey:       "docs/doc.docx",
+		FilenameExtension:     "doc",
 		OriginalBucket:        doc.OriginalBucket,
 		OriginalObjectKey:     doc.OriginalObjectKey,
 		MarkdownBucket:        doc.MarkdownBucket,
@@ -691,6 +692,9 @@ func TestHandleConvertUsesPreprocessedSourceWhenPresent(t *testing.T) {
 	}
 	if transformer.lastRequest.GetFilenameExtension() != "docx" {
 		t.Fatalf("expected docx extension to be used, got %s", transformer.lastRequest.GetFilenameExtension())
+	}
+	if payload := domain.ConvertPayloadFromMap(result.Payload); payload.FilenameExtension != "docx" {
+		t.Fatalf("expected filename extension to be overwritten to docx, got %s", payload.FilenameExtension)
 	}
 
 	if repo.lastVersion == nil || repo.lastVersion.OriginalObjectKey != "docs/doc.docx" {

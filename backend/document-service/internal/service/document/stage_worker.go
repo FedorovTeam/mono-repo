@@ -251,10 +251,13 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
 	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, doc.MarkdownBucket)
 	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
-	payload.FilenameExtension = firstNonEmpty(
-		payload.FilenameExtension,
+	preprocessedExtension := firstNonEmpty(
 		fileExtension(payload.PreprocessedObjectKey),
 		fileExtension(payload.TargetObjectKey),
+	)
+	payload.FilenameExtension = firstNonEmpty(
+		preprocessedExtension,
+		payload.FilenameExtension,
 		fileExtension(payload.OriginalObjectKey),
 		fileExtension(doc.OriginalObjectKey),
 		fileExtension(doc.Name),
