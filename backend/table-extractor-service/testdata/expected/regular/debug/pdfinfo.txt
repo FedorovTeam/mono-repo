@@ -1,6 +1,0 @@
-Pages: 2
-Producer: fixtures
-PDF version: 1.7
-Title: Fixture regular
-Author: QA
-CreationDate: D:20250110

@@ -21,17 +21,32 @@ import (
 )
 
 func TestPopplerIntegration(t *testing.T) {
-	binaries := []string{"pdfinfo", "pdftotext", "pdftoppm"}
-	for _, bin := range binaries {
-		if _, err := exec.LookPath(bin); err != nil {
-			t.Skipf("%s недоступен в PATH: %v", bin, err)
-		}
-	}
+	cfg := config.MustLoad("./../../config/test/config.yaml")
 
-	cfg := config.MustLoad("config/config.yaml")
 	tempDir := cfg.Extractor.TempDir
 	if tempDir == "" {
 		tempDir = t.TempDir()
+	}
+
+	bins := []string{
+		cfg.Extractor.PdfInfoPath,
+		cfg.Extractor.PdftotextPath,
+		cfg.Extractor.PdftoppmPath,
+	}
+
+	for _, bin := range bins {
+		if bin == "" {
+			t.Skip("poppler path is empty in config")
+		}
+		if filepath.IsAbs(bin) {
+			if _, err := os.Stat(bin); err != nil {
+				t.Skipf("%s недоступен: %v", bin, err)
+			}
+		} else {
+			if _, err := exec.LookPath(bin); err != nil {
+				t.Skipf("%s недоступен в PATH: %v", bin, err)
+			}
+		}
 	}
 
 	adapter := NewAdapter(Config{
@@ -77,7 +92,8 @@ func TestPopplerIntegration(t *testing.T) {
 	require.Greater(t, manifest.TableCount, 0, "должна быть извлечена хотя бы одна таблица")
 	require.Greater(t, manifest.PDFInfo.Pages, 0, "pdfinfo должен сообщать количество страниц")
 
-	infoOutput, err := exec.CommandContext(ctx, "pdfinfo", pdfPath).CombinedOutput()
+	infoOutput, err := exec.CommandContext(ctx, cfg.Extractor.PdfInfoPath, pdfPath).CombinedOutput()
+
 	require.NoError(t, err, "pdfinfo завершился с ошибкой: %s", string(infoOutput))
 
 	info := parsePDFInfo(string(infoOutput))

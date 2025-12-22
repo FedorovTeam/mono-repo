@@ -1,3 +1,0 @@
-Product  Qty  Price
-Laptop   2    1200
-Monitor  4    800
