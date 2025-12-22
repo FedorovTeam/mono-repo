@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/usecase/submit"
 
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
@@ -15,11 +17,17 @@ import (
 type PreprocessHandler struct {
 	preprocessv1.UnimplementedPreprocessServiceServer
 	service *submit.Service
+	logger  *zap.Logger
 }
 
-func NewPreprocessHandler(service *submit.Service) *PreprocessHandler {
+func NewPreprocessHandler(service *submit.Service, logger *zap.Logger) *PreprocessHandler {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	return &PreprocessHandler{
 		service: service,
+		logger:  logger,
 	}
 }
 
@@ -27,6 +35,16 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
+
+	logger := h.logger.With(
+		zap.String("job_id", ""),
+		zap.String("document_id", req.GetDocumentId()),
+		zap.String("correlation_id", req.GetCorrelationId()),
+		zap.String("source_bucket", req.GetSourceBucket()),
+		zap.String("source_key", req.GetSourceKey()),
+		zap.String("status", domain.StatusPending.String()),
+	)
+	logger.Info("handling SubmitPreprocess request")
 
 	job, err := h.service.SubmitPreprocess(ctx, submit.SubmitCommand{
 		DocumentID:    req.GetDocumentId(),
@@ -39,6 +57,9 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		CorrelationID: req.GetCorrelationId(),
 	})
 	if err != nil {
+		logger.With(
+			zap.String("status", status.Code(err).String()),
+		).Error("SubmitPreprocess failed", zap.Error(err))
 		return nil, h.handleError(err)
 	}
 
@@ -46,6 +67,12 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 	if correlationID == "" {
 		correlationID = job.CorrelationID
 	}
+
+	logger.With(
+		zap.String("job_id", job.ID),
+		zap.String("status", job.Status.String()),
+		zap.String("correlation_id", correlationID),
+	).Info("SubmitPreprocess succeeded")
 
 	return &preprocessv1.SubmitPreprocessResponse{
 		JobId:         job.ID,
@@ -60,13 +87,34 @@ func (h *PreprocessHandler) GetPreprocessStatus(ctx context.Context, req *prepro
 		return nil, status.Error(codes.InvalidArgument, "job_id is required")
 	}
 
+	logger := h.logger.With(
+		zap.String("job_id", req.GetJobId()),
+		zap.String("document_id", ""),
+		zap.String("correlation_id", req.GetCorrelationId()),
+		zap.String("source_bucket", ""),
+		zap.String("source_key", ""),
+		zap.String("status", domain.StatusUnspecified.String()),
+	)
+	logger.Info("handling GetPreprocessStatus request")
+
 	job, err := h.service.GetStatus(ctx, submit.StatusQuery{
 		JobID:         req.GetJobId(),
 		CorrelationID: req.GetCorrelationId(),
 	})
 	if err != nil {
+		logger.With(
+			zap.String("status", status.Code(err).String()),
+		).Error("GetPreprocessStatus failed", zap.Error(err))
 		return nil, h.handleError(err)
 	}
+
+	logger.With(
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.String("source_bucket", job.SourceBucket),
+		zap.String("source_key", job.SourceKey),
+		zap.String("status", job.Status.String()),
+	).Info("GetPreprocessStatus succeeded")
 
 	return &preprocessv1.GetPreprocessStatusResponse{
 		JobId:         job.ID,

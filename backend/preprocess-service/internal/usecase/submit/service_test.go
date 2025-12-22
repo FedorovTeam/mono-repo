@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap/zaptest"
+
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/domain"
 	"preprocess-service/internal/storage/memory"
@@ -27,7 +29,7 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
@@ -68,7 +70,7 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
@@ -100,7 +102,7 @@ func TestSubmitPreprocessValidatesInput(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
@@ -121,7 +123,7 @@ func TestGetStatusReturnsJob(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
@@ -162,7 +164,7 @@ func TestGetStatusNotFound(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	repo := memory.NewRepository()
-	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
