@@ -81,7 +81,9 @@ func TestLibreOfficeLocalConversion(t *testing.T) {
 		t.Fatalf("init fs storage adapter: %v", err)
 	}
 
-	converter, err := libreoffice.NewExecConverter(cfg.Preprocess.LibreOfficePath)
+	logger := zap.NewNop()
+
+	converter, err := libreoffice.NewExecConverter(cfg.Preprocess.LibreOfficePath, logger)
 	if err != nil {
 		t.Fatalf("init libreoffice converter: %v", err)
 	}
@@ -110,8 +112,6 @@ func TestLibreOfficeLocalConversion(t *testing.T) {
 	if err := repo.Create(context.Background(), job); err != nil {
 		t.Fatalf("save job: %v", err)
 	}
-
-	logger := zap.NewNop()
 
 	serviceCfg := preprocess.Config{
 		LibreOfficePath: cfg.Preprocess.LibreOfficePath,
@@ -155,7 +155,7 @@ func TestLibreOfficeLocalConversion(t *testing.T) {
 
 type noopCallback struct{}
 
-func (noopCallback) Send(_ context.Context, _ string, _ ports.CallbackPayload) (bool, error) {
+func (noopCallback) Send(_ context.Context, _ string, _ ports.CallbackPayload, _ int) (bool, error) {
 	return false, nil
 }
 

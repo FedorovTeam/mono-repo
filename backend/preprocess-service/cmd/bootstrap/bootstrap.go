@@ -61,14 +61,14 @@ func BuildDependencies(ctx context.Context, cfg config.Config, logger *zap.Logge
 
 	repo := postgres.NewPreprocessRepository(dbpool)
 
-	storageAdapter, err := buildStorageAdapter(cfg)
+	storageAdapter, err := buildStorageAdapter(cfg, logger)
 	if err != nil {
 		dbpool.Close()
 		shutdownTelemetry(ctx, telemetry, logger)
 		return app.Dependencies{}, fmt.Errorf("init storage adapter: %w", err)
 	}
 
-	converter, err := libreoffice.NewExecConverter(cfg.Preprocess.LibreOfficePath)
+	converter, err := libreoffice.NewExecConverter(cfg.Preprocess.LibreOfficePath, logger)
 	if err != nil {
 		dbpool.Close()
 		shutdownTelemetry(ctx, telemetry, logger)
@@ -82,7 +82,7 @@ func BuildDependencies(ctx context.Context, cfg config.Config, logger *zap.Logge
 		return app.Dependencies{}, fmt.Errorf("init workspace manager: %w", err)
 	}
 
-	callbackClient := adaptercallback.NewClient(nil)
+	callbackClient := adaptercallback.NewClient(nil, logger)
 
 	return app.Dependencies{
 		Logger:           logger,
@@ -97,7 +97,7 @@ func BuildDependencies(ctx context.Context, cfg config.Config, logger *zap.Logge
 	}, nil
 }
 
-func buildStorageAdapter(cfg config.Config) (interface {
+func buildStorageAdapter(cfg config.Config, logger *zap.Logger) (interface {
 	ports.StorageDownloader
 	ports.StorageUploader
 }, error) {
@@ -109,7 +109,7 @@ func buildStorageAdapter(cfg config.Config) (interface {
 		if err != nil {
 			return nil, fmt.Errorf("init minio client: %w", err)
 		}
-		return storageminio.NewAdapter(minioClient), nil
+		return storageminio.NewAdapter(minioClient, logger), nil
 	default:
 		return nil, fmt.Errorf("unsupported storage mode: %s", cfg.Preprocess.StorageMode)
 	}

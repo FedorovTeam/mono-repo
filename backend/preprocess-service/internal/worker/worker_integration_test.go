@@ -276,3 +276,9 @@ func (stubWorkspace) OutputPath(string) (string, error) { return "output", nil }
 func (stubWorkspace) OutputDir() string                 { return "output" }
 func (stubWorkspace) EnsureExists(string) error         { return nil }
 func (stubWorkspace) Cleanup() error                    { return nil }
+
+type noopCallback struct{}
+
+func (noopCallback) Send(context.Context, string, ports.CallbackPayload, int) (bool, error) {
+	return false, nil
+}

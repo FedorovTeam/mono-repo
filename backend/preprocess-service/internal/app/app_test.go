@@ -77,6 +77,6 @@ func (noopWorkspace) Cleanup() error                    { return nil }
 
 type noopCallback struct{}
 
-func (noopCallback) Send(context.Context, string, ports.CallbackPayload) (bool, error) {
+func (noopCallback) Send(context.Context, string, ports.CallbackPayload, int) (bool, error) {
 	return false, nil
 }
