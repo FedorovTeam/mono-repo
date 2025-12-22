@@ -38,6 +38,7 @@ extractor:
   pdfinfo_timeout: 10s
   pdftotext_timeout: 20s
   pdftoppm_timeout: 30s
+  pdftoppm_dpi: 200
   max_parallel_commands: 2
   temp_dir: ""
 

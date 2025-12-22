@@ -10,9 +10,10 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - Воркер в фоне:
     - скачивает PDF из MinIO (или из `source_url`, если включено),
     - выполняет проверки через `pdfinfo`,
-    - извлекает табличный текст/структуру через poppler (`pdftotext -layout` или другой режим),
+    - извлекает табличный текст/структуру через poppler (`pdftotext -layout` или `-bbox` для протоколов),
     - парсит/нормализует таблицы,
     - сохраняет результаты в MinIO и помечает задачу как `done/failed`.
+    - при включённом `extractor.detect_voting_tables` — берёт координаты колонок из `pdftotext -bbox`, сканирует PNG от `pdftoppm` и проставляет ✓ в нужные ячейки перед генерацией Markdown.
 - Артефакты сохраняются “пачкой” в один prefix:
     - `tables.raw.json` (сырой результат),
     - `tables.normalized.json`,
@@ -45,8 +46,9 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - `minio.*` — endpoint/creds для MinIO + `artifacts_bucket` и `default_artifacts_prefix` по умолчанию.
 - `database.driver` / `database.dsn` — `postgres` или `sqlite`, DSN строки и параметры пула.
 - `storage.*` — таймауты HTTP-клиента к MinIO (`dial_timeout`, `read_write_timeout`, `operation_timeout`).
-- `extractor.mode` — режим извлечения для poppler (`layout` / `bbox`); от него зависит аргумент `pdftotext` (`-layout` или `-bbox`). `extractor.detect_voting_tables` — включает детектор протоколов.
+- `extractor.mode` — режим извлечения для poppler (`layout` / `bbox`); от него зависит аргумент `pdftotext` (`-layout` или `-bbox`). `extractor.detect_voting_tables` — включает детектор протоколов и принудительно переводит `pdftotext` в `-bbox`, чтобы собрать координаты колонок/галочек.
 - `extractor.pdfinfo_path` / `extractor.pdftotext_path` / `extractor.pdftoppm_path` — явные пути к бинарям poppler (по умолчанию используются команды из `$PATH`).
+- `extractor.pdftoppm_dpi` — DPI рендера PNG для поиска галочек (по умолчанию 200).
 - `extractor.pages` — диапазон страниц (`all`, `1-3`, `odd`, т.д. — в зависимости от реализации пайплайна).
 - `observability.logging_enabled` / `observability.tracing.enabled` — включение логов и трассировки.
 
@@ -54,7 +56,7 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 
 - **PostgreSQL**: таблица `table_extraction_queue` хранит заявки и статусы.
 - **MinIO**: источник PDF и место хранения артефактов (JSON/Markdown/manifest).
-- **Poppler**: `pdfinfo` и `pdftotext` (или другие утилиты poppler, которые использует твой пайплайн). Должны быть доступны внутри контейнера/окружения.
+- **Poppler**: `pdfinfo`, `pdftotext` (для `-layout/-bbox`) и `pdftoppm` для рендера PNG (галочки читаются из картинок). Требуется попплер с поддержкой `-bbox`; рекомендуется держать DPI рендера не ниже 150–200 для устойчивого распознавания ✓.
 
 ## gRPC API
 

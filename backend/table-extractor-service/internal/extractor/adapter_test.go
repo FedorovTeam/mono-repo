@@ -138,6 +138,50 @@ func TestAdapterUsesCustomBinariesAndBBoxMode(t *testing.T) {
 	require.NotContains(t, args, "-layout")
 }
 
+func TestAdapterUsesBBoxAndLayoutWhenVotingDetectionEnabled(t *testing.T) {
+	runner := &fakeRunner{
+		responses: map[string]CommandResult{
+			"pdfinfo":   {Stdout: []byte("Pages: 1")},
+			"pdftotext": {Stdout: []byte(`<page number="1" width="100" height="100"><word xMin="10" yMin="10" xMax="20" yMax="12">Присутствует</word></page>`)},
+			"pdftoppm":  {Stdout: []byte("")},
+		},
+	}
+
+	adapter := &Adapter{
+		cfg: Config{
+			PdfInfoPath:         defaultPdfinfo,
+			PdftotextPath:       defaultPdftotext,
+			PdftoppmPath:        defaultPdftoppm,
+			PdfInfoTimeout:      time.Second,
+			PdftotextTimeout:    time.Second,
+			PdftoppmTimeout:     time.Second,
+			MaxParallelCommands: 1,
+			Pages:               "1-1",
+			TempDir:             t.TempDir(),
+			Mode:                modeLayout,
+			DetectVotingTables:  true,
+		},
+		runner: runner,
+		parser: staticParser{
+			parsed: ParsedTables{
+				NormalizedTables: []NormalizedTable{{Headers: []string{"a"}, Rows: []map[string]string{{"a": "b"}}}},
+			},
+		},
+		now: time.Now,
+	}
+
+	result, err := adapter.Extract(context.Background(), "/tmp/demo.pdf")
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, runner.count("pdftotext"), 2)
+	first := runner.argsForOccurrence("pdftotext", 0)
+	second := runner.argsForOccurrence("pdftotext", 1)
+	require.Contains(t, first, "-bbox")
+	require.Contains(t, second, "-layout")
+	require.Contains(t, result.DebugFiles, "pdftotext.bbox.html")
+	require.Contains(t, result.DebugFiles, "pdftotext.layout.txt")
+}
+
 func TestExternalRunnerHonorsTimeout(t *testing.T) {
 	runner := NewExternalCommandRunner(1)
 
@@ -182,7 +226,43 @@ func (f *fakeRunner) argsFor(name string) []string {
 	return nil
 }
 
+func (f *fakeRunner) argsForOccurrence(name string, idx int) []string {
+	cnt := 0
+	for _, call := range f.calls {
+		if call.name == name {
+			if cnt == idx {
+				return call.args
+			}
+			cnt++
+		}
+	}
+	return nil
+}
+
+func (f *fakeRunner) count(name string) int {
+	cnt := 0
+	for _, call := range f.calls {
+		if call.name == name {
+			cnt++
+		}
+	}
+	return cnt
+}
+
 type commandCall struct {
 	name string
 	args []string
+}
+
+type staticParser struct {
+	parsed ParsedTables
+	err    error
+}
+
+func (s staticParser) ParseTables(ParseInput) (ParsedTables, error) {
+	return s.parsed, s.err
+}
+
+func (staticParser) RenderMarkdown(t ParsedTables) string {
+	return DefaultParser{}.RenderMarkdown(t)
 }

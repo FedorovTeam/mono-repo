@@ -141,9 +141,9 @@ func findWordNearY(words []Word, text string, y float64, yTol float64) (Word, bo
 	return best, ok
 }
 
-// findTableHeaderY tries to locate the voting table header row on a page.
+// FindTableHeaderY tries to locate the voting table header row on a page.
 // It returns the YMin (points) of the word "Присутствует" if present.
-func findTableHeaderY(words []Word) (float64, bool) {
+func FindTableHeaderY(words []Word) (float64, bool) {
 	w, ok := findWord(words, "Присутствует")
 	if !ok {
 		return 0, false

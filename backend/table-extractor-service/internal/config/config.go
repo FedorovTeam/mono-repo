@@ -63,6 +63,7 @@ type ExtractorConfig struct {
 	PdfInfoPath        string        `yaml:"pdfinfo_path"`
 	PdftotextPath      string        `yaml:"pdftotext_path"`
 	PdftoppmPath       string        `yaml:"pdftoppm_path"`
+	PdftoppmDPI        int           `yaml:"pdftoppm_dpi"`
 	DetectVotingTables bool          `yaml:"detect_voting_tables"`
 	Pages              string        `yaml:"pages"`
 	PdfInfoTimeout     time.Duration `yaml:"pdfinfo_timeout"`
@@ -121,6 +122,7 @@ func defaultConfig() Config {
 			PdfInfoPath:        "pdfinfo",
 			PdftotextPath:      "pdftotext",
 			PdftoppmPath:       "pdftoppm",
+			PdftoppmDPI:        200,
 			DetectVotingTables: true,
 			Pages:              "all",
 			PdfInfoTimeout:     10 * time.Second,

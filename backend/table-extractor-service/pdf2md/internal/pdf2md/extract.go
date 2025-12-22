@@ -100,7 +100,7 @@ func ExtractDocument(pdfPath string, opt Options) (Document, error) {
 			// Only apply the "skip top text" threshold on pages that actually contain
 			// the table header. Some protocols split the table across pages and the
 			// continuation page may start right away with row 70.
-			if y, ok := findTableHeaderY(pageBBox.Words); ok {
+			if y, ok := FindTableHeaderY(pageBBox.Words); ok {
 				minYPt = y
 			}
 		}
