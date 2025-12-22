@@ -27,6 +27,8 @@ ingress:
 env:
   NEXT_PUBLIC_GATEWAY_URL: "https://gateway.fedorov-team.tech/query"
   NEXT_PUBLIC_API_KEY: "secret"
+  NEXT_PUBLIC_DEFAULT_REPOSITORY: "docs"
+  NEXT_PUBLIC_DEFAULT_BRANCH: "main"
 
 resources:
   requests:
