@@ -36,10 +36,15 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
 
+	correlationID := req.GetCorrelationId()
+	if correlationID == "" {
+		correlationID = correlationIDFromContext(ctx)
+	}
+
 	logger := h.logger.With(
 		zap.String("job_id", ""),
 		zap.String("document_id", req.GetDocumentId()),
-		zap.String("correlation_id", req.GetCorrelationId()),
+		zap.String("correlation_id", correlationID),
 		zap.String("source_bucket", req.GetSourceBucket()),
 		zap.String("source_key", req.GetSourceKey()),
 		zap.String("status", domain.StatusPending.String()),
@@ -54,7 +59,7 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		TargetBucket:  req.GetTargetBucket(),
 		TargetKey:     req.GetTargetKey(),
 		CallbackURL:   req.GetCallbackUrl(),
-		CorrelationID: req.GetCorrelationId(),
+		CorrelationID: correlationID,
 	})
 	if err != nil {
 		logger.With(
@@ -63,7 +68,6 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		return nil, h.handleError(err)
 	}
 
-	correlationID := req.GetCorrelationId()
 	if correlationID == "" {
 		correlationID = job.CorrelationID
 	}
