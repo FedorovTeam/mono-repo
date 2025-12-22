@@ -31,6 +31,7 @@ sequenceDiagram
   `created_at/updated_at`.
 - Индексы: `(status, next_run_at)` для выборки в воркере, `(source_bucket, source_key)` и уникальный `(source_bucket, source_key, source_etag)`
   для идемпотентности `SubmitPreprocess`. Встроенные миграции накатываются при старте (`cmd/bootstrap.RunMigrations`).
+- Распределённый замок на воркер: перед выборкой задач сервис захватывает `pg_try_advisory_lock` с фиксированным ключом. Это гарантирует, что в кластере одновременно активна только одна реплика воркера; дополнительные реплики завершатся с ошибкой старта.
 - Воркер перед выборкой реанимирует застрявшие задачи (`processing` старше `convert_timeout + backoff`), затем берёт `pending/failed` с
   `next_run_at <= now()` через `FOR UPDATE SKIP LOCKED`, увеличивает `attempts` и обновляет статус.
 - Загрузка/выгрузка файлов идёт через S3-адаптер MinIO (или файловый адаптер при `preprocess.storage_mode=filesystem`) с использованием

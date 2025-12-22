@@ -32,9 +32,11 @@ HTTP сервер доступен на `service.port` (по умолчанию 
 - Миграции встроены в бинарник и выполняются при старте через `cmd/bootstrap.RunMigrations`. При необходимости можно отдельно прогнать `go run github.com/pressly/goose/v3/cmd/goose@v3.22.3 -dir db/migrations postgres "$POSTGRES_DSN" up`.
 
 ## Воркеры и ретраи
+- Перед выборкой заданий воркер захватывает распределённый advisory‑лок в PostgreSQL, чтобы одновременно работала только одна реплика воркера на кластер. При занятом замке сервис завершится с ошибкой, не начав обработку.
 - Воркер выбирает задания со статусами `pending` или `failed`, у которых `next_run_at <= now()`, блокирует строку через `FOR UPDATE SKIP LOCKED`, увеличивает `attempts` и переводит статус в `processing`.
 - Перед выборкой воркер реанимирует застрявшие задачи: если статус `processing`, а `started_at` старше `convert_timeout + backoff`, запись переводится в `failed`, `attempts` увеличивается и назначается новое `next_run_at = now() + backoff`.
 - Настройки: обработка задач строго по одной (параллелизм отключён), таймаут конвертации 2 минуты (`convert_timeout`), задержка между опросами очереди 2 секунды (`poll_interval`), backoff 30 секунд (`backoff`), целевой медиатип результата `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
+- Горизонтальное масштабирование: из-за advisory‑лока одновременно может работать только один воркер на очередь. Дополнительные реплики будут блокироваться на старте.
 - Скачивание исходника использует `source_etag` как `If-Match`; 404/412 считаются постоянной ошибкой `source_missing`. Конвертация выполняется LibreOffice (`--convert-to docx`) в подкаталог `output_dir/<job_id>`. Загрузка результата в MinIO происходит в переданный или дефолтный бакет/ключ с указанным `target_media_type`.
 - Ошибки маркируются через `error_code/error_message/error_details`; при временной ошибке задача получает статус `failed` и `next_run_at = now() + backoff*attempt`. При постоянной ошибке или превышении `max_attempts` статус становится `stopped`, заполняется `finished_at`.
 - Callback (`POST` с полями `job_id`, `status`, `target_bucket`, `target_key`, `error{code,message}`) отправляется на `callback_url` только после финального успеха (`done`) или необратимой остановки (`stopped`). Повторов не более 3, между попытками — `backoff` (или 1s, если он не задан).

@@ -14,6 +14,7 @@ type Repository struct {
 	mu       sync.Mutex
 	jobs     map[string]domain.PreprocessJob
 	bySource map[string]string
+	locked   bool
 }
 
 func NewRepository() *Repository {
@@ -146,6 +147,34 @@ func (r *Repository) MarkFailed(_ context.Context, job domain.PreprocessJob, _ d
 	defer r.mu.Unlock()
 
 	r.jobs[job.ID] = cloneJob(job)
+	return nil
+}
+
+func (r *Repository) TryAcquireWorkerLock(ctx context.Context) (domain.LockHandle, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.locked {
+		return nil, false, nil
+	}
+
+	r.locked = true
+	return memoryLockHandle{repo: r}, true, nil
+}
+
+type memoryLockHandle struct {
+	repo *Repository
+}
+
+func (h memoryLockHandle) Release(context.Context) error {
+	if h.repo == nil {
+		return nil
+	}
+
+	h.repo.mu.Lock()
+	defer h.repo.mu.Unlock()
+	h.repo.locked = false
+
 	return nil
 }
 

@@ -14,4 +14,5 @@ type PreprocessJobRepository interface {
 	NextForProcessing(ctx context.Context) (PreprocessJob, bool, error)
 	MarkDone(ctx context.Context, job PreprocessJob) error
 	MarkFailed(ctx context.Context, job PreprocessJob, update FailureUpdate) error
+	TryAcquireWorkerLock(ctx context.Context) (LockHandle, bool, error)
 }

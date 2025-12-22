@@ -33,6 +33,9 @@ func (stubRepo) MarkDone(ctx context.Context, job Job) error              { retu
 func (stubRepo) MarkFailed(ctx context.Context, job Job, update FailureUpdate) error {
 	return nil
 }
+func (stubRepo) TryAcquireWorkerLock(ctx context.Context) (domain.LockHandle, bool, error) {
+	return stubLock{}, true, nil
+}
 
 type capturingRepo struct {
 	failures []FailureUpdate
@@ -62,6 +65,13 @@ func (r *capturingRepo) MarkFailed(ctx context.Context, job Job, update FailureU
 	r.statuses = append(r.statuses, job)
 	return nil
 }
+func (r *capturingRepo) TryAcquireWorkerLock(ctx context.Context) (domain.LockHandle, bool, error) {
+	return stubLock{}, true, nil
+}
+
+type stubLock struct{}
+
+func (stubLock) Release(context.Context) error { return nil }
 
 func TestNotifyCallbackSuccess(t *testing.T) {
 	t.Helper()
