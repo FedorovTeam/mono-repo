@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS table_extraction_queue (
     id TEXT PRIMARY KEY,
     document_id TEXT NOT NULL,
@@ -21,3 +23,13 @@ CREATE INDEX IF NOT EXISTS idx_table_extraction_queue_status ON table_extraction
 CREATE INDEX IF NOT EXISTS idx_table_extraction_queue_document_id ON table_extraction_queue (document_id);
 CREATE INDEX IF NOT EXISTS idx_table_extraction_queue_next_run_at ON table_extraction_queue (next_run_at);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_table_extraction_queue_active_document ON table_extraction_queue (document_id) WHERE status IN ('pending', 'processing');
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS uq_table_extraction_queue_active_document;
+DROP INDEX IF EXISTS idx_table_extraction_queue_next_run_at;
+DROP INDEX IF EXISTS idx_table_extraction_queue_document_id;
+DROP INDEX IF EXISTS idx_table_extraction_queue_status;
+DROP TABLE IF EXISTS table_extraction_queue;
+-- +goose StatementEnd

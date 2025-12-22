@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS table_extraction_jobs (
     id TEXT PRIMARY KEY,
     document_id TEXT NOT NULL UNIQUE,
@@ -19,3 +21,10 @@ CREATE TABLE IF NOT EXISTS table_extraction_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_table_extraction_jobs_status ON table_extraction_jobs (status);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP INDEX IF EXISTS idx_table_extraction_jobs_status;
+DROP TABLE IF EXISTS table_extraction_jobs;
+-- +goose StatementEnd
