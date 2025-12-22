@@ -18,6 +18,7 @@ import (
 
 	"github.com/mono-repo/table-extractor-service/internal/domain"
 	"github.com/mono-repo/table-extractor-service/internal/repository/memory"
+	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 )
 
 func TestSubmitExtractionIdempotencyByDocument(t *testing.T) {
@@ -357,6 +358,53 @@ func TestProcessExtractionJobMarksRetryableWhenUploadFails(t *testing.T) {
 	require.Contains(t, stored.ErrorMessage, "io timeout")
 }
 
+func TestProcessExtractionJobPropagatesCorrelationIDToDependencies(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	correlationID := "corr-deps"
+	storage := &stubStorage{
+		downloadData: []byte("%PDF-1.4 data"),
+	}
+	extractor := &fakeExtractor{
+		result: ExtractionResult{
+			RawJSON: []byte(`{"ok":true}`),
+		},
+	}
+
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue:     repo,
+		Storage:   storage,
+		FileCache: newTestFileCache(storage),
+		Extractor: extractor,
+		Clock:     fixedClock{now: now},
+	}, Config{
+		QueueLimit:             5,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	ctx := context.Background()
+	_, err := uc.SubmitExtraction(ctx, SubmitExtractionRequest{
+		DocumentID:        "doc-correlation",
+		OriginalBucket:    "originals",
+		OriginalObjectKey: "source.pdf",
+		CorrelationID:     correlationID,
+	})
+	require.NoError(t, err)
+
+	processed, err := uc.ProcessExtractionJob(ctx)
+	require.NoError(t, err)
+	require.True(t, processed)
+
+	require.Len(t, storage.downloadCtxCorrelation, 1, "Download should receive correlation id for MinioStorage.baseFields")
+	require.Equal(t, correlationID, storage.downloadCtxCorrelation[0])
+	require.NotEmpty(t, storage.uploadCtxCorrelation, "Upload should receive correlation id for MinioStorage.baseFields")
+	for _, cid := range storage.uploadCtxCorrelation {
+		require.Equal(t, correlationID, cid)
+	}
+	require.Contains(t, extractor.correlationIDs, correlationID, "Extractor must see correlation id for Adapter.baseLogger")
+}
+
 func TestGetJobNotFound(t *testing.T) {
 	repo := memory.NewInMemoryRepository()
 	uc := NewTableExtractorUseCase(Dependencies{
@@ -505,9 +553,13 @@ type fakeExtractor struct {
 	err             error
 	last            string
 	expectedContent []byte
+	correlationIDs  []string
 }
 
-func (f *fakeExtractor) Extract(_ context.Context, path string) (ExtractionResult, error) {
+func (f *fakeExtractor) Extract(ctx context.Context, path string) (ExtractionResult, error) {
+	if cid := telemetry.CorrelationIDFromContext(ctx); cid != "" {
+		f.correlationIDs = append(f.correlationIDs, cid)
+	}
 	f.last = path
 	if len(f.expectedContent) > 0 {
 		data, readErr := os.ReadFile(filepath.Clean(path))
@@ -596,16 +648,21 @@ type stubStorage struct {
 	downloadErr  error
 	uploadErr    error
 	uploads      []string
+
+	downloadCtxCorrelation []string
+	uploadCtxCorrelation   []string
 }
 
-func (s *stubStorage) Download(_ context.Context, _, _ string) (io.ReadCloser, error) {
+func (s *stubStorage) Download(ctx context.Context, _, _ string) (io.ReadCloser, error) {
+	s.downloadCtxCorrelation = append(s.downloadCtxCorrelation, telemetry.CorrelationIDFromContext(ctx))
 	if s.downloadErr != nil {
 		return nil, s.downloadErr
 	}
 	return io.NopCloser(bytes.NewReader(s.downloadData)), nil
 }
 
-func (s *stubStorage) Upload(_ context.Context, _, objectKey, _ string, content io.Reader, _ int64) error {
+func (s *stubStorage) Upload(ctx context.Context, _, objectKey, _ string, content io.Reader, _ int64) error {
+	s.uploadCtxCorrelation = append(s.uploadCtxCorrelation, telemetry.CorrelationIDFromContext(ctx))
 	defer func() {
 		s.uploads = append(s.uploads, objectKey)
 	}()

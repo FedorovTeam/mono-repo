@@ -222,6 +222,8 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 }
 
 func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.TableExtractionJob) error {
+	ctxWithCID := telemetry.ContextWithCorrelationID(ctx, job.CorrelationID)
+	ctxWithCID = telemetry.WithOutgoingCorrelationID(ctxWithCID, job.CorrelationID)
 	aggregate := domain.NewTableExtractionJobAggregate(job)
 
 	sourceProvided := strings.TrimSpace(job.SourceURL) != "" || strings.TrimSpace(job.LocalPath) != "" || (job.Original.Bucket != "" && job.Original.ObjectKey != "")
@@ -239,7 +241,7 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		if transErr != nil {
 			return errors.Join(errors.New("missing original location"), transErr)
 		}
-		saveErr := uc.queue.Save(ctx, updated.Job())
+		saveErr := uc.queue.Save(ctxWithCID, updated.Job())
 		uc.logger.Debug("job marked failed due to missing source",
 			zap.String("queue_id", job.ID.String()),
 			zap.String("document_id", job.DocumentID),
@@ -265,7 +267,7 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("original_object_key", job.Original.ObjectKey),
 	)
 
-	cached, err := uc.fileCache.Fetch(ctx, SourceLocation{
+	cached, err := uc.fileCache.Fetch(ctxWithCID, SourceLocation{
 		Original:  job.Original,
 		SourceURL: job.SourceURL,
 		LocalPath: job.LocalPath,
@@ -276,7 +278,7 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		if transErr != nil {
 			return errors.Join(fmt.Errorf("download original: %w", err), transErr)
 		}
-		statusErr := uc.queue.Save(ctx, updated.Job())
+		statusErr := uc.queue.Save(ctxWithCID, updated.Job())
 		uc.logger.Debug("job marked failed due to download error",
 			zap.String("queue_id", job.ID.String()),
 			zap.String("document_id", job.DocumentID),
@@ -307,14 +309,14 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("correlation_id", job.CorrelationID),
 		zap.String("source_path", cached.Path),
 	)
-	result, err := uc.extractor.Extract(ctx, cached.Path)
+	result, err := uc.extractor.Extract(ctxWithCID, cached.Path)
 	if err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("extraction failed", "extraction_error", err.Error(), false, now)
 		if transErr != nil {
 			return errors.Join(fmt.Errorf("extract tables: %w", err), transErr)
 		}
-		statusErr := uc.queue.Save(ctx, updated.Job())
+		statusErr := uc.queue.Save(ctxWithCID, updated.Job())
 		uc.logger.Debug("job marked failed due to extraction error",
 			zap.String("queue_id", job.ID.String()),
 			zap.String("document_id", job.DocumentID),
@@ -330,13 +332,13 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.Int("artifacts_count", len(result.DebugFiles)),
 	)
 
-	if err := uc.uploadArtifacts(ctx, job, result); err != nil {
+	if err := uc.uploadArtifacts(ctxWithCID, job, result); err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("upload failed", "upload_error", err.Error(), true, now)
 		if transErr != nil {
 			return errors.Join(fmt.Errorf("upload artifacts: %w", err), transErr)
 		}
-		statusErr := uc.queue.Save(ctx, updated.Job())
+		statusErr := uc.queue.Save(ctxWithCID, updated.Job())
 		uc.logger.Debug("job marked failed due to upload error",
 			zap.String("queue_id", job.ID.String()),
 			zap.String("document_id", job.DocumentID),
@@ -351,7 +353,7 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 	if transErr != nil {
 		return fmt.Errorf("mark job done: %w", transErr)
 	}
-	if err := uc.queue.Save(ctx, updated.Job()); err != nil {
+	if err := uc.queue.Save(ctxWithCID, updated.Job()); err != nil {
 		return fmt.Errorf("mark job done: %w", err)
 	}
 
