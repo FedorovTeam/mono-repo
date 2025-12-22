@@ -51,14 +51,12 @@ router:
   preprocess_enabled: true
   preprocess_extensions:
     - doc
-    - pdf
   repositories:
     - owner: "FedorovTeam"
       repository: "knowledge-base"
       preprocess_enabled: true
       preprocess_extensions:
         - doc
-        - pdf
 observability:
   logs:
     enabled: true
