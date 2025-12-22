@@ -110,11 +110,11 @@ func (r *InMemoryRepository) Cleanup(_ context.Context, finishedBefore time.Time
 	return removed, nil
 }
 
-func (r *InMemoryRepository) RetryFailed(_ context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) (int, error) {
+func (r *InMemoryRepository) RetryFailed(_ context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) ([]domain.TableExtractionJob, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	updated := 0
+	updated := make([]domain.TableExtractionJob, 0)
 	for id, job := range r.data {
 		if job.Status != domain.StatusFailed && job.Status != domain.StatusFailedRetryable {
 			continue
@@ -130,7 +130,7 @@ func (r *InMemoryRepository) RetryFailed(_ context.Context, maxAttempts int, ret
 		}
 		job = updatedAgg.Job()
 		r.data[id] = job
-		updated++
+		updated = append(updated, job)
 	}
 
 	return updated, nil

@@ -33,6 +33,12 @@ message SubmitPreprocessResponse {
   PreprocessStatus status = 2;
   string error_message = 3;
   string correlation_id = 4;
+  int32 attempts = 5;
+  int32 max_attempts = 6;
+  google.protobuf.Timestamp next_run_at = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp finished_at = 9;
+  string target_media_type = 10;
 }
 
 message GetPreprocessStatusRequest {
@@ -53,6 +59,12 @@ message GetPreprocessStatusResponse {
   google.protobuf.Timestamp updated_at = 10;
   string error_code = 11;
   map<string, string> error_details = 12;
+  int32 attempts = 13;
+  int32 max_attempts = 14;
+  google.protobuf.Timestamp next_run_at = 15;
+  google.protobuf.Timestamp started_at = 16;
+  google.protobuf.Timestamp finished_at = 17;
+  string target_media_type = 18;
 }
 
 enum PreprocessStatus {
@@ -61,4 +73,5 @@ enum PreprocessStatus {
   PREPROCESS_STATUS_PROCESSING = 2;
   PREPROCESS_STATUS_COMPLETED = 3;
   PREPROCESS_STATUS_FAILED = 4;
+  PREPROCESS_STATUS_STOPPED = 5;
 }

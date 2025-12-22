@@ -49,7 +49,7 @@
      -d '{"job_id": "<JOB_ID>"}' \
      localhost:9082 backend.preprocess.v1.PreprocessService/GetPreprocessStatus
    ```
-5. Ожидаемый финал: `status=PREPROCESS_STATUS_COMPLETED`, заполнены `target_bucket`/`target_key`, ошибок нет.
+5. Ожидаемый финал: `status=PREPROCESS_STATUS_COMPLETED`, заполнены `target_bucket`/`target_key`, `target_media_type=application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `attempts > 0`, `started_at` и `finished_at` не пустые, `next_run_at` соответствует времени последней операции, ошибок нет.
 
 ## Polling сценарий (.doc → .docx)
 1. Подготовить исходник в MinIO: `preprocess-source/incoming/manual.doc`.
@@ -69,7 +69,8 @@
    ```bash
    grpcurl -plaintext -d '{"job_id": "<JOB_ID>"}' localhost:9082 backend.preprocess.v1.PreprocessService/GetPreprocessStatus
    ```
-4. Ожидаемый финал: `status` = `PREPROCESS_STATUS_COMPLETED`, поля `target_bucket`/`target_key` заполнены, `error_code` и `error_details` пустые.
+4. Ожидаемый финал: `status` = `PREPROCESS_STATUS_COMPLETED`, поля `target_bucket`/`target_key` заполнены, `target_media_type` соответствует DOCX, `attempts` и `max_attempts` отражают счётчики ретраев, `started_at`/`finished_at` проставлены, `error_code` и `error_details` пустые. При невосстановимой ошибке ожидайте `PREPROCESS_STATUS_STOPPED` вместе с заполненными `error_*` и последним `next_run_at`.
+   При падении LibreOffice `error_details` будут содержать `lo_output` (stdout/stderr, урезано до ~4 КБ), `lo_exit_code` и `lo_duration_ms` — их удобно читать через `GetPreprocessStatus` для отладки.
 
 ## Webhook сценарий
 1. Поднять echo-приёмник обратных вызовов:
@@ -98,7 +99,7 @@
      "target_key": "converted/manual2.docx"
    }
    ```
-4. Для имитации ошибки можно временно вернуть 500 от вебхука — воркер сделает до трёх попыток, после чего статус станет `FAILED` и в payload появится блок `error`.
+4. Для имитации ошибки можно временно вернуть 500 от вебхука — воркер сделает до трёх попыток, после чего статус станет `STOPPED`, в payload появится блок `error`, а в `GetPreprocessStatus` будут заполнены `error_code/error_message/error_details`, `finished_at` и итоговый `attempts`.
 
 ## Локальный режим без MinIO (LibreOffice only)
 1. В `config/config.yaml` выставить:

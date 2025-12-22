@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v3.21.12
-// source: backend/preprocess/v1/preprocess.proto
+// source: proto/preprocess.proto
 
 package preprocessv1
 
@@ -165,5 +165,5 @@ var PreprocessService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "backend/preprocess/v1/preprocess.proto",
+	Metadata: "proto/preprocess.proto",
 }

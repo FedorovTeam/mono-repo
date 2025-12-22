@@ -20,7 +20,7 @@ type QueueRepo interface {
 	GetByID(ctx context.Context, id uuid.UUID) (domain.TableExtractionJob, bool, error)
 	CountActive(ctx context.Context) (int, error)
 	Cleanup(ctx context.Context, finishedBefore time.Time) (int, error)
-	RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) (int, error)
+	RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) ([]domain.TableExtractionJob, error)
 }
 
 // StorageClient инкапсулирует работу с MinIO/объектным хранилищем.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/metadata"
 
 	"preprocess-service/internal/domain"
 )
@@ -58,9 +59,14 @@ func NewService(repo domain.PreprocessJobRepository, targetBucket, targetKeyPref
 }
 
 func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (domain.PreprocessJob, error) {
+	correlationID := cmd.CorrelationID
+	if correlationID == "" {
+		correlationID = correlationIDFromContext(ctx)
+	}
+
 	logger := s.logger.With(
 		zap.String("document_id", cmd.DocumentID),
-		zap.String("correlation_id", cmd.CorrelationID),
+		zap.String("correlation_id", correlationID),
 		zap.String("source_bucket", cmd.SourceBucket),
 		zap.String("source_key", cmd.SourceKey),
 	)
@@ -95,6 +101,7 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		if existing.ErrorDetails == nil {
 			existing.ErrorDetails = map[string]string{}
 		}
+
 		logger.Info("returning existing preprocess job",
 			zap.String("job_id", existing.ID),
 			zap.String("status", existing.Status.String()),
@@ -103,6 +110,8 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		)
 		return existing, nil
 	}
+
+	now := time.Now().UTC()
 
 	job := domain.PreprocessJob{
 		ID:            uuid.NewString(),
@@ -113,14 +122,14 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		TargetBucket:  targetBucket,
 		TargetKey:     targetKey,
 		CallbackURL:   cmd.CallbackURL,
-		CorrelationID: cmd.CorrelationID,
+		CorrelationID: correlationID,
 		Status:        domain.StatusPending,
 		ErrorDetails:  map[string]string{},
 		Attempts:      0,
 		MaxAttempts:   domain.DefaultMaxAttempts,
-		NextRunAt:     time.Now().UTC(),
-		CreatedAt:     time.Now().UTC(),
-		UpdatedAt:     time.Now().UTC(),
+		NextRunAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	if err := job.Validate(); err != nil {
@@ -185,4 +194,20 @@ func (s *Service) defaultTargetKey(documentID string) string {
 	}
 
 	return fmt.Sprintf("%s.docx", baseName)
+}
+
+func correlationIDFromContext(ctx context.Context) string {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if values := md.Get("x-correlation-id"); len(values) > 0 {
+			return values[0]
+		}
+	}
+
+	if val := ctx.Value("X-Correlation-ID"); val != nil {
+		if id, ok := val.(string); ok {
+			return id
+		}
+	}
+
+	return ""
 }

@@ -37,21 +37,20 @@ type PostgresConfig struct {
 }
 
 type PreprocessConfig struct {
-	LibreOfficePath   string        `yaml:"libreoffice_path"`
-	WorkingDir        string        `yaml:"working_dir"`
-	OutputDir         string        `yaml:"output_dir"`
-	LocalSourceDir    string        `yaml:"local_source_dir"`
-	LocalTargetDir    string        `yaml:"local_target_dir"`
-	StorageMode       string        `yaml:"storage_mode"`
-	SourceBucket      string        `yaml:"source_bucket"`
-	TargetBucket      string        `yaml:"target_bucket"`
-	TargetKeyPrefix   string        `yaml:"target_key_prefix"`
-	TargetMediaType   string        `yaml:"target_media_type"`
-	WorkerConcurrency int64         `yaml:"worker_concurrency"`
-	ProcessTimeout    time.Duration `yaml:"process_timeout"`
-	ConvertTimeout    time.Duration `yaml:"convert_timeout"`
-	Backoff           time.Duration `yaml:"backoff"`
-	PollInterval      time.Duration `yaml:"poll_interval"`
+	LibreOfficePath string        `yaml:"libreoffice_path"`
+	WorkingDir      string        `yaml:"working_dir"`
+	OutputDir       string        `yaml:"output_dir"`
+	LocalSourceDir  string        `yaml:"local_source_dir"`
+	LocalTargetDir  string        `yaml:"local_target_dir"`
+	StorageMode     string        `yaml:"storage_mode"`
+	SourceBucket    string        `yaml:"source_bucket"`
+	TargetBucket    string        `yaml:"target_bucket"`
+	TargetKeyPrefix string        `yaml:"target_key_prefix"`
+	TargetMediaType string        `yaml:"target_media_type"`
+	ProcessTimeout  time.Duration `yaml:"process_timeout"`
+	ConvertTimeout  time.Duration `yaml:"convert_timeout"`
+	Backoff         time.Duration `yaml:"backoff"`
+	PollInterval    time.Duration `yaml:"poll_interval"`
 }
 
 type LoggingConfig struct {

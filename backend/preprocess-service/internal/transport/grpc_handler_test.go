@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"go.uber.org/zap/zaptest"
+	"google.golang.org/grpc/metadata"
 
 	"preprocess-service/internal/config"
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/storage/memory"
 	"preprocess-service/internal/usecase/submit"
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
@@ -52,6 +54,24 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 	if first.GetJobId() == "" {
 		t.Fatalf("expected job id to be set")
 	}
+	if first.GetAttempts() != 0 {
+		t.Fatalf("expected attempts to start with 0, got %d", first.GetAttempts())
+	}
+	if first.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected default max attempts, got %d", first.GetMaxAttempts())
+	}
+	if first.GetNextRunAt() == nil || first.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if first.GetStartedAt() != nil {
+		t.Fatalf("expected started_at to be empty for pending job")
+	}
+	if first.GetFinishedAt() != nil {
+		t.Fatalf("expected finished_at to be empty for pending job")
+	}
+	if first.GetTargetMediaType() != "" {
+		t.Fatalf("expected empty target_media_type for new job, got %s", first.GetTargetMediaType())
+	}
 
 	req.CorrelationId = "corr-2"
 	second, err := handler.SubmitPreprocess(context.Background(), req)
@@ -65,6 +85,12 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 
 	if second.GetStatus() != preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING {
 		t.Fatalf("unexpected status: %s", second.GetStatus())
+	}
+	if got := second.GetNextRunAt(); got == nil || !got.AsTime().Equal(first.GetNextRunAt().AsTime()) {
+		t.Fatalf("expected next_run_at to be preserved, got %v vs %v", got, first.GetNextRunAt())
+	}
+	if second.GetTargetMediaType() != "" {
+		t.Fatalf("expected empty target_media_type for pending job, got %s", second.GetTargetMediaType())
 	}
 }
 
@@ -118,6 +144,72 @@ func TestGetPreprocessStatus(t *testing.T) {
 	if statusResp.GetUpdatedAt().AsTime().After(time.Now().Add(1 * time.Minute)) {
 		t.Fatalf("updated_at is in the future: %v", statusResp.GetUpdatedAt())
 	}
+	if statusResp.GetNextRunAt() == nil || statusResp.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if statusResp.GetAttempts() != 0 {
+		t.Fatalf("expected attempts 0, got %d", statusResp.GetAttempts())
+	}
+	if statusResp.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected max_attempts %d, got %d", domain.DefaultMaxAttempts, statusResp.GetMaxAttempts())
+	}
+	if statusResp.GetStartedAt() != nil {
+		t.Fatalf("expected started_at to be empty for pending job")
+	}
+	if statusResp.GetFinishedAt() != nil {
+		t.Fatalf("expected finished_at to be empty for pending job")
+	}
+	if statusResp.GetTargetMediaType() != "" {
+		t.Fatalf("expected empty target_media_type for pending job, got %s", statusResp.GetTargetMediaType())
+	}
+}
+
+func TestGetPreprocessStatusReturnsErrorDetails(t *testing.T) {
+	cfg := loadTestConfig(t)
+
+	repo := memory.NewRepository()
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
+	if err != nil {
+		t.Fatalf("init service: %v", err)
+	}
+	handler := NewPreprocessHandler(service, zaptest.NewLogger(t))
+
+	now := time.Now().UTC()
+	job := domain.PreprocessJob{
+		ID:           "job-error-details",
+		DocumentID:   "doc-err",
+		SourceBucket: cfg.Preprocess.SourceBucket,
+		SourceKey:    "error.docx",
+		SourceETag:   "etag-err",
+		Status:       domain.StatusFailed,
+		Attempts:     1,
+		MaxAttempts:  3,
+		NextRunAt:    now,
+		UpdatedAt:    now,
+		ErrorCode:    domain.ErrorCodeConvertFailed.String(),
+		ErrorMessage: "conversion failed",
+		ErrorDetails: map[string]string{
+			"lo_exit_code": "7",
+			"lo_output":    "bad output",
+		},
+	}
+	if err := repo.Create(context.Background(), job); err != nil {
+		t.Fatalf("prepare job: %v", err)
+	}
+
+	statusResp, err := handler.GetPreprocessStatus(context.Background(), &preprocessv1.GetPreprocessStatusRequest{
+		JobId: job.ID,
+	})
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+
+	if statusResp.GetErrorDetails()["lo_exit_code"] != "7" {
+		t.Fatalf("expected converter exit code detail, got %v", statusResp.GetErrorDetails())
+	}
+	if statusResp.GetErrorDetails()["lo_output"] == "" {
+		t.Fatalf("expected converter output detail, got %v", statusResp.GetErrorDetails())
+	}
 }
 
 func TestSubmitPreprocessUsesDefaults(t *testing.T) {
@@ -157,5 +249,58 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	expectedKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "doc-3.docx")
 	if statusResp.GetTargetKey() != expectedKey {
 		t.Fatalf("expected default target key %s, got %s", expectedKey, statusResp.GetTargetKey())
+	}
+	if statusResp.GetNextRunAt() == nil || statusResp.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if statusResp.GetAttempts() != 0 {
+		t.Fatalf("expected attempts 0, got %d", statusResp.GetAttempts())
+	}
+	if statusResp.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected default max attempts, got %d", statusResp.GetMaxAttempts())
+	}
+}
+
+func TestSubmitPreprocessUsesContextCorrelationID(t *testing.T) {
+	cfg := loadTestConfig(t)
+
+	repo := memory.NewRepository()
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
+	if err != nil {
+		t.Fatalf("init service: %v", err)
+	}
+	handler := NewPreprocessHandler(service, zaptest.NewLogger(t))
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-correlation-id", "ctx-corr"))
+
+	resp, err := handler.SubmitPreprocess(ctx, &preprocessv1.SubmitPreprocessRequest{
+		SourceBucket: cfg.Preprocess.SourceBucket,
+		SourceKey:    path.Join("docx", "missing-corr.docx"),
+		SourceEtag:   "etag-ctx",
+		DocumentId:   "doc-ctx",
+	})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+
+	if resp.GetCorrelationId() != "ctx-corr" {
+		t.Fatalf("expected correlation from context, got %s", resp.GetCorrelationId())
+	}
+	if resp.GetNextRunAt() == nil || resp.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if resp.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected default max attempts, got %d", resp.GetMaxAttempts())
+	}
+
+	job, found, err := repo.Get(context.Background(), resp.GetJobId())
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if !found {
+		t.Fatal("job not found")
+	}
+	if job.CorrelationID != "ctx-corr" {
+		t.Fatalf("expected job correlation id from context, got %s", job.CorrelationID)
 	}
 }

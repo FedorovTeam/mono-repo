@@ -11,8 +11,10 @@ func toProtoStatus(status domain.PreprocessStatus) preprocessv1.PreprocessStatus
 		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PROCESSING
 	case domain.StatusCompleted:
 		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_COMPLETED
-	case domain.StatusFailed, domain.StatusStopped:
+	case domain.StatusFailed:
 		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED
+	case domain.StatusStopped:
+		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_STOPPED
 	case domain.StatusPending:
 		return preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING
 	default:
@@ -28,6 +30,8 @@ func statusFromProto(status preprocessv1.PreprocessStatus) domain.PreprocessStat
 		return domain.StatusCompleted
 	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED:
 		return domain.StatusFailed
+	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_STOPPED:
+		return domain.StatusStopped
 	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING:
 		return domain.StatusPending
 	default:

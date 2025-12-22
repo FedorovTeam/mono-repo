@@ -23,7 +23,7 @@ type Config struct {
 	TargetBucket    string
 	TargetMediaType string
 	OutputDir       string
-	Concurrency     int64
+	Concurrency     int64 // принудительно приводится к 1, параллелизм отключён
 	ProcessTimeout  time.Duration
 	ConvertTimeout  time.Duration
 	Backoff         time.Duration
@@ -37,6 +37,7 @@ type Worker struct {
 	waitGroup sync.WaitGroup
 	processor *preprocess.Service
 	repo      domain.PreprocessJobRepository
+	lock      domain.LockHandle
 }
 
 type Dependencies struct {
@@ -100,9 +101,7 @@ func New(deps Dependencies, cfg Config, logger *zap.Logger) (*Worker, error) {
 }
 
 func normalizeConfig(cfg Config) Config {
-	if cfg.Concurrency <= 0 {
-		cfg.Concurrency = 1
-	}
+	cfg.Concurrency = 1
 	if cfg.ConvertTimeout <= 0 {
 		cfg.ConvertTimeout = 2 * time.Minute
 	}
@@ -120,6 +119,13 @@ func normalizeConfig(cfg Config) Config {
 
 func (w *Worker) Run(ctx context.Context) error {
 	w.ensureLogger()
+
+	if err := w.acquireLock(ctx); err != nil {
+		w.waitGroup.Wait()
+		return err
+	}
+
+	defer w.releaseLock(context.Background())
 
 	ticker := time.NewTicker(w.cfg.PollInterval)
 	defer ticker.Stop()
@@ -144,10 +150,16 @@ func (w *Worker) Run(ctx context.Context) error {
 			continue
 		}
 
+		if err := w.sem.Acquire(ctx, 1); err != nil {
+			w.waitGroup.Wait()
+			return err
+		}
+
 		w.logger.Debug("picking next job for processing")
 		job, found, err := w.repo.NextForProcessing(ctx)
 		if err != nil {
 			w.logger.Error("failed to pick job", zap.Error(err))
+			w.sem.Release(1)
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
@@ -156,6 +168,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		if !found {
 			w.logger.Debug("no jobs ready for processing, waiting for next tick")
+			w.sem.Release(1)
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
@@ -166,9 +179,6 @@ func (w *Worker) Run(ctx context.Context) error {
 			zap.String("job_id", job.ID),
 			zap.String("correlation_id", job.CorrelationID),
 		)
-		if err := w.sem.Acquire(ctx, 1); err != nil {
-			return err
-		}
 
 		w.waitGroup.Add(1)
 		go func(job domain.PreprocessJob) {
@@ -187,6 +197,48 @@ func (w *Worker) waitForNext(ctx context.Context, ticker *time.Ticker) bool {
 	case <-ticker.C:
 		return true
 	}
+}
+
+func (w *Worker) acquireLock(ctx context.Context) error {
+	if w.repo == nil {
+		return fmt.Errorf("worker repo is not configured")
+	}
+
+	for {
+		lock, acquired, err := w.repo.TryAcquireWorkerLock(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire worker lock: %w", err)
+		}
+
+		if acquired {
+			w.lock = lock
+			w.logger.Info("worker lock acquired")
+			return nil
+		}
+
+		w.logger.Info("worker lock is held, waiting for release")
+
+		timer := time.NewTimer(w.cfg.PollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (w *Worker) releaseLock(ctx context.Context) {
+	if w.lock == nil {
+		return
+	}
+
+	if err := w.lock.Release(ctx); err != nil {
+		w.logger.Error("failed to release worker lock", zap.Error(err))
+		return
+	}
+
+	w.logger.Info("worker lock released")
 }
 
 func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {

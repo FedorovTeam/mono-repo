@@ -3,6 +3,8 @@ package ports
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 )
 
 var (
@@ -39,7 +41,7 @@ type StorageUploader interface {
 }
 
 type DocumentConverter interface {
-	Convert(ctx context.Context, sourcePath, outDir string) error
+	Convert(ctx context.Context, sourcePath, outDir string) (ConvertResult, error)
 }
 
 type CallbackSender interface {
@@ -56,4 +58,30 @@ type Workspace interface {
 	OutputDir() string
 	EnsureExists(path string) error
 	Cleanup() error
+}
+
+type ConvertResult struct {
+	ExitCode int
+	Output   string
+	Stdout   string
+	Stderr   string
+	Duration time.Duration
+}
+
+func (r ConvertResult) Details(prefix string) map[string]string {
+	if prefix == "" {
+		prefix = "lo"
+	}
+
+	details := map[string]string{
+		prefix + "_exit_code":       fmt.Sprintf("%d", r.ExitCode),
+		prefix + "_duration_ms":     fmt.Sprintf("%d", r.Duration.Milliseconds()),
+		prefix + "_duration_string": r.Duration.String(),
+	}
+
+	if r.Output != "" {
+		details[prefix+"_output"] = r.Output
+	}
+
+	return details
 }

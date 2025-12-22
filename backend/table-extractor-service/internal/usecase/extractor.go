@@ -203,11 +203,7 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 			return false, fmt.Errorf("save processing job %s: %w", job.ID, err)
 		}
 
-		uc.logger.Debug("started processing job",
-			zap.String("queue_id", startedJob.ID.String()),
-			zap.String("document_id", startedJob.DocumentID),
-			zap.String("correlation_id", startedJob.CorrelationID),
-		)
+		uc.logger.Debug("started processing job", uc.jobLogFields(startedJob)...)
 
 		if err := uc.processSingle(ctx, startedJob); err != nil {
 			uc.logger.Error("failed to process extraction job",
@@ -242,11 +238,7 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(errors.New("missing original location"), transErr)
 		}
 		saveErr := uc.queue.Save(ctxWithCID, updated.Job())
-		uc.logger.Debug("job marked failed due to missing source",
-			zap.String("queue_id", job.ID.String()),
-			zap.String("document_id", job.DocumentID),
-			zap.String("correlation_id", job.CorrelationID),
-		)
+		uc.logger.Debug("job marked failed due to missing source", uc.jobLogFields(updated.Job())...)
 		return errors.Join(errors.New("missing source"), saveErr)
 	}
 
@@ -267,11 +259,13 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("original_object_key", job.Original.ObjectKey),
 	)
 
+	fetchStarted := time.Now()
 	cached, err := uc.fileCache.Fetch(ctxWithCID, SourceLocation{
 		Original:  job.Original,
 		SourceURL: job.SourceURL,
 		LocalPath: job.LocalPath,
 	})
+	fetchDuration := time.Since(fetchStarted)
 	if err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("download failed", "download_error", err.Error(), false, now)
@@ -279,12 +273,7 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(fmt.Errorf("download original: %w", err), transErr)
 		}
 		statusErr := uc.queue.Save(ctxWithCID, updated.Job())
-		uc.logger.Debug("job marked failed due to download error",
-			zap.String("queue_id", job.ID.String()),
-			zap.String("document_id", job.DocumentID),
-			zap.String("correlation_id", job.CorrelationID),
-			zap.Error(err),
-		)
+		uc.logger.Debug("job marked failed due to download error", uc.jobLogFields(updated.Job(), zap.Error(err))...)
 		return errors.Join(fmt.Errorf("download original: %w", err), statusErr)
 	}
 	uc.logger.Debug("source cached",
@@ -292,6 +281,9 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("document_id", job.DocumentID),
 		zap.String("correlation_id", job.CorrelationID),
 		zap.String("cache_path", cached.Path),
+		zap.Int64("duration_ms", fetchDuration.Milliseconds()),
+		zap.Int("attempts", job.Attempts),
+		zap.String("status_reason", aggregate.Job().StatusReason),
 	)
 	defer func() {
 		if cached.Cleanup != nil {
@@ -309,7 +301,9 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("correlation_id", job.CorrelationID),
 		zap.String("source_path", cached.Path),
 	)
+	extractStart := time.Now()
 	result, err := uc.extractor.Extract(ctxWithCID, cached.Path)
+	extractionDuration := time.Since(extractStart)
 	if err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("extraction failed", "extraction_error", err.Error(), false, now)
@@ -317,12 +311,7 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(fmt.Errorf("extract tables: %w", err), transErr)
 		}
 		statusErr := uc.queue.Save(ctxWithCID, updated.Job())
-		uc.logger.Debug("job marked failed due to extraction error",
-			zap.String("queue_id", job.ID.String()),
-			zap.String("document_id", job.DocumentID),
-			zap.String("correlation_id", job.CorrelationID),
-			zap.Error(err),
-		)
+		uc.logger.Debug("job marked failed due to extraction error", uc.jobLogFields(updated.Job(), zap.Error(err))...)
 		return errors.Join(fmt.Errorf("extract tables: %w", err), statusErr)
 	}
 	uc.logger.Debug("extractor finished",
@@ -330,8 +319,12 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("document_id", job.DocumentID),
 		zap.String("correlation_id", job.CorrelationID),
 		zap.Int("artifacts_count", len(result.DebugFiles)),
+		zap.Int64("duration_ms", extractionDuration.Milliseconds()),
+		zap.Int("attempts", job.Attempts),
+		zap.String("status_reason", aggregate.Job().StatusReason),
 	)
 
+	uploadStart := time.Now()
 	if err := uc.uploadArtifacts(ctxWithCID, job, result); err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("upload failed", "upload_error", err.Error(), true, now)
@@ -339,32 +332,62 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(fmt.Errorf("upload artifacts: %w", err), transErr)
 		}
 		statusErr := uc.queue.Save(ctxWithCID, updated.Job())
-		uc.logger.Debug("job marked failed due to upload error",
-			zap.String("queue_id", job.ID.String()),
-			zap.String("document_id", job.DocumentID),
-			zap.String("correlation_id", job.CorrelationID),
-			zap.Error(err),
-		)
+		uc.logger.Debug("job marked failed due to upload error", uc.jobLogFields(updated.Job(), zap.Error(err))...)
 		return errors.Join(fmt.Errorf("upload artifacts: %w", err), statusErr)
 	}
+	uploadDuration := time.Since(uploadStart)
+	uc.logger.Debug("artifacts uploaded",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.Int64("duration_ms", uploadDuration.Milliseconds()),
+		zap.Int("attempts", job.Attempts),
+		zap.String("status_reason", aggregate.Job().StatusReason),
+	)
 
 	finishedAt := uc.clock.Now().UTC()
+	markDoneStart := time.Now()
 	updated, _, transErr := aggregate.MarkDone("completed", finishedAt)
 	if transErr != nil {
 		return fmt.Errorf("mark job done: %w", transErr)
 	}
-	if err := uc.queue.Save(ctxWithCID, updated.Job()); err != nil {
+	aggregate = updated
+	finalJob := updated.Job()
+	if err := uc.queue.Save(ctxWithCID, finalJob); err != nil {
 		return fmt.Errorf("mark job done: %w", err)
 	}
+	markDoneDuration := time.Since(markDoneStart)
+	uc.logger.Debug("job marked done", uc.jobLogFields(finalJob, zap.Int64("duration_ms", markDoneDuration.Milliseconds()))...)
 
-	uc.logger.Debug("processSingle finished",
-		zap.String("queue_id", job.ID.String()),
-		zap.String("document_id", job.DocumentID),
-		zap.String("correlation_id", job.CorrelationID),
+	uc.logger.Debug("job processed",
+		zap.String("queue_id", finalJob.ID.String()),
+		zap.String("document_id", finalJob.DocumentID),
+		zap.String("correlation_id", finalJob.CorrelationID),
 		zap.Time("finished_at", finishedAt),
+		zap.Int("artifacts_size_bytes", artifactsSize(result)),
+		zap.Int("debug_files_count", len(result.DebugFiles)),
 	)
 
 	return nil
+}
+
+func artifactsSize(result ExtractionResult) int {
+	return len(result.RawJSON) + len(result.NormalizedJSON) + len(result.Markdown) + len(result.Manifest)
+}
+
+func (uc *TableExtractorUseCase) jobLogFields(job domain.TableExtractionJob, extra ...zap.Field) []zap.Field {
+	fields := []zap.Field{
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.String("status", string(job.Status)),
+		zap.Int("attempts", job.Attempts),
+		zap.String("status_reason", job.StatusReason),
+		zap.String("error_code", job.ErrorCode),
+		zap.String("error_message", job.ErrorMessage),
+		zap.Any("next_run_at", job.NextRunAt),
+	}
+	return append(fields, extra...)
 }
 
 func (uc *TableExtractorUseCase) uploadArtifacts(ctx context.Context, job domain.TableExtractionJob, result ExtractionResult) error {
@@ -464,7 +487,7 @@ func extractExtension(value string) string {
 	return strings.ToLower(strings.TrimPrefix(path.Ext(clean), "."))
 }
 
-func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, processingTimeout time.Duration, maxAttempts int, backoffInterval, maxBackoff time.Duration) (int, int, error) {
+func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, processingTimeout time.Duration, maxAttempts int, backoffInterval, maxBackoff time.Duration) ([]domain.TableExtractionJob, []domain.TableExtractionJob, error) {
 	now := uc.clock.Now().UTC()
 	threshold := now
 	if processingTimeout > 0 {
@@ -473,11 +496,11 @@ func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, pro
 
 	jobs, err := uc.queue.ListProcessingBefore(ctx, threshold)
 	if err != nil {
-		return 0, 0, fmt.Errorf("list stuck processing: %w", err)
+		return nil, nil, fmt.Errorf("list stuck processing: %w", err)
 	}
 
-	restored := 0
-	failed := 0
+	restored := make([]domain.TableExtractionJob, 0)
+	failed := make([]domain.TableExtractionJob, 0)
 
 	for _, job := range jobs {
 		aggregate := domain.NewTableExtractionJobAggregate(job)
@@ -486,16 +509,12 @@ func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, pro
 			if transErr != nil {
 				return restored, failed, fmt.Errorf("mark job failed: %w", transErr)
 			}
-			if err := uc.queue.Save(ctx, updated.Job()); err != nil {
+			updatedJob := updated.Job()
+			if err := uc.queue.Save(ctx, updatedJob); err != nil {
 				return restored, failed, fmt.Errorf("mark job failed: %w", err)
 			}
-			uc.logger.Debug("job marked failed after timeout",
-				zap.String("queue_id", job.ID.String()),
-				zap.String("document_id", job.DocumentID),
-				zap.String("correlation_id", job.CorrelationID),
-				zap.Int("attempts", job.Attempts),
-			)
-			failed++
+			uc.logger.Debug("job marked failed after timeout", uc.jobLogFields(updatedJob)...)
+			failed = append(failed, updatedJob)
 			continue
 		}
 
@@ -505,41 +524,41 @@ func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, pro
 		if transErr != nil {
 			return restored, failed, fmt.Errorf("postpone job: %w", transErr)
 		}
-		if err := uc.queue.Save(ctx, updated.Job()); err != nil {
+		updatedJob := updated.Job()
+		if err := uc.queue.Save(ctx, updatedJob); err != nil {
 			return restored, failed, fmt.Errorf("postpone job: %w", err)
 		}
-		uc.logger.Debug("job restored after timeout",
-			zap.String("queue_id", job.ID.String()),
-			zap.String("document_id", job.DocumentID),
-			zap.String("correlation_id", job.CorrelationID),
-			zap.Duration("backoff_delay", delay),
-			zap.Time("next_run_at", nextRun),
-			zap.Int("attempts", job.Attempts),
-		)
-		restored++
+		uc.logger.Debug("job restored after timeout", uc.jobLogFields(updatedJob, zap.Duration("backoff_delay", delay))...)
+		restored = append(restored, updatedJob)
 	}
 
 	return restored, failed, nil
 }
 
-func (uc *TableExtractorUseCase) RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration) (int, error) {
+func (uc *TableExtractorUseCase) RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration) ([]domain.TableExtractionJob, error) {
 	delay := retryDelay
 	if delay < 0 {
 		delay = 0
 	}
 	now := uc.clock.Now().UTC()
-	count, err := uc.queue.RetryFailed(ctx, maxAttempts, delay, now)
+	jobs, err := uc.queue.RetryFailed(ctx, maxAttempts, delay, now)
 	if err != nil {
-		return 0, fmt.Errorf("retry failed jobs: %w", err)
+		return nil, fmt.Errorf("retry failed jobs: %w", err)
 	}
-	if count > 0 {
+	for _, job := range jobs {
+		uc.logger.Debug("job scheduled for retry", uc.jobLogFields(job,
+			zap.Duration("retry_delay", delay),
+			zap.Int("max_attempts", maxAttempts),
+		)...)
+	}
+	if len(jobs) > 0 {
 		uc.logger.Debug("jobs scheduled for retry",
-			zap.Int("count", count),
+			zap.Int("count", len(jobs)),
 			zap.Duration("retry_delay", delay),
 			zap.Int("max_attempts", maxAttempts),
 		)
 	}
-	return count, nil
+	return jobs, nil
 }
 
 func (uc *TableExtractorUseCase) CleanupFinished(ctx context.Context, retention time.Duration) (int, error) {

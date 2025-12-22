@@ -1,13 +1,18 @@
 # Сценарии использования
 
-## Конвертация .doc → .docx с polling
-1. Подготовить исходный файл `incoming/report.doc` в бакете `preprocess-source`.
-2. Вызвать `SubmitPreprocess` с `target_key: converted/report.docx`, `document_id` и `correlation_id`.
-3. Каждые несколько секунд опрашивать `GetPreprocessStatus` до получения `PREPROCESS_STATUS_COMPLETED`.
-4. Забрать сконвертированный docx из `preprocess-artifacts/converted/report.docx` и передать дальше в docling.
+## Конвертация (.doc/.docx/.pdf → .docx) с опросом статуса
+1. Загрузить исходный файл в бакет, указанный в конфиге `preprocess.source_bucket` (по умолчанию `preprocess-source`), и сохранить его ETag — он обязателен для `SubmitPreprocess`.
+2. Вызвать `SubmitPreprocess`, передав `document_id`, `source_bucket/source_key/source_etag` и при необходимости `correlation_id`. Если не задавать `target_bucket` и `target_key`, сервис заполнит их из конфига (`preprocess.target_bucket` и `<target_key_prefix>/<document_id>.docx`).
+3. В ответе придёт `job_id`, текущий `status`, счётчики `attempts/max_attempts`, даты `next_run_at` и, при наличии, `started_at`/`finished_at`, а также `target_media_type` (для готовых результатов). Для уже существующего источника возвращается сохранённая задача без создания новой.
+4. Опросить `GetPreprocessStatus` до перехода в `PREPROCESS_STATUS_COMPLETED` или `PREPROCESS_STATUS_STOPPED`. `FAILED` остаётся промежуточным статусом для повторов: смотрите `error_code`, `error_message`, `error_details` и `next_run_at`, чтобы понять причину и время следующей попытки.
+5. После `COMPLETED` забирать готовый DOCX из координат `target_bucket/target_key` из ответа и передавать в docling/дальнейший пайплайн. Параллельная обработка недоступна: задачи исполняются только по одной.
 
-## Конвертация .pdf → .docx с callback
-1. Задеплоить callback endpoint, принимающий POST с JSON (например, `https://example.tld/hooks/preprocess`).
-2. Вызвать `SubmitPreprocess` c `callback_url` и параметрами источника (bucket/key/etag).
-3. Получить `job_id` и дождаться уведомления о статусе. В payload будут путь результата и возможное описание ошибки.
-4. По уведомлению инициировать следующую стадию пайплайна (например, публикацию в GitHub).
+## Конвертация с webhook для финального статуса
+1. Развернуть HTTP endpoint для приёма POST с JSON.
+2. Вызвать `SubmitPreprocess`, передав `callback_url` и координаты источника (`source_bucket/source_key/source_etag`), а также нужные `target_bucket/target_key` (или оставить дефолтные из конфига). `document_id` и ETag обязательны.
+3. Сервис вернёт `job_id`; воркер скачает файл, сконвертирует его через LibreOffice и загрузит результат. Callback отправляется только после финального состояния: `status=done` при успешной конвертации или `status=stopped` при необратимой ошибке/превышении попыток. В payload всегда есть `job_id`, `target_bucket`, `target_key`, а при остановке — блок `error { code, message }`.
+4. При `status=done` можно сразу читать результат в целевом бакете; при `status=stopped` обрабатывать ошибку и решать, нужно ли перезапустить задачу с исправленными данными. Очередь обрабатывается последовательно, новых параллельных воркеров нет.
+
+## Повторная отправка того же файла
+1. Если `SubmitPreprocess` вызывается повторно с теми же `source_bucket/source_key/source_etag`, сервис найдёт существующее задание и вернёт его без изменения статуса или целевых координат.
+2. Этот сценарий подходит для безопасного повтора после сетевых сбоёв клиента: `job_id`, `status`, `target_bucket` и `target_key` будут идентичны исходным значениям.

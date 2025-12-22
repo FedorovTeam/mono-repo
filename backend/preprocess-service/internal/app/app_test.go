@@ -26,7 +26,6 @@ func TestNewAppWithoutTelemetry(t *testing.T) {
 	cfg.Preprocess.ConvertTimeout = time.Second
 	cfg.Preprocess.Backoff = time.Second
 	cfg.Preprocess.PollInterval = 10 * time.Millisecond
-	cfg.Preprocess.WorkerConcurrency = 1
 
 	logger := zaptest.NewLogger(t)
 
@@ -61,7 +60,9 @@ func (noopStorage) Upload(context.Context, string, string, string, string) error
 
 type noopConverter struct{}
 
-func (noopConverter) Convert(context.Context, string, string) error { return nil }
+func (noopConverter) Convert(context.Context, string, string) (ports.ConvertResult, error) {
+	return ports.ConvertResult{}, nil
+}
 
 type noopWorkspaceManager struct{}
 

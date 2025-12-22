@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -36,10 +37,15 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
 
+	correlationID := req.GetCorrelationId()
+	if correlationID == "" {
+		correlationID = correlationIDFromContext(ctx)
+	}
+
 	logger := h.logger.With(
 		zap.String("job_id", ""),
 		zap.String("document_id", req.GetDocumentId()),
-		zap.String("correlation_id", req.GetCorrelationId()),
+		zap.String("correlation_id", correlationID),
 		zap.String("source_bucket", req.GetSourceBucket()),
 		zap.String("source_key", req.GetSourceKey()),
 		zap.String("status", domain.StatusPending.String()),
@@ -54,7 +60,7 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		TargetBucket:  req.GetTargetBucket(),
 		TargetKey:     req.GetTargetKey(),
 		CallbackURL:   req.GetCallbackUrl(),
-		CorrelationID: req.GetCorrelationId(),
+		CorrelationID: correlationID,
 	})
 	if err != nil {
 		logger.With(
@@ -63,7 +69,6 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		return nil, h.handleError(err)
 	}
 
-	correlationID := req.GetCorrelationId()
 	if correlationID == "" {
 		correlationID = job.CorrelationID
 	}
@@ -75,10 +80,16 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 	).Info("SubmitPreprocess succeeded")
 
 	return &preprocessv1.SubmitPreprocessResponse{
-		JobId:         job.ID,
-		Status:        toProtoStatus(job.Status),
-		ErrorMessage:  job.ErrorMessage,
-		CorrelationId: correlationID,
+		JobId:           job.ID,
+		Status:          toProtoStatus(job.Status),
+		ErrorMessage:    job.ErrorMessage,
+		CorrelationId:   correlationID,
+		Attempts:        int32(job.Attempts),
+		MaxAttempts:     int32(job.MaxAttempts),
+		NextRunAt:       timestamppb.New(job.NextRunAt),
+		StartedAt:       timestampOrNil(job.StartedAt),
+		FinishedAt:      timestampOrNil(job.FinishedAt),
+		TargetMediaType: job.TargetMediaType,
 	}, nil
 }
 
@@ -117,18 +128,24 @@ func (h *PreprocessHandler) GetPreprocessStatus(ctx context.Context, req *prepro
 	).Info("GetPreprocessStatus succeeded")
 
 	return &preprocessv1.GetPreprocessStatusResponse{
-		JobId:         job.ID,
-		DocumentId:    job.DocumentID,
-		SourceBucket:  job.SourceBucket,
-		SourceKey:     job.SourceKey,
-		TargetBucket:  job.TargetBucket,
-		TargetKey:     job.TargetKey,
-		Status:        toProtoStatus(job.Status),
-		ErrorMessage:  job.ErrorMessage,
-		ErrorCode:     job.ErrorCode,
-		ErrorDetails:  job.ErrorDetails,
-		CorrelationId: job.CorrelationID,
-		UpdatedAt:     timestamppb.New(job.UpdatedAt),
+		JobId:           job.ID,
+		DocumentId:      job.DocumentID,
+		SourceBucket:    job.SourceBucket,
+		SourceKey:       job.SourceKey,
+		TargetBucket:    job.TargetBucket,
+		TargetKey:       job.TargetKey,
+		Status:          toProtoStatus(job.Status),
+		ErrorMessage:    job.ErrorMessage,
+		ErrorCode:       job.ErrorCode,
+		ErrorDetails:    job.ErrorDetails,
+		CorrelationId:   job.CorrelationID,
+		UpdatedAt:       timestamppb.New(job.UpdatedAt),
+		Attempts:        int32(job.Attempts),
+		MaxAttempts:     int32(job.MaxAttempts),
+		NextRunAt:       timestamppb.New(job.NextRunAt),
+		StartedAt:       timestampOrNil(job.StartedAt),
+		FinishedAt:      timestampOrNil(job.FinishedAt),
+		TargetMediaType: job.TargetMediaType,
 	}, nil
 }
 
@@ -143,4 +160,12 @@ func (h *PreprocessHandler) handleError(err error) error {
 	default:
 		return status.Errorf(codes.Internal, "unexpected error: %v", err)
 	}
+}
+
+func timestampOrNil(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+
+	return timestamppb.New(t)
 }
