@@ -19,7 +19,7 @@ func NewDocumentRepository() *DocumentRepository {
 func (r *DocumentRepository) MarkStatus(ctx context.Context, tx application.Tx, documentID string, status domain.DocumentStatus, payload map[string]any, reason string) error {
 	if _, err := tx.Exec(ctx, `
         UPDATE documents
-        SET status=$1, actual_status=$1, error_reason='', updated_at=now()
+        SET status=$1, error_reason='', updated_at=now()
         WHERE id=$2
     `, status, documentID); err != nil {
 		return err

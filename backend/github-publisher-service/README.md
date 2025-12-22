@@ -28,9 +28,9 @@
 ## Очередь и воркер
 - Запускается из `cmd/main.go` вместе с gRPC сервером и использует `processing.dsn`.
 - Опрос (`poll_interval`, по умолчанию 5s) выбирает `pending` записи из `processing_jobs` с `next_run_at <= now()` и нужной `stage` (`publish_to_github` по умолчанию) через `FOR UPDATE SKIP LOCKED`.
-- Успешный проход: статус задания меняется на `in_progress`, пишется событие `job_events`, документ обновляется на `PublishedToGitHub`/`actual_status=PublishedToGitHub`/`error_reason=''`, в `document_status_logs` добавляется запись с `workflow_id` из `payload.correlation_id`, затем задача помечается `completed`.
+- Успешный проход: статус задания меняется на `in_progress`, пишется событие `job_events`, документ обновляется на `PublishedToGitHub` со сброшенным `error_reason`, в `document_status_logs` добавляется запись с `workflow_id` из `payload.correlation_id`, затем задача помечается `completed`.
 - Ошибка: попытка инкрементируется, в `payload` пишется `last_error`, `next_run_at` сдвигается на `now + attempts*backoff` (линейный рост), статус остаётся `pending` до достижения `max_attempts`, после чего становится `failed`; событие фиксируется в `job_events`.
-- Ожидаемые столбцы в БД: в `processing_jobs` используются `task_id`, `document_id`, `stage`, `status`, `attempts`, `next_run_at`, `payload`, `updated_at`; в `job_events` — `id`, `job_id`, `stage`, `status`, `event_type`, `message`, `payload`, `created_at`; в `documents` — `id`, `status`, `actual_status`, `error_reason`, `updated_at`; в `document_status_logs` — `id`, `document_id`, `from_status`, `to_status`, `workflow_id`, `reason`, `created_at`.
+- Ожидаемые столбцы в БД: в `processing_jobs` используются `task_id`, `document_id`, `stage`, `status`, `attempts`, `next_run_at`, `payload`, `updated_at`; в `job_events` — `id`, `job_id`, `stage`, `status`, `event_type`, `message`, `payload`, `created_at`; в `documents` — `id`, `status`, `error_reason`, `updated_at`; в `document_status_logs` — `id`, `document_id`, `from_status`, `to_status`, `workflow_id`, `reason`, `created_at`.
 
 ## Конфигурация
 Все параметры читаются из `config/config.yaml` или из файла по пути `CONFIG_PATH`.

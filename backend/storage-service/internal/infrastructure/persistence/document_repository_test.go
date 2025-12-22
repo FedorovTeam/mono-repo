@@ -26,7 +26,7 @@ func TestDocumentRepository_MarkStatus(t *testing.T) {
 		t.Fatalf("begin tx: %v", err)
 	}
 
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE documents SET status=$1, actual_status=$1, error_reason='', updated_at=now() WHERE id=$2")).
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE documents SET status=$1, error_reason='', updated_at=now() WHERE id=$2")).
 		WithArgs(domain.DocumentStatusStoredOriginal, "doc").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO document_status_logs (id, document_id, from_status, to_status, workflow_id, reason, created_at) VALUES (gen_random_uuid(), $1, NULL, $2, $3, $4, now())")).
