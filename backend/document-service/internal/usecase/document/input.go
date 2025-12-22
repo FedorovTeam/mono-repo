@@ -2,18 +2,20 @@ package document
 
 // CreateDocumentInput содержит параметры создания документа.
 type CreateDocumentInput struct {
-	ID                string
-	FileName          string
-	Owner             string
-	Repository        string
-	Branch            string
-	BaseBranch        string
-	Path              string
-	UploadBucket      string
-	UploadObjectKey   string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	CreatePR          bool
+	ID                 string
+	FileName           string
+	Owner              string
+	Repository         string
+	Branch             string
+	BaseBranch         string
+	Path               string
+	UploadBucket       string
+	UploadObjectKey    string
+	MarkdownBucket     string
+	MarkdownObjectKey  string
+	CreatePR           bool
+	ConversionStrategy string
+	ExtractTables      bool
 }
 
 // ConfirmUploadInput подтверждает загрузку исходного файла.

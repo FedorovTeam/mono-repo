@@ -10,6 +10,7 @@ services:
   storage_service: "storage-service.storage-service.svc.cluster.local:9090"
   transformer_service: "docling-transformer-service.docling-transformer-service.svc.cluster.local:9090"
   github_publisher_service: "github-publisher-service.github-publisher-service.svc.cluster.local:9090"
+  table_extractor_service: "table-extractor-service.table-extractor-service.svc.cluster.local:9090"
 grpc_clients:
   timeout: 3s
   keepalive:
@@ -52,12 +53,18 @@ router:
   preprocess_enabled: true
   preprocess_extensions:
     - doc
+  table_extractor_enabled: true
+  table_extractor_extensions:
+    - pdf
   repositories:
     - owner: "FedorovTeam"
       repository: "knowledge-base"
       preprocess_enabled: true
       preprocess_extensions:
         - doc
+      table_extractor_enabled: true
+      table_extractor_extensions:
+        - pdf
 observability:
   logs:
     enabled: true

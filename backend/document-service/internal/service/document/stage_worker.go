@@ -16,6 +16,7 @@ import (
 	workersvc "backend-document-service/internal/usecase"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
+	tableextractorv1 "backend-document-service/proto/backend/tableextractor/v1"
 )
 
 // StageWorker обрабатывает pending-задачи из processing_jobs.
@@ -86,6 +87,8 @@ func (w *StageWorker) handleJob(ctx context.Context, job domain.ProcessingJob) (
 		return w.handleStoreOriginal(ctx, job)
 	case domain.JobStagePreprocessToDocx:
 		return w.handlePreprocessToDocx(ctx, job)
+	case domain.JobStageExtractTables:
+		return w.handleExtractTables(ctx, job)
 	case domain.JobStageConvertToMarkdown:
 		return w.handleConvert(ctx, job)
 	case domain.JobStagePublishToGitHub:
@@ -233,6 +236,70 @@ func (w *StageWorker) handlePreprocessToDocx(ctx context.Context, job domain.Pro
 	}
 }
 
+func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
+	payload := domain.ExtractTablesPayloadFromMap(job.Payload)
+	if w.activities == nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("activities not configured")
+	}
+
+	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
+	if err != nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("load document: %w", err)
+	}
+	if doc == nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("document %s not found", job.DocumentID)
+	}
+
+	payload.OriginalBucket = firstNonEmpty(payload.OriginalBucket, doc.OriginalBucket)
+	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
+	payload.ArtifactsBucket = firstNonEmpty(payload.ArtifactsBucket, doc.MarkdownBucket)
+	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	if payload.ArtifactsPrefix == "" {
+		payload.ArtifactsPrefix = tablesArtifactsPrefix(payload.MarkdownObjectKey)
+	}
+	if payload.CorrelationID == "" {
+		payload.CorrelationID = correlationFromDoc(doc)
+	}
+
+	if strings.TrimSpace(payload.OriginalBucket) == "" || strings.TrimSpace(payload.OriginalObjectKey) == "" {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("table extraction original location is required")
+	}
+	if strings.TrimSpace(payload.ArtifactsBucket) == "" {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("artifacts bucket is required for table extraction")
+	}
+
+	jobCtx := w.jobContext(ctx, payload.CorrelationID)
+	if payload.QueueID == "" {
+		result, submitErr := w.activities.ExtractTables(jobCtx, tableExtractionInput{
+			DocumentID:        job.DocumentID,
+			OriginalBucket:    payload.OriginalBucket,
+			OriginalObjectKey: payload.OriginalObjectKey,
+			ArtifactsBucket:   payload.ArtifactsBucket,
+			ArtifactsPrefix:   payload.ArtifactsPrefix,
+			CorrelationID:     payload.CorrelationID,
+		})
+		if submitErr != nil {
+			if isTemporaryGRPCError(submitErr) {
+				payload.LastError = submitErr.Error()
+				return w.postponeWithBackoff(ctx, job, payload.ToMap(), submitErr)
+			}
+			return workersvc.JobResult{Payload: payload.ToMap()}, submitErr
+		}
+		return w.processTableExtractionResult(jobCtx, job, doc, payload, result)
+	}
+
+	result, pollErr := w.activities.GetTableExtractionJob(jobCtx, payload.QueueID, payload.CorrelationID)
+	if pollErr != nil {
+		if isTemporaryGRPCError(pollErr) {
+			payload.LastError = pollErr.Error()
+			return w.postponeWithBackoff(ctx, job, payload.ToMap(), pollErr)
+		}
+		return workersvc.JobResult{Payload: payload.ToMap()}, pollErr
+	}
+
+	return w.processTableExtractionResult(jobCtx, job, doc, payload, result)
+}
+
 func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
 	payload := domain.ConvertPayloadFromMap(job.Payload)
 	if w.activities == nil {
@@ -266,17 +333,25 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
 
+	sourceBucket := payload.OriginalBucket
+	sourceObjectKey := payload.OriginalObjectKey
+	if payload.PreprocessedBucket != "" && payload.PreprocessedObjectKey != "" {
+		sourceBucket = payload.PreprocessedBucket
+		sourceObjectKey = payload.PreprocessedObjectKey
+	} else {
+		sourceBucket = firstNonEmpty(payload.PreprocessedBucket, payload.OriginalBucket)
+		sourceObjectKey = firstNonEmpty(payload.PreprocessedObjectKey, payload.TargetObjectKey, payload.OriginalObjectKey)
+	}
+
 	input := convertInput{
 		DocumentID:        job.DocumentID,
-		OriginalBucket:    firstNonEmpty(payload.PreprocessedBucket, payload.OriginalBucket),
+		OriginalBucket:    sourceBucket,
 		MarkdownBucket:    payload.MarkdownBucket,
-		OriginalObjectKey: firstNonEmpty(payload.PreprocessedObjectKey, payload.TargetObjectKey, payload.OriginalObjectKey),
+		OriginalObjectKey: sourceObjectKey,
 		MarkdownObjectKey: payload.MarkdownObjectKey,
 		FilenameExtension: payload.FilenameExtension,
 		Version:           latestVersion(doc).Version + 1,
 	}
-	sourceBucket := input.OriginalBucket
-	sourceObjectKey := input.OriginalObjectKey
 
 	convCtx := w.jobContext(ctx, payload.CorrelationID)
 	result, err := w.activities.ConvertToMarkdown(convCtx, input)
@@ -322,6 +397,83 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	}
 	if len(eventPayload) == 0 {
 		eventPayload = nil
+	}
+
+	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed", Payload: eventPayload}}, nil
+}
+
+func (w *StageWorker) processTableExtractionResult(ctx context.Context, job domain.ProcessingJob, doc *domain.Document, payload domain.ExtractTablesPayload, result tableExtractionResult) (workersvc.JobResult, error) {
+	payload.QueueID = firstNonEmpty(result.QueueID, payload.QueueID)
+	payload.Status = result.Status.String()
+	payload.StatusReason = firstNonEmpty(result.StatusReason, payload.StatusReason)
+	payload.ArtifactsBucket = firstNonEmpty(result.ArtifactsBucket, payload.ArtifactsBucket)
+	payload.ArtifactsPrefix = firstNonEmpty(result.ArtifactsPrefix, payload.ArtifactsPrefix)
+	payload.MarkdownObjectKey = firstNonEmpty(result.MarkdownObjectKey, payload.MarkdownObjectKey, tablesMarkdownKey(payload.ArtifactsPrefix))
+	payload.CorrelationID = firstNonEmpty(result.CorrelationID, payload.CorrelationID)
+
+	if payload.QueueID == "" {
+		err := fmt.Errorf("table extraction queue_id is empty for document %s", job.DocumentID)
+		payload.LastError = err.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
+	}
+
+	switch result.Status {
+	case tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE:
+		payload.PollAttempts = 0
+		return w.completeTableExtraction(ctx, doc, payload)
+	case tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_FAILED:
+		reason := firstNonEmpty(payload.StatusReason, "table extraction failed")
+		payload.StatusReason = reason
+		payload.LastError = reason
+		return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "failed", Message: reason}}, fmt.Errorf("%s", reason)
+	case tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_UNSPECIFIED:
+		err := fmt.Errorf("table extraction status is empty for queue_id=%s", payload.QueueID)
+		payload.LastError = err.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
+	default:
+		delay := w.preprocessBackoff(payload.PollAttempts)
+		payload.PollAttempts++
+		next := time.Now().Add(delay)
+		return workersvc.JobResult{
+			Payload: payload.ToMap(),
+			Status:  domain.JobStatusPending,
+			NextRun: &next,
+			Event:   &domain.JobEvent{EventType: "postponed", Message: fmt.Sprintf("status=%s", result.Status.String())},
+		}, nil
+	}
+}
+
+func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.Document, payload domain.ExtractTablesPayload) (workersvc.JobResult, error) {
+	if doc == nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("document is required")
+	}
+	markdownKey := payload.MarkdownObjectKey
+	if markdownKey == "" {
+		markdownKey = tablesMarkdownKey(payload.ArtifactsPrefix)
+	}
+	if markdownKey == "" {
+		err := errors.New("table extraction markdown_object_key is empty")
+		payload.LastError = err.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
+	}
+
+	version := latestVersion(doc).Version + 1
+	if err := w.activities.MarkConverted(ctx, doc, markdownKey, payload.OriginalObjectKey, payload.QueueID, version); err != nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("update status: %w", err)
+	}
+
+	eventPayload := map[string]any{}
+	if payload.ArtifactsBucket != "" {
+		eventPayload["artifacts_bucket"] = payload.ArtifactsBucket
+	}
+	if payload.ArtifactsPrefix != "" {
+		eventPayload["artifacts_prefix"] = payload.ArtifactsPrefix
+	}
+	if payload.QueueID != "" {
+		eventPayload["table_queue_id"] = payload.QueueID
+	}
+	if markdownKey != "" {
+		eventPayload["markdown_object_key"] = markdownKey
 	}
 
 	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed", Payload: eventPayload}}, nil
@@ -514,6 +666,34 @@ func (w *StageWorker) jobContext(ctx context.Context, correlationID string) cont
 
 func metadataAppend(ctx context.Context, correlationID string) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, correlationID)
+}
+
+func tablesArtifactsPrefix(markdownKey string) string {
+	key := strings.TrimSpace(markdownKey)
+	if key == "" {
+		return ""
+	}
+	key = strings.TrimSuffix(key, "/")
+	if key == "" {
+		return ""
+	}
+	withoutExt := strings.TrimSuffix(key, path.Ext(key))
+	if withoutExt == "" {
+		return ""
+	}
+	return withoutExt
+}
+
+func tablesMarkdownKey(prefix string) string {
+	cleanPrefix := strings.TrimSpace(prefix)
+	if cleanPrefix == "" {
+		return ""
+	}
+	cleanPrefix = strings.TrimSuffix(cleanPrefix, "/")
+	if cleanPrefix == "" {
+		return ""
+	}
+	return path.Join(cleanPrefix, "tables.md")
 }
 
 func preprocessTargetKey(originalKey string) string {

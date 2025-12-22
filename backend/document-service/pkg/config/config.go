@@ -25,6 +25,7 @@ type Config struct {
 		StorageService         string `yaml:"storage_service"`
 		TransformerService     string `yaml:"transformer_service"`
 		GithubPublisherService string `yaml:"github_publisher_service"`
+		TableExtractorService  string `yaml:"table_extractor_service"`
 	} `yaml:"services"`
 	Github struct {
 		Owner         string `yaml:"owner"`
@@ -100,16 +101,20 @@ type BackoffConfig struct {
 }
 
 type Router struct {
-	PreprocessEnabled    bool                   `yaml:"preprocess_enabled"`
-	PreprocessExtensions []string               `yaml:"preprocess_extensions"`
-	RepositoryRules      []RepositoryRouterRule `yaml:"repositories"`
+	PreprocessEnabled        bool                   `yaml:"preprocess_enabled"`
+	PreprocessExtensions     []string               `yaml:"preprocess_extensions"`
+	TableExtractorEnabled    bool                   `yaml:"table_extractor_enabled"`
+	TableExtractorExtensions []string               `yaml:"table_extractor_extensions"`
+	RepositoryRules          []RepositoryRouterRule `yaml:"repositories"`
 }
 
 type RepositoryRouterRule struct {
-	Owner                string   `yaml:"owner"`
-	Repository           string   `yaml:"repository"`
-	PreprocessEnabled    *bool    `yaml:"preprocess_enabled"`
-	PreprocessExtensions []string `yaml:"preprocess_extensions"`
+	Owner                    string   `yaml:"owner"`
+	Repository               string   `yaml:"repository"`
+	PreprocessEnabled        *bool    `yaml:"preprocess_enabled"`
+	PreprocessExtensions     []string `yaml:"preprocess_extensions"`
+	TableExtractorEnabled    *bool    `yaml:"table_extractor_enabled"`
+	TableExtractorExtensions []string `yaml:"table_extractor_extensions"`
 }
 
 func Load(path string) (*Config, error) {
@@ -138,7 +143,7 @@ func (c *Config) Validate() error {
 	if c.Storage.OriginalBucket == "" || c.Storage.MarkdownBucket == "" {
 		return fmt.Errorf("storage buckets configuration is incomplete")
 	}
-	if c.Services.PreprocessService == "" || c.Services.StorageService == "" || c.Services.TransformerService == "" || c.Services.GithubPublisherService == "" {
+	if c.Services.PreprocessService == "" || c.Services.StorageService == "" || c.Services.TransformerService == "" || c.Services.GithubPublisherService == "" || c.Services.TableExtractorService == "" {
 		return fmt.Errorf("services endpoints must be provided")
 	}
 
@@ -194,8 +199,13 @@ func (r *Router) normalize() {
 	if len(r.PreprocessExtensions) == 0 {
 		r.PreprocessExtensions = []string{"doc", "pdf"}
 	}
+	r.TableExtractorExtensions = normalizeExtensions(r.TableExtractorExtensions)
+	if len(r.TableExtractorExtensions) == 0 {
+		r.TableExtractorExtensions = []string{"pdf"}
+	}
 	for i := range r.RepositoryRules {
 		r.RepositoryRules[i].PreprocessExtensions = normalizeExtensions(r.RepositoryRules[i].PreprocessExtensions)
+		r.RepositoryRules[i].TableExtractorExtensions = normalizeExtensions(r.RepositoryRules[i].TableExtractorExtensions)
 	}
 }
 

@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package backend.tableextractor.v1;
+
+option go_package = "backend-document-service/proto/backend/tableextractor/v1;tableextractorv1";
+
+import "google/protobuf/timestamp.proto";
+
+enum TableExtractionStatus {
+  TABLE_EXTRACTION_STATUS_UNSPECIFIED = 0;
+  TABLE_EXTRACTION_STATUS_PENDING = 1;
+  TABLE_EXTRACTION_STATUS_PROCESSING = 2;
+  TABLE_EXTRACTION_STATUS_DONE = 3;
+  TABLE_EXTRACTION_STATUS_FAILED = 4;
+  TABLE_EXTRACTION_STATUS_FAILED_RETRYABLE = 5;
+}
+
+message ArtifactLocation {
+  string bucket = 1;
+  string object_key = 2;
+}
+
+message TableArtifacts {
+  ArtifactLocation raw_json = 1;
+  ArtifactLocation normalized_json = 2;
+  ArtifactLocation markdown = 3;
+  ArtifactLocation manifest = 4;
+  ArtifactLocation debug_prefix = 5;
+}
+
+message TableExtractionJob {
+  string queue_id = 1;
+  string document_id = 2;
+  TableExtractionStatus status = 3;
+  string status_reason = 4;
+  TableArtifacts artifacts = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+  string correlation_id = 8;
+}
+
+message ExtractTablesFromPdfRequest {
+  string document_id = 1;
+  string original_bucket = 2;
+  string original_object_key = 3;
+  string source_url = 4;
+  string artifacts_bucket = 5;
+  string artifacts_prefix = 6;
+  bool wait_for_result = 7;
+  string correlation_id = 8;
+}
+
+message ExtractTablesFromPdfResponse {
+  TableExtractionJob job = 1;
+  string correlation_id = 2;
+}
+
+message GetTableExtractionJobRequest {
+  string queue_id = 1;
+  string correlation_id = 2;
+}
+
+message GetTableExtractionJobResponse {
+  TableExtractionJob job = 1;
+  string correlation_id = 2;
+}
+
+service TableExtractorService {
+  rpc ExtractTablesFromPdf(ExtractTablesFromPdfRequest) returns (ExtractTablesFromPdfResponse);
+  rpc GetTableExtractionJob(GetTableExtractionJobRequest) returns (GetTableExtractionJobResponse);
+}

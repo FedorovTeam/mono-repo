@@ -136,6 +136,65 @@ func TestJobFollowerSchedulesPreprocessWhenEnabled(t *testing.T) {
 	require.Equal(t, "etag-preprocess", payload.OriginalETag)
 }
 
+func TestJobFollowerSchedulesExtractTablesWhenEnabled(t *testing.T) {
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true})
+	repo := &followerRepo{
+		jobs: []domain.ProcessingJob{
+			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted, Payload: domain.StoreOriginalPayload{OriginalETag: "etag-preprocess"}.ToMap()},
+		},
+		document: &domain.Document{
+			ID:                "doc-1",
+			Status:            domain.DocumentStatusStoredOriginal,
+			OriginalBucket:    "orig-bucket",
+			OriginalObjectKey: "incoming/file.pdf",
+			MarkdownBucket:    "md-bucket",
+			MarkdownObjectKey: "markdown/key.md",
+			ExtractTables:     true,
+			Versions:          []domain.DocumentVersion{{Version: 1, OriginalETag: "etag-preprocess"}},
+		},
+	}
+
+	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, router)
+
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.createdJobs, 1)
+	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
+	payload := domain.ExtractTablesPayloadFromMap(repo.createdJobs[0].Payload)
+	require.Equal(t, "orig-bucket", payload.OriginalBucket)
+	require.Equal(t, "incoming/file.pdf", payload.OriginalObjectKey)
+	require.Equal(t, "md-bucket", payload.ArtifactsBucket)
+	require.Equal(t, tablesArtifactsPrefix("markdown/key.md"), payload.ArtifactsPrefix)
+}
+
+func TestJobFollowerSchedulesExtractTablesForTablesOnlyStrategy(t *testing.T) {
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true})
+	repo := &followerRepo{
+		jobs: []domain.ProcessingJob{
+			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted, Payload: domain.StoreOriginalPayload{OriginalETag: "etag-preprocess"}.ToMap()},
+		},
+		document: &domain.Document{
+			ID:                 "doc-1",
+			Status:             domain.DocumentStatusStoredOriginal,
+			OriginalBucket:     "orig-bucket",
+			OriginalObjectKey:  "incoming/file.pdf",
+			MarkdownBucket:     "md-bucket",
+			MarkdownObjectKey:  "markdown/key.md",
+			ConversionStrategy: domain.ConversionStrategyTablesOnly,
+			Versions:           []domain.DocumentVersion{{Version: 1, OriginalETag: "etag-preprocess"}},
+		},
+	}
+
+	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, router)
+
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.createdJobs, 1)
+	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
+}
+
 func TestPreprocessConversionForcesDocxExtension(t *testing.T) {
 	repo := &followerRepo{
 		jobs: []domain.ProcessingJob{

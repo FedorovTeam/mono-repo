@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
 	"strings"
 	"time"
 
 	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
+	tableextractorv1 "backend-document-service/proto/backend/tableextractor/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -62,6 +64,25 @@ type convertInput struct {
 	FilenameExtension string
 }
 
+type tableExtractionInput struct {
+	DocumentID        string
+	OriginalBucket    string
+	OriginalObjectKey string
+	ArtifactsBucket   string
+	ArtifactsPrefix   string
+	CorrelationID     string
+}
+
+type tableExtractionResult struct {
+	QueueID           string
+	Status            tableextractorv1.TableExtractionStatus
+	StatusReason      string
+	ArtifactsBucket   string
+	ArtifactsPrefix   string
+	MarkdownObjectKey string
+	CorrelationID     string
+}
+
 type publishInput struct {
 	DocumentID        string
 	DocumentName      string
@@ -92,20 +113,22 @@ type convertResult struct {
 }
 
 type Activities struct {
-	repo        Repository
-	statuses    *StatusApplication
-	preprocess  preprocessv1.PreprocessServiceClient
-	transformer transformerv1.TransformerServiceClient
-	publisher   githubpublisherv1.GithubPublisherServiceClient
+	repo           Repository
+	statuses       *StatusApplication
+	preprocess     preprocessv1.PreprocessServiceClient
+	tableExtractor tableextractorv1.TableExtractorServiceClient
+	transformer    transformerv1.TransformerServiceClient
+	publisher      githubpublisherv1.GithubPublisherServiceClient
 }
 
-func NewActivities(repo Repository, preprocessClient preprocessv1.PreprocessServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient) *Activities {
+func NewActivities(repo Repository, preprocessClient preprocessv1.PreprocessServiceClient, transformerClient transformerv1.TransformerServiceClient, tableExtractorClient tableextractorv1.TableExtractorServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient) *Activities {
 	return &Activities{
-		repo:        repo,
-		statuses:    NewStatusApplication(repo),
-		preprocess:  preprocessClient,
-		transformer: transformerClient,
-		publisher:   publisherClient,
+		repo:           repo,
+		statuses:       NewStatusApplication(repo),
+		preprocess:     preprocessClient,
+		tableExtractor: tableExtractorClient,
+		transformer:    transformerClient,
+		publisher:      publisherClient,
 	}
 }
 
@@ -214,6 +237,56 @@ func (a *Activities) GetPreprocessStatus(ctx context.Context, jobID, correlation
 		return result, status.Error(codes.FailedPrecondition, "preprocess status is empty")
 	}
 	return result, nil
+}
+
+func (a *Activities) ExtractTables(ctx context.Context, input tableExtractionInput) (tableExtractionResult, error) {
+	if a.tableExtractor == nil {
+		return tableExtractionResult{}, fmt.Errorf("table extractor client is not configured")
+	}
+	if strings.TrimSpace(input.OriginalBucket) == "" || strings.TrimSpace(input.OriginalObjectKey) == "" {
+		return tableExtractionResult{}, fmt.Errorf("original bucket and key are required for table extraction")
+	}
+	if strings.TrimSpace(input.ArtifactsBucket) == "" {
+		return tableExtractionResult{}, fmt.Errorf("artifacts bucket is required for table extraction")
+	}
+
+	ctx = a.withCorrelationID(ctx, input.CorrelationID)
+	req := &tableextractorv1.ExtractTablesFromPdfRequest{
+		DocumentId:        input.DocumentID,
+		OriginalBucket:    input.OriginalBucket,
+		OriginalObjectKey: input.OriginalObjectKey,
+		ArtifactsBucket:   input.ArtifactsBucket,
+		ArtifactsPrefix:   input.ArtifactsPrefix,
+		WaitForResult:     false,
+		CorrelationId:     correlationIDFromContext(ctx),
+	}
+
+	resp, err := a.tableExtractor.ExtractTablesFromPdf(ctx, req)
+	if err != nil {
+		return tableExtractionResult{}, err
+	}
+
+	return mapTableJob(resp.GetJob(), correlationIDFromContext(ctx), input.ArtifactsPrefix, input.ArtifactsBucket), nil
+}
+
+func (a *Activities) GetTableExtractionJob(ctx context.Context, queueID, correlationID string) (tableExtractionResult, error) {
+	if a.tableExtractor == nil {
+		return tableExtractionResult{}, fmt.Errorf("table extractor client is not configured")
+	}
+	if strings.TrimSpace(queueID) == "" {
+		return tableExtractionResult{}, fmt.Errorf("queue_id is required to poll table extractor job")
+	}
+
+	ctx = a.withCorrelationID(ctx, correlationID)
+	resp, err := a.tableExtractor.GetTableExtractionJob(ctx, &tableextractorv1.GetTableExtractionJobRequest{
+		QueueId:       queueID,
+		CorrelationId: correlationIDFromContext(ctx),
+	})
+	if err != nil {
+		return tableExtractionResult{}, err
+	}
+
+	return mapTableJob(resp.GetJob(), correlationIDFromContext(ctx), "", ""), nil
 }
 
 func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) (convertResult, error) {
@@ -482,6 +555,39 @@ func mapPublishErrorCode(code githubpublisherv1.PublishErrorCode) string {
 		return publishGithubPermanentReason
 	default:
 		return publishGithubUnknownReason
+	}
+}
+
+func mapTableJob(job *tableextractorv1.TableExtractionJob, correlationID, fallbackPrefix, fallbackBucket string) tableExtractionResult {
+	if job == nil {
+		return tableExtractionResult{
+			ArtifactsPrefix: fallbackPrefix,
+			ArtifactsBucket: fallbackBucket,
+			CorrelationID:   correlationID,
+		}
+	}
+	artifacts := job.GetArtifacts()
+	markdown := artifacts.GetMarkdown()
+	manifest := artifacts.GetManifest()
+	debugPrefix := artifacts.GetDebugPrefix()
+
+	prefix := firstNonEmpty(debugPrefix.GetObjectKey(), fallbackPrefix)
+	bucket := firstNonEmpty(markdown.GetBucket(), manifest.GetBucket(), fallbackBucket)
+	markdownKey := markdown.GetObjectKey()
+	if markdownKey == "" && prefix != "" {
+		markdownKey = tablesMarkdownKey(prefix)
+	} else if markdownKey != "" && prefix == "" {
+		prefix = path.Dir(markdownKey)
+	}
+
+	return tableExtractionResult{
+		QueueID:           strings.TrimSpace(job.GetQueueId()),
+		Status:            job.GetStatus(),
+		StatusReason:      job.GetStatusReason(),
+		ArtifactsBucket:   bucket,
+		ArtifactsPrefix:   prefix,
+		MarkdownObjectKey: markdownKey,
+		CorrelationID:     firstNonEmpty(job.GetCorrelationId(), correlationID),
 	}
 }
 
