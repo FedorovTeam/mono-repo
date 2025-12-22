@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 )
 
 func TestAdapterProducesArtifacts(t *testing.T) {
@@ -183,13 +187,38 @@ func TestAdapterUsesBBoxAndLayoutWhenVotingDetectionEnabled(t *testing.T) {
 }
 
 func TestExternalRunnerHonorsTimeout(t *testing.T) {
-	runner := NewExternalCommandRunner(1)
+	core, observed := observer.New(zap.DebugLevel)
+	runner := NewExternalCommandRunner(1, zap.New(core))
 
-	ctx := context.Background()
+	ctx := telemetry.ContextWithCorrelationID(context.Background(), "corr-timeout")
 	start := time.Now()
 	_, err := runner.Run(ctx, 50*time.Millisecond, "sleep", "1")
 	require.Error(t, err)
 	require.Less(t, time.Since(start), 500*time.Millisecond)
+
+	timeoutLogs := observed.FilterField(zap.Bool("timed_out", true))
+	require.Greater(t, timeoutLogs.Len(), 0)
+	entry := timeoutLogs.All()[timeoutLogs.Len()-1]
+	require.Equal(t, zap.ErrorLevel, entry.Level)
+	require.Equal(t, "sleep", entry.ContextMap()["command"])
+	require.Equal(t, "corr-timeout", entry.ContextMap()["correlation_id"])
+}
+
+func TestExternalRunnerLogsCommandError(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	runner := NewExternalCommandRunner(1, zap.New(core))
+
+	ctx := telemetry.ContextWithCorrelationID(context.Background(), "corr-error")
+	_, err := runner.Run(ctx, time.Second, "false")
+	require.Error(t, err)
+
+	errorLogs := observed.FilterMessage("command run failed")
+	require.Greater(t, errorLogs.Len(), 0)
+	entry := errorLogs.All()[errorLogs.Len()-1]
+	require.Equal(t, zap.ErrorLevel, entry.Level)
+	require.Equal(t, "false", entry.ContextMap()["command"])
+	require.Equal(t, "corr-error", entry.ContextMap()["correlation_id"])
+	require.Equal(t, false, entry.ContextMap()["timed_out"])
 }
 
 type fakeRunner struct {
