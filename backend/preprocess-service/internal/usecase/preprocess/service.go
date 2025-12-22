@@ -32,7 +32,7 @@ type Service struct {
 	workspace  ports.WorkspaceManager
 	callback   ports.CallbackSender
 	cfg        Config
-	logger     *zap.SugaredLogger
+	logger     *zap.Logger
 	policy     domain.RetryPolicy
 
 	downloadSourceFn func(ctx context.Context, job Job, workspace ports.Workspace) (string, error)
@@ -40,7 +40,7 @@ type Service struct {
 	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
 }
 
-func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, workspace ports.WorkspaceManager, callback ports.CallbackSender, cfg Config, logger *zap.SugaredLogger) (*Service, error) {
+func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, workspace ports.WorkspaceManager, callback ports.CallbackSender, cfg Config, logger *zap.Logger) (*Service, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("job repository is required")
 	}
@@ -60,7 +60,7 @@ func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDow
 	normalized := normalizeConfig(cfg)
 
 	if logger == nil {
-		logger = zap.NewNop().Sugar()
+		logger = zap.NewNop()
 	}
 
 	svc := &Service{
@@ -100,7 +100,10 @@ func normalizeConfig(cfg Config) Config {
 }
 
 func (s *Service) Process(ctx context.Context, job Job) error {
-	logger := s.logger.With("job_id", job.ID, "correlation_id", job.CorrelationID)
+	logger := s.logger.With(
+		zap.String("job_id", job.ID),
+		zap.String("correlation_id", job.CorrelationID),
+	)
 	logger.Info("start processing job")
 
 	processCtx, cancel := context.WithTimeout(ctx, s.cfg.ProcessTimeout)
@@ -120,11 +123,11 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	now := time.Now().UTC()
 	completedJob, err := jobState.MarkCompleted(now)
 	if err != nil {
-		logger.Errorw("failed to compute completion state", "error", err)
+		logger.Error("failed to compute completion state", zap.Error(err))
 		return err
 	}
 	if err := s.repo.MarkDone(processCtx, completedJob); err != nil {
-		logger.Errorw("failed to mark job done", "error", err)
+		logger.Error("failed to mark job done", zap.Error(err))
 		return err
 	}
 
@@ -132,8 +135,8 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	return nil
 }
 
-func (s *Service) handleFailure(ctx context.Context, logger *zap.SugaredLogger, job Job, err error) error {
-	logger.Errorw("job failed", "error", err)
+func (s *Service) handleFailure(ctx context.Context, logger *zap.Logger, job Job, err error) error {
+	logger.Error("job failed", zap.Error(err))
 
 	repoCtx := context.WithoutCancel(ctx)
 
@@ -141,12 +144,12 @@ func (s *Service) handleFailure(ctx context.Context, logger *zap.SugaredLogger, 
 	now := time.Now().UTC()
 	updatedJob, update, failErr := job.MarkFailed(now, s.policy, failure)
 	if failErr != nil {
-		logger.Errorw("failed to compute failure update", "error", failErr)
+		logger.Error("failed to compute failure update", zap.Error(failErr))
 		return err
 	}
 
 	if err := s.repo.MarkFailed(repoCtx, updatedJob, update); err != nil {
-		logger.Errorw("failed to update job status", "error", err)
+		logger.Error("failed to update job status", zap.Error(err))
 	}
 
 	if update.Status == StatusStopped {
@@ -159,21 +162,29 @@ func (s *Service) handleFailure(ctx context.Context, logger *zap.SugaredLogger, 
 func (s *Service) handleJob(ctx context.Context, job *Job) error {
 	s.ensureFunctions()
 
+	logger := s.logger.With(
+		zap.String("job_id", job.ID),
+		zap.String("correlation_id", job.CorrelationID),
+	)
+	logger.Debug("preparing workspace for job")
 	workspace, err := s.workspace.Prepare(job.ID)
 	if err != nil {
 		return permanentError(domain.ErrorCodeTmpDir, fmt.Errorf("prepare workspace: %w", err))
 	}
 	defer workspace.Cleanup()
 
+	logger.Debug("workspace prepared", zap.String("output_dir", workspace.OutputDir()))
 	sourcePath, err := s.downloadSourceFn(ctx, *job, workspace)
 	if err != nil {
 		return err
 	}
 
+	logger.Debug("source downloaded", zap.String("source_path", sourcePath))
 	if err := s.convertFn(ctx, sourcePath, workspace); err != nil {
 		return err
 	}
 
+	logger.Debug("conversion completed")
 	outputPath, err := workspace.OutputPath(job.SourceKey)
 	if err != nil {
 		if errors.Is(err, ports.ErrInvalidObjectKey) {
@@ -206,6 +217,14 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 }
 
 func (s *Service) downloadSource(ctx context.Context, job Job, workspace ports.Workspace) (string, error) {
+	logger := s.logger.With(
+		zap.String("job_id", job.ID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.String("bucket", job.SourceBucket),
+		zap.String("key", job.SourceKey),
+	)
+	logger.Debug("downloading source object")
+
 	targetPath, err := workspace.SourcePath(job.SourceKey)
 	if err != nil {
 		if errors.Is(err, ports.ErrInvalidObjectKey) {
@@ -221,6 +240,7 @@ func (s *Service) downloadSource(ctx context.Context, job Job, workspace ports.W
 		return "", temporaryError(domain.ErrorCodeDownloadFailed, err)
 	}
 
+	logger.Debug("source object downloaded", zap.String("path", targetPath))
 	return targetPath, nil
 }
 
@@ -228,22 +248,35 @@ func (s *Service) convertToDocx(ctx context.Context, sourcePath string, workspac
 	convertCtx, cancel := context.WithTimeout(ctx, s.cfg.ConvertTimeout)
 	defer cancel()
 
+	logger := s.logger.With(
+		zap.String("source_path", sourcePath),
+		zap.String("output_dir", workspace.OutputDir()),
+	)
+	logger.Debug("starting document conversion")
 	if err := s.converter.Convert(convertCtx, sourcePath, workspace.OutputDir()); err != nil {
 		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
 			return temporaryError(domain.ErrorCodeConvertTimeout, fmt.Errorf("conversion timeout: %w", err))
 		}
 		return permanentError(domain.ErrorCodeConvertFailed, err)
 	}
+	logger.Debug("document conversion finished")
 	return nil
 }
 
 func (s *Service) uploadResult(ctx context.Context, bucket, key, path string) error {
+	logger := s.logger.With(
+		zap.String("bucket", bucket),
+		zap.String("key", key),
+		zap.String("path", path),
+	)
+	logger.Debug("uploading converted document")
 	if err := s.uploader.Upload(ctx, bucket, key, path, s.cfg.TargetMediaType); err != nil {
 		if errors.Is(err, ports.ErrBucketNotFound) {
 			return permanentError(domain.ErrorCodeTargetBucket, err)
 		}
 		return temporaryError(domain.ErrorCodeUploadFailed, err)
 	}
+	logger.Debug("converted document uploaded")
 	return nil
 }
 
@@ -252,6 +285,11 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.Pre
 		return
 	}
 
+	logger := s.logger.With(
+		zap.String("job_id", job.ID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.String("callback_url", job.CallbackURL),
+	)
 	payload := ports.CallbackPayload{
 		JobID:        job.ID,
 		Status:       status.String(),
@@ -269,12 +307,21 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.Pre
 	}
 
 	for attempt := 1; attempt <= callbackMaxAttempts; attempt++ {
+		logger.Debug("sending callback",
+			zap.Int("attempt", attempt),
+			zap.String("status", payload.Status),
+		)
 		temporary, err := s.callback.Send(ctx, job.CallbackURL, payload)
 		if err == nil {
+			logger.Debug("callback delivered successfully", zap.Int("attempt", attempt))
 			return
 		}
 
-		s.logger.Errorw("callback delivery failed", "attempt", attempt, "temporary", temporary, "error", err, "callback_url", job.CallbackURL)
+		logger.Error("callback delivery failed",
+			zap.Int("attempt", attempt),
+			zap.Bool("temporary", temporary),
+			zap.Error(err),
+		)
 
 		if !temporary || attempt == callbackMaxAttempts {
 			return

@@ -132,7 +132,7 @@ func TestWorkerRecoversFromProcessorPanic(t *testing.T) {
 		t.Fatalf("create job: %v", err)
 	}
 
-	logger := zap.NewNop().Sugar()
+	logger := zap.NewNop()
 	workerCfg := Config{
 		WorkingDir:      t.TempDir(),
 		OutputDir:       t.TempDir(),

@@ -19,12 +19,12 @@ type GRPCServer struct {
 	listener net.Listener
 }
 
-func NewGRPCServer(port int, handler preprocessv1.PreprocessServiceServer, meter metric.Meter, logger *zap.SugaredLogger) (*GRPCServer, error) {
+func NewGRPCServer(port int, handler preprocessv1.PreprocessServiceServer, meter metric.Meter, logger *zap.Logger) (*GRPCServer, error) {
 	if meter == nil {
 		meter = otelmetric.NewMeterProvider().Meter("preprocess-service")
 	}
 	if logger == nil {
-		logger = zap.NewNop().Sugar()
+		logger = zap.NewNop()
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))

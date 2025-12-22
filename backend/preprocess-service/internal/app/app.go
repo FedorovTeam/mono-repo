@@ -23,7 +23,7 @@ import (
 
 // Dependencies описывает внешний слой и инфраструктуру, необходимую приложению.
 type Dependencies struct {
-	Logger           *zap.SugaredLogger
+	Logger           *zap.Logger
 	Telemetry        *observability.Telemetry
 	DB               *pgxpool.Pool
 	Repo             domain.PreprocessJobRepository
@@ -41,13 +41,13 @@ type App struct {
 	worker     *worker.Worker
 	db         *pgxpool.Pool
 	telemetry  *observability.Telemetry
-	logger     *zap.SugaredLogger
+	logger     *zap.Logger
 }
 
 func New(cfg config.Config, deps Dependencies) (*App, error) {
 	logger := deps.Logger
 	if logger == nil {
-		logger = zap.NewNop().Sugar()
+		logger = zap.NewNop()
 	}
 
 	if deps.Repo == nil {
@@ -163,7 +163,7 @@ func (a *App) Close() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := a.telemetry.Shutdown(shutdownCtx); err != nil {
-			a.logger.Errorw("shutdown telemetry", "error", err)
+			a.logger.Error("shutdown telemetry", zap.Error(err))
 		}
 	}
 }

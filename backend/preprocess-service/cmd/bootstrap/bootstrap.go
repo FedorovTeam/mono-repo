@@ -24,7 +24,7 @@ import (
 )
 
 // RunMigrations запускает встроенные миграции до старта сервиса.
-func RunMigrations(ctx context.Context, dsn string, logger *zap.SugaredLogger) error {
+func RunMigrations(ctx context.Context, dsn string, logger *zap.Logger) error {
 	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return fmt.Errorf("open postgres connection: %w", err)
@@ -43,9 +43,9 @@ func RunMigrations(ctx context.Context, dsn string, logger *zap.SugaredLogger) e
 }
 
 // BuildDependencies создаёт инфраструктурные зависимости приложения.
-func BuildDependencies(ctx context.Context, cfg config.Config, logger *zap.SugaredLogger) (app.Dependencies, error) {
+func BuildDependencies(ctx context.Context, cfg config.Config, logger *zap.Logger) (app.Dependencies, error) {
 	if logger == nil {
-		logger = zap.NewNop().Sugar()
+		logger = zap.NewNop()
 	}
 
 	telemetry, err := observability.Setup(ctx, cfg.Service.Name)
@@ -115,7 +115,7 @@ func buildStorageAdapter(cfg config.Config) (interface {
 	}
 }
 
-func shutdownTelemetry(ctx context.Context, telemetry *observability.Telemetry, logger *zap.SugaredLogger) {
+func shutdownTelemetry(ctx context.Context, telemetry *observability.Telemetry, logger *zap.Logger) {
 	if telemetry == nil {
 		return
 	}
@@ -124,6 +124,6 @@ func shutdownTelemetry(ctx context.Context, telemetry *observability.Telemetry, 
 	defer cancel()
 
 	if err := telemetry.Shutdown(shutdownCtx); err != nil && logger != nil {
-		logger.Errorw("shutdown telemetry after bootstrap failure", "error", err)
+		logger.Error("shutdown telemetry after bootstrap failure", zap.Error(err))
 	}
 }

@@ -18,12 +18,12 @@ type HTTPServer struct {
 	server *http.Server
 }
 
-func NewHTTPServer(port int, db *pgxpool.Pool, metricsHandler http.Handler, meter metric.Meter, logger *zap.SugaredLogger) *HTTPServer {
+func NewHTTPServer(port int, db *pgxpool.Pool, metricsHandler http.Handler, meter metric.Meter, logger *zap.Logger) *HTTPServer {
 	if meter == nil {
 		meter = otelmetric.NewMeterProvider().Meter("preprocess-service")
 	}
 	if logger == nil {
-		logger = zap.NewNop().Sugar()
+		logger = zap.NewNop()
 	}
 
 	mux := http.NewServeMux()
@@ -37,7 +37,7 @@ func NewHTTPServer(port int, db *pgxpool.Pool, metricsHandler http.Handler, mete
 
 		if db != nil {
 			if err := db.Ping(ctx); err != nil {
-				logger.Errorw("readiness check failed", "error", err)
+				logger.Error("readiness check failed", zap.Error(err))
 				http.Error(w, "database unavailable", http.StatusServiceUnavailable)
 				return
 			}

@@ -97,7 +97,7 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 	svc := &Service{
 		cfg:      Config{Backoff: 5 * time.Millisecond},
 		callback: callbackclient.NewClient(server.Client()),
-		logger:   zap.NewNop().Sugar(),
+		logger:   zap.NewNop(),
 	}
 
 	job := Job{ID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
@@ -154,7 +154,7 @@ func TestNotifyCallbackRetry(t *testing.T) {
 	svc := &Service{
 		cfg:      Config{Backoff: 5 * time.Millisecond},
 		callback: callbackclient.NewClient(server.Client()),
-		logger:   zap.NewNop().Sugar(),
+		logger:   zap.NewNop(),
 	}
 
 	job := Job{ID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
@@ -190,7 +190,7 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 			TargetBucket:    "default-target",
 			TargetMediaType: DefaultTargetMediaType,
 		},
-		logger:    zap.NewNop().Sugar(),
+		logger:    zap.NewNop(),
 		workspace: workspaceManager,
 	}
 
@@ -253,7 +253,7 @@ func TestProcessTemporaryFailureSchedulesRetry(t *testing.T) {
 	t.Helper()
 
 	repo := &capturingRepo{}
-	logger := zap.NewNop().Sugar()
+	logger := zap.NewNop()
 	workspace := &fakeWorkspace{
 		sourcePath: "/tmp/source",
 		outputPath: "/tmp/output/result.docx",
@@ -313,7 +313,7 @@ func TestProcessPermanentFailureStops(t *testing.T) {
 	t.Helper()
 
 	repo := &capturingRepo{}
-	logger := zap.NewNop().Sugar()
+	logger := zap.NewNop()
 	workspace := &fakeWorkspace{
 		sourcePath: "/tmp/source",
 		outputPath: "/tmp/output/result.docx",
