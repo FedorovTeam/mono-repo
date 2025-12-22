@@ -2,13 +2,13 @@ package transport
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -26,7 +26,7 @@ func (r *responseRecorder) WriteHeader(statusCode int) {
 	r.ResponseWriter.WriteHeader(statusCode)
 }
 
-func httpMiddleware(handler http.Handler, meter metric.Meter, logger *slog.Logger) http.Handler {
+func httpMiddleware(handler http.Handler, meter metric.Meter, logger *zap.SugaredLogger) http.Handler {
 	requestCount, _ := meter.Int64Counter(
 		"http_requests_total",
 		metric.WithDescription("Количество HTTP запросов"),
@@ -61,7 +61,7 @@ func httpMiddleware(handler http.Handler, meter metric.Meter, logger *slog.Logge
 		requestDuration.Record(r.Context(), float64(duration.Milliseconds()), metric.WithAttributes(attrs...))
 
 		recorder.Header().Set(correlationIDHeader, corrID)
-		logger.Info("http request",
+		logger.Infow("http request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", recorder.statusCode,
@@ -80,7 +80,7 @@ func correlationIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-func correlationUnaryInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
+func correlationUnaryInterceptor(logger *zap.SugaredLogger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
@@ -97,13 +97,13 @@ func correlationUnaryInterceptor(logger *slog.Logger) grpc.UnaryServerIntercepto
 		}
 
 		ctx = metadata.NewIncomingContext(context.WithValue(ctx, correlationIDHeader, corrID), md)
-		logger.Debug("attached correlation id", "correlation_id", corrID, "method", info.FullMethod)
+		logger.Debugw("attached correlation id", "correlation_id", corrID, "method", info.FullMethod)
 
 		return handler(ctx, req)
 	}
 }
 
-func metricsUnaryInterceptor(meter metric.Meter, logger *slog.Logger) grpc.UnaryServerInterceptor {
+func metricsUnaryInterceptor(meter metric.Meter, logger *zap.SugaredLogger) grpc.UnaryServerInterceptor {
 	requestCount, _ := meter.Int64Counter(
 		"grpc_requests_total",
 		metric.WithDescription("Количество gRPC вызовов"),
@@ -129,7 +129,7 @@ func metricsUnaryInterceptor(meter metric.Meter, logger *slog.Logger) grpc.Unary
 		requestCount.Add(ctx, 1, metric.WithAttributes(attrs...))
 		requestDuration.Record(ctx, float64(duration.Milliseconds()), metric.WithAttributes(attrs...))
 
-		logger.Info("grpc request",
+		logger.Infow("grpc request",
 			"method", info.FullMethod,
 			"status", code.String(),
 			"duration", duration,

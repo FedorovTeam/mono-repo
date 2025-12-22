@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	"preprocess-service/internal/domain"
 	callbackclient "preprocess-service/internal/transport/callback"
@@ -96,7 +97,7 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 	svc := &Service{
 		cfg:      Config{Backoff: 5 * time.Millisecond},
 		callback: callbackclient.NewClient(server.Client()),
-		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:   zap.NewNop().Sugar(),
 	}
 
 	job := Job{ID: "job-1", TargetBucket: "bucket", TargetKey: "result.docx", CallbackURL: server.URL}
@@ -153,7 +154,7 @@ func TestNotifyCallbackRetry(t *testing.T) {
 	svc := &Service{
 		cfg:      Config{Backoff: 5 * time.Millisecond},
 		callback: callbackclient.NewClient(server.Client()),
-		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:   zap.NewNop().Sugar(),
 	}
 
 	job := Job{ID: "job-2", TargetBucket: "bucket", TargetKey: "out.docx", CallbackURL: server.URL}
@@ -189,7 +190,7 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 			TargetBucket:    "default-target",
 			TargetMediaType: DefaultTargetMediaType,
 		},
-		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:    zap.NewNop().Sugar(),
 		workspace: workspaceManager,
 	}
 
@@ -252,7 +253,7 @@ func TestProcessTemporaryFailureSchedulesRetry(t *testing.T) {
 	t.Helper()
 
 	repo := &capturingRepo{}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := zap.NewNop().Sugar()
 	workspace := &fakeWorkspace{
 		sourcePath: "/tmp/source",
 		outputPath: "/tmp/output/result.docx",
@@ -312,7 +313,7 @@ func TestProcessPermanentFailureStops(t *testing.T) {
 	t.Helper()
 
 	repo := &capturingRepo{}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := zap.NewNop().Sugar()
 	workspace := &fakeWorkspace{
 		sourcePath: "/tmp/source",
 		outputPath: "/tmp/output/result.docx",

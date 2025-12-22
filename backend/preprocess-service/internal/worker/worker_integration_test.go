@@ -5,8 +5,6 @@ package worker
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path"
@@ -17,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
+	"go.uber.org/zap"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/domain"
@@ -133,7 +132,7 @@ func TestWorkerRecoversFromProcessorPanic(t *testing.T) {
 		t.Fatalf("create job: %v", err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := zap.NewNop().Sugar()
 	workerCfg := Config{
 		WorkingDir:      t.TempDir(),
 		OutputDir:       t.TempDir(),

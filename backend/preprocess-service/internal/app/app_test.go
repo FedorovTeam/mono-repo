@@ -2,11 +2,11 @@ package app
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"go.uber.org/zap/zaptest"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/storage/memory"
@@ -28,7 +28,7 @@ func TestNewAppWithoutTelemetry(t *testing.T) {
 	cfg.Preprocess.PollInterval = 10 * time.Millisecond
 	cfg.Preprocess.WorkerConcurrency = 1
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := zaptest.NewLogger(t).Sugar()
 
 	app, err := New(cfg, Dependencies{
 		Logger:           logger,

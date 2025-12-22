@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"go.uber.org/zap"
 
 	"preprocess-service/db/migrations"
 	"preprocess-service/internal/adapter/libreoffice"
@@ -24,7 +24,7 @@ import (
 )
 
 // RunMigrations запускает встроенные миграции до старта сервиса.
-func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger) error {
+func RunMigrations(ctx context.Context, dsn string, logger *zap.SugaredLogger) error {
 	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return fmt.Errorf("open postgres connection: %w", err)
@@ -43,9 +43,9 @@ func RunMigrations(ctx context.Context, dsn string, logger *slog.Logger) error {
 }
 
 // BuildDependencies создаёт инфраструктурные зависимости приложения.
-func BuildDependencies(ctx context.Context, cfg config.Config, logger *slog.Logger) (app.Dependencies, error) {
+func BuildDependencies(ctx context.Context, cfg config.Config, logger *zap.SugaredLogger) (app.Dependencies, error) {
 	if logger == nil {
-		logger = slog.Default()
+		logger = zap.NewNop().Sugar()
 	}
 
 	telemetry, err := observability.Setup(ctx, cfg.Service.Name)
@@ -115,7 +115,7 @@ func buildStorageAdapter(cfg config.Config) (interface {
 	}
 }
 
-func shutdownTelemetry(ctx context.Context, telemetry *observability.Telemetry, logger *slog.Logger) {
+func shutdownTelemetry(ctx context.Context, telemetry *observability.Telemetry, logger *zap.SugaredLogger) {
 	if telemetry == nil {
 		return
 	}
@@ -124,6 +124,6 @@ func shutdownTelemetry(ctx context.Context, telemetry *observability.Telemetry, 
 	defer cancel()
 
 	if err := telemetry.Shutdown(shutdownCtx); err != nil && logger != nil {
-		logger.Error("shutdown telemetry after bootstrap failure", "error", err)
+		logger.Errorw("shutdown telemetry after bootstrap failure", "error", err)
 	}
 }

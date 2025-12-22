@@ -14,7 +14,7 @@
 - `proto/preprocess.proto` — контракт gRPC (`SubmitPreprocess`, `GetPreprocessStatus`).
 
 ## Порядок инициализации и DI
-1. `cmd/main.go` загружает конфигурацию и создаёт `slog` через `app.NewLogger`.
+1. `cmd/main.go` загружает конфигурацию и создаёт zap-логгер (`*zap.Logger` и `*zap.SugaredLogger`) через `app.NewLogger`.
 2. Перед поднятием сервисов вызывается `bootstrap.RunMigrations`, чтобы прогнать встроенные миграции PostgreSQL явным шагом.
 3. `bootstrap.BuildDependencies` собирает инфраструктуру: подключает телеметрию, пул PostgreSQL и репозиторий, storage‑адаптер (MinIO по умолчанию или файловый при `storage_mode=filesystem`), LibreOffice‑конвертер, файловый workspace и callback‑клиент.
 4. `app.New` принимает `config.Config` и `app.Dependencies`, состоящие из интерфейсов портов (`PreprocessJobRepository`, `StorageDownloader/StorageUploader`, `DocumentConverter`, `WorkspaceManager`, `CallbackSender`, `Telemetry`). Это позволяет подменять реализации для тестов или локального раннера без запуска миграций и без создания внешних клиентов внутри `App`.
@@ -44,7 +44,7 @@ HTTP сервер доступен на `service.port` (по умолчанию 
 - `postgres`: `dsn` (используется и для readiness).
 - `minio`: `endpoint`, `access_key`, `secret_key`, `ssl`, `region`.
 - `preprocess`: `libreoffice_path` (обязателен), `working_dir`, `output_dir`, `storage_mode` (`minio`|`filesystem`), `local_source_dir`/`local_target_dir` (используются при `storage_mode=filesystem`), `target_bucket`, `target_key_prefix`, `target_media_type`, `worker_concurrency`, `convert_timeout`, `backoff`, `poll_interval`.
-- `logging`: `level` (`debug|info|warn|error`).
+- `logging`: `level` (`trace|debug|info|warn|error|dpanic|panic|fatal`), `format` (`console|json`), при отсутствии значений используется `info` + `console`.
 
 Переменные окружения перекрывают только `CONFIG_PATH`, `POSTGRES_DSN`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_REGION`, `MINIO_SSL`. Рабочие директории создаются на старте; если `target_bucket` не передан клиентом, используется значение из конфига. `target_key` обязателен: либо приходит в запросе, либо формируется по `target_key_prefix` и `document_id`.
 
