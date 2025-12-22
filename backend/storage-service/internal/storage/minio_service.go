@@ -24,6 +24,7 @@ type Client interface {
 	MakeBucket(ctx context.Context, bucketName string, opts minio.MakeBucketOptions) error
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions) error
 	GetObject(ctx context.Context, bucketName, objectName string) (io.ReadCloser, error)
+	StatObject(ctx context.Context, bucketName, objectName string, opts minio.StatObjectOptions) (minio.ObjectInfo, error)
 	PresignHeader(ctx context.Context, method, bucketName, objectName string, expires time.Duration, reqParams url.Values, extraHeaders http.Header) (*url.URL, error)
 	SetBucketNotification(ctx context.Context, bucketName string, config notification.Configuration) error
 }
@@ -61,6 +62,11 @@ func (m *MinioAPI) GetObject(ctx context.Context, bucketName, objectName string)
 		return nil, err
 	}
 	return object, nil
+}
+
+// StatObject возвращает метаданные объекта.
+func (m *MinioAPI) StatObject(ctx context.Context, bucketName, objectName string, opts minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	return m.client.StatObject(ctx, bucketName, objectName, opts)
 }
 
 // PresignHeader проксирует вызов к minio.Client с сохранением всех подписываемых заголовков.
@@ -210,24 +216,44 @@ func (s *Service) UploadMarkdown(ctx context.Context, orgSlug, projectSlug, docu
 	return ObjectLocation{Bucket: s.markdownBucket, Key: key}, nil
 }
 
-// DownloadObject возвращает содержимое объекта для указанного бакета.
-func (s *Service) DownloadObject(ctx context.Context, bucket, key string) ([]byte, error) {
+// ObjectData содержит содержимое и метаданные объекта.
+type ObjectData struct {
+	Content   []byte
+	ETag      string
+	UpdatedAt time.Time
+}
+
+// DownloadObject возвращает содержимое объекта и его метаданные для указанного бакета.
+func (s *Service) DownloadObject(ctx context.Context, bucket, key string) (ObjectData, error) {
 	if err := s.ensureBucket(ctx, bucket); err != nil {
-		return nil, err
+		return ObjectData{}, err
+	}
+
+	info, err := s.client.StatObject(ctx, bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		return ObjectData{}, fmt.Errorf("failed to stat object: %w", err)
+	}
+	updatedAt := info.LastModified
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
 	}
 
 	reader, err := s.client.GetObject(ctx, bucket, key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch object: %w", err)
+		return ObjectData{}, fmt.Errorf("failed to fetch object: %w", err)
 	}
 	defer reader.Close()
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read object: %w", err)
+		return ObjectData{}, fmt.Errorf("failed to read object: %w", err)
 	}
 
-	return data, nil
+	return ObjectData{
+		Content:   data,
+		ETag:      info.ETag,
+		UpdatedAt: updatedAt,
+	}, nil
 }
 
 // GenerateUploadURL валидирует параметры и подписывает ссылку для загрузки исходного документа.

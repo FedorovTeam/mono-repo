@@ -48,8 +48,9 @@ type JobPayloadMetadata struct {
 // StoreOriginalPayload описывает данные для шага сохранения оригинала.
 type StoreOriginalPayload struct {
 	JobPayloadMetadata
-	Bucket    string
-	ObjectKey string
+	Bucket       string
+	ObjectKey    string
+	OriginalETag string
 }
 
 // ConvertPayload описывает данные для шага конвертации в Markdown.
@@ -73,6 +74,7 @@ type PreprocessPayload struct {
 	JobPayloadMetadata
 	OriginalBucket         string
 	OriginalObjectKey      string
+	OriginalETag           string
 	TargetBucket           string
 	TargetObjectKey        string
 	PreprocessJobID        string
@@ -130,6 +132,9 @@ func (p StoreOriginalPayload) ToMap() map[string]any {
 	if p.ObjectKey != "" {
 		res["object_key"] = p.ObjectKey
 	}
+	if p.OriginalETag != "" {
+		res["original_etag"] = p.OriginalETag
+	}
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }
@@ -140,6 +145,7 @@ func StoreOriginalPayloadFromMap(payload map[string]any) StoreOriginalPayload {
 		JobPayloadMetadata: metadataFromMap(payload),
 		Bucket:             stringFromMap(payload, "bucket"),
 		ObjectKey:          stringFromMap(payload, "object_key"),
+		OriginalETag:       stringFromMap(payload, "original_etag"),
 	}
 }
 
@@ -210,6 +216,9 @@ func (p PreprocessPayload) ToMap() map[string]any {
 	if p.OriginalObjectKey != "" {
 		res["original_object_key"] = p.OriginalObjectKey
 	}
+	if p.OriginalETag != "" {
+		res["original_etag"] = p.OriginalETag
+	}
 	if p.TargetBucket != "" {
 		res["target_bucket"] = p.TargetBucket
 	}
@@ -247,6 +256,7 @@ func PreprocessPayloadFromMap(payload map[string]any) PreprocessPayload {
 		JobPayloadMetadata:     metadataFromMap(payload),
 		OriginalBucket:         stringFromMap(payload, "original_bucket"),
 		OriginalObjectKey:      stringFromMap(payload, "original_object_key"),
+		OriginalETag:           stringFromMap(payload, "original_etag"),
 		TargetBucket:           stringFromMap(payload, "target_bucket"),
 		TargetObjectKey:        stringFromMap(payload, "target_object_key"),
 		PreprocessJobID:        stringFromMap(payload, "preprocess_job_id"),

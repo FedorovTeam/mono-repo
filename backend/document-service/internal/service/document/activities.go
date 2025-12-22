@@ -109,7 +109,7 @@ func NewActivities(repo Repository, preprocessClient preprocessv1.PreprocessServ
 	}
 }
 
-func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) error {
+func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID, originalETag string) error {
 	ctx = a.withCorrelationID(ctx, "")
 	doc, err := a.repo.GetDocument(ctx, documentID)
 	if err != nil {
@@ -135,7 +135,7 @@ func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) 
 		version = 1
 	}
 
-	_, err = a.statuses.Transition(ctx, doc, domain.DocumentStatusStoredOriginal, "", "", &domain.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey})
+	_, err = a.statuses.Transition(ctx, doc, domain.DocumentStatusStoredOriginal, "", "", &domain.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey, OriginalETag: originalETag})
 	return err
 }
 

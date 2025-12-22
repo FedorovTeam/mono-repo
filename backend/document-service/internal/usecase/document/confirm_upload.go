@@ -49,11 +49,12 @@ func (uc *ConfirmUpload) Execute(ctx context.Context, in ConfirmUploadInput) (*d
 	if uc.storage == nil {
 		return nil, errors.New("storage client is not configured")
 	}
-	if err := uc.storage.ValidateObject(ctx, in.Bucket, in.ObjectKey); err != nil {
+	etag, err := uc.storage.ValidateObject(ctx, in.Bucket, in.ObjectKey)
+	if err != nil {
 		return nil, fmt.Errorf("storage validation failed: %w", err)
 	}
 
-	payload := domain.StoreOriginalPayload{Bucket: in.Bucket, ObjectKey: in.ObjectKey}.ToMap()
+	payload := domain.StoreOriginalPayload{Bucket: in.Bucket, ObjectKey: in.ObjectKey, OriginalETag: etag}.ToMap()
 	job := &domain.ProcessingJob{
 		DocumentID: doc.ID,
 		Stage:      domain.JobStageStoreOriginal,

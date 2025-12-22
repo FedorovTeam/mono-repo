@@ -35,7 +35,8 @@ func TestNewMinioClientInitializesBuckets(t *testing.T) {
 
 	data, err := service.DownloadObject(ctx, location.Bucket, location.Key)
 	require.NoError(t, err)
-	require.Equal(t, []byte("payload"), data)
+	require.Equal(t, []byte("payload"), data.Content)
+	require.NotEmpty(t, data.ETag)
 
 	existsDocx, err := client.BucketExists(ctx, "knowledge-original")
 	require.NoError(t, err)

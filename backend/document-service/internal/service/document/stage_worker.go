@@ -106,7 +106,7 @@ func (w *StageWorker) handleStoreOriginal(ctx context.Context, job domain.Proces
 		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("activities not configured")
 	}
 
-	if err := w.activities.MarkStoredOriginal(w.jobContext(ctx, correlationID), job.DocumentID); err != nil {
+	if err := w.activities.MarkStoredOriginal(w.jobContext(ctx, correlationID), job.DocumentID, payload.OriginalETag); err != nil {
 		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
 
@@ -129,6 +129,7 @@ func (w *StageWorker) handlePreprocessToDocx(ctx context.Context, job domain.Pro
 
 	payload.OriginalBucket = firstNonEmpty(payload.OriginalBucket, doc.OriginalBucket)
 	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
+	payload.OriginalETag = firstNonEmpty(payload.OriginalETag, latestVersion(doc).OriginalETag)
 	payload.TargetBucket = firstNonEmpty(payload.TargetBucket, doc.OriginalBucket)
 	if payload.TargetObjectKey == "" {
 		payload.TargetObjectKey = preprocessTargetKey(payload.OriginalObjectKey)
@@ -156,6 +157,7 @@ func (w *StageWorker) handlePreprocessToDocx(ctx context.Context, job domain.Pro
 			DocumentID:      job.DocumentID,
 			SourceBucket:    payload.OriginalBucket,
 			SourceObjectKey: payload.OriginalObjectKey,
+			SourceETag:      payload.OriginalETag,
 			TargetBucket:    payload.TargetBucket,
 			TargetObjectKey: payload.TargetObjectKey,
 			CorrelationID:   payload.CorrelationID,

@@ -201,6 +201,8 @@ func TestGetObjectReturnsStoredData(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []byte("content"), resp.GetContent())
+	require.NotEmpty(t, resp.GetEtag())
+	require.NotNil(t, resp.GetUpdatedAt())
 }
 
 func validationConfig() storage.UploadValidationConfig {
@@ -237,6 +239,10 @@ func (m *mockPresignClient) PutObject(context.Context, string, string, io.Reader
 
 func (m *mockPresignClient) GetObject(context.Context, string, string) (io.ReadCloser, error) {
 	return nil, errors.New("not implemented")
+}
+
+func (m *mockPresignClient) StatObject(context.Context, string, string, minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	return minio.ObjectInfo{}, errors.New("not implemented")
 }
 
 func (m *mockPresignClient) PresignHeader(_ context.Context, method, bucketName, objectName string, expires time.Duration, _ url.Values, headers http.Header) (*url.URL, error) {
@@ -333,6 +339,18 @@ func (m *mockClient) GetObject(_ context.Context, bucketName, objectName string)
 	}
 
 	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+func (m *mockClient) StatObject(_ context.Context, bucketName, objectName string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	bucketData, ok := m.storedData[bucketName]
+	if !ok {
+		return minio.ObjectInfo{}, minio.ErrorResponse{Code: "NoSuchBucket"}
+	}
+	data, ok := bucketData[objectName]
+	if !ok {
+		return minio.ObjectInfo{}, minio.ErrorResponse{Code: "NoSuchKey"}
+	}
+	return minio.ObjectInfo{ETag: "etag-" + objectName, Size: int64(len(data)), LastModified: time.Now().UTC()}, nil
 }
 
 func (m *mockClient) PresignHeader(_ context.Context, _ string, _ string, _ string, _ time.Duration, _ url.Values, _ http.Header) (*url.URL, error) {

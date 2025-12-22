@@ -20,6 +20,10 @@ type mockClient struct {
 	buckets     map[string]bool
 	storedData  map[string]map[string][]byte
 	lastPutOpts minio.PutObjectOptions
+	lastStat    struct {
+		bucket string
+		object string
+	}
 	lastPresign struct {
 		method  string
 		bucket  string
@@ -89,6 +93,24 @@ func (m *mockClient) GetObject(_ context.Context, bucketName, objectName string)
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
+func (m *mockClient) StatObject(_ context.Context, bucketName, objectName string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	bucketData, ok := m.storedData[bucketName]
+	if !ok {
+		return minio.ObjectInfo{}, minio.ErrorResponse{Code: "NoSuchBucket"}
+	}
+	data, ok := bucketData[objectName]
+	if !ok {
+		return minio.ObjectInfo{}, minio.ErrorResponse{Code: "NoSuchKey"}
+	}
+	m.lastStat.bucket = bucketName
+	m.lastStat.object = objectName
+	return minio.ObjectInfo{
+		ETag:         "etag-" + objectName,
+		Size:         int64(len(data)),
+		LastModified: time.Now().UTC(),
+	}, nil
+}
+
 func (m *mockClient) PresignHeader(_ context.Context, method, bucketName, objectName string, expires time.Duration, _ url.Values, headers http.Header) (*url.URL, error) {
 	m.lastPresign.method = method
 	m.lastPresign.bucket = bucketName
@@ -145,7 +167,9 @@ func TestService_UploadAndDownload(t *testing.T) {
 
 	downloaded, err := svc.DownloadObject(ctx, mdLocation.Bucket, mdLocation.Key)
 	require.NoError(t, err)
-	require.Equal(t, markdownContent, downloaded)
+	require.Equal(t, markdownContent, downloaded.Content)
+	require.NotEmpty(t, downloaded.ETag)
+	require.False(t, downloaded.UpdatedAt.IsZero())
 }
 
 func TestService_ErrorsOnMissingBucket(t *testing.T) {

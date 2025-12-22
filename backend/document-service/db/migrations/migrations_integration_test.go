@@ -59,6 +59,7 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 	assertColumnExists(t, ctx, db, "documents", "path")
 	assertColumnExists(t, ctx, db, "documents", "error_reason")
 	assertColumnExists(t, ctx, db, "documents", "workflow_id")
+	assertColumnExists(t, ctx, db, "document_versions", "original_etag")
 	assertColumnNotExists(t, ctx, db, "documents", "force_ocr")
 	assertColumnExists(t, ctx, db, "document_status_logs", "workflow_id")
 }
@@ -145,7 +146,7 @@ func assertJobEnums(t *testing.T, ctx context.Context, db *sql.DB) {
 		require.NoError(t, rows.Scan(&v))
 		stages = append(stages, v)
 	}
-	require.Equal(t, []string{"store_original", "convert_to_markdown", "publish_to_github"}, stages)
+	require.Equal(t, []string{"store_original", "convert_to_markdown", "publish_to_github", "preprocess_to_docx"}, stages)
 
 	statusRows, err := db.QueryContext(ctx, `
         SELECT enumlabel FROM pg_enum WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'job_status') ORDER BY enumsortorder
