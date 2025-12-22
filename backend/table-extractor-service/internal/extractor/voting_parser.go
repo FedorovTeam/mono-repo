@@ -11,15 +11,15 @@ import (
 	"sort"
 	"strconv"
 
-	"pdf2md"
+	"github.com/mono-repo/table-extractor-service/internal/voting"
 )
 
 type VotingTableParser struct {
-	params pdf2md.DetectParams
+	params voting.DetectParams
 }
 
 func NewVotingTableParser() VotingTableParser {
-	return VotingTableParser{params: pdf2md.DefaultDetectParams()}
+	return VotingTableParser{params: voting.DefaultDetectParams()}
 }
 
 func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
@@ -35,9 +35,9 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 		return ParsedTables{}, errors.New("bbox html does not contain <page> tags")
 	}
 
-	pageBBoxes := make(map[int]pdf2md.PageBBox, len(pageSegments))
+	pageBBoxes := make(map[int]voting.PageBBox, len(pageSegments))
 	for _, seg := range pageSegments {
-		page, err := pdf2md.ParseBBoxHTML(seg.HTML)
+		page, err := voting.ParseBBoxHTML(seg.HTML)
 		if err != nil {
 			return ParsedTables{}, fmt.Errorf("parse bbox page %d: %w", seg.Number, err)
 		}
@@ -45,12 +45,12 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 	}
 
 	firstPage := pageBBoxes[pageSegments[0].Number]
-	cols, nameXMaxPt, tableHeaderYPt, err := pdf2md.ExtractColumns(firstPage)
+	cols, nameXMaxPt, tableHeaderYPt, err := voting.ExtractColumns(firstPage)
 	if err != nil {
 		return ParsedTables{}, err
 	}
 
-	rows := make(map[int]*pdf2md.Row, 128)
+	rows := make(map[int]*voting.Row, 128)
 	pageNumbers := make([]int, 0, len(pageBBoxes))
 	for n := range pageBBoxes {
 		pageNumbers = append(pageNumbers, n)
@@ -75,41 +75,41 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 		if num == pageSegments[0].Number {
 			minYPt = tableHeaderYPt
 		} else {
-			if y, ok := pdf2md.FindTableHeaderY(pageBBox.Words); ok {
+			if y, ok := voting.FindTableHeaderY(pageBBox.Words); ok {
 				minYPt = y
 			}
 		}
 
-		rowNumWords := pdf2md.ExtractRowNumberWords(pageBBox, minYPt)
+		rowNumWords := voting.ExtractRowNumberWords(pageBBox, minYPt)
 		for _, rn := range rowNumWords {
 			n := rn.Number
 			row := rows[n]
 			if row == nil {
-				row = &pdf2md.Row{Number: n, Marks: make(map[pdf2md.ColumnKey]bool, len(cols))}
+				row = &voting.Row{Number: n, Marks: make(map[voting.ColumnKey]bool, len(cols))}
 				rows[n] = row
 			}
 			if row.Name == "" {
-				row.Name = pdf2md.ExtractNameForRow(rn.Word, pageBBox.Words, nameXMaxPt)
+				row.Name = voting.ExtractNameForRow(rn.Word, pageBBox.Words, nameXMaxPt)
 			}
 
 			yCenterPt := (rn.Word.YMin + rn.Word.YMax) / 2
 			yPx := int((yCenterPt * yScale) + 0.5)
 
-			marks := pdf2md.DetectMarks(gray, yPx, cols, xScale, yScale, p.params)
+			marks := voting.DetectMarks(gray, yPx, cols, xScale, yScale, p.params)
 			for k, v := range marks {
 				row.Marks[k] = v
 			}
 		}
 	}
 
-	rowList := make([]pdf2md.Row, 0, len(rows))
+	rowList := make([]voting.Row, 0, len(rows))
 	for _, r := range rows {
 		rowList = append(rowList, *r)
 	}
 	sort.Slice(rowList, func(i, j int) bool { return rowList[i].Number < rowList[j].Number })
 
-	doc := pdf2md.Document{
-		HeaderText: pdf2md.ExtractHeaderText(input.LayoutText),
+	doc := voting.Document{
+		HeaderText: voting.ExtractHeaderText(input.LayoutText),
 		Columns:    cols,
 		Rows:       rowList,
 	}
@@ -119,7 +119,7 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 
 func (p VotingTableParser) RenderMarkdown(tables ParsedTables) string {
 	if tables.Document != nil {
-		return pdf2md.ToMarkdown(*tables.Document)
+		return voting.ToMarkdown(*tables.Document)
 	}
 	return DefaultParser{}.RenderMarkdown(tables)
 }
@@ -161,7 +161,7 @@ func loadGrayFromBytes(data []byte) (*image.Gray, error) {
 	return g, nil
 }
 
-func convertDocument(doc pdf2md.Document) ParsedTables {
+func convertDocument(doc voting.Document) ParsedTables {
 	headers := []string{"№", "Ф.И.О."}
 	for _, c := range doc.Columns {
 		headers = append(headers, c.Title)
