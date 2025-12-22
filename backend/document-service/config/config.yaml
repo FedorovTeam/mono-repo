@@ -13,9 +13,9 @@ services:
 grpc_clients:
   timeout: 3s
   keepalive:
-    time: 30s
+    time: 5m
     timeout: 5s
-    permit_without_stream: true
+    permit_without_stream: false
   backoff:
     base_delay: 1s
     multiplier: 1.6
