@@ -14,7 +14,7 @@ type Repository interface {
 
 // Storage описывает операции проверки доступности объектов в файловом хранилище.
 type Storage interface {
-	ValidateObject(ctx context.Context, bucket, objectKey string) error
+	ValidateObject(ctx context.Context, bucket, objectKey string) (string, error)
 }
 
 // JobScheduler описывает операции для постановки следующего этапа обработки.

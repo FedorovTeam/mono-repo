@@ -16,10 +16,13 @@ func New(client storagev1.StorageServiceClient) *Client {
 	return &Client{client: client}
 }
 
-func (c *Client) ValidateObject(ctx context.Context, bucket, objectKey string) error {
+func (c *Client) ValidateObject(ctx context.Context, bucket, objectKey string) (string, error) {
 	if c.client == nil {
-		return fmt.Errorf("storage client is not configured")
+		return "", fmt.Errorf("storage client is not configured")
 	}
-	_, err := c.client.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: bucket, ObjectKey: objectKey})
-	return err
+	resp, err := c.client.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: bucket, ObjectKey: objectKey})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetEtag(), nil
 }

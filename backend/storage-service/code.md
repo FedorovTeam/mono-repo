@@ -41,7 +41,7 @@ classDiagram
         +NewService(client, keyGenerator, docxBucket, markdownBucket) Service
         +UploadOriginal(ctx, orgSlug, projectSlug, documentID, extension, content) ObjectLocation
         +UploadMarkdown(ctx, orgSlug, projectSlug, documentID, content) ObjectLocation
-        +DownloadObject(ctx, bucket, key) []byte
+        +DownloadObject(ctx, bucket, key) ObjectData
         +GenerateUploadURL(ctx, bucket, params) PresignedUpload
     }
     Service --> ObjectKeyGenerator

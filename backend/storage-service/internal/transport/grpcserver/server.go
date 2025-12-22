@@ -132,7 +132,7 @@ func (s *Server) GetObject(ctx context.Context, req *storagev1.GetObjectRequest)
 	correlationID := s.correlationID(ctx, "")
 	s.attachResponseMetadata(ctx, correlationID, s.resolveOrgSlug(ctx, ""), s.resolveProjectSlug(ctx, ""))
 
-	content, err := s.service.DownloadObject(ctx, req.GetBucket(), req.GetObjectKey())
+	object, err := s.service.DownloadObject(ctx, req.GetBucket(), req.GetObjectKey())
 	if err != nil {
 		return nil, s.mapStorageError(err)
 	}
@@ -140,8 +140,9 @@ func (s *Server) GetObject(ctx context.Context, req *storagev1.GetObjectRequest)
 	return &storagev1.GetObjectResponse{
 		Bucket:    req.GetBucket(),
 		ObjectKey: req.GetObjectKey(),
-		Content:   content,
-		UpdatedAt: timestamppb.Now(),
+		Content:   object.Content,
+		UpdatedAt: timestamppb.New(object.UpdatedAt),
+		Etag:      object.ETag,
 	}, nil
 }
 

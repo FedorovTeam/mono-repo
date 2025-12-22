@@ -30,6 +30,9 @@ func (f *fakeNotificationClient) PutObject(ctx context.Context, bucketName, obje
 func (f *fakeNotificationClient) GetObject(ctx context.Context, bucketName, objectName string) (io.ReadCloser, error) {
 	return nil, nil
 }
+func (f *fakeNotificationClient) StatObject(ctx context.Context, bucketName, objectName string, opts minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	return minio.ObjectInfo{}, nil
+}
 func (f *fakeNotificationClient) PresignHeader(ctx context.Context, method, bucketName, objectName string, expires time.Duration, reqParams url.Values, extraHeaders http.Header) (*url.URL, error) {
 	return nil, nil
 }

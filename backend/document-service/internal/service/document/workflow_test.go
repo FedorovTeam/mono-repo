@@ -300,7 +300,7 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 	repo := &fakeRepo{doc: doc}
 	activities := NewActivities(repo, nil, nil, nil)
 
-	if err := activities.MarkStoredOriginal(context.Background(), doc.ID); err != nil {
+	if err := activities.MarkStoredOriginal(context.Background(), doc.ID, "etag-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

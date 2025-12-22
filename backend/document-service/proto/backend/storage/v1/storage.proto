@@ -44,6 +44,7 @@ message GetObjectResponse {
   string object_key = 2;
   bytes content = 3;
   google.protobuf.Timestamp updated_at = 4;
+  string etag = 5;
 }
 
 message GenerateUploadURLRequest {

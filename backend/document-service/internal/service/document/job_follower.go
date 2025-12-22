@@ -143,6 +143,7 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 			payload := domain.PreprocessPayload{
 				OriginalBucket:     doc.OriginalBucket,
 				OriginalObjectKey:  doc.OriginalObjectKey,
+				OriginalETag:       latestVersion(doc).OriginalETag,
 				FilenameExtension:  fileExtension(firstNonEmpty(doc.OriginalObjectKey, doc.Name)),
 				JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
 			}.ToMap()

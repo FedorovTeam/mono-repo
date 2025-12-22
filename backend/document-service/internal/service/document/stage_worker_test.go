@@ -401,7 +401,7 @@ func TestHandlePreprocessSubmitSchedulesRetry(t *testing.T) {
 		OriginalObjectKey: "docs/doc.pdf",
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "docs/doc.md",
-		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", OriginalETag: "etag-original", MarkdownObjectKey: "docs/doc.md"}},
 	}
 
 	repo := &publishRepoStub{doc: doc, now: now}
@@ -438,6 +438,9 @@ func TestHandlePreprocessSubmitSchedulesRetry(t *testing.T) {
 	if preprocess.lastSubmit == nil || preprocess.lastSubmit.CorrelationId != doc.ID {
 		t.Fatalf("expected correlation id from document, got %+v", preprocess.lastSubmit)
 	}
+	if preprocess.lastSubmit.GetSourceEtag() != "etag-original" {
+		t.Fatalf("expected source etag to be forwarded, got %s", preprocess.lastSubmit.GetSourceEtag())
+	}
 }
 
 func TestHandlePreprocessCompletesAfterPoll(t *testing.T) {
@@ -454,7 +457,7 @@ func TestHandlePreprocessCompletesAfterPoll(t *testing.T) {
 		OriginalObjectKey: "docs/doc.pdf",
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "docs/doc.md",
-		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", OriginalETag: "etag-original", MarkdownObjectKey: "docs/doc.md"}},
 	}
 	repo := &publishRepoStub{doc: doc}
 	preprocess := &staticPreprocess{
