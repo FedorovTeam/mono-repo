@@ -23,7 +23,7 @@ type Config struct {
 	TargetBucket    string
 	TargetMediaType string
 	OutputDir       string
-	Concurrency     int64
+	Concurrency     int64 // принудительно приводится к 1, параллелизм отключён
 	ProcessTimeout  time.Duration
 	ConvertTimeout  time.Duration
 	Backoff         time.Duration
@@ -100,9 +100,7 @@ func New(deps Dependencies, cfg Config, logger *zap.Logger) (*Worker, error) {
 }
 
 func normalizeConfig(cfg Config) Config {
-	if cfg.Concurrency <= 0 {
-		cfg.Concurrency = 1
-	}
+	cfg.Concurrency = 1
 	if cfg.ConvertTimeout <= 0 {
 		cfg.ConvertTimeout = 2 * time.Minute
 	}
