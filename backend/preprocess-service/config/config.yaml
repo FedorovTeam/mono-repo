@@ -31,5 +31,5 @@ preprocess:
   poll_interval: 2s
 
 logging:
-  level: info
+  level: debug
   format: console
