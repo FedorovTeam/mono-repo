@@ -34,6 +34,10 @@ spec:
             # API-ключ, который gateway ждёт в X-API-Key
             - name: NEXT_PUBLIC_API_KEY
               value: "secret"
+            - name: NEXT_PUBLIC_DEFAULT_REPOSITORY
+              value: "docs"
+            - name: NEXT_PUBLIC_DEFAULT_BRANCH
+              value: "main"
           resources:
             requests:
               cpu: "50m"

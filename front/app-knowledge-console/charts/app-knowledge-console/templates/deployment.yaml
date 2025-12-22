@@ -30,6 +30,10 @@ spec:
               value: {{ .Values.env.NEXT_PUBLIC_GATEWAY_URL | quote }}
             - name: NEXT_PUBLIC_API_KEY
               value: {{ .Values.env.NEXT_PUBLIC_API_KEY | quote }}
+            - name: NEXT_PUBLIC_DEFAULT_REPOSITORY
+              value: {{ .Values.env.NEXT_PUBLIC_DEFAULT_REPOSITORY | quote }}
+            - name: NEXT_PUBLIC_DEFAULT_BRANCH
+              value: {{ .Values.env.NEXT_PUBLIC_DEFAULT_BRANCH | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
