@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/mono-repo/table-extractor-service/internal/domain"
@@ -41,6 +42,17 @@ func NewHandler(uc ExtractionUseCase, correlationProvider CorrelationIDProvider,
 func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTablesFromPdfRequest) (*pb.ExtractTablesFromPdfResponse, error) {
 	ctx, correlationID := h.resolveCorrelationID(ctx, req.GetCorrelationId())
 
+	fields := []zap.Field{
+		zap.String("method", "ExtractTablesFromPdf"),
+		zap.String("correlation_id", correlationID),
+		zap.String("document_id", req.GetDocumentId()),
+		zap.String("source_url", req.GetSourceUrl()),
+		zap.String("original_bucket", req.GetOriginalBucket()),
+		zap.String("original_object_key", req.GetOriginalObjectKey()),
+		zap.Int("request_size", proto.Size(req)),
+	}
+	h.logger.Debug("incoming gRPC request", fields...)
+
 	job, err := h.uc.ExtractTablesFromPDF(ctx, usecase.ExtractTablesRequest{
 		DocumentID:        req.GetDocumentId(),
 		OriginalBucket:    req.GetOriginalBucket(),
@@ -52,10 +64,17 @@ func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTable
 		CorrelationID:     correlationID,
 	})
 	if err != nil {
+		h.logger.Debug("gRPC request finished with error", append(fields, zap.Error(err))...)
 		return nil, h.mapError(err)
 	}
 
 	h.cids.SetHeader(ctx, job.CorrelationID)
+
+	fields = append(fields,
+		zap.String("queue_id", job.ID.String()),
+		zap.String("correlation_id", job.CorrelationID),
+	)
+	h.logger.Debug("gRPC request finished", fields...)
 
 	return &pb.ExtractTablesFromPdfResponse{
 		Job:           toProtoJob(job),
@@ -66,17 +85,30 @@ func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTable
 func (h *Handler) GetTableExtractionJob(ctx context.Context, req *pb.GetTableExtractionJobRequest) (*pb.GetTableExtractionJobResponse, error) {
 	ctx, _ = h.resolveCorrelationID(ctx, req.GetCorrelationId())
 
+	fields := []zap.Field{
+		zap.String("method", "GetTableExtractionJob"),
+		zap.String("correlation_id", h.cids.FromContext(ctx)),
+		zap.String("queue_id", req.GetQueueId()),
+		zap.Int("request_size", proto.Size(req)),
+	}
+	h.logger.Debug("incoming gRPC request", fields...)
+
 	jobID, err := uuid.Parse(req.GetQueueId())
 	if err != nil {
+		h.logger.Debug("gRPC request finished with error", append(fields, zap.Error(err))...)
 		return nil, status.Error(codes.InvalidArgument, "invalid queue_id")
 	}
 
 	job, err := h.uc.GetJob(ctx, jobID)
 	if err != nil {
+		h.logger.Debug("gRPC request finished with error", append(fields, zap.Error(err))...)
 		return nil, h.mapError(err)
 	}
 
 	h.cids.SetHeader(ctx, job.CorrelationID)
+
+	fields = append(fields, zap.String("correlation_id", job.CorrelationID), zap.String("document_id", job.DocumentID))
+	h.logger.Debug("gRPC request finished", fields...)
 
 	return &pb.GetTableExtractionJobResponse{
 		Job:           toProtoJob(job),

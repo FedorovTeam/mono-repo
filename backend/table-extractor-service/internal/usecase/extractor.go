@@ -16,6 +16,7 @@ import (
 
 	"github.com/mono-repo/table-extractor-service/internal/domain"
 	"github.com/mono-repo/table-extractor-service/internal/repository"
+	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 )
 
 var (
@@ -113,6 +114,14 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 	}
 
 	correlationID := strings.TrimSpace(req.CorrelationID)
+	uc.logger.Debug("SubmitExtraction received",
+		zap.String("document_id", req.DocumentID),
+		zap.String("correlation_id", correlationID),
+		zap.String("source_url", req.SourceURL),
+		zap.String("local_path", req.LocalPath),
+		zap.String("original_bucket", req.OriginalBucket),
+		zap.String("original_object_key", req.OriginalObjectKey),
+	)
 
 	now := uc.clock.Now().UTC()
 	artifactsBucket := req.ArtifactsBucket
@@ -167,8 +176,19 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 		return false, fmt.Errorf("acquire pending jobs: %w", err)
 	}
 	if len(jobs) == 0 {
+		uc.logger.Debug("no pending jobs found",
+			zap.String("correlation_id", telemetry.CorrelationIDFromContext(ctx)),
+			zap.Int("batch_size", uc.cfg.AcquireBatchSize),
+		)
+	}
+	if len(jobs) == 0 {
 		return false, nil
 	}
+
+	uc.logger.Debug("processing pending jobs",
+		zap.Int("count", len(jobs)),
+		zap.String("correlation_id", telemetry.CorrelationIDFromContext(ctx)),
+	)
 
 	for _, job := range jobs {
 		startTime := uc.clock.Now().UTC()
@@ -182,6 +202,12 @@ func (uc *TableExtractorUseCase) ProcessExtractionJob(ctx context.Context) (bool
 		if err := uc.queue.Save(ctx, startedJob); err != nil {
 			return false, fmt.Errorf("save processing job %s: %w", job.ID, err)
 		}
+
+		uc.logger.Debug("started processing job",
+			zap.String("queue_id", startedJob.ID.String()),
+			zap.String("document_id", startedJob.DocumentID),
+			zap.String("correlation_id", startedJob.CorrelationID),
+		)
 
 		if err := uc.processSingle(ctx, startedJob); err != nil {
 			uc.logger.Error("failed to process extraction job",
@@ -199,6 +225,14 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 	aggregate := domain.NewTableExtractionJobAggregate(job)
 
 	sourceProvided := strings.TrimSpace(job.SourceURL) != "" || strings.TrimSpace(job.LocalPath) != "" || (job.Original.Bucket != "" && job.Original.ObjectKey != "")
+	uc.logger.Debug("processSingle started",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.Bool("has_source_url", strings.TrimSpace(job.SourceURL) != ""),
+		zap.Bool("has_local_path", strings.TrimSpace(job.LocalPath) != ""),
+		zap.Bool("has_original", job.Original.Bucket != "" && job.Original.ObjectKey != ""),
+	)
 	if !sourceProvided {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("original file is not set", "invalid_original", "source is empty", false, now)
@@ -206,8 +240,30 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(errors.New("missing original location"), transErr)
 		}
 		saveErr := uc.queue.Save(ctx, updated.Job())
+		uc.logger.Debug("job marked failed due to missing source",
+			zap.String("queue_id", job.ID.String()),
+			zap.String("document_id", job.DocumentID),
+			zap.String("correlation_id", job.CorrelationID),
+		)
 		return errors.Join(errors.New("missing source"), saveErr)
 	}
+
+	sourceType := "original"
+	if strings.TrimSpace(job.SourceURL) != "" {
+		sourceType = "source_url"
+	} else if strings.TrimSpace(job.LocalPath) != "" {
+		sourceType = "local_path"
+	}
+	uc.logger.Debug("fetching source file",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.String("source_type", sourceType),
+		zap.String("source_url", job.SourceURL),
+		zap.String("local_path", job.LocalPath),
+		zap.String("original_bucket", job.Original.Bucket),
+		zap.String("original_object_key", job.Original.ObjectKey),
+	)
 
 	cached, err := uc.fileCache.Fetch(ctx, SourceLocation{
 		Original:  job.Original,
@@ -221,14 +277,36 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(fmt.Errorf("download original: %w", err), transErr)
 		}
 		statusErr := uc.queue.Save(ctx, updated.Job())
+		uc.logger.Debug("job marked failed due to download error",
+			zap.String("queue_id", job.ID.String()),
+			zap.String("document_id", job.DocumentID),
+			zap.String("correlation_id", job.CorrelationID),
+			zap.Error(err),
+		)
 		return errors.Join(fmt.Errorf("download original: %w", err), statusErr)
 	}
+	uc.logger.Debug("source cached",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.String("cache_path", cached.Path),
+	)
 	defer func() {
 		if cached.Cleanup != nil {
 			cached.Cleanup()
+			uc.logger.Debug("cache cleaned",
+				zap.String("queue_id", job.ID.String()),
+				zap.String("correlation_id", job.CorrelationID),
+			)
 		}
 	}()
 
+	uc.logger.Debug("starting extractor",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.String("source_path", cached.Path),
+	)
 	result, err := uc.extractor.Extract(ctx, cached.Path)
 	if err != nil {
 		now := uc.clock.Now().UTC()
@@ -237,8 +315,20 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(fmt.Errorf("extract tables: %w", err), transErr)
 		}
 		statusErr := uc.queue.Save(ctx, updated.Job())
+		uc.logger.Debug("job marked failed due to extraction error",
+			zap.String("queue_id", job.ID.String()),
+			zap.String("document_id", job.DocumentID),
+			zap.String("correlation_id", job.CorrelationID),
+			zap.Error(err),
+		)
 		return errors.Join(fmt.Errorf("extract tables: %w", err), statusErr)
 	}
+	uc.logger.Debug("extractor finished",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.Int("artifacts_count", len(result.DebugFiles)),
+	)
 
 	if err := uc.uploadArtifacts(ctx, job, result); err != nil {
 		now := uc.clock.Now().UTC()
@@ -247,6 +337,12 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 			return errors.Join(fmt.Errorf("upload artifacts: %w", err), transErr)
 		}
 		statusErr := uc.queue.Save(ctx, updated.Job())
+		uc.logger.Debug("job marked failed due to upload error",
+			zap.String("queue_id", job.ID.String()),
+			zap.String("document_id", job.DocumentID),
+			zap.String("correlation_id", job.CorrelationID),
+			zap.Error(err),
+		)
 		return errors.Join(fmt.Errorf("upload artifacts: %w", err), statusErr)
 	}
 
@@ -258,6 +354,13 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 	if err := uc.queue.Save(ctx, updated.Job()); err != nil {
 		return fmt.Errorf("mark job done: %w", err)
 	}
+
+	uc.logger.Debug("processSingle finished",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.Time("finished_at", finishedAt),
+	)
 
 	return nil
 }
@@ -278,6 +381,14 @@ func (uc *TableExtractorUseCase) uploadArtifacts(ctx context.Context, job domain
 		if len(file.payload) == 0 {
 			continue
 		}
+		uc.logger.Debug("uploading artifact",
+			zap.String("queue_id", job.ID.String()),
+			zap.String("document_id", job.DocumentID),
+			zap.String("correlation_id", job.CorrelationID),
+			zap.String("bucket", file.location.Bucket),
+			zap.String("object_key", file.location.ObjectKey),
+			zap.Int("size_bytes", len(file.payload)),
+		)
 		if err := uc.storage.Upload(ctx, file.location.Bucket, file.location.ObjectKey, file.contentType, bytesReader(file.payload), int64(len(file.payload))); err != nil {
 			return fmt.Errorf("upload %s: %w", file.location.ObjectKey, err)
 		}
@@ -292,6 +403,14 @@ func (uc *TableExtractorUseCase) uploadArtifacts(ctx context.Context, job domain
 			continue
 		}
 		objectKey := path.Join(job.Artifacts.DebugPrefix.ObjectKey, filepath.Base(name))
+		uc.logger.Debug("uploading debug artifact",
+			zap.String("queue_id", job.ID.String()),
+			zap.String("document_id", job.DocumentID),
+			zap.String("correlation_id", job.CorrelationID),
+			zap.String("bucket", job.Artifacts.DebugPrefix.Bucket),
+			zap.String("object_key", objectKey),
+			zap.Int("size_bytes", len(payload)),
+		)
 		if err := uc.storage.Upload(ctx, job.Artifacts.DebugPrefix.Bucket, objectKey, "text/plain", bytesReader(payload), int64(len(payload))); err != nil {
 			return fmt.Errorf("upload debug file %s: %w", objectKey, err)
 		}
@@ -368,6 +487,12 @@ func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, pro
 			if err := uc.queue.Save(ctx, updated.Job()); err != nil {
 				return restored, failed, fmt.Errorf("mark job failed: %w", err)
 			}
+			uc.logger.Debug("job marked failed after timeout",
+				zap.String("queue_id", job.ID.String()),
+				zap.String("document_id", job.DocumentID),
+				zap.String("correlation_id", job.CorrelationID),
+				zap.Int("attempts", job.Attempts),
+			)
 			failed++
 			continue
 		}
@@ -381,6 +506,14 @@ func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, pro
 		if err := uc.queue.Save(ctx, updated.Job()); err != nil {
 			return restored, failed, fmt.Errorf("postpone job: %w", err)
 		}
+		uc.logger.Debug("job restored after timeout",
+			zap.String("queue_id", job.ID.String()),
+			zap.String("document_id", job.DocumentID),
+			zap.String("correlation_id", job.CorrelationID),
+			zap.Duration("backoff_delay", delay),
+			zap.Time("next_run_at", nextRun),
+			zap.Int("attempts", job.Attempts),
+		)
 		restored++
 	}
 
@@ -397,6 +530,13 @@ func (uc *TableExtractorUseCase) RetryFailed(ctx context.Context, maxAttempts in
 	if err != nil {
 		return 0, fmt.Errorf("retry failed jobs: %w", err)
 	}
+	if count > 0 {
+		uc.logger.Debug("jobs scheduled for retry",
+			zap.Int("count", count),
+			zap.Duration("retry_delay", delay),
+			zap.Int("max_attempts", maxAttempts),
+		)
+	}
 	return count, nil
 }
 
@@ -408,6 +548,12 @@ func (uc *TableExtractorUseCase) CleanupFinished(ctx context.Context, retention 
 	count, err := uc.queue.Cleanup(ctx, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("cleanup finished jobs: %w", err)
+	}
+	if count > 0 {
+		uc.logger.Debug("cleanup finished jobs",
+			zap.Int("removed", count),
+			zap.Duration("retention", retention),
+		)
 	}
 	return count, nil
 }

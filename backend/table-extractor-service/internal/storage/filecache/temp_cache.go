@@ -12,24 +12,39 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 	"github.com/mono-repo/table-extractor-service/internal/usecase"
 )
 
 // TempCache загружает исходный файл во временную директорию и предоставляет путь с коллбеком очистки.
 type TempCache struct {
 	storage usecase.StorageClient
+	logger  *zap.Logger
 }
 
-func NewTempCache(storage usecase.StorageClient) *TempCache {
-	return &TempCache{storage: storage}
+func NewTempCache(storage usecase.StorageClient, logger *zap.Logger) *TempCache {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &TempCache{storage: storage, logger: logger}
 }
 
 func (c *TempCache) Fetch(ctx context.Context, source usecase.SourceLocation) (usecase.CachedFile, error) {
 	if strings.TrimSpace(source.SourceURL) != "" {
+		c.logger.Debug("fetching file from url",
+			zap.String("correlation_id", telemetry.CorrelationIDFromContext(ctx)),
+			zap.String("source_url", source.SourceURL),
+		)
 		return c.fetchFromURL(ctx, source.SourceURL)
 	}
 
 	if strings.TrimSpace(source.LocalPath) != "" {
+		c.logger.Debug("fetching file from local path",
+			zap.String("correlation_id", telemetry.CorrelationIDFromContext(ctx)),
+			zap.String("local_path", source.LocalPath),
+		)
 		return c.copyLocalFile(source.LocalPath)
 	}
 
@@ -40,6 +55,12 @@ func (c *TempCache) Fetch(ctx context.Context, source usecase.SourceLocation) (u
 	if strings.TrimSpace(source.Original.Bucket) == "" || strings.TrimSpace(source.Original.ObjectKey) == "" {
 		return usecase.CachedFile{}, errors.New("original location is empty")
 	}
+
+	c.logger.Debug("fetching file from object storage",
+		zap.String("correlation_id", telemetry.CorrelationIDFromContext(ctx)),
+		zap.String("bucket", source.Original.Bucket),
+		zap.String("object_key", source.Original.ObjectKey),
+	)
 
 	reader, err := c.storage.Download(ctx, source.Original.Bucket, source.Original.ObjectKey)
 	if err != nil {
