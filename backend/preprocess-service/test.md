@@ -70,6 +70,7 @@
    grpcurl -plaintext -d '{"job_id": "<JOB_ID>"}' localhost:9082 backend.preprocess.v1.PreprocessService/GetPreprocessStatus
    ```
 4. Ожидаемый финал: `status` = `PREPROCESS_STATUS_COMPLETED`, поля `target_bucket`/`target_key` заполнены, `target_media_type` соответствует DOCX, `attempts` и `max_attempts` отражают счётчики ретраев, `started_at`/`finished_at` проставлены, `error_code` и `error_details` пустые. При невосстановимой ошибке ожидайте `PREPROCESS_STATUS_STOPPED` вместе с заполненными `error_*` и последним `next_run_at`.
+   При падении LibreOffice `error_details` будут содержать `lo_output` (stdout/stderr, урезано до ~4 КБ), `lo_exit_code` и `lo_duration_ms` — их удобно читать через `GetPreprocessStatus` для отладки.
 
 ## Webhook сценарий
 1. Поднять echo-приёмник обратных вызовов:

@@ -256,9 +256,9 @@ func (s *Service) convertToDocx(ctx context.Context, sourcePath string, workspac
 	result, err := s.converter.Convert(convertCtx, sourcePath, workspace.OutputDir())
 	if err != nil {
 		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
-			return result, temporaryErrorWithDetails(domain.ErrorCodeConvertTimeout, fmt.Errorf("conversion timeout: %w", err), result.Details("converter"))
+			return result, temporaryErrorWithDetails(domain.ErrorCodeConvertTimeout, fmt.Errorf("conversion timeout: %w", err), result.Details("lo"))
 		}
-		return result, permanentErrorWithDetails(domain.ErrorCodeConvertFailed, err, result.Details("converter"))
+		return result, permanentErrorWithDetails(domain.ErrorCodeConvertFailed, err, result.Details("lo"))
 	}
 	logger.Debug("document conversion finished")
 	return result, nil
