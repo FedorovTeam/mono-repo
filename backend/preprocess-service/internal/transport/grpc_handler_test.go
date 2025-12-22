@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"preprocess-service/internal/config"
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/storage/memory"
 	"preprocess-service/internal/usecase/submit"
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
@@ -53,6 +54,24 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 	if first.GetJobId() == "" {
 		t.Fatalf("expected job id to be set")
 	}
+	if first.GetAttempts() != 0 {
+		t.Fatalf("expected attempts to start with 0, got %d", first.GetAttempts())
+	}
+	if first.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected default max attempts, got %d", first.GetMaxAttempts())
+	}
+	if first.GetNextRunAt() == nil || first.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if first.GetStartedAt() != nil {
+		t.Fatalf("expected started_at to be empty for pending job")
+	}
+	if first.GetFinishedAt() != nil {
+		t.Fatalf("expected finished_at to be empty for pending job")
+	}
+	if first.GetTargetMediaType() != "" {
+		t.Fatalf("expected empty target_media_type for new job, got %s", first.GetTargetMediaType())
+	}
 
 	req.CorrelationId = "corr-2"
 	second, err := handler.SubmitPreprocess(context.Background(), req)
@@ -66,6 +85,12 @@ func TestSubmitPreprocessIdempotent(t *testing.T) {
 
 	if second.GetStatus() != preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING {
 		t.Fatalf("unexpected status: %s", second.GetStatus())
+	}
+	if got := second.GetNextRunAt(); got == nil || !got.AsTime().Equal(first.GetNextRunAt().AsTime()) {
+		t.Fatalf("expected next_run_at to be preserved, got %v vs %v", got, first.GetNextRunAt())
+	}
+	if second.GetTargetMediaType() != "" {
+		t.Fatalf("expected empty target_media_type for pending job, got %s", second.GetTargetMediaType())
 	}
 }
 
@@ -119,6 +144,24 @@ func TestGetPreprocessStatus(t *testing.T) {
 	if statusResp.GetUpdatedAt().AsTime().After(time.Now().Add(1 * time.Minute)) {
 		t.Fatalf("updated_at is in the future: %v", statusResp.GetUpdatedAt())
 	}
+	if statusResp.GetNextRunAt() == nil || statusResp.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if statusResp.GetAttempts() != 0 {
+		t.Fatalf("expected attempts 0, got %d", statusResp.GetAttempts())
+	}
+	if statusResp.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected max_attempts %d, got %d", domain.DefaultMaxAttempts, statusResp.GetMaxAttempts())
+	}
+	if statusResp.GetStartedAt() != nil {
+		t.Fatalf("expected started_at to be empty for pending job")
+	}
+	if statusResp.GetFinishedAt() != nil {
+		t.Fatalf("expected finished_at to be empty for pending job")
+	}
+	if statusResp.GetTargetMediaType() != "" {
+		t.Fatalf("expected empty target_media_type for pending job, got %s", statusResp.GetTargetMediaType())
+	}
 }
 
 func TestSubmitPreprocessUsesDefaults(t *testing.T) {
@@ -159,6 +202,15 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	if statusResp.GetTargetKey() != expectedKey {
 		t.Fatalf("expected default target key %s, got %s", expectedKey, statusResp.GetTargetKey())
 	}
+	if statusResp.GetNextRunAt() == nil || statusResp.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if statusResp.GetAttempts() != 0 {
+		t.Fatalf("expected attempts 0, got %d", statusResp.GetAttempts())
+	}
+	if statusResp.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected default max attempts, got %d", statusResp.GetMaxAttempts())
+	}
 }
 
 func TestSubmitPreprocessUsesContextCorrelationID(t *testing.T) {
@@ -185,6 +237,12 @@ func TestSubmitPreprocessUsesContextCorrelationID(t *testing.T) {
 
 	if resp.GetCorrelationId() != "ctx-corr" {
 		t.Fatalf("expected correlation from context, got %s", resp.GetCorrelationId())
+	}
+	if resp.GetNextRunAt() == nil || resp.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be set")
+	}
+	if resp.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("expected default max attempts, got %d", resp.GetMaxAttempts())
 	}
 
 	job, found, err := repo.Get(context.Background(), resp.GetJobId())

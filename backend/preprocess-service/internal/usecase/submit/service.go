@@ -101,6 +101,7 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		if existing.ErrorDetails == nil {
 			existing.ErrorDetails = map[string]string{}
 		}
+
 		logger.Info("returning existing preprocess job",
 			zap.String("job_id", existing.ID),
 			zap.String("status", existing.Status.String()),
@@ -109,6 +110,8 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		)
 		return existing, nil
 	}
+
+	now := time.Now().UTC()
 
 	job := domain.PreprocessJob{
 		ID:            uuid.NewString(),
@@ -124,9 +127,9 @@ func (s *Service) SubmitPreprocess(ctx context.Context, cmd SubmitCommand) (doma
 		ErrorDetails:  map[string]string{},
 		Attempts:      0,
 		MaxAttempts:   domain.DefaultMaxAttempts,
-		NextRunAt:     time.Now().UTC(),
-		CreatedAt:     time.Now().UTC(),
-		UpdatedAt:     time.Now().UTC(),
+		NextRunAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	if err := job.Validate(); err != nil {

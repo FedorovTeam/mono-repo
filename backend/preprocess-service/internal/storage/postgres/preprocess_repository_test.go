@@ -389,6 +389,83 @@ func TestPreprocessRepository_CreateLogsJob(t *testing.T) {
 	}
 }
 
+func TestPreprocessRepository_GetReturnsTimestampsAndTargetMedia(t *testing.T) {
+	ctx := context.Background()
+	mock, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("create mock pool: %v", err)
+	}
+	defer mock.Close()
+
+	repo := NewPreprocessRepository(mock, zap.NewNop())
+	now := time.Now().UTC()
+	started := now.Add(-2 * time.Minute)
+	finished := now.Add(-time.Minute)
+	details := []byte(`{"reason":"converted"}`)
+
+	rows := pgxmock.NewRows(jobColumnNames()).AddRow(
+		"job-dates",
+		"doc-5",
+		"source",
+		"input.docx",
+		"etag-5",
+		nullableString("target"),
+		nullableString("output.docx"),
+		nullableString("https://callback"),
+		nullableString("corr-get"),
+		nullableString("application/vnd.test"),
+		toStatusString(domain.StatusCompleted),
+		2,
+		5,
+		now,
+		&started,
+		&finished,
+		nullableString("ERR_TEST"),
+		nullableString("error"),
+		details,
+		now.Add(-3*time.Minute),
+		now,
+	)
+
+	mock.ExpectQuery("SELECT .*FROM preprocess_queue").
+		WithArgs("job-dates").
+		WillReturnRows(rows)
+
+	job, found, err := repo.Get(ctx, "job-dates")
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if !found {
+		t.Fatal("expected job to be found")
+	}
+
+	if job.Attempts != 2 || job.MaxAttempts != 5 {
+		t.Fatalf("unexpected attempts data: %d/%d", job.Attempts, job.MaxAttempts)
+	}
+	if !job.NextRunAt.Equal(now) {
+		t.Fatalf("unexpected next_run_at: %v", job.NextRunAt)
+	}
+	if !job.StartedAt.Equal(started) {
+		t.Fatalf("unexpected started_at: %v", job.StartedAt)
+	}
+	if !job.FinishedAt.Equal(finished) {
+		t.Fatalf("unexpected finished_at: %v", job.FinishedAt)
+	}
+	if job.TargetMediaType != "application/vnd.test" {
+		t.Fatalf("unexpected target_media_type: %s", job.TargetMediaType)
+	}
+	if job.ErrorDetails["reason"] != "converted" {
+		t.Fatalf("unexpected error details: %#v", job.ErrorDetails)
+	}
+	if job.CorrelationID != "corr-get" {
+		t.Fatalf("unexpected correlation_id: %s", job.CorrelationID)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func readIntField(value any) int {
 	switch v := value.(type) {
 	case int:

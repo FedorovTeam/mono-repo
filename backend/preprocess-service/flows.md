@@ -6,7 +6,7 @@
 3. Если в БД (`preprocess_queue`) уже есть запись с теми же `source_bucket`/`source_key`/`source_etag`, сервис возвращает существующий `job_id` и актуальное состояние задачи (идемпотентность по исходнику).
 4. Если задачи ещё нет, сервис создаёт новую запись со статусом `pending`, `max_attempts=5` и ближайшим запуском `next_run_at=now()`:
    - `target_bucket` и `target_key` берутся из запроса; при их отсутствии используются `preprocess.target_bucket` и `preprocess.target_key_prefix` (`<prefix>/<document_id>.docx`).
-   - В ответе клиент получает `job_id`, `status` и `correlation_id`.
+   - В ответе клиент получает `job_id`, `status`, `attempts/max_attempts`, `next_run_at`, при наличии — `started_at`/`finished_at`, `target_media_type` и `correlation_id`.
 
 ## Обработка задач воркером
 1. Воркер каждые `preprocess.poll_interval` (по умолчанию 2s) переводит «зависшие» задачи из статуса `processing` в `failed`, если они длятся дольше `convert_timeout + backoff`, чтобы они снова попали в очередь.
@@ -23,7 +23,7 @@
 ## Polling через `GetPreprocessStatus`
 1. Вызывайте `GetPreprocessStatus(job_id, correlation_id?)` по gRPC-порту сервиса (`service.grpc_port`, по умолчанию 9090).
 2. Возможные статусы: `pending`, `processing`, `done`, `failed` (ожидает повторной попытки), `stopped` (окончательная ошибка).
-3. Ответ содержит координаты исходника и результата, `error_code`/`error_message`/`error_details`, `updated_at` и `correlation_id`.
+3. Ответ содержит координаты исходника и результата, `error_code`/`error_message`/`error_details`, счётчики `attempts/max_attempts`, тайминги `next_run_at`, `started_at`, `finished_at`, `updated_at`, `target_media_type` и `correlation_id`.
 
 ## Webhook c `callback_url`
 1. Поднимите HTTP endpoint с приёмом POST JSON.
