@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.uber.org/zap/zaptest"
+	"google.golang.org/grpc/metadata"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/storage/memory"
@@ -157,5 +158,43 @@ func TestSubmitPreprocessUsesDefaults(t *testing.T) {
 	expectedKey := path.Join(cfg.Preprocess.TargetKeyPrefix, "doc-3.docx")
 	if statusResp.GetTargetKey() != expectedKey {
 		t.Fatalf("expected default target key %s, got %s", expectedKey, statusResp.GetTargetKey())
+	}
+}
+
+func TestSubmitPreprocessUsesContextCorrelationID(t *testing.T) {
+	cfg := loadTestConfig(t)
+
+	repo := memory.NewRepository()
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
+	if err != nil {
+		t.Fatalf("init service: %v", err)
+	}
+	handler := NewPreprocessHandler(service, zaptest.NewLogger(t))
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-correlation-id", "ctx-corr"))
+
+	resp, err := handler.SubmitPreprocess(ctx, &preprocessv1.SubmitPreprocessRequest{
+		SourceBucket: cfg.Preprocess.SourceBucket,
+		SourceKey:    path.Join("docx", "missing-corr.docx"),
+		SourceEtag:   "etag-ctx",
+		DocumentId:   "doc-ctx",
+	})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+
+	if resp.GetCorrelationId() != "ctx-corr" {
+		t.Fatalf("expected correlation from context, got %s", resp.GetCorrelationId())
+	}
+
+	job, found, err := repo.Get(context.Background(), resp.GetJobId())
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if !found {
+		t.Fatal("job not found")
+	}
+	if job.CorrelationID != "ctx-corr" {
+		t.Fatalf("expected job correlation id from context, got %s", job.CorrelationID)
 	}
 }

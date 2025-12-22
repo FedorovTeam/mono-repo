@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.uber.org/zap/zaptest"
+	"google.golang.org/grpc/metadata"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/domain"
@@ -155,6 +156,45 @@ func TestGetStatusReturnsJob(t *testing.T) {
 
 	if result.CorrelationID != "req-corr" {
 		t.Fatalf("expected correlation override, got %s", result.CorrelationID)
+	}
+}
+
+func TestSubmitPreprocessUsesContextCorrelationID(t *testing.T) {
+	t.Helper()
+
+	cfg := loadTestConfig(t)
+
+	repo := memory.NewRepository()
+	svc, err := NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-correlation-id", "ctx-corr"))
+
+	job, err := svc.SubmitPreprocess(ctx, SubmitCommand{
+		DocumentID:   "doc-ctx",
+		SourceBucket: cfg.Preprocess.SourceBucket,
+		SourceKey:    path.Join("incoming", "ctx.docx"),
+		SourceETag:   "etag-ctx",
+	})
+	if err != nil {
+		t.Fatalf("submit failed: %v", err)
+	}
+
+	if job.CorrelationID != "ctx-corr" {
+		t.Fatalf("expected correlation id from context, got %s", job.CorrelationID)
+	}
+
+	saved, found, err := repo.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("get job failed: %v", err)
+	}
+	if !found {
+		t.Fatal("expected job to be stored")
+	}
+	if saved.CorrelationID != "ctx-corr" {
+		t.Fatalf("expected stored correlation id from context, got %s", saved.CorrelationID)
 	}
 }
 
