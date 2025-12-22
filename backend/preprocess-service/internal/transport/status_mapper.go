@@ -38,3 +38,18 @@ func statusFromProto(status preprocessv1.PreprocessStatus) domain.PreprocessStat
 		return domain.StatusUnspecified
 	}
 }
+
+func toProtoStage(stage domain.ProcessingStage) preprocessv1.PreprocessStage {
+	switch stage {
+	case domain.StageDownloading:
+		return preprocessv1.PreprocessStage_PREPROCESS_STAGE_DOWNLOADING
+	case domain.StageConverting:
+		return preprocessv1.PreprocessStage_PREPROCESS_STAGE_CONVERTING
+	case domain.StageUploading:
+		return preprocessv1.PreprocessStage_PREPROCESS_STAGE_UPLOADING
+	case domain.StageCallback:
+		return preprocessv1.PreprocessStage_PREPROCESS_STAGE_CALLBACK
+	default:
+		return preprocessv1.PreprocessStage_PREPROCESS_STAGE_UNSPECIFIED
+	}
+}

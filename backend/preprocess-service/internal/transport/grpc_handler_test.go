@@ -162,6 +162,15 @@ func TestGetPreprocessStatus(t *testing.T) {
 	if statusResp.GetTargetMediaType() != "" {
 		t.Fatalf("expected empty target_media_type for pending job, got %s", statusResp.GetTargetMediaType())
 	}
+	if statusResp.GetProcessingStage() != preprocessv1.PreprocessStage_PREPROCESS_STAGE_DOWNLOADING {
+		t.Fatalf("unexpected processing stage: %s", statusResp.GetProcessingStage())
+	}
+	if statusResp.GetStageUpdatedAt() == nil || statusResp.GetStageUpdatedAt().AsTime().IsZero() {
+		t.Fatalf("expected stage_updated_at to be set")
+	}
+	if statusResp.GetStageStartedAt() == nil || statusResp.GetStageStartedAt().AsTime().IsZero() {
+		t.Fatalf("expected stage_started_at to be set")
+	}
 }
 
 func TestGetPreprocessStatusReturnsErrorDetails(t *testing.T) {
@@ -176,18 +185,21 @@ func TestGetPreprocessStatusReturnsErrorDetails(t *testing.T) {
 
 	now := time.Now().UTC()
 	job := domain.PreprocessJob{
-		ID:           "job-error-details",
-		DocumentID:   "doc-err",
-		SourceBucket: cfg.Preprocess.SourceBucket,
-		SourceKey:    "error.docx",
-		SourceETag:   "etag-err",
-		Status:       domain.StatusFailed,
-		Attempts:     1,
-		MaxAttempts:  3,
-		NextRunAt:    now,
-		UpdatedAt:    now,
-		ErrorCode:    domain.ErrorCodeConvertFailed.String(),
-		ErrorMessage: "conversion failed",
+		ID:              "job-error-details",
+		DocumentID:      "doc-err",
+		SourceBucket:    cfg.Preprocess.SourceBucket,
+		SourceKey:       "error.docx",
+		SourceETag:      "etag-err",
+		Status:          domain.StatusFailed,
+		Attempts:        1,
+		MaxAttempts:     3,
+		NextRunAt:       now,
+		UpdatedAt:       now,
+		ProcessingStage: domain.StageConverting,
+		StageStartedAt:  now.Add(-time.Minute),
+		StageUpdatedAt:  now,
+		ErrorCode:       domain.ErrorCodeConvertFailed.String(),
+		ErrorMessage:    "conversion failed",
 		ErrorDetails: map[string]string{
 			"lo_exit_code": "7",
 			"lo_output":    "bad output",

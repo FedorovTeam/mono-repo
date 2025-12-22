@@ -30,6 +30,28 @@ func TestToProtoStatus(t *testing.T) {
 	}
 }
 
+func TestToProtoStage(t *testing.T) {
+	tests := []struct {
+		name  string
+		stage domain.ProcessingStage
+		want  preprocessv1.PreprocessStage
+	}{
+		{name: "downloading", stage: domain.StageDownloading, want: preprocessv1.PreprocessStage_PREPROCESS_STAGE_DOWNLOADING},
+		{name: "converting", stage: domain.StageConverting, want: preprocessv1.PreprocessStage_PREPROCESS_STAGE_CONVERTING},
+		{name: "uploading", stage: domain.StageUploading, want: preprocessv1.PreprocessStage_PREPROCESS_STAGE_UPLOADING},
+		{name: "callback", stage: domain.StageCallback, want: preprocessv1.PreprocessStage_PREPROCESS_STAGE_CALLBACK},
+		{name: "unspecified", stage: domain.StageUnspecified, want: preprocessv1.PreprocessStage_PREPROCESS_STAGE_UNSPECIFIED},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toProtoStage(tt.stage); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestStatusFromProto(t *testing.T) {
 	tests := []struct {
 		name   string

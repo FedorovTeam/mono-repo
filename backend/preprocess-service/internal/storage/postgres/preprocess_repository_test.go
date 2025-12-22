@@ -26,23 +26,26 @@ func TestPreprocessRepository_NextForProcessingLocksAndMarksProcessing(t *testin
 
 	now := time.Now().UTC()
 	job := domain.PreprocessJob{
-		ID:            "job-next",
-		DocumentID:    "doc-1",
-		SourceBucket:  "source",
-		SourceKey:     "input.txt",
-		SourceETag:    "etag-1",
-		CorrelationID: "corr-123",
-		Status:        domain.StatusPending,
-		Attempts:      0,
-		MaxAttempts:   3,
-		NextRunAt:     now.Add(-time.Minute),
-		CreatedAt:     now.Add(-2 * time.Minute),
-		UpdatedAt:     now.Add(-time.Minute),
+		ID:              "job-next",
+		DocumentID:      "doc-1",
+		SourceBucket:    "source",
+		SourceKey:       "input.txt",
+		SourceETag:      "etag-1",
+		CorrelationID:   "corr-123",
+		Status:          domain.StatusPending,
+		ProcessingStage: domain.StageDownloading,
+		Attempts:        0,
+		MaxAttempts:     3,
+		NextRunAt:       now.Add(-time.Minute),
+		CreatedAt:       now.Add(-2 * time.Minute),
+		UpdatedAt:       now.Add(-time.Minute),
+		StageStartedAt:  now.Add(-time.Minute),
+		StageUpdatedAt:  now.Add(-time.Minute),
 	}
 
 	rows := pgxmock.NewRows(jobColumnNames()).
 		AddRow(job.ID, job.DocumentID, job.SourceBucket, job.SourceKey, job.SourceETag, nil, nil, nil, nullableString(job.CorrelationID), nil,
-			toStatusString(job.Status), job.Attempts, job.MaxAttempts, job.NextRunAt, nil, nil, nil, nil, []byte("{}"), job.CreatedAt, job.UpdatedAt)
+			toStatusString(job.Status), toStageString(job.ProcessingStage), job.Attempts, job.MaxAttempts, job.NextRunAt, nil, nil, &job.StageStartedAt, job.StageUpdatedAt, nil, nil, []byte("{}"), job.CreatedAt, job.UpdatedAt)
 
 	mock.ExpectBeginTx(pgx.TxOptions{})
 	mock.ExpectQuery("SELECT .*FOR UPDATE SKIP LOCKED").
@@ -52,6 +55,8 @@ func TestPreprocessRepository_NextForProcessingLocksAndMarksProcessing(t *testin
 		WithArgs(
 			toStatusString(domain.StatusProcessing),
 			job.Attempts+1,
+			pgxmock.AnyArg(),
+			toStageString(domain.StageDownloading),
 			pgxmock.AnyArg(),
 			job.ID,
 		).
@@ -127,18 +132,21 @@ func TestPreprocessRepository_RequeueStuckMakesProcessingAvailable(t *testing.T)
 	backoff := 30 * time.Second
 
 	job := domain.PreprocessJob{
-		ID:           "job-stuck",
-		DocumentID:   "doc-stuck",
-		SourceBucket: "bucket",
-		SourceKey:    "key",
-		SourceETag:   "etag",
-		Status:       domain.StatusProcessing,
-		Attempts:     1,
-		MaxAttempts:  3,
-		NextRunAt:    now.Add(-time.Minute),
-		StartedAt:    now.Add(-(convertTimeout + backoff + time.Minute)),
-		CreatedAt:    now.Add(-2 * time.Minute),
-		UpdatedAt:    now.Add(-time.Minute),
+		ID:              "job-stuck",
+		DocumentID:      "doc-stuck",
+		SourceBucket:    "bucket",
+		SourceKey:       "key",
+		SourceETag:      "etag",
+		Status:          domain.StatusProcessing,
+		ProcessingStage: domain.StageConverting,
+		Attempts:        1,
+		MaxAttempts:     3,
+		NextRunAt:       now.Add(-time.Minute),
+		StartedAt:       now.Add(-(convertTimeout + backoff + time.Minute)),
+		CreatedAt:       now.Add(-2 * time.Minute),
+		UpdatedAt:       now.Add(-time.Minute),
+		StageStartedAt:  now.Add(-(convertTimeout + backoff + time.Minute)),
+		StageUpdatedAt:  now.Add(-time.Minute),
 	}
 
 	requeuedAttempts := job.Attempts + 1
@@ -161,7 +169,7 @@ func TestPreprocessRepository_RequeueStuckMakesProcessingAvailable(t *testing.T)
 
 	rows := pgxmock.NewRows(jobColumnNames()).
 		AddRow(job.ID, job.DocumentID, job.SourceBucket, job.SourceKey, job.SourceETag, nil, nil, nil, nullableString("corr-requeued"), nil,
-			toStatusString(domain.StatusFailed), requeuedAttempts, job.MaxAttempts, availableAt, &job.StartedAt, nil, nil, nil, []byte("{}"), job.CreatedAt, job.UpdatedAt)
+			toStatusString(domain.StatusFailed), toStageString(job.ProcessingStage), requeuedAttempts, job.MaxAttempts, availableAt, &job.StartedAt, nil, &job.StageStartedAt, job.StageUpdatedAt, nil, nil, []byte("{}"), job.CreatedAt, job.UpdatedAt)
 
 	mock.ExpectBeginTx(pgx.TxOptions{})
 	mock.ExpectQuery("SELECT .*FOR UPDATE SKIP LOCKED").
@@ -171,6 +179,8 @@ func TestPreprocessRepository_RequeueStuckMakesProcessingAvailable(t *testing.T)
 		WithArgs(
 			toStatusString(domain.StatusProcessing),
 			requeuedAttempts+1,
+			pgxmock.AnyArg(),
+			toStageString(domain.StageDownloading),
 			pgxmock.AnyArg(),
 			job.ID,
 		).
@@ -233,19 +243,22 @@ func TestPreprocessRepository_MarkFailedUpdatesStatus(t *testing.T) {
 
 	now := time.Now().UTC()
 	job := domain.PreprocessJob{
-		ID:           "job-failed",
-		DocumentID:   "doc-2",
-		SourceBucket: "source",
-		SourceKey:    "input.txt",
-		SourceETag:   "etag-2",
-		Status:       domain.StatusProcessing,
-		Attempts:     2,
-		MaxAttempts:  3,
-		NextRunAt:    now.Add(-time.Minute),
-		CreatedAt:    now.Add(-2 * time.Minute),
-		UpdatedAt:    now,
-		TargetBucket: "target",
-		TargetKey:    "converted/out.docx",
+		ID:              "job-failed",
+		DocumentID:      "doc-2",
+		SourceBucket:    "source",
+		SourceKey:       "input.txt",
+		SourceETag:      "etag-2",
+		Status:          domain.StatusProcessing,
+		ProcessingStage: domain.StageConverting,
+		Attempts:        2,
+		MaxAttempts:     3,
+		NextRunAt:       now.Add(-time.Minute),
+		CreatedAt:       now.Add(-2 * time.Minute),
+		UpdatedAt:       now,
+		TargetBucket:    "target",
+		TargetKey:       "converted/out.docx",
+		StageStartedAt:  now.Add(-3 * time.Minute),
+		StageUpdatedAt:  now,
 	}
 
 	update := domain.FailureUpdate{
@@ -270,6 +283,9 @@ func TestPreprocessRepository_MarkFailedUpdatesStatus(t *testing.T) {
 			`{"reason":"timeout"}`,
 			pgxmock.AnyArg(),
 			pgxmock.AnyArg(),
+			toStageString(job.ProcessingStage),
+			pgxmock.AnyArg(),
+			job.StageUpdatedAt,
 		).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
@@ -316,18 +332,21 @@ func TestPreprocessRepository_CreateLogsJob(t *testing.T) {
 
 	nextRunAt := time.Date(2024, 10, 1, 12, 0, 0, 0, time.UTC)
 	job := domain.PreprocessJob{
-		ID:            "job-create",
-		DocumentID:    "doc-3",
-		SourceBucket:  "source",
-		SourceKey:     "input.txt",
-		SourceETag:    "etag-3",
-		CorrelationID: "corr-create",
-		Status:        domain.StatusPending,
-		Attempts:      1,
-		MaxAttempts:   3,
-		NextRunAt:     nextRunAt,
-		CreatedAt:     nextRunAt,
-		UpdatedAt:     nextRunAt,
+		ID:              "job-create",
+		DocumentID:      "doc-3",
+		SourceBucket:    "source",
+		SourceKey:       "input.txt",
+		SourceETag:      "etag-3",
+		CorrelationID:   "corr-create",
+		Status:          domain.StatusPending,
+		ProcessingStage: domain.StageDownloading,
+		Attempts:        1,
+		MaxAttempts:     3,
+		NextRunAt:       nextRunAt,
+		CreatedAt:       nextRunAt,
+		UpdatedAt:       nextRunAt,
+		StageStartedAt:  nextRunAt,
+		StageUpdatedAt:  nextRunAt,
 	}
 
 	mock.ExpectExec("INSERT INTO preprocess_queue").
@@ -348,6 +367,9 @@ func TestPreprocessRepository_CreateLogsJob(t *testing.T) {
 			job.NextRunAt,
 			pgxmock.AnyArg(),
 			pgxmock.AnyArg(),
+			toStageString(job.ProcessingStage),
+			nullableTime(job.StageStartedAt),
+			job.StageUpdatedAt,
 			pgxmock.AnyArg(),
 			pgxmock.AnyArg(),
 			`{}`,
@@ -415,11 +437,14 @@ func TestPreprocessRepository_GetReturnsTimestampsAndTargetMedia(t *testing.T) {
 		nullableString("corr-get"),
 		nullableString("application/vnd.test"),
 		toStatusString(domain.StatusCompleted),
+		toStageString(domain.StageUploading),
 		2,
 		5,
 		now,
 		&started,
 		&finished,
+		&started,
+		now,
 		nullableString("ERR_TEST"),
 		nullableString("error"),
 		details,
@@ -460,6 +485,15 @@ func TestPreprocessRepository_GetReturnsTimestampsAndTargetMedia(t *testing.T) {
 	if job.CorrelationID != "corr-get" {
 		t.Fatalf("unexpected correlation_id: %s", job.CorrelationID)
 	}
+	if job.ProcessingStage != domain.StageUploading {
+		t.Fatalf("unexpected processing stage: %s", job.ProcessingStage)
+	}
+	if !job.StageStartedAt.Equal(started) {
+		t.Fatalf("unexpected stage_started_at: %v", job.StageStartedAt)
+	}
+	if !job.StageUpdatedAt.Equal(now) {
+		t.Fatalf("unexpected stage_updated_at: %v", job.StageUpdatedAt)
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
@@ -499,11 +533,14 @@ func jobColumnNames() []string {
 		"correlation_id",
 		"target_media_type",
 		"status",
+		"processing_stage",
 		"attempts",
 		"max_attempts",
 		"next_run_at",
 		"started_at",
 		"finished_at",
+		"stage_started_at",
+		"stage_updated_at",
 		"error_code",
 		"error_message",
 		"error_details",
