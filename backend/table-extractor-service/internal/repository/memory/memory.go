@@ -69,56 +69,17 @@ func (r *InMemoryRepository) UpsertOrGetActive(_ context.Context, job domain.Tab
 }
 
 func (r *InMemoryRepository) AcquirePendingBatch(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
-	return r.SelectPendingBatchForUpdate(ctx, limit, now)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.selectPendingBatch(limit, now)
 }
 
 func (r *InMemoryRepository) SelectPendingBatchForUpdate(_ context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if limit <= 0 {
-		return nil, nil
-	}
-
-	candidates := make([]domain.TableExtractionJob, 0, len(r.data))
-	for _, job := range r.data {
-		if job.Status != domain.StatusPending {
-			continue
-		}
-		if job.NextRunAt != nil && job.NextRunAt.After(now) {
-			continue
-		}
-		candidates = append(candidates, job)
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		left := candidates[i].NextRunAt
-		right := candidates[j].NextRunAt
-		if left == nil && right == nil {
-			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
-		}
-		if left == nil {
-			return true
-		}
-		if right == nil {
-			return false
-		}
-		if left.Equal(*right) {
-			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
-		}
-		return left.Before(*right)
-	})
-
-	if len(candidates) > limit {
-		candidates = candidates[:limit]
-	}
-
-	result := make([]domain.TableExtractionJob, 0, len(candidates))
-	for _, job := range candidates {
-		result = append(result, job)
-	}
-
-	return result, nil
+	return r.selectPendingBatch(limit, now)
 }
 
 func (r *InMemoryRepository) ListProcessingBefore(_ context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error) {
@@ -196,6 +157,56 @@ func (r *InMemoryRepository) Save(_ context.Context, job domain.TableExtractionJ
 	r.data[job.ID] = job
 	r.byDoc[job.DocumentID] = job.ID
 	return nil
+}
+
+func (r *InMemoryRepository) selectPendingBatch(limit int, now time.Time) ([]domain.TableExtractionJob, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	candidates := make([]domain.TableExtractionJob, 0, len(r.data))
+	for _, job := range r.data {
+		if job.Status != domain.StatusPending {
+			continue
+		}
+		if job.NextRunAt != nil && job.NextRunAt.After(now) {
+			continue
+		}
+		candidates = append(candidates, job)
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		left := candidates[i].NextRunAt
+		right := candidates[j].NextRunAt
+		if left == nil && right == nil {
+			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
+		}
+		if left == nil {
+			return true
+		}
+		if right == nil {
+			return false
+		}
+		if left.Equal(*right) {
+			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
+		}
+		return left.Before(*right)
+	})
+
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	result := make([]domain.TableExtractionJob, 0, len(candidates))
+	for _, job := range candidates {
+		result = append(result, job)
+	}
+
+	return result, nil
 }
 
 func (r *InMemoryRepository) GetByID(_ context.Context, id uuid.UUID) (domain.TableExtractionJob, bool, error) {
