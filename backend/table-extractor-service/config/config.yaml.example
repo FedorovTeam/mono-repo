@@ -47,5 +47,6 @@ extractor:
 
 observability:
   logging_enabled: true
+  log_level: info # debug|info|warn|error
   tracing:
     enabled: false
