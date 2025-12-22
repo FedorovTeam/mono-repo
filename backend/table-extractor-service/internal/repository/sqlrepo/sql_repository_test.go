@@ -90,6 +90,14 @@ func TestAcquirePendingBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, domain.StatusPending, stillPending.Status)
+
+	locked, err := repo.SelectPendingBatchForUpdate(ctx, 2, now)
+	require.NoError(t, err)
+	require.Len(t, locked, 2)
+	require.Equal(t, domain.StatusPending, locked[0].Status)
+	require.Equal(t, domain.StatusPending, locked[1].Status)
+	require.Equal(t, 0, locked[0].Attempts)
+	require.Equal(t, 0, locked[1].Attempts)
 }
 
 func TestSaveAppliesAggregateChanges(t *testing.T) {

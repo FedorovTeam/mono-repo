@@ -133,19 +133,17 @@ func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableE
 }
 
 func (r *SQLRepository) AcquirePendingBatch(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
-	return r.SelectPendingBatchForUpdate(ctx, limit, now)
+	return r.selectPendingBatch(ctx, limit, now, false)
 }
 
 func (r *SQLRepository) SelectPendingBatchForUpdate(ctx context.Context, limit int, now time.Time) ([]domain.TableExtractionJob, error) {
+	return r.selectPendingBatch(ctx, limit, now, true)
+}
+
+func (r *SQLRepository) selectPendingBatch(ctx context.Context, limit int, now time.Time, lockForUpdate bool) ([]domain.TableExtractionJob, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback()
 
 	selectQuery := fmt.Sprintf(`SELECT 
 		id, document_id, original_bucket, original_object_key,
@@ -157,42 +155,63 @@ func (r *SQLRepository) SelectPendingBatchForUpdate(ctx context.Context, limit i
 		ORDER BY (next_run_at IS NOT NULL), next_run_at, created_at
 		LIMIT %s`, r.placeholder(1), r.placeholder(2), r.placeholder(3))
 
-	if r.dialect == database.DialectPostgres {
+	if lockForUpdate && r.dialect == database.DialectPostgres {
 		selectQuery += " FOR UPDATE SKIP LOCKED"
 	}
 
-	rows, err := tx.QueryContext(ctx, selectQuery, string(domain.StatusPending), now, limit)
-	if err != nil {
-		return nil, fmt.Errorf("select pending: %w", err)
+	scanRows := func(rows *sql.Rows) ([]domain.TableExtractionJob, error) {
+		defer rows.Close()
+
+		var jobs []domain.TableExtractionJob
+		for rows.Next() {
+			job, ok, err := r.scanJob(rows)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				jobs = append(jobs, job)
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate pending: %w", err)
+		}
+
+		if len(jobs) == 0 {
+			return nil, nil
+		}
+		return jobs, nil
 	}
-	defer rows.Close()
 
-	var jobs []domain.TableExtractionJob
+	if lockForUpdate {
+		tx, err := r.db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("begin transaction: %w", err)
+		}
+		defer tx.Rollback()
 
-	for rows.Next() {
-		job, ok, err := r.scanJob(rows)
+		rows, err := tx.QueryContext(ctx, selectQuery, string(domain.StatusPending), now, limit)
+		if err != nil {
+			return nil, fmt.Errorf("select pending: %w", err)
+		}
+
+		jobs, err := scanRows(rows)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
-			continue
+
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit transaction: %w", err)
 		}
-		jobs = append(jobs, job)
+		return jobs, nil
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate pending: %w", err)
+	rows, err := r.db.QueryContext(ctx, selectQuery, string(domain.StatusPending), now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("select pending: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit transaction: %w", err)
-	}
-
-	if len(jobs) == 0 {
-		return nil, nil
-	}
-
-	return jobs, nil
+	return scanRows(rows)
 }
 
 func (r *SQLRepository) Save(ctx context.Context, job domain.TableExtractionJob) error {
