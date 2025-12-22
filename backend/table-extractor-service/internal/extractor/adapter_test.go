@@ -22,12 +22,16 @@ func TestAdapterProducesArtifacts(t *testing.T) {
 	now := time.Date(2024, 11, 1, 10, 0, 0, 0, time.UTC)
 	adapter := &Adapter{
 		cfg: Config{
+			PdfInfoPath:         defaultPdfinfo,
+			PdftotextPath:       defaultPdftotext,
+			PdftoppmPath:        defaultPdftoppm,
 			PdfInfoTimeout:      time.Second,
 			PdftotextTimeout:    time.Second,
 			PdftoppmTimeout:     time.Second,
 			MaxParallelCommands: 1,
 			Pages:               "all",
 			TempDir:             t.TempDir(),
+			Mode:                modeLayout,
 		},
 		runner: runner,
 		parser: DefaultParser{},
@@ -68,11 +72,15 @@ func TestAdapterPropagatesCommandError(t *testing.T) {
 
 	adapter := &Adapter{
 		cfg: Config{
+			PdfInfoPath:         defaultPdfinfo,
+			PdftotextPath:       defaultPdftotext,
+			PdftoppmPath:        defaultPdftoppm,
 			PdfInfoTimeout:      time.Second,
 			PdftotextTimeout:    time.Second,
 			PdftoppmTimeout:     time.Second,
 			MaxParallelCommands: 1,
 			TempDir:             t.TempDir(),
+			Mode:                modeLayout,
 		},
 		runner: runner,
 		parser: DefaultParser{},
@@ -82,6 +90,52 @@ func TestAdapterPropagatesCommandError(t *testing.T) {
 	_, err := adapter.Extract(context.Background(), "/tmp/demo.pdf")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "pdfinfo")
+}
+
+func TestAdapterUsesCustomBinariesAndBBoxMode(t *testing.T) {
+	const (
+		customPdfInfo   = "/opt/poppler/bin/pdfinfo"
+		customPdftotext = "/opt/poppler/bin/pdftotext"
+		customPdftoppm  = "/opt/poppler/bin/pdftoppm"
+	)
+
+	runner := &fakeRunner{
+		responses: map[string]CommandResult{
+			customPdfInfo:   {Stdout: []byte("Pages: 1")},
+			customPdftotext: {Stdout: []byte("<bbox>data</bbox>")},
+			customPdftoppm:  {Stdout: []byte("")},
+		},
+	}
+
+	adapter := &Adapter{
+		cfg: Config{
+			PdfInfoPath:         customPdfInfo,
+			PdftotextPath:       customPdftotext,
+			PdftoppmPath:        customPdftoppm,
+			PdfInfoTimeout:      time.Second,
+			PdftotextTimeout:    time.Second,
+			PdftoppmTimeout:     time.Second,
+			MaxParallelCommands: 1,
+			Pages:               "1-1",
+			TempDir:             t.TempDir(),
+			Mode:                modeBBox,
+		},
+		runner: runner,
+		parser: DefaultParser{},
+		now:    time.Now,
+	}
+
+	_, err := adapter.Extract(context.Background(), "/tmp/demo.pdf")
+	require.NoError(t, err)
+
+	require.Contains(t, runner.commands(), customPdfInfo)
+	require.Contains(t, runner.commands(), customPdftotext)
+	require.Contains(t, runner.commands(), customPdftoppm)
+
+	args := runner.argsFor(customPdftotext)
+	require.NotNil(t, args)
+	require.Contains(t, args, "-bbox")
+	require.NotContains(t, args, "-layout")
 }
 
 func TestExternalRunnerHonorsTimeout(t *testing.T) {
@@ -97,11 +151,11 @@ func TestExternalRunnerHonorsTimeout(t *testing.T) {
 type fakeRunner struct {
 	responses map[string]CommandResult
 	errs      map[string]error
-	calls     []string
+	calls     []commandCall
 }
 
-func (f *fakeRunner) Run(_ context.Context, _ time.Duration, name string, _ ...string) (CommandResult, error) {
-	f.calls = append(f.calls, name)
+func (f *fakeRunner) Run(_ context.Context, _ time.Duration, name string, args ...string) (CommandResult, error) {
+	f.calls = append(f.calls, commandCall{name: name, args: args})
 	if err := f.errs[name]; err != nil {
 		return CommandResult{}, err
 	}
@@ -112,5 +166,23 @@ func (f *fakeRunner) Run(_ context.Context, _ time.Duration, name string, _ ...s
 }
 
 func (f *fakeRunner) commands() []string {
-	return f.calls
+	names := make([]string, 0, len(f.calls))
+	for _, call := range f.calls {
+		names = append(names, call.name)
+	}
+	return names
+}
+
+func (f *fakeRunner) argsFor(name string) []string {
+	for _, call := range f.calls {
+		if call.name == name {
+			return call.args
+		}
+	}
+	return nil
+}
+
+type commandCall struct {
+	name string
+	args []string
 }
