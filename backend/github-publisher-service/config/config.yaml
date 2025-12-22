@@ -3,7 +3,9 @@ service:
   grpc_port: 9090
 
 logging:
-  level: debug
+  # уровень логирования: debug, info, warn или error
+  level: info
+  # формат вывода: json (по умолчанию) или console для чтения в терминале
   encoding: json
   development: false
 

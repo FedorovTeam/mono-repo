@@ -35,11 +35,17 @@
 ## Конфигурация
 Все параметры читаются из `config/config.yaml` или из файла по пути `CONFIG_PATH`.
 - `service.name`, `service.grpc_port` — идентификатор сервиса и порт gRPC.
+- `logging.level` (`info` по умолчанию, допустимы `debug|info|warn|error`), `logging.encoding` (`json` или `console`), `logging.development` — настройки zap‑логгера.
 - `github.base_url`, `github.owner`, `github.repository`, `github.token`, `github.default_branch`, `github.author_name`, `github.author_email`, `github.correlation_header` (по умолчанию `X-Correlation-ID`). Значения `owner`/`repository`/`default_branch` не имеют жёстких дефолтов и при пустых настройках попадут в запросы к GitHub как пустые.
 - `minio.endpoint`, `minio.access_key`, `minio.secret_key`, `minio.secure` — подключение для загрузки Markdown.
 - `processing.dsn` (обязателен для старта воркера), `processing.stage` (по умолчанию `publish_to_github`), `processing.poll_interval`/`max_attempts`/`backoff` (по умолчанию 5s/3/5s).
 - `retry.initial_backoff`/`max_backoff`/`max_attempts` — дефолты для внутренней стратегии публикации (подставляются, если не заданы: 5s/30s/3).
 - `observability.service_name` (по умолчанию `service.name`, затем `github-publisher-service`), `observability.metrics_enabled`/`traces_enabled`/`logs_enabled` (если все три опущены или `false`, сервис включает все), `observability.otlp_endpoint` — обязателен при включённых метриках или трейсигах.
+
+### Логирование
+- Включить детальный вывод можно параметром `logging.level: debug` (по умолчанию `info`); человеко‑читаемый вывод для локальной отладки включается `logging.encoding: console`.
+- Логи пишутся через zap в JSON и дополнены контекстом: при расчёте retry‑политики и каждой публикации фиксируются `correlation_id`, `attempt`, `max_attempts`, `initial_backoff`, `max_backoff`, `status`, `error_code`, `commit_sha`, `pr_number`, `retry_in` (для временных сбоев). При ошибках воркера в сообщении присутствуют `task_id`, `stage`, `attempts`, `document_id`, `correlation_id`, `status` и стек ошибки.
+- Формат времени — ISO8601; глобальный логгер пробрасывается через `zap.ReplaceGlobals`, поэтому сторонние зависимости, использующие `zap.L()`, пишут в тот же поток.
 
 ## Локальный запуск и тестирование
 1. Подготовьте `config/config.yaml` или переменную `CONFIG_PATH` с настройками GitHub/MinIO/PostgreSQL/OTLP.
