@@ -244,9 +244,9 @@ func TestCleanupAndRetryFailed(t *testing.T) {
 		string(domain.StatusFailedRetryable),
 	}, statuses)
 
-	retired, err := repo.RetryFailed(ctx, 3, time.Minute, now)
+	retried, err := repo.RetryFailed(ctx, 3, time.Minute, now)
 	require.NoError(t, err)
-	require.Equal(t, 2, retired)
+	require.Len(t, retried, 2)
 
 	updated, ok, err := repo.GetByID(ctx, createdFailed.ID)
 	require.NoError(t, err)

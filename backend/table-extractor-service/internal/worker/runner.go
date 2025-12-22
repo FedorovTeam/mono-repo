@@ -7,6 +7,8 @@ import (
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/mono-repo/table-extractor-service/internal/domain"
 )
 
 type Config struct {
@@ -20,8 +22,8 @@ type Config struct {
 
 type Processor interface {
 	ProcessExtractionJob(ctx context.Context) (bool, error)
-	RestoreStuckProcessing(ctx context.Context, processingTimeout time.Duration, maxAttempts int, backoffInterval, maxBackoff time.Duration) (int, int, error)
-	RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration) (int, error)
+	RestoreStuckProcessing(ctx context.Context, processingTimeout time.Duration, maxAttempts int, backoffInterval, maxBackoff time.Duration) ([]domain.TableExtractionJob, []domain.TableExtractionJob, error)
+	RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration) ([]domain.TableExtractionJob, error)
 	CleanupFinished(ctx context.Context, retention time.Duration) (int, error)
 }
 
@@ -147,38 +149,7 @@ func (r *Runner) maintenanceLoop(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		restored, failed, err := r.processor.RestoreStuckProcessing(ctx, r.cfg.ProcessingTimeout, r.cfg.Retry.MaxAttempts, r.cfg.Retry.BackoffInterval, r.cfg.Retry.MaxBackoff)
-		if err != nil {
-			r.logger.Warn("failed to restore stuck processing jobs", zap.Error(err))
-		} else if restored > 0 || failed > 0 {
-			r.logger.Info("restored stuck jobs", zap.Int("restored", restored), zap.Int("marked_failed", failed))
-		} else {
-			r.logger.Debug("no stuck jobs to restore",
-				zap.Duration("processing_timeout", r.cfg.ProcessingTimeout),
-			)
-		}
-
-		retried, err := r.processor.RetryFailed(ctx, r.cfg.Retry.MaxAttempts, r.cfg.Retry.BackoffInterval)
-		if err != nil {
-			r.logger.Warn("failed to retry jobs", zap.Error(err))
-		} else if retried > 0 {
-			r.logger.Info("retried failed jobs", zap.Int("count", retried))
-		} else {
-			r.logger.Debug("no failed jobs to retry",
-				zap.Int("max_attempts", r.cfg.Retry.MaxAttempts),
-			)
-		}
-
-		cleaned, err := r.processor.CleanupFinished(ctx, r.cfg.CleanupRetention)
-		if err != nil {
-			r.logger.Warn("failed to cleanup finished jobs", zap.Error(err))
-		} else if cleaned > 0 {
-			r.logger.Info("cleaned finished jobs", zap.Int("removed", cleaned))
-		} else {
-			r.logger.Debug("no finished jobs to cleanup",
-				zap.Duration("cleanup_retention", r.cfg.CleanupRetention),
-			)
-		}
+		r.runMaintenanceCycle(ctx)
 	}
 }
 
@@ -191,8 +162,13 @@ func (r *Runner) restoreProcessing(ctx context.Context) {
 		r.logger.Warn("failed to restore processing jobs on startup", zap.Error(err))
 		return
 	}
-	if restored > 0 || failed > 0 {
-		r.logger.Info("restored processing jobs on startup", zap.Int("restored", restored), zap.Int("marked_failed", failed))
+	if len(restored) > 0 || len(failed) > 0 {
+		r.logger.Info("restored processing jobs on startup",
+			zap.Int("restored", len(restored)),
+			zap.Int("marked_failed", len(failed)),
+			zap.Strings("restored_correlation_ids", correlationIDs(restored)),
+			zap.Strings("failed_correlation_ids", correlationIDs(failed)),
+		)
 	}
 }
 
@@ -245,4 +221,63 @@ func (b *backoff) next() time.Duration {
 func (b *backoff) reset() {
 	b.cur = b.base
 	b.inited = false
+}
+
+func (r *Runner) runMaintenanceCycle(ctx context.Context) {
+	restored, failed, err := r.processor.RestoreStuckProcessing(ctx, r.cfg.ProcessingTimeout, r.cfg.Retry.MaxAttempts, r.cfg.Retry.BackoffInterval, r.cfg.Retry.MaxBackoff)
+	if err != nil {
+		r.logger.Warn("failed to restore stuck processing jobs", zap.Error(err))
+	} else if len(restored) > 0 || len(failed) > 0 {
+		r.logger.Info("restored stuck jobs",
+			zap.Int("restored", len(restored)),
+			zap.Int("marked_failed", len(failed)),
+			zap.String("restored_status", string(domain.StatusPending)),
+			zap.String("failed_status", string(domain.StatusFailed)),
+			zap.Strings("restored_correlation_ids", correlationIDs(restored)),
+			zap.Strings("failed_correlation_ids", correlationIDs(failed)),
+		)
+	} else {
+		r.logger.Debug("no stuck jobs to restore",
+			zap.Duration("processing_timeout", r.cfg.ProcessingTimeout),
+		)
+	}
+
+	retried, err := r.processor.RetryFailed(ctx, r.cfg.Retry.MaxAttempts, r.cfg.Retry.BackoffInterval)
+	if err != nil {
+		r.logger.Warn("failed to retry jobs", zap.Error(err))
+	} else if len(retried) > 0 {
+		r.logger.Info("retried failed jobs",
+			zap.Int("count", len(retried)),
+			zap.String("status", string(domain.StatusPending)),
+			zap.Strings("correlation_ids", correlationIDs(retried)),
+		)
+	} else {
+		r.logger.Debug("no failed jobs to retry",
+			zap.Int("max_attempts", r.cfg.Retry.MaxAttempts),
+		)
+	}
+
+	cleaned, err := r.processor.CleanupFinished(ctx, r.cfg.CleanupRetention)
+	if err != nil {
+		r.logger.Warn("failed to cleanup finished jobs", zap.Error(err))
+	} else if cleaned > 0 {
+		r.logger.Info("cleaned finished jobs", zap.Int("removed", cleaned))
+	} else {
+		r.logger.Debug("no finished jobs to cleanup",
+			zap.Duration("cleanup_retention", r.cfg.CleanupRetention),
+		)
+	}
+}
+
+func correlationIDs(jobs []domain.TableExtractionJob) []string {
+	if len(jobs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		if job.CorrelationID != "" {
+			ids = append(ids, job.CorrelationID)
+		}
+	}
+	return ids
 }
