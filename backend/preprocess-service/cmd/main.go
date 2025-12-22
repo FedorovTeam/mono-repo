@@ -19,7 +19,11 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	logger := app.NewLogger(cfg.Logging.Level)
+	zapLogger, logger, err := app.NewLogger(cfg.Logging)
+	if err != nil {
+		log.Fatalf("failed to init logger: %v", err)
+	}
+	defer func() { _ = zapLogger.Sync() }()
 	initCtx := context.Background()
 
 	if err := bootstrap.RunMigrations(initCtx, cfg.Postgres.DSN, logger); err != nil {

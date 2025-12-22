@@ -35,6 +35,7 @@ preprocess:
   target_key_prefix: converted
 logging:
   level: debug
+  format: console
 `)
 
 	if err := os.WriteFile(path, content, 0o600); err != nil {
@@ -80,5 +81,9 @@ logging:
 
 	if cfg.Preprocess.OutputDir != "/tmp/out" {
 		t.Fatalf("unexpected output dir: %s", cfg.Preprocess.OutputDir)
+	}
+
+	if cfg.Logging.Format != "console" {
+		t.Fatalf("unexpected logging format: %s", cfg.Logging.Format)
 	}
 }

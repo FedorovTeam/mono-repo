@@ -3,12 +3,12 @@ package worker
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
 
 	"preprocess-service/internal/domain"
@@ -33,7 +33,7 @@ type Config struct {
 type Worker struct {
 	cfg       Config
 	sem       *semaphore.Weighted
-	logger    *slog.Logger
+	logger    *zap.SugaredLogger
 	waitGroup sync.WaitGroup
 	processor *preprocess.Service
 	repo      domain.PreprocessJobRepository
@@ -48,7 +48,7 @@ type Dependencies struct {
 	Callback         ports.CallbackSender
 }
 
-func New(deps Dependencies, cfg Config, logger *slog.Logger) (*Worker, error) {
+func New(deps Dependencies, cfg Config, logger *zap.SugaredLogger) (*Worker, error) {
 	if deps.Repo == nil {
 		return nil, fmt.Errorf("queue repository is required")
 	}
@@ -69,7 +69,7 @@ func New(deps Dependencies, cfg Config, logger *slog.Logger) (*Worker, error) {
 	}
 
 	if logger == nil {
-		logger = slog.Default()
+		logger = zap.NewNop().Sugar()
 	}
 
 	normalizedCfg := normalizeConfig(cfg)
@@ -133,7 +133,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		if err := w.repo.RequeueStuck(ctx, w.cfg.ConvertTimeout, w.cfg.Backoff); err != nil {
-			w.logger.Error("failed to requeue stuck jobs", "error", err)
+			w.logger.Errorw("failed to requeue stuck jobs", "error", err)
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
@@ -142,7 +142,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		job, found, err := w.repo.NextForProcessing(ctx)
 		if err != nil {
-			w.logger.Error("failed to pick job", "error", err)
+			w.logger.Errorw("failed to pick job", "error", err)
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
@@ -186,7 +186,7 @@ func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			logger.Error("job panicked", "panic", recovered)
+			logger.Errorw("job panicked", "panic", recovered)
 			w.handleJobPanic(ctx, job, recovered)
 		}
 	}()
@@ -197,13 +197,13 @@ func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
 	}
 
 	if err := w.processor.Process(ctx, preprocess.Job(job)); err != nil {
-		logger.Error("job processing finished with error", "error", err)
+		logger.Errorw("job processing finished with error", "error", err)
 	}
 }
 
 func (w *Worker) ensureLogger() {
 	if w.logger == nil {
-		w.logger = slog.Default()
+		w.logger = zap.NewNop().Sugar()
 	}
 }
 
@@ -227,12 +227,12 @@ func (w *Worker) handleJobPanic(ctx context.Context, job domain.PreprocessJob, r
 	now := time.Now().UTC()
 	updatedJob, update, err := job.MarkFailed(now, policy, failure)
 	if err != nil {
-		w.logger.Error("failed to compute panic failure update", "error", err)
+		w.logger.Errorw("failed to compute panic failure update", "error", err)
 		return
 	}
 
 	repoCtx := context.WithoutCancel(ctx)
 	if err := w.repo.MarkFailed(repoCtx, updatedJob, update); err != nil {
-		w.logger.Error("failed to mark job as failed after panic", "error", err)
+		w.logger.Errorw("failed to mark job as failed after panic", "error", err)
 	}
 }

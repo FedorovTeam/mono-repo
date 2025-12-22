@@ -32,3 +32,4 @@ preprocess:
 
 logging:
   level: info
+  format: console

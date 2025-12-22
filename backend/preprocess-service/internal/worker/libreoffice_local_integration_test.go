@@ -6,12 +6,13 @@ package worker
 import (
 	"context"
 	"io"
-	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	"preprocess-service/internal/adapter/libreoffice"
 	storagefs "preprocess-service/internal/adapter/storage/fs"
@@ -110,7 +111,7 @@ func TestLibreOfficeLocalConversion(t *testing.T) {
 		t.Fatalf("save job: %v", err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := zap.NewNop().Sugar()
 
 	serviceCfg := preprocess.Config{
 		LibreOfficePath: cfg.Preprocess.LibreOfficePath,

@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"time"
+
+	"go.uber.org/zap"
 
 	"preprocess-service/internal/domain"
 	"preprocess-service/internal/usecase/ports"
@@ -31,7 +32,7 @@ type Service struct {
 	workspace  ports.WorkspaceManager
 	callback   ports.CallbackSender
 	cfg        Config
-	logger     *slog.Logger
+	logger     *zap.SugaredLogger
 	policy     domain.RetryPolicy
 
 	downloadSourceFn func(ctx context.Context, job Job, workspace ports.Workspace) (string, error)
@@ -39,7 +40,7 @@ type Service struct {
 	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
 }
 
-func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, workspace ports.WorkspaceManager, callback ports.CallbackSender, cfg Config, logger *slog.Logger) (*Service, error) {
+func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDownloader, uploader ports.StorageUploader, converter ports.DocumentConverter, workspace ports.WorkspaceManager, callback ports.CallbackSender, cfg Config, logger *zap.SugaredLogger) (*Service, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("job repository is required")
 	}
@@ -59,7 +60,7 @@ func NewService(repo domain.PreprocessJobRepository, downloader ports.StorageDow
 	normalized := normalizeConfig(cfg)
 
 	if logger == nil {
-		logger = slog.Default()
+		logger = zap.NewNop().Sugar()
 	}
 
 	svc := &Service{
@@ -119,11 +120,11 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	now := time.Now().UTC()
 	completedJob, err := jobState.MarkCompleted(now)
 	if err != nil {
-		logger.Error("failed to compute completion state", "error", err)
+		logger.Errorw("failed to compute completion state", "error", err)
 		return err
 	}
 	if err := s.repo.MarkDone(processCtx, completedJob); err != nil {
-		logger.Error("failed to mark job done", "error", err)
+		logger.Errorw("failed to mark job done", "error", err)
 		return err
 	}
 
@@ -131,8 +132,8 @@ func (s *Service) Process(ctx context.Context, job Job) error {
 	return nil
 }
 
-func (s *Service) handleFailure(ctx context.Context, logger *slog.Logger, job Job, err error) error {
-	logger.Error("job failed", "error", err)
+func (s *Service) handleFailure(ctx context.Context, logger *zap.SugaredLogger, job Job, err error) error {
+	logger.Errorw("job failed", "error", err)
 
 	repoCtx := context.WithoutCancel(ctx)
 
@@ -140,12 +141,12 @@ func (s *Service) handleFailure(ctx context.Context, logger *slog.Logger, job Jo
 	now := time.Now().UTC()
 	updatedJob, update, failErr := job.MarkFailed(now, s.policy, failure)
 	if failErr != nil {
-		logger.Error("failed to compute failure update", "error", failErr)
+		logger.Errorw("failed to compute failure update", "error", failErr)
 		return err
 	}
 
 	if err := s.repo.MarkFailed(repoCtx, updatedJob, update); err != nil {
-		logger.Error("failed to update job status", "error", err)
+		logger.Errorw("failed to update job status", "error", err)
 	}
 
 	if update.Status == StatusStopped {
@@ -273,7 +274,7 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.Pre
 			return
 		}
 
-		s.logger.Error("callback delivery failed", "attempt", attempt, "temporary", temporary, "error", err, "callback_url", job.CallbackURL)
+		s.logger.Errorw("callback delivery failed", "attempt", attempt, "temporary", temporary, "error", err, "callback_url", job.CallbackURL)
 
 		if !temporary || attempt == callbackMaxAttempts {
 			return

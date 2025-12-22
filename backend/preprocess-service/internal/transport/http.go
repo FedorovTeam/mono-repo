@@ -3,7 +3,6 @@ package transport
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/metric"
 	otelmetric "go.opentelemetry.io/otel/metric/noop"
+	"go.uber.org/zap"
 )
 
 type HTTPServer struct {
@@ -18,12 +18,12 @@ type HTTPServer struct {
 	server *http.Server
 }
 
-func NewHTTPServer(port int, db *pgxpool.Pool, metricsHandler http.Handler, meter metric.Meter, logger *slog.Logger) *HTTPServer {
+func NewHTTPServer(port int, db *pgxpool.Pool, metricsHandler http.Handler, meter metric.Meter, logger *zap.SugaredLogger) *HTTPServer {
 	if meter == nil {
 		meter = otelmetric.NewMeterProvider().Meter("preprocess-service")
 	}
 	if logger == nil {
-		logger = slog.Default()
+		logger = zap.NewNop().Sugar()
 	}
 
 	mux := http.NewServeMux()
@@ -37,7 +37,7 @@ func NewHTTPServer(port int, db *pgxpool.Pool, metricsHandler http.Handler, mete
 
 		if db != nil {
 			if err := db.Ping(ctx); err != nil {
-				logger.Error("readiness check failed", "error", err)
+				logger.Errorw("readiness check failed", "error", err)
 				http.Error(w, "database unavailable", http.StatusServiceUnavailable)
 				return
 			}

@@ -3,12 +3,12 @@ package transport
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/metric"
 	otelmetric "go.opentelemetry.io/otel/metric/noop"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
@@ -19,12 +19,12 @@ type GRPCServer struct {
 	listener net.Listener
 }
 
-func NewGRPCServer(port int, handler preprocessv1.PreprocessServiceServer, meter metric.Meter, logger *slog.Logger) (*GRPCServer, error) {
+func NewGRPCServer(port int, handler preprocessv1.PreprocessServiceServer, meter metric.Meter, logger *zap.SugaredLogger) (*GRPCServer, error) {
 	if meter == nil {
 		meter = otelmetric.NewMeterProvider().Meter("preprocess-service")
 	}
 	if logger == nil {
-		logger = slog.Default()
+		logger = zap.NewNop().Sugar()
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))

@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel/metric"
 	otelmetric "go.opentelemetry.io/otel/metric/noop"
+	"go.uber.org/zap"
 
 	"preprocess-service/internal/config"
 	"preprocess-service/internal/domain"
@@ -23,7 +23,7 @@ import (
 
 // Dependencies описывает внешний слой и инфраструктуру, необходимую приложению.
 type Dependencies struct {
-	Logger           *slog.Logger
+	Logger           *zap.SugaredLogger
 	Telemetry        *observability.Telemetry
 	DB               *pgxpool.Pool
 	Repo             domain.PreprocessJobRepository
@@ -41,13 +41,13 @@ type App struct {
 	worker     *worker.Worker
 	db         *pgxpool.Pool
 	telemetry  *observability.Telemetry
-	logger     *slog.Logger
+	logger     *zap.SugaredLogger
 }
 
 func New(cfg config.Config, deps Dependencies) (*App, error) {
 	logger := deps.Logger
 	if logger == nil {
-		logger = slog.Default()
+		logger = zap.NewNop().Sugar()
 	}
 
 	if deps.Repo == nil {
@@ -163,7 +163,7 @@ func (a *App) Close() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := a.telemetry.Shutdown(shutdownCtx); err != nil {
-			a.logger.Error("shutdown telemetry", "error", err)
+			a.logger.Errorw("shutdown telemetry", "error", err)
 		}
 	}
 }
