@@ -56,6 +56,18 @@ func TestUpsertOrGetActiveQueueLimit(t *testing.T) {
 	require.ErrorIs(t, err, repository.ErrQueueLimitReached)
 }
 
+func TestUpsertOrGetActiveValidatesJob(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+
+	job := newJob(t, "doc-invalid")
+	job.CorrelationID = ""
+
+	_, _, err := repo.UpsertOrGetActive(ctx, job, 10)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "correlation_id")
+}
+
 func TestAcquirePendingBatch(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()
