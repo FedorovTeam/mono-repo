@@ -69,11 +69,11 @@ func New(cfg config.Config, deps Dependencies) (*App, error) {
 		return nil, fmt.Errorf("callback sender is required")
 	}
 
-	submitService, err := submit.NewService(deps.Repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix)
+	submitService, err := submit.NewService(deps.Repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, logger)
 	if err != nil {
 		return nil, fmt.Errorf("init submit service: %w", err)
 	}
-	handler := transport.NewPreprocessHandler(submitService)
+	handler := transport.NewPreprocessHandler(submitService, logger)
 
 	var (
 		metricsHandler http.Handler
