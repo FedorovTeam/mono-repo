@@ -48,7 +48,7 @@ stage_worker:
   grace_period: 15s
   wait_markdown: true
 router:
-  preprocess_enabled: false
+  preprocess_enabled: true
   preprocess_extensions:
     - doc
     - pdf
