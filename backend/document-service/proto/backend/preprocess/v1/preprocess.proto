@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package backend.preprocess.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "backend-document-service/proto/backend/preprocess/v1;preprocessv1";
+
+// PreprocessService отвечает за постановку и отслеживание задач предобработки документов.
+service PreprocessService {
+  // SubmitPreprocess ставит документ в очередь на предобработку. При повторной отправке
+  // с теми же source_bucket/source_key/source_etag возвращается существующий job_id.
+  rpc SubmitPreprocess(SubmitPreprocessRequest) returns (SubmitPreprocessResponse);
+
+  // GetPreprocessStatus возвращает текущий статус ранее созданной задачи.
+  rpc GetPreprocessStatus(GetPreprocessStatusRequest) returns (GetPreprocessStatusResponse);
+}
+
+// SubmitPreprocessRequest описывает параметры постановки документа в очередь.
+message SubmitPreprocessRequest {
+  string source_bucket = 1;
+  string source_key = 2;
+  string source_etag = 3;
+  string target_bucket = 4;
+  string target_key = 5;
+  string document_id = 6;
+  string correlation_id = 7;
+  string callback_url = 8;
+}
+
+message SubmitPreprocessResponse {
+  string job_id = 1;
+  PreprocessStatus status = 2;
+  string error_message = 3;
+  string correlation_id = 4;
+}
+
+message GetPreprocessStatusRequest {
+  string job_id = 1;
+  string correlation_id = 2;
+}
+
+message GetPreprocessStatusResponse {
+  string job_id = 1;
+  string document_id = 2;
+  string source_bucket = 3;
+  string source_key = 4;
+  string target_bucket = 5;
+  string target_key = 6;
+  PreprocessStatus status = 7;
+  string error_message = 8;
+  string correlation_id = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  string error_code = 11;
+  map<string, string> error_details = 12;
+}
+
+enum PreprocessStatus {
+  PREPROCESS_STATUS_UNSPECIFIED = 0;
+  PREPROCESS_STATUS_PENDING = 1;
+  PREPROCESS_STATUS_PROCESSING = 2;
+  PREPROCESS_STATUS_COMPLETED = 3;
+  PREPROCESS_STATUS_FAILED = 4;
+}

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
+	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -27,6 +29,28 @@ const (
 
 	correlationIDHeader = "x-correlation-id"
 )
+
+type preprocessInput struct {
+	JobID           string
+	DocumentID      string
+	SourceBucket    string
+	SourceObjectKey string
+	SourceETag      string
+	TargetBucket    string
+	TargetObjectKey string
+	CorrelationID   string
+}
+
+type preprocessResult struct {
+	JobID           string
+	Status          preprocessv1.PreprocessStatus
+	TargetBucket    string
+	TargetObjectKey string
+	ErrorMessage    string
+	ErrorCode       string
+	CorrelationID   string
+	UpdatedAt       time.Time
+}
 
 type convertInput struct {
 	DocumentID        string
@@ -70,14 +94,16 @@ type convertResult struct {
 type Activities struct {
 	repo        Repository
 	statuses    *StatusApplication
+	preprocess  preprocessv1.PreprocessServiceClient
 	transformer transformerv1.TransformerServiceClient
 	publisher   githubpublisherv1.GithubPublisherServiceClient
 }
 
-func NewActivities(repo Repository, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient) *Activities {
+func NewActivities(repo Repository, preprocessClient preprocessv1.PreprocessServiceClient, transformerClient transformerv1.TransformerServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient) *Activities {
 	return &Activities{
 		repo:        repo,
 		statuses:    NewStatusApplication(repo),
+		preprocess:  preprocessClient,
 		transformer: transformerClient,
 		publisher:   publisherClient,
 	}
@@ -111,6 +137,83 @@ func (a *Activities) MarkStoredOriginal(ctx context.Context, documentID string) 
 
 	_, err = a.statuses.Transition(ctx, doc, domain.DocumentStatusStoredOriginal, "", "", &domain.DocumentVersion{Version: version, OriginalObjectKey: doc.OriginalObjectKey})
 	return err
+}
+
+func (a *Activities) SubmitPreprocess(ctx context.Context, input preprocessInput) (preprocessResult, error) {
+	if a.preprocess == nil {
+		return preprocessResult{}, fmt.Errorf("preprocess client is not configured")
+	}
+	if input.JobID != "" {
+		return a.GetPreprocessStatus(ctx, input.JobID, input.CorrelationID)
+	}
+	if strings.TrimSpace(input.SourceBucket) == "" || strings.TrimSpace(input.SourceObjectKey) == "" {
+		return preprocessResult{}, fmt.Errorf("source bucket and key are required")
+	}
+	if strings.TrimSpace(input.TargetBucket) == "" || strings.TrimSpace(input.TargetObjectKey) == "" {
+		return preprocessResult{}, fmt.Errorf("target bucket and key are required")
+	}
+	ctx = a.withCorrelationID(ctx, input.CorrelationID)
+	req := &preprocessv1.SubmitPreprocessRequest{
+		SourceBucket:  input.SourceBucket,
+		SourceKey:     input.SourceObjectKey,
+		SourceEtag:    input.SourceETag,
+		TargetBucket:  input.TargetBucket,
+		TargetKey:     input.TargetObjectKey,
+		DocumentId:    input.DocumentID,
+		CorrelationId: correlationIDFromContext(ctx),
+	}
+
+	resp, err := a.preprocess.SubmitPreprocess(ctx, req)
+	if err != nil {
+		return preprocessResult{}, err
+	}
+
+	result := preprocessResult{
+		JobID:           strings.TrimSpace(resp.GetJobId()),
+		Status:          resp.GetStatus(),
+		TargetBucket:    input.TargetBucket,
+		TargetObjectKey: input.TargetObjectKey,
+		ErrorMessage:    resp.GetErrorMessage(),
+		CorrelationID:   firstNonEmpty(resp.GetCorrelationId(), correlationIDFromContext(ctx)),
+	}
+	if result.JobID == "" {
+		return result, status.Error(codes.FailedPrecondition, "preprocess job_id is empty")
+	}
+	return result, nil
+}
+
+func (a *Activities) GetPreprocessStatus(ctx context.Context, jobID, correlationID string) (preprocessResult, error) {
+	if a.preprocess == nil {
+		return preprocessResult{}, fmt.Errorf("preprocess client is not configured")
+	}
+	if strings.TrimSpace(jobID) == "" {
+		return preprocessResult{}, fmt.Errorf("job_id is required")
+	}
+	ctx = a.withCorrelationID(ctx, correlationID)
+	resp, err := a.preprocess.GetPreprocessStatus(ctx, &preprocessv1.GetPreprocessStatusRequest{
+		JobId:         jobID,
+		CorrelationId: correlationIDFromContext(ctx),
+	})
+	if err != nil {
+		return preprocessResult{}, err
+	}
+
+	result := preprocessResult{
+		JobID:           strings.TrimSpace(resp.GetJobId()),
+		Status:          resp.GetStatus(),
+		TargetBucket:    resp.GetTargetBucket(),
+		TargetObjectKey: resp.GetTargetKey(),
+		ErrorMessage:    resp.GetErrorMessage(),
+		ErrorCode:       resp.GetErrorCode(),
+		CorrelationID:   firstNonEmpty(resp.GetCorrelationId(), correlationIDFromContext(ctx)),
+	}
+	if ts := resp.GetUpdatedAt(); ts != nil {
+		result.UpdatedAt = ts.AsTime()
+	}
+	if result.Status == preprocessv1.PreprocessStatus_PREPROCESS_STATUS_UNSPECIFIED {
+		return result, status.Error(codes.FailedPrecondition, "preprocess status is empty")
+	}
+	return result, nil
 }
 
 func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) (convertResult, error) {
@@ -339,6 +442,21 @@ func (a *Activities) PublishMarkdown(ctx context.Context, input publishInput) (*
 	}
 
 	return resp, nil
+}
+
+func preprocessFailureReason(code, message string) string {
+	code = strings.TrimSpace(code)
+	message = strings.TrimSpace(message)
+	var reason string
+	if code != "" {
+		reason = fmt.Sprintf("preprocess %s", code)
+	} else {
+		reason = "preprocess failed"
+	}
+	if message != "" {
+		return fmt.Sprintf("%s: %s", reason, message)
+	}
+	return reason
 }
 
 func mapPublishErrorCode(code githubpublisherv1.PublishErrorCode) string {

@@ -13,6 +13,7 @@ import (
 
 	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
+	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 )
 
@@ -191,6 +192,31 @@ func (*errorTransformer) ConvertDocxToMarkdown(context.Context, *transformerv1.C
 	return nil, status.Error(codes.Unimplemented, "not implemented")
 }
 
+type staticPreprocess struct {
+	submitResp *preprocessv1.SubmitPreprocessResponse
+	statusResp *preprocessv1.GetPreprocessStatusResponse
+	submitErr  error
+	statusErr  error
+	lastSubmit *preprocessv1.SubmitPreprocessRequest
+	lastStatus *preprocessv1.GetPreprocessStatusRequest
+}
+
+func (s *staticPreprocess) SubmitPreprocess(ctx context.Context, in *preprocessv1.SubmitPreprocessRequest, opts ...grpc.CallOption) (*preprocessv1.SubmitPreprocessResponse, error) {
+	s.lastSubmit = in
+	if s.submitErr != nil {
+		return nil, s.submitErr
+	}
+	return s.submitResp, nil
+}
+
+func (s *staticPreprocess) GetPreprocessStatus(ctx context.Context, in *preprocessv1.GetPreprocessStatusRequest, opts ...grpc.CallOption) (*preprocessv1.GetPreprocessStatusResponse, error) {
+	s.lastStatus = in
+	if s.statusErr != nil {
+		return nil, s.statusErr
+	}
+	return s.statusResp, nil
+}
+
 func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-commit",
@@ -208,7 +234,7 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc123"}}
-	activities := NewActivities(repo, nil, publisher)
+	activities := NewActivities(repo, nil, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
 	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: (domain.PublishPayload{
@@ -254,7 +280,7 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 		ErrorMessage: "timeout",
 		RetryAfter:   retryAfter,
 	}}
-	activities := NewActivities(repo, nil, publisher)
+	activities := NewActivities(repo, nil, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
 	start := time.Now()
@@ -336,7 +362,7 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 
 	repo.now = fixed.Add(time.Minute)
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "commit-sha"}}
-	activities := NewActivities(repo, nil, publisher)
+	activities := NewActivities(repo, nil, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 2, time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -350,6 +376,175 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	cancel()
 	if err := <-runErr; err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected worker error: %v", err)
+	}
+}
+
+func TestHandlePreprocessSubmitSchedulesRetry(t *testing.T) {
+	now := time.Now()
+	doc := &domain.Document{
+		ID:                "doc-preprocess",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc, now: now}
+	preprocess := &staticPreprocess{
+		submitResp: &preprocessv1.SubmitPreprocessResponse{
+			JobId:         "job-pre-1",
+			Status:        preprocessv1.PreprocessStatus_PREPROCESS_STATUS_PENDING,
+			CorrelationId: "corr-submit",
+		},
+	}
+	activities := NewActivities(repo, preprocess, nil, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, 500*time.Millisecond)
+
+	result, err := worker.handlePreprocessToDocx(context.Background(), domain.ProcessingJob{TaskID: "job-pre", DocumentID: doc.ID, Stage: domain.JobStagePreprocessToDocx})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != domain.JobStatusPending {
+		t.Fatalf("expected pending status, got %s", result.Status)
+	}
+	if result.NextRun == nil || result.NextRun.Sub(now) < 400*time.Millisecond {
+		t.Fatalf("expected delayed retry, got %v", result.NextRun)
+	}
+	payload := domain.PreprocessPayloadFromMap(result.Payload)
+	if payload.PreprocessJobID != "job-pre-1" {
+		t.Fatalf("expected preprocess job id, got %+v", payload)
+	}
+	if payload.TargetObjectKey != "docs/doc.docx" {
+		t.Fatalf("expected target object key to be docx, got %s", payload.TargetObjectKey)
+	}
+	if payload.PreprocessedObjectKey != payload.TargetObjectKey || payload.PreprocessedBucket != payload.TargetBucket {
+		t.Fatalf("expected preprocessed location to match target, got %+v", payload)
+	}
+	if preprocess.lastSubmit == nil || preprocess.lastSubmit.CorrelationId != doc.ID {
+		t.Fatalf("expected correlation id from document, got %+v", preprocess.lastSubmit)
+	}
+}
+
+func TestHandlePreprocessCompletesAfterPoll(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-preprocess-complete",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	preprocess := &staticPreprocess{
+		statusResp: &preprocessv1.GetPreprocessStatusResponse{
+			JobId:        "job-pre-2",
+			Status:       preprocessv1.PreprocessStatus_PREPROCESS_STATUS_COMPLETED,
+			TargetBucket: "processed",
+			TargetKey:    "docs/doc.docx",
+		},
+	}
+	activities := NewActivities(repo, preprocess, nil, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second)
+
+	payload := domain.PreprocessPayload{
+		PreprocessJobID:   "job-pre-2",
+		OriginalBucket:    doc.OriginalBucket,
+		OriginalObjectKey: doc.OriginalObjectKey,
+		TargetBucket:      "processed",
+		TargetObjectKey:   "docs/doc.docx",
+		PollAttempts:      2,
+		JobPayloadMetadata: domain.JobPayloadMetadata{
+			CorrelationID: "corr-2",
+		},
+	}.ToMap()
+
+	result, err := worker.handlePreprocessToDocx(context.Background(), domain.ProcessingJob{
+		TaskID:     "job-pre-2",
+		DocumentID: doc.ID,
+		Stage:      domain.JobStagePreprocessToDocx,
+		Payload:    payload,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+	updated := domain.PreprocessPayloadFromMap(result.Payload)
+	if updated.PreprocessedBucket != "processed" || updated.PreprocessedObjectKey != "docs/doc.docx" {
+		t.Fatalf("expected updated preprocessed location, got %+v", updated)
+	}
+	if updated.PollAttempts != 0 {
+		t.Fatalf("expected poll attempts reset, got %d", updated.PollAttempts)
+	}
+}
+
+func TestHandlePreprocessFailsOnFailedStatus(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-preprocess-failed",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	preprocess := &staticPreprocess{
+		statusResp: &preprocessv1.GetPreprocessStatusResponse{
+			JobId:        "job-pre-3",
+			Status:       preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED,
+			ErrorMessage: "convert failed",
+			ErrorCode:    "FAILED",
+		},
+	}
+	activities := NewActivities(repo, preprocess, nil, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second)
+
+	payload := domain.PreprocessPayload{
+		PreprocessJobID:   "job-pre-3",
+		OriginalBucket:    doc.OriginalBucket,
+		OriginalObjectKey: doc.OriginalObjectKey,
+		TargetBucket:      doc.OriginalBucket,
+		TargetObjectKey:   "docs/doc.docx",
+	}.ToMap()
+
+	result, err := worker.handlePreprocessToDocx(context.Background(), domain.ProcessingJob{
+		TaskID:     "job-pre-3",
+		DocumentID: doc.ID,
+		Stage:      domain.JobStagePreprocessToDocx,
+		Payload:    payload,
+	})
+	if err == nil {
+		t.Fatal("expected error for failed preprocess")
+	}
+	if result.Event == nil || result.Event.EventType != "failed" {
+		t.Fatalf("expected failed event, got %+v", result.Event)
+	}
+	updated := domain.PreprocessPayloadFromMap(result.Payload)
+	if updated.LastError == "" || updated.PreprocessStatus == "" {
+		t.Fatalf("expected last error and status in payload, got %+v", updated)
 	}
 }
 
@@ -373,7 +568,7 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending"}}
-	activities := NewActivities(repo, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
@@ -415,7 +610,7 @@ func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ocr", Status: "done", MarkdownObjectKey: "path/doc.md"}}
-	activities := NewActivities(repo, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	job := domain.ProcessingJob{TaskID: "job-ocr", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: map[string]any{"force_ocr": true}}
@@ -467,7 +662,7 @@ func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 		},
 	}}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-2", Status: "failed"}}
-	activities := NewActivities(repo, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -511,7 +706,7 @@ func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.ResourceExhausted, "queue limit reached")}
-	activities := NewActivities(repo, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-exhausted", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: (domain.ConvertPayload{}).ToMap()})
@@ -559,7 +754,7 @@ func TestHandleConvertRetriesOnTemporaryGRPCErrors(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
-	activities := NewActivities(repo, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, 200*time.Millisecond)
 
 	start := time.Now()
@@ -611,7 +806,7 @@ func TestHandleConvertHonorsMaxAttemptsForTemporaryErrors(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
-	activities := NewActivities(repo, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 	worker.maxAttempts = 1
 

@@ -21,6 +21,7 @@ import (
 	docservice "backend-document-service/internal/service/document"
 	docusecase "backend-document-service/internal/usecase/document"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
+	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
 	storagev1 "backend-document-service/proto/backend/storage/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 	"golang.org/x/sync/errgroup"
@@ -105,8 +106,18 @@ func main() {
 	}
 	defer publisherConn.Close()
 
+	preprocessConn, err := grpcclient.NewGRPCClient(
+		cfg.Services.PreprocessService,
+		cfg.ServicesGRPC,
+	)
+	if err != nil {
+		log.Fatalf("preprocess client: %v", err)
+	}
+	defer preprocessConn.Close()
+
 	transformerClient := transformerv1.NewTransformerServiceClient(transformerConn)
 	publisherClient := githubpublisherv1.NewGithubPublisherServiceClient(publisherConn)
+	preprocessClient := preprocessv1.NewPreprocessServiceClient(preprocessConn)
 
 	defaults := docusecase.Defaults{
 		OriginalBucket: cfg.Storage.OriginalBucket,
@@ -123,6 +134,7 @@ func main() {
 
 	activities := docservice.NewActivities(
 		repo,
+		preprocessClient,
 		transformerClient,
 		publisherClient,
 	)
@@ -142,6 +154,7 @@ func main() {
 	)
 
 	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	preprocessWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.ConvertBatchSize, cfg.StageWorker.RetryDelay)
 	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 
@@ -165,6 +178,7 @@ func main() {
 		{Name: "upload-reconciler", Interval: cfg.Reconciler.Interval, Run: reconciler.Run},
 		{Name: "processing-reconciler", Interval: cfg.StageWorker.Interval, Run: processingReconciler.Run},
 		{Name: "stage-store", Interval: cfg.StageWorker.Interval, Run: storeWorker.Run},
+		{Name: "stage-preprocess", Interval: cfg.StageWorker.Interval, Run: preprocessWorker.Run},
 		{Name: "stage-convert", Interval: cfg.StageWorker.Interval, Run: convertWorker.Run},
 		{Name: "stage-publish", Interval: cfg.StageWorker.Interval, Run: publishWorker.Run},
 		{Name: "job-follower", Interval: cfg.JobFollower.Interval, Run: jobFollower.Run},

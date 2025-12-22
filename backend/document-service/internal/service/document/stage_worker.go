@@ -15,6 +15,7 @@ import (
 	"backend-document-service/internal/domain"
 	workersvc "backend-document-service/internal/usecase"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
+	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
 )
 
 // StageWorker обрабатывает pending-задачи из processing_jobs.
@@ -83,6 +84,8 @@ func (w *StageWorker) handleJob(ctx context.Context, job domain.ProcessingJob) (
 	switch job.Stage {
 	case domain.JobStageStoreOriginal:
 		return w.handleStoreOriginal(ctx, job)
+	case domain.JobStagePreprocessToDocx:
+		return w.handlePreprocessToDocx(ctx, job)
 	case domain.JobStageConvertToMarkdown:
 		return w.handleConvert(ctx, job)
 	case domain.JobStagePublishToGitHub:
@@ -108,6 +111,121 @@ func (w *StageWorker) handleStoreOriginal(ctx context.Context, job domain.Proces
 	}
 
 	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed"}}, nil
+}
+
+func (w *StageWorker) handlePreprocessToDocx(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
+	payload := domain.PreprocessPayloadFromMap(job.Payload)
+	if w.activities == nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("activities not configured")
+	}
+
+	doc, err := w.repo.GetDocument(ctx, job.DocumentID)
+	if err != nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("load document: %w", err)
+	}
+	if doc == nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("document %s not found", job.DocumentID)
+	}
+
+	payload.OriginalBucket = firstNonEmpty(payload.OriginalBucket, doc.OriginalBucket)
+	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
+	payload.TargetBucket = firstNonEmpty(payload.TargetBucket, doc.OriginalBucket)
+	if payload.TargetObjectKey == "" {
+		payload.TargetObjectKey = preprocessTargetKey(payload.OriginalObjectKey)
+	}
+	payload.FilenameExtension = firstNonEmpty(
+		payload.FilenameExtension,
+		fileExtension(payload.OriginalObjectKey),
+		fileExtension(doc.OriginalObjectKey),
+		fileExtension(doc.Name),
+	)
+	if payload.CorrelationID == "" {
+		payload.CorrelationID = correlationFromDoc(doc)
+	}
+	if strings.TrimSpace(payload.OriginalBucket) == "" || strings.TrimSpace(payload.OriginalObjectKey) == "" {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("preprocess original location is required")
+	}
+	if strings.TrimSpace(payload.TargetBucket) == "" || strings.TrimSpace(payload.TargetObjectKey) == "" {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("preprocess target location is required")
+	}
+
+	jobCtx := w.jobContext(ctx, payload.CorrelationID)
+	if payload.PreprocessJobID == "" {
+		result, submitErr := w.activities.SubmitPreprocess(jobCtx, preprocessInput{
+			JobID:           payload.PreprocessJobID,
+			DocumentID:      job.DocumentID,
+			SourceBucket:    payload.OriginalBucket,
+			SourceObjectKey: payload.OriginalObjectKey,
+			TargetBucket:    payload.TargetBucket,
+			TargetObjectKey: payload.TargetObjectKey,
+			CorrelationID:   payload.CorrelationID,
+		})
+		if submitErr != nil {
+			if isTemporaryGRPCError(submitErr) {
+				payload.LastError = submitErr.Error()
+				return w.postponeWithBackoff(ctx, job, payload.ToMap(), submitErr)
+			}
+			return workersvc.JobResult{Payload: payload.ToMap()}, submitErr
+		}
+		payload.PreprocessJobID = result.JobID
+		payload.PreprocessStatus = result.Status.String()
+		payload.PreprocessErrorMessage = result.ErrorMessage
+		payload.PreprocessedBucket = firstNonEmpty(payload.PreprocessedBucket, result.TargetBucket, payload.TargetBucket)
+		payload.PreprocessedObjectKey = firstNonEmpty(payload.PreprocessedObjectKey, result.TargetObjectKey, payload.TargetObjectKey)
+		payload.CorrelationID = firstNonEmpty(result.CorrelationID, payload.CorrelationID)
+		switch result.Status {
+		case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_COMPLETED:
+			return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed"}}, nil
+		case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED:
+			reason := preprocessFailureReason("", payload.PreprocessErrorMessage)
+			payload.PreprocessErrorMessage = reason
+			payload.LastError = reason
+			return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "failed", Message: reason}}, fmt.Errorf("%s", reason)
+		}
+		next := time.Now().Add(w.retryDelay)
+		return workersvc.JobResult{
+			Payload: payload.ToMap(),
+			Status:  domain.JobStatusPending,
+			NextRun: &next,
+			Event:   &domain.JobEvent{EventType: "postponed", Message: "preprocess submitted"},
+		}, nil
+	}
+
+	result, pollErr := w.activities.GetPreprocessStatus(jobCtx, payload.PreprocessJobID, payload.CorrelationID)
+	if pollErr != nil {
+		if isTemporaryGRPCError(pollErr) {
+			payload.LastError = pollErr.Error()
+			return w.postponeWithBackoff(ctx, job, payload.ToMap(), pollErr)
+		}
+		return workersvc.JobResult{Payload: payload.ToMap()}, pollErr
+	}
+
+	payload.PreprocessStatus = result.Status.String()
+	payload.PreprocessErrorMessage = result.ErrorMessage
+	payload.PreprocessedBucket = firstNonEmpty(payload.PreprocessedBucket, result.TargetBucket, payload.TargetBucket)
+	payload.PreprocessedObjectKey = firstNonEmpty(payload.PreprocessedObjectKey, result.TargetObjectKey, payload.TargetObjectKey)
+	payload.CorrelationID = firstNonEmpty(result.CorrelationID, payload.CorrelationID)
+
+	switch result.Status {
+	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_COMPLETED:
+		payload.PollAttempts = 0
+		return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed"}}, nil
+	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED:
+		reason := preprocessFailureReason(result.ErrorCode, firstNonEmpty(result.ErrorMessage, payload.PreprocessErrorMessage))
+		payload.PreprocessErrorMessage = reason
+		payload.LastError = reason
+		return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "failed", Message: reason}}, fmt.Errorf("%s", reason)
+	default:
+		delay := w.preprocessBackoff(payload.PollAttempts)
+		payload.PollAttempts++
+		next := time.Now().Add(delay)
+		return workersvc.JobResult{
+			Payload: payload.ToMap(),
+			Status:  domain.JobStatusPending,
+			NextRun: &next,
+			Event:   &domain.JobEvent{EventType: "postponed", Message: fmt.Sprintf("status=%s", result.Status.String())},
+		}, nil
+	}
 }
 
 func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
@@ -312,6 +430,18 @@ func (w *StageWorker) postponeWithBackoff(ctx context.Context, job domain.Proces
 	}, nil
 }
 
+func (w *StageWorker) preprocessBackoff(attempts int) time.Duration {
+	delay := w.retryDelay * time.Duration(1<<attempts)
+	maxDelay := w.retryDelay * 16
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+	if delay <= 0 {
+		delay = w.retryDelay
+	}
+	return delay
+}
+
 func buildPublishEventPayload(resp *githubpublisherv1.PublishMarkdownResponse) map[string]any {
 	if resp == nil {
 		return nil
@@ -358,6 +488,22 @@ func (w *StageWorker) jobContext(ctx context.Context, correlationID string) cont
 
 func metadataAppend(ctx context.Context, correlationID string) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, correlationID)
+}
+
+func preprocessTargetKey(originalKey string) string {
+	key := strings.TrimSpace(originalKey)
+	if key == "" {
+		return ""
+	}
+	ext := path.Ext(key)
+	base := strings.TrimSuffix(key, ext)
+	if base == "" {
+		base = key
+	}
+	if strings.EqualFold(ext, ".docx") {
+		return key
+	}
+	return base + ".docx"
 }
 
 func fileExtension(name string) string {
