@@ -466,10 +466,12 @@ func newRecordingConverter(durations map[string]time.Duration) recordingConverte
 	return recordingConverter{durations: durations}
 }
 
-func (c recordingConverter) Convert(ctx context.Context, _ string, outDir string) error {
+func (c recordingConverter) Convert(ctx context.Context, _ string, outDir string) (ports.ConvertResult, error) {
+	start := time.Now()
+
 	jobID := filepath.Base(outDir)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return err
+		return ports.ConvertResult{}, err
 	}
 
 	delay := c.durations[jobID]
@@ -477,16 +479,16 @@ func (c recordingConverter) Convert(ctx context.Context, _ string, outDir string
 	select {
 	case <-ctx.Done():
 		timer.Stop()
-		return ctx.Err()
+		return ports.ConvertResult{ExitCode: -1, Duration: time.Since(start)}, ctx.Err()
 	case <-timer.C:
 	}
 
 	outputPath := filepath.Join(outDir, "converted.docx")
 	if err := os.WriteFile(outputPath, []byte("ok"), 0o644); err != nil {
-		return err
+		return ports.ConvertResult{}, err
 	}
 
-	return nil
+	return ports.ConvertResult{ExitCode: 0, Duration: time.Since(start)}, nil
 }
 
 func setupPostgres(ctx context.Context, t *testing.T) (*pgxpool.Pool, func()) {
@@ -560,7 +562,7 @@ func (noopStorage) Upload(context.Context, string, string, string, string) error
 
 type panicConverter struct{}
 
-func (panicConverter) Convert(context.Context, string, string) error {
+func (panicConverter) Convert(context.Context, string, string) (ports.ConvertResult, error) {
 	panic("processor panic")
 }
 
