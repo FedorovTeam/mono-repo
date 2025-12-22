@@ -48,6 +48,7 @@ type PreprocessConfig struct {
 	TargetKeyPrefix   string        `yaml:"target_key_prefix"`
 	TargetMediaType   string        `yaml:"target_media_type"`
 	WorkerConcurrency int64         `yaml:"worker_concurrency"`
+	ProcessTimeout    time.Duration `yaml:"process_timeout"`
 	ConvertTimeout    time.Duration `yaml:"convert_timeout"`
 	Backoff           time.Duration `yaml:"backoff"`
 	PollInterval      time.Duration `yaml:"poll_interval"`
