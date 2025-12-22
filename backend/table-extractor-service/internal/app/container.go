@@ -68,6 +68,9 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 	fileCache := filecache.NewTempCache(storageClient)
 
 	extractAdapter := extractor.NewAdapter(extractor.Config{
+		PdfInfoPath:         cfg.Extractor.PdfInfoPath,
+		PdftotextPath:       cfg.Extractor.PdftotextPath,
+		PdftoppmPath:        cfg.Extractor.PdftoppmPath,
 		PdfInfoTimeout:      cfg.Extractor.PdfInfoTimeout,
 		PdftotextTimeout:    cfg.Extractor.PdftotextTimeout,
 		PdftoppmTimeout:     cfg.Extractor.PdftoppmTimeout,
@@ -75,6 +78,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 		Pages:               cfg.Extractor.Pages,
 		DetectVotingTables:  cfg.Extractor.DetectVotingTables,
 		TempDir:             cfg.Extractor.TempDir,
+		Mode:                cfg.Extractor.Mode,
 	})
 
 	deps := usecase.Dependencies{

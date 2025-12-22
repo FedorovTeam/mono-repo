@@ -16,11 +16,13 @@ import (
 
 const (
 	defaultPdfInfoTimeout  = 10 * time.Second
-	defaultPdftotext       = "pdftotext"
 	defaultPdftotextTimout = 20 * time.Second
-	defaultPdftoppm        = "pdftoppm"
 	defaultPdftoppmTimeout = 30 * time.Second
 	defaultPdfinfo         = "pdfinfo"
+	defaultPdftotext       = "pdftotext"
+	defaultPdftoppm        = "pdftoppm"
+	modeLayout             = "layout"
+	modeBBox               = "bbox"
 )
 
 // Adapter orchestrates poppler utilities and converts their output into artifacts
@@ -33,6 +35,9 @@ type Adapter struct {
 }
 
 type Config struct {
+	PdfInfoPath         string
+	PdftotextPath       string
+	PdftoppmPath        string
 	PdfInfoTimeout      time.Duration
 	PdftotextTimeout    time.Duration
 	PdftoppmTimeout     time.Duration
@@ -40,6 +45,7 @@ type Config struct {
 	Pages               string
 	DetectVotingTables  bool
 	TempDir             string
+	Mode                string
 }
 
 // CommandRunner abstracts execution of external utilities and can be replaced by mocks in tests.
@@ -105,6 +111,7 @@ type PDFInfo struct {
 }
 
 func NewAdapter(cfg Config) *Adapter {
+	cfg.Mode = normalizeMode(cfg.Mode)
 	if cfg.PdfInfoTimeout <= 0 {
 		cfg.PdfInfoTimeout = defaultPdfInfoTimeout
 	}
@@ -119,6 +126,15 @@ func NewAdapter(cfg Config) *Adapter {
 	}
 	if cfg.TempDir == "" {
 		cfg.TempDir = os.TempDir()
+	}
+	if cfg.PdfInfoPath == "" {
+		cfg.PdfInfoPath = defaultPdfinfo
+	}
+	if cfg.PdftotextPath == "" {
+		cfg.PdftotextPath = defaultPdftotext
+	}
+	if cfg.PdftoppmPath == "" {
+		cfg.PdftoppmPath = defaultPdftoppm
 	}
 
 	runner := NewExternalCommandRunner(cfg.MaxParallelCommands)
@@ -146,7 +162,7 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	}
 
 	pdfInfoStart := time.Now()
-	infoRes, err := a.runner.Run(ctx, a.cfg.PdfInfoTimeout, defaultPdfinfo, pdfPath)
+	infoRes, err := a.runner.Run(ctx, a.cfg.PdfInfoTimeout, a.cfg.PdfInfoPath, pdfPath)
 	manifest.Processing.PdfInfoMs = durationMs(pdfInfoStart)
 	if err != nil {
 		return usecase.ExtractionResult{}, fmt.Errorf("pdfinfo: %w (stderr: %s)", err, string(infoRes.Stderr))
@@ -155,7 +171,7 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 
 	textStart := time.Now()
 	pdftotextArgs := a.buildPdftotextArgs(pdfPath)
-	textRes, err := a.runner.Run(ctx, a.cfg.PdftotextTimeout, defaultPdftotext, pdftotextArgs...)
+	textRes, err := a.runner.Run(ctx, a.cfg.PdftotextTimeout, a.cfg.PdftotextPath, pdftotextArgs...)
 	manifest.Processing.PdftotextMs = durationMs(textStart)
 	if err != nil {
 		return usecase.ExtractionResult{}, fmt.Errorf("pdftotext: %w (stderr: %s)", err, string(textRes.Stderr))
@@ -228,7 +244,7 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 }
 
 func (a *Adapter) buildPdftotextArgs(pdfPath string) []string {
-	args := []string{"-layout"}
+	args := []string{pdftotextModeArg(a.cfg.Mode)}
 	start, end := parsePageRange(a.cfg.Pages)
 	if start > 0 {
 		args = append(args, "-f", fmt.Sprint(start))
@@ -258,7 +274,7 @@ func (a *Adapter) renderCheckboxes(ctx context.Context, pdfPath string) (map[str
 	}
 	args = append(args, pdfPath, prefix)
 
-	res, err := a.runner.Run(ctx, a.cfg.PdftoppmTimeout, defaultPdftoppm, args...)
+	res, err := a.runner.Run(ctx, a.cfg.PdftoppmTimeout, a.cfg.PdftoppmPath, args...)
 	if err != nil {
 		return nil, fmt.Errorf("pdftoppm: %w (stderr: %s)", err, string(res.Stderr))
 	}
@@ -347,4 +363,20 @@ func parseInt(value string) int {
 	var result int
 	fmt.Sscanf(value, "%d", &result)
 	return result
+}
+
+func normalizeMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case modeBBox:
+		return modeBBox
+	default:
+		return modeLayout
+	}
+}
+
+func pdftotextModeArg(mode string) string {
+	if normalizeMode(mode) == modeBBox {
+		return "-bbox"
+	}
+	return "-layout"
 }

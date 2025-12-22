@@ -35,6 +35,9 @@ func TestPopplerIntegration(t *testing.T) {
 	}
 
 	adapter := NewAdapter(Config{
+		PdfInfoPath:         cfg.Extractor.PdfInfoPath,
+		PdftotextPath:       cfg.Extractor.PdftotextPath,
+		PdftoppmPath:        cfg.Extractor.PdftoppmPath,
 		PdfInfoTimeout:      cfg.Extractor.PdfInfoTimeout,
 		PdftotextTimeout:    cfg.Extractor.PdftotextTimeout,
 		PdftoppmTimeout:     cfg.Extractor.PdftoppmTimeout,
@@ -42,6 +45,7 @@ func TestPopplerIntegration(t *testing.T) {
 		Pages:               cfg.Extractor.Pages,
 		DetectVotingTables:  cfg.Extractor.DetectVotingTables,
 		TempDir:             tempDir,
+		Mode:                cfg.Extractor.Mode,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

@@ -45,7 +45,8 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - `minio.*` — endpoint/creds для MinIO + `artifacts_bucket` и `default_artifacts_prefix` по умолчанию.
 - `database.driver` / `database.dsn` — `postgres` или `sqlite`, DSN строки и параметры пула.
 - `storage.*` — таймауты HTTP-клиента к MinIO (`dial_timeout`, `read_write_timeout`, `operation_timeout`).
-- `extractor.mode` — режим извлечения (`layout`/`structured`), `extractor.detect_voting_tables` — включает детектор протоколов.
+- `extractor.mode` — режим извлечения для poppler (`layout` / `bbox`); от него зависит аргумент `pdftotext` (`-layout` или `-bbox`). `extractor.detect_voting_tables` — включает детектор протоколов.
+- `extractor.pdfinfo_path` / `extractor.pdftotext_path` / `extractor.pdftoppm_path` — явные пути к бинарям poppler (по умолчанию используются команды из `$PATH`).
 - `extractor.pages` — диапазон страниц (`all`, `1-3`, `odd`, т.д. — в зависимости от реализации пайплайна).
 - `observability.logging_enabled` / `observability.tracing.enabled` — включение логов и трассировки.
 

@@ -33,6 +33,9 @@ storage:
 
 extractor:
   mode: layout
+  pdfinfo_path: pdfinfo
+  pdftotext_path: pdftotext
+  pdftoppm_path: pdftoppm
   detect_voting_tables: true
   pages: all
   pdfinfo_timeout: 10s

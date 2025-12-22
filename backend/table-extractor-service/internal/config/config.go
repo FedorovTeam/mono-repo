@@ -60,6 +60,9 @@ type StorageConfig struct {
 
 type ExtractorConfig struct {
 	Mode               string        `yaml:"mode"`
+	PdfInfoPath        string        `yaml:"pdfinfo_path"`
+	PdftotextPath      string        `yaml:"pdftotext_path"`
+	PdftoppmPath       string        `yaml:"pdftoppm_path"`
 	DetectVotingTables bool          `yaml:"detect_voting_tables"`
 	Pages              string        `yaml:"pages"`
 	PdfInfoTimeout     time.Duration `yaml:"pdfinfo_timeout"`
@@ -115,6 +118,9 @@ func defaultConfig() Config {
 		},
 		Extractor: ExtractorConfig{
 			Mode:               "layout",
+			PdfInfoPath:        "pdfinfo",
+			PdftotextPath:      "pdftotext",
+			PdftoppmPath:       "pdftoppm",
 			DetectVotingTables: true,
 			Pages:              "all",
 			PdfInfoTimeout:     10 * time.Second,
