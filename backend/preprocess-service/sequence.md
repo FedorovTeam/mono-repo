@@ -14,11 +14,11 @@ sequenceDiagram
     alt Уже есть задача с тем же source_bucket/source_key/source_etag
         API->>Queue: SELECT ... WHERE source_bucket & source_key & source_etag
         Queue-->>API: Возвращает существующий job (pending/processing/done/failed/stopped) со счётчиками и таймингами
-        API-->>Client: job_id + статус + attempts/max_attempts + next_run_at + started_at/finished_at + target_media_type
+        API-->>Client: job_id + статус + processing_stage + stage_started_at/stage_updated_at + attempts/max_attempts + next_run_at + started_at/finished_at + target_media_type
     else Новая задача
         API->>Queue: INSERT status=pending, attempts=0, next_run_at=now(), target_bucket/key с дефолтами
         Queue-->>API: job_id сохранённой задачи
-        API-->>Client: job_id, status=pending, attempts=0, max_attempts=5, next_run_at=now()
+        API-->>Client: job_id, status=pending, processing_stage=downloading, stage_started_at=stage_updated_at=now(), attempts=0, max_attempts=5, next_run_at=now()
     end
 
     loop Каждые poll_interval
@@ -26,16 +26,19 @@ sequenceDiagram
         Worker->>Queue: SELECT status IN (pending, failed) AND next_run_at<=now() FOR UPDATE SKIP LOCKED
         alt Нашлась задача
             Queue-->>Worker: job для обработки
-            Worker->>Queue: UPDATE job SET status=processing, attempts=attempts+1, started_at=now()
+            Worker->>Queue: UPDATE job SET status=processing, attempts=attempts+1, started_at=now(), processing_stage=downloading, stage_started_at=now(), stage_updated_at=now()
             Worker->>Worker: prepare workspace
+            Worker->>Queue: UPDATE processing_stage=downloading, stage_updated_at=now()
             Worker->>Storage: Download source (If-Match=source_etag)
+            Worker->>Queue: UPDATE processing_stage=converting, stage_started_at=now(), stage_updated_at=now()
             Worker->>Converter: Convert в DOCX в workspace
+            Worker->>Queue: UPDATE processing_stage=uploading, stage_started_at=now(), stage_updated_at=now()
             Worker->>Storage: Upload target_bucket/target_key с media_type
             alt Успех
-                Worker->>Queue: UPDATE status=done, finished_at=now(), сбрасывает error_* и сохраняет target
-                Worker-->>Callback: POST {job_id, status=done, target_bucket, target_key}
+                Worker->>Queue: UPDATE status=done, finished_at=now(), сбрасывает error_* и сохраняет target, processing_stage=callback, stage_started_at=now(), stage_updated_at=now()
+                Worker-->>Callback: POST {job_id, status=done, target_bucket, target_key}, обновляет stage_updated_at
             else Ошибка обработки
-                Worker->>Queue: UPDATE status=failed/stopped, next_run_at=policy.nextRun, error_code/message/details
+                Worker->>Queue: UPDATE status=failed/stopped, next_run_at=policy.nextRun, error_code/message/details, stage_updated_at=now()
                 opt Только при status=stopped (постоянная ошибка или исчерпан лимит попыток)
                     Worker-->>Callback: POST {job_id, status=stopped, error}
                 end

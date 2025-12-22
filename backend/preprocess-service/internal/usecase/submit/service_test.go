@@ -130,15 +130,18 @@ func TestGetStatusReturnsJob(t *testing.T) {
 	}
 
 	job := domain.PreprocessJob{
-		ID:            "job-1",
-		DocumentID:    "doc-1",
-		SourceBucket:  "source",
-		SourceKey:     "file.docx",
-		SourceETag:    "etag",
-		Status:        domain.StatusPending,
-		ErrorDetails:  map[string]string{},
-		UpdatedAt:     time.Now(),
-		CorrelationID: "corr-1",
+		ID:              "job-1",
+		DocumentID:      "doc-1",
+		SourceBucket:    "source",
+		SourceKey:       "file.docx",
+		SourceETag:      "etag",
+		Status:          domain.StatusPending,
+		ErrorDetails:    map[string]string{},
+		UpdatedAt:       time.Now(),
+		CorrelationID:   "corr-1",
+		ProcessingStage: domain.StageDownloading,
+		StageStartedAt:  time.Now(),
+		StageUpdatedAt:  time.Now(),
 	}
 
 	if err := repo.Create(context.Background(), job); err != nil {

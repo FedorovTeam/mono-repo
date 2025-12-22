@@ -90,6 +90,9 @@ func (h *PreprocessHandler) SubmitPreprocess(ctx context.Context, req *preproces
 		StartedAt:       timestampOrNil(job.StartedAt),
 		FinishedAt:      timestampOrNil(job.FinishedAt),
 		TargetMediaType: job.TargetMediaType,
+		ProcessingStage: toProtoStage(job.ProcessingStage),
+		StageStartedAt:  timestampOrNil(job.StageStartedAt),
+		StageUpdatedAt:  timestampOrNil(job.StageUpdatedAt),
 	}, nil
 }
 
@@ -146,6 +149,9 @@ func (h *PreprocessHandler) GetPreprocessStatus(ctx context.Context, req *prepro
 		StartedAt:       timestampOrNil(job.StartedAt),
 		FinishedAt:      timestampOrNil(job.FinishedAt),
 		TargetMediaType: job.TargetMediaType,
+		ProcessingStage: toProtoStage(job.ProcessingStage),
+		StageStartedAt:  timestampOrNil(job.StageStartedAt),
+		StageUpdatedAt:  timestampOrNil(job.StageUpdatedAt),
 	}, nil
 }
 
