@@ -46,6 +46,18 @@ stage_worker:
   retry_delay: 1m
   grace_period: 15s
   wait_markdown: true
+router:
+  preprocess_enabled: false
+  preprocess_extensions:
+    - doc
+    - pdf
+  repositories:
+    - owner: "FedorovTeam"
+      repository: "knowledge-base"
+      preprocess_enabled: true
+      preprocess_extensions:
+        - doc
+        - pdf
 observability:
   logs:
     enabled: true

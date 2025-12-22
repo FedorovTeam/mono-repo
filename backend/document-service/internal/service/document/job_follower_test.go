@@ -12,6 +12,7 @@ type followerRepo struct {
 	jobs          []domain.ProcessingJob
 	createdJobs   []domain.ProcessingJob
 	updatedStatus []domain.DocumentStatus
+	document      *domain.Document
 }
 
 func (r *followerRepo) ListFinishedJobs(ctx context.Context, limit int, postpone time.Duration) ([]domain.ProcessingJob, error) {
@@ -19,6 +20,9 @@ func (r *followerRepo) ListFinishedJobs(ctx context.Context, limit int, postpone
 }
 
 func (r *followerRepo) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
+	if r.document != nil {
+		return r.document, nil
+	}
 	return &domain.Document{
 		ID:                id,
 		Status:            domain.DocumentStatusStoredOriginal,
@@ -63,7 +67,7 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 		PRBody:        "PR body",
 		AuthorName:    "Author",
 		AuthorEmail:   "author@example.com",
-	})
+	}, domain.NewStageRouter(domain.RouterRules{}))
 	if err := follower.reconcile(context.Background()); err != nil {
 		t.Fatalf("unexpected reconcile error: %v", err)
 	}
@@ -106,12 +110,43 @@ func TestJobFollowerMarksFailed(t *testing.T) {
 		}},
 	}
 
-	follower := NewJobFollower(repo, 10, time.Minute, PublishDefaults{})
+	follower := NewJobFollower(repo, 10, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{}))
 	if err := follower.reconcile(context.Background()); err != nil {
 		t.Fatalf("unexpected reconcile error: %v", err)
 	}
 
 	if len(repo.updatedStatus) != 1 || repo.updatedStatus[0] != domain.DocumentStatusFailed {
 		t.Fatalf("document status was not marked as failed: %+v", repo.updatedStatus)
+	}
+}
+
+func TestJobFollowerSchedulesPreprocessWhenEnabled(t *testing.T) {
+	router := domain.NewStageRouter(domain.RouterRules{PreprocessEnabled: true})
+	repo := &followerRepo{
+		jobs: []domain.ProcessingJob{
+			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted},
+		},
+		document: &domain.Document{
+			ID:                "doc-1",
+			Status:            domain.DocumentStatusStoredOriginal,
+			OriginalBucket:    "orig-bucket",
+			OriginalObjectKey: "incoming/file.doc",
+		},
+	}
+
+	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, router)
+	if err := follower.reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected reconcile error: %v", err)
+	}
+
+	if len(repo.createdJobs) != 1 {
+		t.Fatalf("expected 1 scheduled job, got %d", len(repo.createdJobs))
+	}
+	if repo.createdJobs[0].Stage != domain.JobStagePreprocessToDocx {
+		t.Fatalf("expected preprocess_to_docx stage, got %s", repo.createdJobs[0].Stage)
+	}
+	payload := domain.PreprocessPayloadFromMap(repo.createdJobs[0].Payload)
+	if payload.OriginalObjectKey != "incoming/file.doc" || payload.OriginalBucket != "orig-bucket" {
+		t.Fatalf("unexpected preprocess payload: %+v", payload)
 	}
 }

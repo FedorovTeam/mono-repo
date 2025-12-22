@@ -77,6 +77,7 @@ type JobStage string
 
 const (
 	JobStageStoreOriginal     JobStage = "store_original"
+	JobStagePreprocessToDocx  JobStage = "preprocess_to_docx"
 	JobStageConvertToMarkdown JobStage = "convert_to_markdown"
 	JobStagePublishToGitHub   JobStage = "publish_to_github"
 )
@@ -94,7 +95,7 @@ const (
 // ValidateJobStage проверяет известность стадии.
 func ValidateJobStage(stage JobStage) error {
 	switch stage {
-	case JobStageStoreOriginal, JobStageConvertToMarkdown, JobStagePublishToGitHub:
+	case JobStageStoreOriginal, JobStagePreprocessToDocx, JobStageConvertToMarkdown, JobStagePublishToGitHub:
 		return nil
 	default:
 		return errors.New("unsupported job stage")

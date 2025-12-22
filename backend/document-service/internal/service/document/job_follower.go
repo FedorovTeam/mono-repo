@@ -33,14 +33,18 @@ type JobFollower struct {
 	postpone  time.Duration
 	metrics   *workerMetrics
 	defaults  PublishDefaults
+	router    *domain.StageRouter
 }
 
-func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration, defaults PublishDefaults) *JobFollower {
+func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration, defaults PublishDefaults, router *domain.StageRouter) *JobFollower {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
 	if postpone <= 0 {
 		postpone = 5 * time.Minute
+	}
+	if router == nil {
+		router = domain.NewStageRouter(domain.RouterRules{})
 	}
 
 	return &JobFollower{
@@ -49,6 +53,7 @@ func NewJobFollower(repo jobFollowerRepo, batchSize int, postpone time.Duration,
 		postpone:  postpone,
 		metrics:   newWorkerMetrics("job_follower"),
 		defaults:  defaults,
+		router:    router,
 	}
 }
 
@@ -132,16 +137,32 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 
 	switch job.Stage {
 	case domain.JobStageStoreOriginal:
-		payload := domain.ConvertPayload{
-			OriginalBucket:     doc.OriginalBucket,
-			OriginalObjectKey:  doc.OriginalObjectKey,
-			MarkdownBucket:     doc.MarkdownBucket,
-			MarkdownObjectKey:  doc.MarkdownObjectKey,
-			JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
-		}.ToMap()
+		nextStage := f.router.NextStageAfterStore(doc)
+		switch nextStage {
+		case domain.JobStagePreprocessToDocx:
+			payload := domain.PreprocessPayload{
+				OriginalBucket:     doc.OriginalBucket,
+				OriginalObjectKey:  doc.OriginalObjectKey,
+				FilenameExtension:  fileExtension(firstNonEmpty(doc.OriginalObjectKey, doc.Name)),
+				JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
+			}.ToMap()
+			event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: preprocess"}
+			if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStagePreprocessToDocx, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
+				return fmt.Errorf("enqueue preprocess for %s: %w", doc.ID, err)
+			}
+		default:
+			payload := f.convertPayloadForDocument(doc, domain.ConvertPayload{}, correlationFromDoc(doc)).ToMap()
+			event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
+			if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
+				return fmt.Errorf("enqueue convert for %s: %w", doc.ID, err)
+			}
+		}
+	case domain.JobStagePreprocessToDocx:
+		overrides, correlationID := preprocessConversion(job.Payload, doc)
+		payload := f.convertPayloadForDocument(doc, overrides, correlationID).ToMap()
 		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
 		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
-			return fmt.Errorf("enqueue convert for %s: %w", doc.ID, err)
+			return fmt.Errorf("enqueue convert after preprocess for %s: %w", doc.ID, err)
 		}
 	case domain.JobStageConvertToMarkdown:
 		payload := domain.PublishPayload{
@@ -210,4 +231,43 @@ func correlationFromDoc(doc *domain.Document) string {
 		return doc.WorkflowID
 	}
 	return doc.ID
+}
+
+func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides domain.ConvertPayload, correlationID string) domain.ConvertPayload {
+	payload := domain.ConvertPayload{
+		OriginalBucket:     firstNonEmpty(overrides.OriginalBucket, doc.OriginalBucket),
+		OriginalObjectKey:  firstNonEmpty(overrides.OriginalObjectKey, doc.OriginalObjectKey),
+		MarkdownBucket:     firstNonEmpty(overrides.MarkdownBucket, doc.MarkdownBucket),
+		MarkdownObjectKey:  firstNonEmpty(overrides.MarkdownObjectKey, doc.MarkdownObjectKey),
+		FilenameExtension:  overrides.FilenameExtension,
+		JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationID},
+	}
+
+	if payload.FilenameExtension == "" {
+		payload.FilenameExtension = firstNonEmpty(
+			overrides.FilenameExtension,
+			fileExtension(payload.OriginalObjectKey),
+			fileExtension(doc.OriginalObjectKey),
+			fileExtension(doc.Name),
+		)
+	}
+
+	return payload
+}
+
+func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.ConvertPayload, string) {
+	preprocessPayload := domain.PreprocessPayloadFromMap(payload)
+	originalBucket := firstNonEmpty(preprocessPayload.PreprocessedBucket, preprocessPayload.OriginalBucket)
+	originalKey := firstNonEmpty(preprocessPayload.PreprocessedObjectKey, preprocessPayload.OriginalObjectKey)
+
+	correlationID := correlationFromDoc(doc)
+	if preprocessPayload.CorrelationID != "" {
+		correlationID = preprocessPayload.CorrelationID
+	}
+
+	return domain.ConvertPayload{
+		OriginalBucket:    originalBucket,
+		OriginalObjectKey: originalKey,
+		FilenameExtension: firstNonEmpty(preprocessPayload.FilenameExtension, "docx"),
+	}, correlationID
 }

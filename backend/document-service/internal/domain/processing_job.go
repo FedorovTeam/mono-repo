@@ -64,6 +64,21 @@ type ConvertPayload struct {
 	FilenameExtension string
 }
 
+// PreprocessPayload описывает данные для шага преобразования в DOCX.
+type PreprocessPayload struct {
+	JobPayloadMetadata
+	OriginalBucket         string
+	OriginalObjectKey      string
+	TargetBucket           string
+	TargetObjectKey        string
+	PreprocessJobID        string
+	PreprocessedBucket     string
+	PreprocessedObjectKey  string
+	FilenameExtension      string
+	PreprocessStatus       string
+	PreprocessErrorMessage string
+}
+
 // PublishPayload описывает данные для шага публикации в GitHub.
 type PublishPayload struct {
 	JobPayloadMetadata
@@ -162,6 +177,60 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		QueueID:            stringFromMap(payload, "queue_id"),
 		Status:             stringFromMap(payload, "status"),
 		FilenameExtension:  stringFromMap(payload, "filename_extension"),
+	}
+}
+
+// ToMap преобразует PreprocessPayload в map для хранения в БД.
+func (p PreprocessPayload) ToMap() map[string]any {
+	res := map[string]any{}
+	if p.OriginalBucket != "" {
+		res["original_bucket"] = p.OriginalBucket
+	}
+	if p.OriginalObjectKey != "" {
+		res["original_object_key"] = p.OriginalObjectKey
+	}
+	if p.TargetBucket != "" {
+		res["target_bucket"] = p.TargetBucket
+	}
+	if p.TargetObjectKey != "" {
+		res["target_object_key"] = p.TargetObjectKey
+	}
+	if p.PreprocessJobID != "" {
+		res["preprocess_job_id"] = p.PreprocessJobID
+	}
+	if p.PreprocessedBucket != "" {
+		res["preprocessed_bucket"] = p.PreprocessedBucket
+	}
+	if p.PreprocessedObjectKey != "" {
+		res["preprocessed_object_key"] = p.PreprocessedObjectKey
+	}
+	if p.FilenameExtension != "" {
+		res["filename_extension"] = p.FilenameExtension
+	}
+	if p.PreprocessStatus != "" {
+		res["preprocess_status"] = p.PreprocessStatus
+	}
+	if p.PreprocessErrorMessage != "" {
+		res["preprocess_error_message"] = p.PreprocessErrorMessage
+	}
+	p.JobPayloadMetadata.applyTo(res)
+	return res
+}
+
+// PreprocessPayloadFromMap восстанавливает структуру из map.
+func PreprocessPayloadFromMap(payload map[string]any) PreprocessPayload {
+	return PreprocessPayload{
+		JobPayloadMetadata:     metadataFromMap(payload),
+		OriginalBucket:         stringFromMap(payload, "original_bucket"),
+		OriginalObjectKey:      stringFromMap(payload, "original_object_key"),
+		TargetBucket:           stringFromMap(payload, "target_bucket"),
+		TargetObjectKey:        stringFromMap(payload, "target_object_key"),
+		PreprocessJobID:        stringFromMap(payload, "preprocess_job_id"),
+		PreprocessedBucket:     stringFromMap(payload, "preprocessed_bucket"),
+		PreprocessedObjectKey:  stringFromMap(payload, "preprocessed_object_key"),
+		FilenameExtension:      stringFromMap(payload, "filename_extension"),
+		PreprocessStatus:       stringFromMap(payload, "preprocess_status"),
+		PreprocessErrorMessage: stringFromMap(payload, "preprocess_error_message"),
 	}
 }
 

@@ -15,10 +15,14 @@ type UpdateStatus struct {
 	repo       Repository
 	scheduler  JobScheduler
 	statusRepo StatusUpdater
+	router     *domain.StageRouter
 }
 
-func NewUpdateStatus(repo Repository) *UpdateStatus {
-	return &UpdateStatus{repo: repo, scheduler: repo, statusRepo: repo}
+func NewUpdateStatus(repo Repository, router *domain.StageRouter) *UpdateStatus {
+	if router == nil {
+		router = domain.NewStageRouter(domain.RouterRules{})
+	}
+	return &UpdateStatus{repo: repo, scheduler: repo, statusRepo: repo, router: router}
 }
 
 func (uc *UpdateStatus) Execute(ctx context.Context, in UpdateStatusInput) (*domain.Document, error) {
@@ -63,7 +67,7 @@ func (uc *UpdateStatus) enqueueNextStage(ctx context.Context, doc *domain.Docume
 	var stage domain.JobStage
 	switch doc.Status {
 	case domain.DocumentStatusStoredOriginal:
-		stage = domain.JobStageConvertToMarkdown
+		stage = uc.router.NextStageAfterStore(doc)
 	case domain.DocumentStatusConvertedToMarkdown:
 		stage = domain.JobStagePublishToGitHub
 	default:
