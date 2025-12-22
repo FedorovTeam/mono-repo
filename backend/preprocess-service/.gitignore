@@ -1,0 +1,12 @@
+bin/
+vendor/
+.env
+*.log
+.idea/
+*.swp
+*.swo
+.DS_Store
+coverage.out
+dev.yaml
+testdata/output/
+testdata/source/

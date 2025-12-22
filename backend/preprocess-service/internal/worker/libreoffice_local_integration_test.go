@@ -62,8 +62,12 @@ func TestLibreOfficeLocalConversion(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(localSourcePath), 0o755); err != nil {
 		t.Fatalf("prepare local source dir: %v", err)
 	}
-	if err := copyFile(filepath.Join("testdata", "sample.doc"), localSourcePath); err != nil {
-		t.Fatalf("copy source file: %v", err)
+	fixture := filepath.Join(filepath.Dir(cfg.Preprocess.LocalSourceDir), "sample.doc")
+	// при твоём конфиге LocalSourceDir = .../preprocess-service/testdata/source
+	// значит fixture = .../preprocess-service/testdata/sample.doc
+
+	if err := copyFile(fixture, localSourcePath); err != nil {
+		t.Fatalf("copy source file (%s): %v", fixture, err)
 	}
 
 	wsManager, err := workspace.NewFSManager(cfg.Preprocess.WorkingDir, cfg.Preprocess.OutputDir)
