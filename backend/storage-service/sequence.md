@@ -20,7 +20,7 @@ sequenceDiagram
         alt Задача найдена
             Storage->>Postgres: UPDATE processing_jobs SET status='in_progress' + job_events(event_type=processing)
             alt Обновление документа прошло успешно
-                Storage->>Postgres: UPDATE documents SET status='StoredOriginal', actual_status='StoredOriginal', error_reason=''
+                Storage->>Postgres: UPDATE documents SET status='StoredOriginal', error_reason=''
                 Storage->>Postgres: INSERT document_status_logs(workflow_id из payload.correlation_id, reason='processed by storage worker')
                 Storage->>Postgres: UPDATE processing_jobs SET status='completed' + job_events(event_type=completed)
             else Ошибка обновления документа
