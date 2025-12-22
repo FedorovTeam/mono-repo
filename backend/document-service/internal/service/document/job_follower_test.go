@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"backend-document-service/internal/domain"
 )
 
@@ -36,6 +38,7 @@ func (r *followerRepo) GetDocument(ctx context.Context, id string) (*domain.Docu
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "md/key",
 		WorkflowID:        "corr-1",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalETag: "etag-default"}},
 	}, nil
 }
 
@@ -56,7 +59,7 @@ func (r *followerRepo) UpdateProcessingJob(ctx context.Context, taskID string, s
 func TestJobFollowerSchedulesNextStages(t *testing.T) {
 	repo := &followerRepo{
 		jobs: []domain.ProcessingJob{
-			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted},
+			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted, Payload: domain.StoreOriginalPayload{OriginalETag: "etag-default"}.ToMap()},
 			{TaskID: "job-2", DocumentID: "doc-1", Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusCompleted},
 		},
 	}
@@ -68,35 +71,21 @@ func TestJobFollowerSchedulesNextStages(t *testing.T) {
 		AuthorName:    "Author",
 		AuthorEmail:   "author@example.com",
 	}, domain.NewStageRouter(domain.RouterRules{}))
-	if err := follower.reconcile(context.Background()); err != nil {
-		t.Fatalf("unexpected reconcile error: %v", err)
-	}
 
-	if len(repo.createdJobs) != 2 {
-		t.Fatalf("expected 2 scheduled jobs, got %d", len(repo.createdJobs))
-	}
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
 
-	if repo.createdJobs[0].Stage != domain.JobStageConvertToMarkdown {
-		t.Fatalf("expected convert stage, got %s", repo.createdJobs[0].Stage)
-	}
+	require.Len(t, repo.createdJobs, 2)
+
+	require.Equal(t, domain.JobStageConvertToMarkdown, repo.createdJobs[0].Stage)
 	convertPayload := domain.ConvertPayloadFromMap(repo.createdJobs[0].Payload)
-	if convertPayload.OriginalBucket != "orig-bucket" {
-		t.Fatalf("unexpected payload for convert: %+v", repo.createdJobs[0].Payload)
-	}
+	require.Equal(t, "orig-bucket", convertPayload.OriginalBucket)
 
-	if repo.createdJobs[1].Stage != domain.JobStagePublishToGitHub {
-		t.Fatalf("expected publish stage, got %s", repo.createdJobs[1].Stage)
-	}
+	require.Equal(t, domain.JobStagePublishToGitHub, repo.createdJobs[1].Stage)
 	publishPayload := domain.PublishPayloadFromMap(repo.createdJobs[1].Payload)
-	if publishPayload.Repository != "org/repo" {
-		t.Fatalf("unexpected repository in payload: %+v", repo.createdJobs[1].Payload)
-	}
-	if publishPayload.CommitMessage != "commit message" {
-		t.Fatalf("unexpected commit_message in payload: %+v", repo.createdJobs[1].Payload)
-	}
-	if publishPayload.AuthorEmail != "author@example.com" {
-		t.Fatalf("author fields were not propagated: %+v", repo.createdJobs[1].Payload)
-	}
+	require.Equal(t, "org/repo", publishPayload.Repository)
+	require.Equal(t, "commit message", publishPayload.CommitMessage)
+	require.Equal(t, "author@example.com", publishPayload.AuthorEmail)
 }
 
 func TestJobFollowerMarksFailed(t *testing.T) {
@@ -111,42 +100,110 @@ func TestJobFollowerMarksFailed(t *testing.T) {
 	}
 
 	follower := NewJobFollower(repo, 10, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{}))
-	if err := follower.reconcile(context.Background()); err != nil {
-		t.Fatalf("unexpected reconcile error: %v", err)
-	}
 
-	if len(repo.updatedStatus) != 1 || repo.updatedStatus[0] != domain.DocumentStatusFailed {
-		t.Fatalf("document status was not marked as failed: %+v", repo.updatedStatus)
-	}
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.updatedStatus, 1)
+	require.Equal(t, domain.DocumentStatusFailed, repo.updatedStatus[0])
 }
 
 func TestJobFollowerSchedulesPreprocessWhenEnabled(t *testing.T) {
 	router := domain.NewStageRouter(domain.RouterRules{PreprocessEnabled: true})
 	repo := &followerRepo{
 		jobs: []domain.ProcessingJob{
-			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted},
+			{TaskID: "job-1", DocumentID: "doc-1", Stage: domain.JobStageStoreOriginal, Status: domain.JobStatusCompleted, Payload: domain.StoreOriginalPayload{OriginalETag: "etag-preprocess"}.ToMap()},
 		},
 		document: &domain.Document{
 			ID:                "doc-1",
 			Status:            domain.DocumentStatusStoredOriginal,
 			OriginalBucket:    "orig-bucket",
 			OriginalObjectKey: "incoming/file.doc",
+			Versions:          []domain.DocumentVersion{{Version: 1, OriginalETag: "etag-preprocess"}},
 		},
 	}
 
 	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, router)
-	if err := follower.reconcile(context.Background()); err != nil {
-		t.Fatalf("unexpected reconcile error: %v", err)
+
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.createdJobs, 1)
+	require.Equal(t, domain.JobStagePreprocessToDocx, repo.createdJobs[0].Stage)
+	payload := domain.PreprocessPayloadFromMap(repo.createdJobs[0].Payload)
+	require.Equal(t, "incoming/file.doc", payload.OriginalObjectKey)
+	require.Equal(t, "orig-bucket", payload.OriginalBucket)
+	require.Equal(t, "etag-preprocess", payload.OriginalETag)
+}
+
+func TestScheduleNextUsesOriginalETag(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-id",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.pdf",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalETag: "etag-1"}},
+	}
+	repo := &followerRepo{document: doc}
+	follower := NewJobFollower(repo, 1, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{PreprocessEnabled: true}))
+	job := domain.ProcessingJob{
+		DocumentID: doc.ID,
+		Stage:      domain.JobStageStoreOriginal,
+		Status:     domain.JobStatusCompleted,
+		Payload:    domain.StoreOriginalPayload{OriginalETag: "etag-from-job"}.ToMap(),
 	}
 
-	if len(repo.createdJobs) != 1 {
-		t.Fatalf("expected 1 scheduled job, got %d", len(repo.createdJobs))
-	}
-	if repo.createdJobs[0].Stage != domain.JobStagePreprocessToDocx {
-		t.Fatalf("expected preprocess_to_docx stage, got %s", repo.createdJobs[0].Stage)
-	}
+	err := follower.scheduleNext(context.Background(), job, doc)
+
+	require.NoError(t, err)
+	require.Len(t, repo.createdJobs, 1)
 	payload := domain.PreprocessPayloadFromMap(repo.createdJobs[0].Payload)
-	if payload.OriginalObjectKey != "incoming/file.doc" || payload.OriginalBucket != "orig-bucket" {
-		t.Fatalf("unexpected preprocess payload: %+v", payload)
+	require.Equal(t, "etag-1", payload.OriginalETag)
+}
+
+func TestScheduleNextFailsWithoutOriginalETag(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-id",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.pdf",
 	}
+	repo := &followerRepo{document: doc}
+	follower := NewJobFollower(repo, 1, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{PreprocessEnabled: true}))
+	job := domain.ProcessingJob{
+		DocumentID: doc.ID,
+		Stage:      domain.JobStageStoreOriginal,
+		Status:     domain.JobStatusCompleted,
+		Payload:    map[string]any{},
+	}
+
+	err := follower.scheduleNext(context.Background(), job, doc)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "etag")
+	require.Empty(t, repo.createdJobs)
+}
+
+func TestScheduleNextFallsBackToJobPayloadETag(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-id",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "file.pdf",
+	}
+	repo := &followerRepo{document: doc}
+	follower := NewJobFollower(repo, 1, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{PreprocessEnabled: true}))
+	job := domain.ProcessingJob{
+		DocumentID: doc.ID,
+		Stage:      domain.JobStageStoreOriginal,
+		Status:     domain.JobStatusCompleted,
+		Payload:    domain.StoreOriginalPayload{OriginalETag: "etag-from-job"}.ToMap(),
+	}
+
+	err := follower.scheduleNext(context.Background(), job, doc)
+
+	require.NoError(t, err)
+	require.Len(t, repo.createdJobs, 1)
+	payload := domain.PreprocessPayloadFromMap(repo.createdJobs[0].Payload)
+	require.Equal(t, "etag-from-job", payload.OriginalETag)
 }
