@@ -77,6 +77,7 @@ type PreprocessPayload struct {
 	FilenameExtension      string
 	PreprocessStatus       string
 	PreprocessErrorMessage string
+	PollAttempts           int
 }
 
 // PublishPayload описывает данные для шага публикации в GitHub.
@@ -213,6 +214,9 @@ func (p PreprocessPayload) ToMap() map[string]any {
 	if p.PreprocessErrorMessage != "" {
 		res["preprocess_error_message"] = p.PreprocessErrorMessage
 	}
+	if p.PollAttempts > 0 {
+		res["poll_attempts"] = p.PollAttempts
+	}
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }
@@ -231,6 +235,7 @@ func PreprocessPayloadFromMap(payload map[string]any) PreprocessPayload {
 		FilenameExtension:      stringFromMap(payload, "filename_extension"),
 		PreprocessStatus:       stringFromMap(payload, "preprocess_status"),
 		PreprocessErrorMessage: stringFromMap(payload, "preprocess_error_message"),
+		PollAttempts:           intFromMap(payload, "poll_attempts"),
 	}
 }
 
@@ -312,4 +317,26 @@ func stringFromMap(payload map[string]any, key string) string {
 		}
 	}
 	return ""
+}
+
+func intFromMap(payload map[string]any, key string) int {
+	if payload == nil {
+		return 0
+	}
+	val, ok := payload[key]
+	if !ok {
+		return 0
+	}
+	switch v := val.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
 }

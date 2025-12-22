@@ -21,6 +21,7 @@ type Config struct {
 		MarkdownBucket string `yaml:"markdown_bucket"`
 	} `yaml:"storage"`
 	Services struct {
+		PreprocessService      string `yaml:"preprocess_service"`
 		StorageService         string `yaml:"storage_service"`
 		TransformerService     string `yaml:"transformer_service"`
 		GithubPublisherService string `yaml:"github_publisher_service"`
@@ -136,7 +137,7 @@ func (c *Config) Validate() error {
 	if c.Storage.OriginalBucket == "" || c.Storage.MarkdownBucket == "" {
 		return fmt.Errorf("storage buckets configuration is incomplete")
 	}
-	if c.Services.StorageService == "" || c.Services.TransformerService == "" || c.Services.GithubPublisherService == "" {
+	if c.Services.PreprocessService == "" || c.Services.StorageService == "" || c.Services.TransformerService == "" || c.Services.GithubPublisherService == "" {
 		return fmt.Errorf("services endpoints must be provided")
 	}
 

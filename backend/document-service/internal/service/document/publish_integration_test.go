@@ -20,7 +20,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 
 		repo := &integrationRepo{}
 		publisher := &recordingPublisher{}
-		activities := NewActivities(repo, nil, publisher)
+		activities := NewActivities(repo, nil, nil, publisher)
 
 		_, err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-1",
@@ -53,7 +53,7 @@ func TestPublishMarkdownWithStoredContentAndGithubResponses(t *testing.T) {
 
 		repo := &integrationRepo{}
 		publisher := &recordingPublisher{response: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_TEMPORARY_FAILURE, ErrorCode: githubpublisherv1.PublishErrorCode_PUBLISH_ERROR_CODE_TIMEOUT, ErrorMessage: "timeout"}}
-		activities := NewActivities(repo, nil, publisher)
+		activities := NewActivities(repo, nil, nil, publisher)
 
 		_, err := activities.PublishMarkdown(context.Background(), publishInput{
 			DocumentID:        "doc-missing",

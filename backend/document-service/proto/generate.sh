@@ -9,4 +9,5 @@ protoc -I. -I"$MOD_CACHE" -I/usr/include \
   backend/document/v1/document.proto \
   backend/storage/v1/storage.proto \
   backend/transformer/v1/transformer.proto \
-  backend/githubpublisher/v1/githubpublisher.proto
+  backend/githubpublisher/v1/githubpublisher.proto \
+  backend/preprocess/v1/preprocess.proto
