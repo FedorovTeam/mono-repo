@@ -10,7 +10,7 @@ sequenceDiagram
     participant TR as TransformerService (gRPC)
     participant GP as GithubPublisherService (gRPC)
     participant UR as UploadReconciler (cron)
-    participant SW as StageWorker (store/convert/publish)
+    participant SW as StageWorker (store/preprocess/convert/publish)
     participant F as JobFollower (cron)
     participant PR as ProcessingReconciler (cron)
 
@@ -34,7 +34,13 @@ sequenceDiagram
 
     Note over F,S: JobFollower читает completed/failed после postpone окна
     alt store_original completed
-        F->>S: INSERT job convert_to_markdown(pending, payload=original_bucket/object_key, markdown_bucket/object_key, correlation_id=workflow_id)
+        alt preprocess.enabled AND ext in (doc, pdf)
+            F->>S: INSERT job preprocess_to_docx(pending, payload=original_bucket/object_key, correlation_id=workflow_id)
+        else docx/other
+            F->>S: INSERT job convert_to_markdown(pending, payload=original_bucket/object_key, markdown_bucket/object_key, correlation_id=workflow_id)
+        end
+    else preprocess_to_docx completed
+        F->>S: INSERT job convert_to_markdown(pending, payload=preprocessed_bucket/object_key?, markdown_bucket/object_key, correlation_id=workflow_id)
     else convert_to_markdown completed
         F->>S: INSERT job publish_to_github(pending, payload=markdown_bucket/object_key, repo/branch/base_branch/path, create_pr, commit_message/pr_title/pr_body, author_*, correlation_id=workflow_id)
     else любой failed
@@ -42,7 +48,7 @@ sequenceDiagram
         F->>S: UPDATE processing_jobs status=failed {handled}
     end
 
-    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false)
+    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа или preprocessed_bucket/key, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false)
     alt Документ уже Converted/Published
         SW-->>S: Activities.MarkConverted (no-op), job_event completed
     else Временная gRPC ошибка (Unavailable/ResourceExhausted/...)

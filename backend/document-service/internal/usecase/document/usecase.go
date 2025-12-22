@@ -12,14 +12,19 @@ type UseCase struct {
 	confirmUpload *ConfirmUpload
 	updateStatus  *UpdateStatus
 	repo          Repository
+	router        *domain.StageRouter
 }
 
-func New(repo Repository, storage Storage, defaults Defaults) *UseCase {
+func New(repo Repository, storage Storage, defaults Defaults, router *domain.StageRouter) *UseCase {
+	if router == nil {
+		router = domain.NewStageRouter(domain.RouterRules{})
+	}
 	return &UseCase{
 		create:        NewCreateDocument(repo, defaults),
 		confirmUpload: NewConfirmUpload(repo, storage),
-		updateStatus:  NewUpdateStatus(repo),
+		updateStatus:  NewUpdateStatus(repo, router),
 		repo:          repo,
+		router:        router,
 	}
 }
 

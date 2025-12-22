@@ -411,7 +411,6 @@ func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 		MarkdownBucket:    "md-bucket",
 		MarkdownObjectKey: "path/doc.md",
 		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "path/doc", MarkdownObjectKey: "path/doc.md"}},
-		ForceOCR:          true,
 	}
 
 	repo := &publishRepoStub{doc: doc}
@@ -419,7 +418,8 @@ func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 	activities := NewActivities(repo, transformer, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
-	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-ocr", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	job := domain.ProcessingJob{TaskID: "job-ocr", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: map[string]any{"force_ocr": true}}
+	result, err := worker.handleConvert(context.Background(), job)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 	if payload.FilenameExtension != "pdf" {
 		t.Fatalf("expected filename extension in payload, got %v", result.Payload)
 	}
-	if payload.ForceOCR != nil {
+	if _, ok := result.Payload["force_ocr"]; ok {
 		t.Fatalf("expected force_ocr to be omitted from payload, got %v", result.Payload)
 	}
 }

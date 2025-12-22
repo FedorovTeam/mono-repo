@@ -117,7 +117,9 @@ func main() {
 		BaseBranch:     cfg.Github.BaseBranch,
 	}
 
-	usecase := docusecase.New(repo, storageAdapter, defaults)
+	router := newStageRouter(cfg.Router)
+
+	usecase := docusecase.New(repo, storageAdapter, defaults, router)
 
 	activities := docservice.NewActivities(
 		repo,
@@ -156,6 +158,7 @@ func main() {
 		cfg.JobFollower.BatchSize,
 		cfg.JobFollower.RescheduleAfter,
 		publishDefaults,
+		router,
 	)
 
 	workers := []docservice.PeriodicWorker{
@@ -183,4 +186,20 @@ func main() {
 		log.Printf("service stopped: %v", err)
 		os.Exit(1)
 	}
+}
+
+func newStageRouter(cfg config.Router) *domain.StageRouter {
+	rules := domain.RouterRules{
+		PreprocessEnabled:    cfg.PreprocessEnabled,
+		PreprocessExtensions: cfg.PreprocessExtensions,
+	}
+	for _, rule := range cfg.RepositoryRules {
+		rules.RepositoryRules = append(rules.RepositoryRules, domain.RepositoryRouterRule{
+			Owner:                rule.Owner,
+			Repository:           rule.Repository,
+			PreprocessEnabled:    rule.PreprocessEnabled,
+			PreprocessExtensions: rule.PreprocessExtensions,
+		})
+	}
+	return domain.NewStageRouter(rules)
 }

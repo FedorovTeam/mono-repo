@@ -42,6 +42,7 @@ type Config struct {
 	Reconciler    Reconciler    `yaml:"reconciler"`
 	JobFollower   JobFollower   `yaml:"job_follower"`
 	StageWorker   StageWorker   `yaml:"stage_worker"`
+	Router        Router        `yaml:"router"`
 }
 
 type Observability struct {
@@ -94,6 +95,19 @@ type BackoffConfig struct {
 	Multiplier float64       `yaml:"multiplier"`
 	Jitter     float64       `yaml:"jitter"`
 	MaxDelay   time.Duration `yaml:"max_delay"`
+}
+
+type Router struct {
+	PreprocessEnabled    bool                   `yaml:"preprocess_enabled"`
+	PreprocessExtensions []string               `yaml:"preprocess_extensions"`
+	RepositoryRules      []RepositoryRouterRule `yaml:"repositories"`
+}
+
+type RepositoryRouterRule struct {
+	Owner                string   `yaml:"owner"`
+	Repository           string   `yaml:"repository"`
+	PreprocessEnabled    *bool    `yaml:"preprocess_enabled"`
+	PreprocessExtensions []string `yaml:"preprocess_extensions"`
 }
 
 func Load(path string) (*Config, error) {
@@ -163,5 +177,42 @@ func (c *Config) Validate() error {
 	if strings.TrimSpace(c.Github.AuthorName) == "" || strings.TrimSpace(c.Github.AuthorEmail) == "" {
 		return fmt.Errorf("github.author_name and github.author_email are required")
 	}
+	c.Router.normalize()
+	if err := c.Router.validate(); err != nil {
+		return fmt.Errorf("router: %w", err)
+	}
 	return nil
+}
+
+func (r *Router) normalize() {
+	r.PreprocessExtensions = normalizeExtensions(r.PreprocessExtensions)
+	if len(r.PreprocessExtensions) == 0 {
+		r.PreprocessExtensions = []string{"doc", "pdf"}
+	}
+	for i := range r.RepositoryRules {
+		r.RepositoryRules[i].PreprocessExtensions = normalizeExtensions(r.RepositoryRules[i].PreprocessExtensions)
+	}
+}
+
+func (r Router) validate() error {
+	for i, rule := range r.RepositoryRules {
+		if strings.TrimSpace(rule.Owner) == "" && strings.TrimSpace(rule.Repository) == "" {
+			return fmt.Errorf("repositories[%d]: owner or repository is required", i)
+		}
+	}
+	return nil
+}
+
+func normalizeExtensions(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, val := range values {
+		ext := strings.TrimSpace(val)
+		if ext == "" {
+			continue
+		}
+		ext = strings.TrimPrefix(ext, ".")
+		ext = strings.ToLower(ext)
+		result = append(result, ext)
+	}
+	return result
 }
