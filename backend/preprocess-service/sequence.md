@@ -1,22 +1,52 @@
-# Последовательность Submit → очередь → воркер → MinIO → callback
+# Динамика постановки, обработки и обратного вызова
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Preprocess as preprocess-service
-    participant Queue as Очередь задач (PostgreSQL)
+    participant API as gRPC API (preprocess-service)
+    participant Queue as preprocess_queue (PostgreSQL)
     participant Worker as Воркер предобработки
-    participant MinIO
+    participant Storage as Хранилище (MinIO/FS)
+    participant Converter as LibreOffice
     participant Callback as callback_url
 
-    Client->>Preprocess: SubmitPreprocess(source_bucket, source_key, source_etag, callback_url)
-    Preprocess-->>Client: job_id (PENDING или существующий)
-    Preprocess->>Queue: Сохраняет задание PENDING
-    Worker->>Queue: Забирает запись
-    Worker->>MinIO: Читает source_bucket/source_key по etag
-    Worker->>MinIO: Сохраняет результат target_bucket/target_key (docx)
-    Worker->>Preprocess: Обновляет статус COMPLETED/FAILED
-    Client->>Preprocess: GetPreprocessStatus(job_id)
-    Preprocess-->>Client: Текущий статус + путь к результату
-    Worker-->>Callback: POST с job_id, статусом и ошибкой (если есть)
+    Client->>API: SubmitPreprocess(document_id, source_bucket/key/etag, target_bucket?, target_key?, callback_url)
+    alt Уже есть задача с тем же source_bucket/source_key/source_etag
+        API->>Queue: SELECT ... WHERE source_bucket & source_key & source_etag
+        Queue-->>API: Возвращает существующий job (pending/processing/done/failed/stopped)
+        API-->>Client: job_id + текущий статус
+    else Новая задача
+        API->>Queue: INSERT status=pending, attempts=0, next_run_at=now(), target_bucket/key с дефолтами
+        Queue-->>API: job_id сохранённой задачи
+        API-->>Client: job_id, status=pending
+    end
+
+    loop Каждые poll_interval
+        Worker->>Queue: UPDATE processing>convert_timeout+backoff → status=failed, next_run_at=now()+backoff
+        Worker->>Queue: SELECT status IN (pending, failed) AND next_run_at<=now() FOR UPDATE SKIP LOCKED
+        alt Нашлась задача
+            Queue-->>Worker: job для обработки
+            Worker->>Queue: UPDATE job SET status=processing, attempts=attempts+1, started_at=now()
+            Worker->>Worker: prepare workspace
+            Worker->>Storage: Download source (If-Match=source_etag)
+            Worker->>Converter: Convert в DOCX в workspace
+            Worker->>Storage: Upload target_bucket/target_key с media_type
+            alt Успех
+                Worker->>Queue: UPDATE status=done, finished_at=now(), сбрасывает error_* и сохраняет target
+                Worker-->>Callback: POST {job_id, status=done, target_bucket, target_key}
+            else Ошибка обработки
+                Worker->>Queue: UPDATE status=failed/stopped, next_run_at=policy.nextRun, error_code/message/details
+                opt Только при status=stopped (постоянная ошибка или исчерпан лимит попыток)
+                    Worker-->>Callback: POST {job_id, status=stopped, error}
+                end
+            end
+        else Задач нет
+            Queue-->>Worker: нет записей для обработки
+        end
+    end
+
+    Client->>API: GetPreprocessStatus(job_id, correlation_id?)
+    API->>Queue: SELECT job_id=...
+    Queue-->>API: job со статусом, target_bucket/key, error_code/message/details, updated_at
+    API-->>Client: pending/processing/done/failed/stopped + путь к результату или ошибка
 ```
