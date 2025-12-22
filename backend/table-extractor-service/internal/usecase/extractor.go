@@ -267,11 +267,13 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("original_object_key", job.Original.ObjectKey),
 	)
 
+	fetchStarted := time.Now()
 	cached, err := uc.fileCache.Fetch(ctxWithCID, SourceLocation{
 		Original:  job.Original,
 		SourceURL: job.SourceURL,
 		LocalPath: job.LocalPath,
 	})
+	fetchDuration := time.Since(fetchStarted)
 	if err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("download failed", "download_error", err.Error(), false, now)
@@ -292,6 +294,9 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("document_id", job.DocumentID),
 		zap.String("correlation_id", job.CorrelationID),
 		zap.String("cache_path", cached.Path),
+		zap.Int64("duration_ms", fetchDuration.Milliseconds()),
+		zap.Int("attempts", job.Attempts),
+		zap.String("status_reason", aggregate.Job().StatusReason),
 	)
 	defer func() {
 		if cached.Cleanup != nil {
@@ -309,7 +314,9 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("correlation_id", job.CorrelationID),
 		zap.String("source_path", cached.Path),
 	)
+	extractStart := time.Now()
 	result, err := uc.extractor.Extract(ctxWithCID, cached.Path)
+	extractionDuration := time.Since(extractStart)
 	if err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("extraction failed", "extraction_error", err.Error(), false, now)
@@ -330,8 +337,12 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		zap.String("document_id", job.DocumentID),
 		zap.String("correlation_id", job.CorrelationID),
 		zap.Int("artifacts_count", len(result.DebugFiles)),
+		zap.Int64("duration_ms", extractionDuration.Milliseconds()),
+		zap.Int("attempts", job.Attempts),
+		zap.String("status_reason", aggregate.Job().StatusReason),
 	)
 
+	uploadStart := time.Now()
 	if err := uc.uploadArtifacts(ctxWithCID, job, result); err != nil {
 		now := uc.clock.Now().UTC()
 		updated, _, transErr := aggregate.MarkFailed("upload failed", "upload_error", err.Error(), true, now)
@@ -347,24 +358,51 @@ func (uc *TableExtractorUseCase) processSingle(ctx context.Context, job domain.T
 		)
 		return errors.Join(fmt.Errorf("upload artifacts: %w", err), statusErr)
 	}
+	uploadDuration := time.Since(uploadStart)
+	uc.logger.Debug("artifacts uploaded",
+		zap.String("queue_id", job.ID.String()),
+		zap.String("document_id", job.DocumentID),
+		zap.String("correlation_id", job.CorrelationID),
+		zap.Int64("duration_ms", uploadDuration.Milliseconds()),
+		zap.Int("attempts", job.Attempts),
+		zap.String("status_reason", aggregate.Job().StatusReason),
+	)
 
 	finishedAt := uc.clock.Now().UTC()
+	markDoneStart := time.Now()
 	updated, _, transErr := aggregate.MarkDone("completed", finishedAt)
 	if transErr != nil {
 		return fmt.Errorf("mark job done: %w", transErr)
 	}
-	if err := uc.queue.Save(ctxWithCID, updated.Job()); err != nil {
+	aggregate = updated
+	finalJob := updated.Job()
+	if err := uc.queue.Save(ctxWithCID, finalJob); err != nil {
 		return fmt.Errorf("mark job done: %w", err)
 	}
-
-	uc.logger.Debug("processSingle finished",
+	markDoneDuration := time.Since(markDoneStart)
+	uc.logger.Debug("job marked done",
 		zap.String("queue_id", job.ID.String()),
 		zap.String("document_id", job.DocumentID),
 		zap.String("correlation_id", job.CorrelationID),
+		zap.Int64("duration_ms", markDoneDuration.Milliseconds()),
+		zap.Int("attempts", finalJob.Attempts),
+		zap.String("status_reason", finalJob.StatusReason),
+	)
+
+	uc.logger.Debug("job processed",
+		zap.String("queue_id", finalJob.ID.String()),
+		zap.String("document_id", finalJob.DocumentID),
+		zap.String("correlation_id", finalJob.CorrelationID),
 		zap.Time("finished_at", finishedAt),
+		zap.Int("artifacts_size_bytes", artifactsSize(result)),
+		zap.Int("debug_files_count", len(result.DebugFiles)),
 	)
 
 	return nil
+}
+
+func artifactsSize(result ExtractionResult) int {
+	return len(result.RawJSON) + len(result.NormalizedJSON) + len(result.Markdown) + len(result.Manifest)
 }
 
 func (uc *TableExtractorUseCase) uploadArtifacts(ctx context.Context, job domain.TableExtractionJob, result ExtractionResult) error {

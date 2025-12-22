@@ -15,6 +15,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/mono-repo/table-extractor-service/internal/domain"
 	"github.com/mono-repo/table-extractor-service/internal/repository/memory"
@@ -164,6 +167,54 @@ func TestProcessExtractionJobUploadsArtifacts(t *testing.T) {
 		Bucket:    job.Artifacts.DebugPrefix.Bucket,
 		ObjectKey: job.Artifacts.DebugPrefix.ObjectKey + "/page-1.txt",
 	}, []byte("debug"))
+}
+
+func TestProcessExtractionJobLogsDurations(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	storage := newFakeStorage()
+	originalKey := "source/trace.pdf"
+	storage.addObject("originals", originalKey, []byte("%PDF-1.4 trace"))
+	jobID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	extractor := &fakeExtractor{
+		result: ExtractionResult{
+			RawJSON:        []byte(`{"raw":true}`),
+			NormalizedJSON: []byte(`{"normalized":true}`),
+			Markdown:       []byte("# tables"),
+			Manifest:       []byte(`{"version":1}`),
+		},
+	}
+
+	core, observed := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue:       repo,
+		Storage:     storage,
+		FileCache:   newTestFileCache(storage),
+		Extractor:   extractor,
+		Clock:       fixedClock{now: time.Date(2024, 5, 12, 9, 0, 0, 0, time.UTC)},
+		IDGenerator: fixedIDGenerator{id: jobID},
+	}, Config{
+		QueueLimit:             10,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, logger)
+
+	ctx := context.Background()
+	job, err := uc.SubmitExtraction(ctx, SubmitExtractionRequest{
+		DocumentID:        "doc-logs",
+		OriginalBucket:    "originals",
+		OriginalObjectKey: originalKey,
+		CorrelationID:     "corr-logs",
+	})
+	require.NoError(t, err)
+
+	processed, err := uc.ProcessExtractionJob(ctx)
+	require.NoError(t, err)
+	require.True(t, processed)
+
+	require.True(t, hasLogWithFields(observed.All(), job.ID.String(), "corr-logs", "duration_ms", "queue_id", "correlation_id"),
+		"expected log entry with duration and identifiers")
 }
 
 func TestProcessExtractionJobUsesSourceURLFilePath(t *testing.T) {
@@ -529,6 +580,37 @@ func TestRetryFailedAndCleanupFinished(t *testing.T) {
 
 	_, err = uc.GetJob(context.Background(), doneJob.ID)
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func hasLogWithFields(entries []observer.LoggedEntry, queueID, correlationID string, keys ...string) bool {
+	for _, entry := range entries {
+		fieldSet := make(map[string]bool, len(entry.Context))
+		values := make(map[string]string, len(entry.Context))
+		for _, field := range entry.Context {
+			fieldSet[field.Key] = true
+			if field.Type == zapcore.StringType {
+				values[field.Key] = field.String
+			}
+		}
+		missing := false
+		for _, key := range keys {
+			if !fieldSet[key] {
+				missing = true
+				break
+			}
+		}
+		if missing {
+			continue
+		}
+		if queueID != "" && values["queue_id"] != queueID {
+			continue
+		}
+		if correlationID != "" && values["correlation_id"] != correlationID {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func newJobFromFactory(t *testing.T, documentID string, createdAt time.Time) domain.TableExtractionJob {
