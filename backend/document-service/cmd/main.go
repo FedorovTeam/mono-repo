@@ -154,7 +154,7 @@ func main() {
 	)
 
 	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	preprocessWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	preprocessWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, cfg.StageWorker.BatchSize, cfg.StageWorker.PreprocessRetryDelay)
 	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.ConvertBatchSize, cfg.StageWorker.RetryDelay)
 	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
 
