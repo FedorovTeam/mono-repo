@@ -29,8 +29,8 @@ func (r *InMemoryRepository) UpsertOrGetActive(_ context.Context, job domain.Tab
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if job.ID == uuid.Nil {
-		job.ID = uuid.New()
+	if err := job.Validate(); err != nil {
+		return domain.TableExtractionJob{}, false, err
 	}
 
 	if existingID, ok := r.byDoc[job.DocumentID]; ok {
@@ -50,17 +50,6 @@ func (r *InMemoryRepository) UpsertOrGetActive(_ context.Context, job domain.Tab
 		if active >= queueLimit {
 			return domain.TableExtractionJob{}, false, repository.ErrQueueLimitReached
 		}
-	}
-
-	now := time.Now().UTC()
-	if job.CreatedAt.IsZero() {
-		job.CreatedAt = now
-	}
-	if job.UpdatedAt.IsZero() {
-		job.UpdatedAt = job.CreatedAt
-	}
-	if err := job.Validate(); err != nil {
-		return domain.TableExtractionJob{}, false, err
 	}
 
 	r.data[job.ID] = job

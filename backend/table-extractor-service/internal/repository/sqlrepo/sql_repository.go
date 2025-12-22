@@ -29,16 +29,6 @@ func NewSQLRepository(db *sql.DB, dialect database.Dialect) repository.TableExtr
 }
 
 func (r *SQLRepository) UpsertOrGetActive(ctx context.Context, job domain.TableExtractionJob, queueLimit int) (domain.TableExtractionJob, bool, error) {
-	now := time.Now().UTC()
-	if job.ID == uuid.Nil {
-		job.ID = uuid.New()
-	}
-	if job.CreatedAt.IsZero() {
-		job.CreatedAt = now
-	}
-	if job.UpdatedAt.IsZero() {
-		job.UpdatedAt = job.CreatedAt
-	}
 	if err := job.Validate(); err != nil {
 		return domain.TableExtractionJob{}, false, fmt.Errorf("validate job: %w", err)
 	}
