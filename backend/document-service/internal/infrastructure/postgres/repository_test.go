@@ -174,6 +174,33 @@ func TestListDocuments(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestGetDocumentNullErrorReason(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := New(db)
+	ctx := context.Background()
+
+	now := time.Now()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, created_at, updated_at FROM documents WHERE id=$1")).
+		WithArgs("doc-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", "", "", "", "", "", domain.DocumentStatusUploaded, "wf", "orig", "orig/key", "md", "md/key", nil, false, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, document_id, version, original_object_key, original_etag, markdown_object_key, markdown_queue_id, created_at, updated_at FROM document_versions WHERE document_id=$1 ORDER BY version")).
+		WithArgs("doc-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "version", "original_object_key", "original_etag", "markdown_object_key", "markdown_queue_id", "created_at", "updated_at"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at FROM processing_jobs WHERE document_id=$1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1")).
+		WithArgs("doc-1", domain.JobStatusPending, domain.JobStatusInProgress).
+		WillReturnError(sql.ErrNoRows)
+
+	doc, err := repo.GetDocument(ctx, "doc-1")
+	require.NoError(t, err)
+	require.Equal(t, "", doc.ErrorReason)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestListFinishedJobs(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
