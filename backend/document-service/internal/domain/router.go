@@ -7,41 +7,61 @@ import (
 
 // RepositoryRouterRule задаёт переопределения стратегии роутинга для конкретного репозитория.
 type RepositoryRouterRule struct {
-	Owner                string
-	Repository           string
-	PreprocessEnabled    *bool
-	PreprocessExtensions []string
+	Owner                    string
+	Repository               string
+	PreprocessEnabled        *bool
+	PreprocessExtensions     []string
+	TableExtractorEnabled    *bool
+	TableExtractorExtensions []string
 }
 
 // RouterRules описывает глобальные и репозиторные правила выбора стадий обработки.
 type RouterRules struct {
-	PreprocessEnabled    bool
-	PreprocessExtensions []string
-	RepositoryRules      []RepositoryRouterRule
+	PreprocessEnabled        bool
+	PreprocessExtensions     []string
+	TableExtractorEnabled    bool
+	TableExtractorExtensions []string
+	RepositoryRules          []RepositoryRouterRule
 }
 
 type repositoryRule struct {
-	owner             string
-	repo              string
-	preprocessEnabled *bool
-	preprocessExt     map[string]struct{}
+	owner                 string
+	repo                  string
+	preprocessEnabled     *bool
+	preprocessExt         map[string]struct{}
+	tableExtractorEnabled *bool
+	tableExtractorExt     map[string]struct{}
+}
+
+type effectiveRoutingRules struct {
+	preprocessEnabled     bool
+	preprocessExt         map[string]struct{}
+	tableExtractorEnabled bool
+	tableExtractorExt     map[string]struct{}
 }
 
 // StageRouter выбирает следующую стадию обработки документа на основе расширения и конфигурации.
 type StageRouter struct {
-	preprocessEnabled bool
-	preprocessExt     map[string]struct{}
-	repoRules         []repositoryRule
+	preprocessEnabled     bool
+	preprocessExt         map[string]struct{}
+	tableExtractorEnabled bool
+	tableExtractorExt     map[string]struct{}
+	repoRules             []repositoryRule
 }
 
 // NewStageRouter создаёт StageRouter с нормализованными правилами.
 func NewStageRouter(rules RouterRules) *StageRouter {
 	router := &StageRouter{
-		preprocessEnabled: rules.PreprocessEnabled,
-		preprocessExt:     normalizeExtensions(rules.PreprocessExtensions),
+		preprocessEnabled:     rules.PreprocessEnabled,
+		preprocessExt:         normalizeExtensions(rules.PreprocessExtensions),
+		tableExtractorEnabled: rules.TableExtractorEnabled,
+		tableExtractorExt:     normalizeExtensions(rules.TableExtractorExtensions),
 	}
 	if len(router.preprocessExt) == 0 {
 		router.preprocessExt = defaultPreprocessExtensions()
+	}
+	if len(router.tableExtractorExt) == 0 {
+		router.tableExtractorExt = defaultTableExtractorExtensions()
 	}
 
 	for _, rule := range rules.RepositoryRules {
@@ -50,10 +70,12 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 			continue
 		}
 		router.repoRules = append(router.repoRules, repositoryRule{
-			owner:             owner,
-			repo:              repo,
-			preprocessEnabled: rule.PreprocessEnabled,
-			preprocessExt:     normalizeExtensions(rule.PreprocessExtensions),
+			owner:                 owner,
+			repo:                  repo,
+			preprocessEnabled:     rule.PreprocessEnabled,
+			preprocessExt:         normalizeExtensions(rule.PreprocessExtensions),
+			tableExtractorEnabled: rule.TableExtractorEnabled,
+			tableExtractorExt:     normalizeExtensions(rule.TableExtractorExtensions),
 		})
 	}
 
@@ -66,13 +88,25 @@ func (r *StageRouter) NextStageAfterStore(doc *Document) JobStage {
 		return JobStageConvertToMarkdown
 	}
 
-	enabled, extensions := r.effectiveRules(doc)
+	rules := r.effectiveRules(doc)
 	ext := documentExtension(doc)
+	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
+	wantsTables := doc.ExtractTables || strategy == ConversionStrategyTablesOnly
+
+	if wantsTables && rules.tableExtractorEnabled {
+		if ext == "" {
+			return JobStageExtractTables
+		}
+		if _, ok := rules.tableExtractorExt[ext]; ok {
+			return JobStageExtractTables
+		}
+	}
+
 	if ext == "docx" {
 		return JobStageConvertToMarkdown
 	}
-	if enabled && ext != "" {
-		if _, ok := extensions[ext]; ok {
+	if rules.preprocessEnabled && ext != "" {
+		if _, ok := rules.preprocessExt[ext]; ok {
 			return JobStagePreprocessToDocx
 		}
 	}
@@ -80,13 +114,20 @@ func (r *StageRouter) NextStageAfterStore(doc *Document) JobStage {
 	return JobStageConvertToMarkdown
 }
 
-func (r *StageRouter) effectiveRules(doc *Document) (bool, map[string]struct{}) {
+func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 	if doc == nil {
-		return r.preprocessEnabled, cloneExtensions(r.preprocessExt)
+		return effectiveRoutingRules{
+			preprocessEnabled:     r.preprocessEnabled,
+			preprocessExt:         cloneExtensions(r.preprocessExt),
+			tableExtractorEnabled: r.tableExtractorEnabled,
+			tableExtractorExt:     cloneExtensions(r.tableExtractorExt),
+		}
 	}
 
 	enabled := r.preprocessEnabled
 	extensions := r.preprocessExt
+	tableExtractorEnabled := r.tableExtractorEnabled
+	tableExtractorExt := r.tableExtractorExt
 
 	for _, rule := range r.repoRules {
 		if rule.matches(doc) {
@@ -96,6 +137,12 @@ func (r *StageRouter) effectiveRules(doc *Document) (bool, map[string]struct{}) 
 			if len(rule.preprocessExt) > 0 {
 				extensions = rule.preprocessExt
 			}
+			if rule.tableExtractorEnabled != nil {
+				tableExtractorEnabled = *rule.tableExtractorEnabled
+			}
+			if len(rule.tableExtractorExt) > 0 {
+				tableExtractorExt = rule.tableExtractorExt
+			}
 			break
 		}
 	}
@@ -103,8 +150,16 @@ func (r *StageRouter) effectiveRules(doc *Document) (bool, map[string]struct{}) 
 	if len(extensions) == 0 {
 		extensions = defaultPreprocessExtensions()
 	}
+	if len(tableExtractorExt) == 0 {
+		tableExtractorExt = defaultTableExtractorExtensions()
+	}
 
-	return enabled, cloneExtensions(extensions)
+	return effectiveRoutingRules{
+		preprocessEnabled:     enabled,
+		preprocessExt:         cloneExtensions(extensions),
+		tableExtractorEnabled: tableExtractorEnabled,
+		tableExtractorExt:     cloneExtensions(tableExtractorExt),
+	}
 }
 
 func (r repositoryRule) matches(doc *Document) bool {
@@ -173,6 +228,10 @@ func normalizeRepository(owner, repo string) (string, string) {
 
 func defaultPreprocessExtensions() map[string]struct{} {
 	return map[string]struct{}{"doc": {}, "pdf": {}}
+}
+
+func defaultTableExtractorExtensions() map[string]struct{} {
+	return map[string]struct{}{"pdf": {}}
 }
 
 func cloneExtensions(src map[string]struct{}) map[string]struct{} {

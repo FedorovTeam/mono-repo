@@ -9,25 +9,27 @@ import (
 // Document описывает знаниевый документ и связанную метаинформацию.
 // Валидации и правила переходов статусов инкапсулированы в методах сущности.
 type Document struct {
-	ID                string
-	Name              string
-	Owner             string
-	Repository        string
-	Branch            string
-	BaseBranch        string
-	Path              string
-	Status            DocumentStatus
-	WorkflowID        string
-	ActiveJobID       string
-	ErrorReason       string
-	OriginalBucket    string
-	OriginalObjectKey string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	CreatePR          bool
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	Versions          []DocumentVersion
+	ID                 string
+	Name               string
+	Owner              string
+	Repository         string
+	Branch             string
+	BaseBranch         string
+	Path               string
+	Status             DocumentStatus
+	ConversionStrategy ConversionStrategy
+	ExtractTables      bool
+	WorkflowID         string
+	ActiveJobID        string
+	ErrorReason        string
+	OriginalBucket     string
+	OriginalObjectKey  string
+	MarkdownBucket     string
+	MarkdownObjectKey  string
+	CreatePR           bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Versions           []DocumentVersion
 }
 
 // DocumentVersion хранит ссылки на конкретную версию объекта в хранилище.
@@ -77,6 +79,9 @@ func (d *Document) ValidateForCreation() error {
 		return errors.New("upload object key is required")
 	case strings.TrimSpace(d.MarkdownObjectKey) == "":
 		return errors.New("markdown object key is required")
+	}
+	if err := ValidateConversionStrategy(d.ConversionStrategy); err != nil {
+		return err
 	}
 
 	if err := ValidateDocumentStatus(d.Status); err != nil {

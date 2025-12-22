@@ -14,6 +14,7 @@ import (
 	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
+	tableextractorv1 "backend-document-service/proto/backend/tableextractor/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 )
 
@@ -199,6 +200,36 @@ func (*errorTransformer) ConvertDocxToMarkdown(context.Context, *transformerv1.C
 	return nil, status.Error(codes.Unimplemented, "not implemented")
 }
 
+type tableExtractorStub struct {
+	resp        *tableextractorv1.ExtractTablesFromPdfResponse
+	pollResp    *tableextractorv1.GetTableExtractionJobResponse
+	err         error
+	lastSubmit  *tableextractorv1.ExtractTablesFromPdfRequest
+	lastPollReq *tableextractorv1.GetTableExtractionJobRequest
+}
+
+func (s *tableExtractorStub) ExtractTablesFromPdf(ctx context.Context, in *tableextractorv1.ExtractTablesFromPdfRequest, opts ...grpc.CallOption) (*tableextractorv1.ExtractTablesFromPdfResponse, error) {
+	s.lastSubmit = in
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.resp != nil {
+		return s.resp, nil
+	}
+	return &tableextractorv1.ExtractTablesFromPdfResponse{}, nil
+}
+
+func (s *tableExtractorStub) GetTableExtractionJob(ctx context.Context, in *tableextractorv1.GetTableExtractionJobRequest, opts ...grpc.CallOption) (*tableextractorv1.GetTableExtractionJobResponse, error) {
+	s.lastPollReq = in
+	if s.err != nil && s.resp == nil {
+		return nil, s.err
+	}
+	if s.pollResp != nil {
+		return s.pollResp, nil
+	}
+	return &tableextractorv1.GetTableExtractionJobResponse{}, nil
+}
+
 type staticPreprocess struct {
 	submitResp *preprocessv1.SubmitPreprocessResponse
 	statusResp *preprocessv1.GetPreprocessStatusResponse
@@ -241,7 +272,7 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc123"}}
-	activities := NewActivities(repo, nil, nil, publisher)
+	activities := NewActivities(repo, nil, nil, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
 	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: (domain.PublishPayload{
@@ -287,7 +318,7 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 		ErrorMessage: "timeout",
 		RetryAfter:   retryAfter,
 	}}
-	activities := NewActivities(repo, nil, nil, publisher)
+	activities := NewActivities(repo, nil, nil, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
 
 	start := time.Now()
@@ -369,7 +400,7 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 
 	repo.now = fixed.Add(time.Minute)
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "commit-sha"}}
-	activities := NewActivities(repo, nil, nil, publisher)
+	activities := NewActivities(repo, nil, nil, nil, publisher)
 	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 2, time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -412,7 +443,7 @@ func TestHandlePreprocessSubmitSchedulesRetry(t *testing.T) {
 			CorrelationId: "corr-submit",
 		},
 	}
-	activities := NewActivities(repo, preprocess, nil, nil)
+	activities := NewActivities(repo, preprocess, nil, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, 500*time.Millisecond)
 
 	result, err := worker.handlePreprocessToDocx(context.Background(), domain.ProcessingJob{TaskID: "job-pre", DocumentID: doc.ID, Stage: domain.JobStagePreprocessToDocx})
@@ -468,7 +499,7 @@ func TestHandlePreprocessCompletesAfterPoll(t *testing.T) {
 			TargetKey:    "docs/doc.docx",
 		},
 	}
-	activities := NewActivities(repo, preprocess, nil, nil)
+	activities := NewActivities(repo, preprocess, nil, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second)
 
 	payload := domain.PreprocessPayload{
@@ -529,7 +560,7 @@ func TestHandlePreprocessFailsOnFailedStatus(t *testing.T) {
 			ErrorCode:    "FAILED",
 		},
 	}
-	activities := NewActivities(repo, preprocess, nil, nil)
+	activities := NewActivities(repo, preprocess, nil, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second)
 
 	payload := domain.PreprocessPayload{
@@ -578,7 +609,7 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending"}}
-	activities := NewActivities(repo, nil, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
@@ -620,7 +651,7 @@ func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ocr", Status: "done", MarkdownObjectKey: "path/doc.md"}}
-	activities := NewActivities(repo, nil, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	job := domain.ProcessingJob{TaskID: "job-ocr", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: map[string]any{"force_ocr": true}}
@@ -664,7 +695,7 @@ func TestHandleConvertUsesPreprocessedSourceWhenPresent(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-prep", Status: "done", MarkdownObjectKey: "docs/doc.md"}}
-	activities := NewActivities(repo, nil, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	payload := domain.ConvertPayload{
@@ -745,7 +776,7 @@ func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 		},
 	}}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-2", Status: "failed"}}
-	activities := NewActivities(repo, nil, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -789,7 +820,7 @@ func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.ResourceExhausted, "queue limit reached")}
-	activities := NewActivities(repo, nil, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-exhausted", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: (domain.ConvertPayload{}).ToMap()})
@@ -837,7 +868,7 @@ func TestHandleConvertRetriesOnTemporaryGRPCErrors(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
-	activities := NewActivities(repo, nil, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, 200*time.Millisecond)
 
 	start := time.Now()
@@ -889,7 +920,7 @@ func TestHandleConvertHonorsMaxAttemptsForTemporaryErrors(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
-	activities := NewActivities(repo, nil, transformer, nil)
+	activities := NewActivities(repo, nil, transformer, nil, nil)
 	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
 	worker.maxAttempts = 1
 
@@ -905,6 +936,91 @@ func TestHandleConvertHonorsMaxAttemptsForTemporaryErrors(t *testing.T) {
 	}
 	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusFailed {
 		t.Fatalf("expected failed status update, got %v", repo.statusUpdates)
+	}
+}
+
+func TestHandleExtractTablesSubmitsAndPostpones(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-1",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/input.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "md/output.md",
+		Versions:          []domain.DocumentVersion{{Version: 1}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	tableExtractor := &tableExtractorStub{
+		resp: &tableextractorv1.ExtractTablesFromPdfResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-1",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_PENDING,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "md-bucket", ObjectKey: "md/output/tables.md"},
+				},
+			},
+		},
+	}
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil), domain.JobStageExtractTables, 1, time.Second)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: map[string]any{}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != domain.JobStatusPending {
+		t.Fatalf("expected pending status, got %s", result.Status)
+	}
+	if result.NextRun == nil {
+		t.Fatal("expected next run to be scheduled")
+	}
+	payload := domain.ExtractTablesPayloadFromMap(result.Payload)
+	if payload.QueueID != "queue-1" {
+		t.Fatalf("expected queue_id propagated, got %s", payload.QueueID)
+	}
+	if payload.ArtifactsBucket != "md-bucket" {
+		t.Fatalf("expected artifacts bucket, got %s", payload.ArtifactsBucket)
+	}
+	if payload.MarkdownObjectKey == "" {
+		t.Fatal("expected markdown object key to be filled")
+	}
+}
+
+func TestHandleExtractTablesMarksConverted(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-1",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/input.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "md/output.md",
+		Versions:          []domain.DocumentVersion{{Version: 1}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	tableExtractor := &tableExtractorStub{
+		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-1",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "md-bucket", ObjectKey: "md/output/tables.md"},
+				},
+				CorrelationId: "corr-1",
+			},
+		},
+	}
+	payload := (domain.ExtractTablesPayload{QueueID: "queue-1"}).ToMap()
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil), domain.JobStageExtractTables, 1, time.Second)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+	if repo.doc.Status != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document converted status, got %s", repo.doc.Status)
+	}
+	if repo.lastVersion == nil || repo.lastVersion.MarkdownObjectKey != "md/output/tables.md" {
+		t.Fatalf("expected markdown key propagated, got %+v", repo.lastVersion)
 	}
 }
 

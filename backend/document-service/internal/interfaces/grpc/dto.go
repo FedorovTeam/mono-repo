@@ -7,18 +7,20 @@ import (
 )
 
 type createDocumentDTO struct {
-	ID                string
-	FileName          string
-	Owner             string
-	Repository        string
-	Branch            string
-	BaseBranch        string
-	Path              string
-	UploadBucket      string
-	UploadObjectKey   string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	CreatePR          bool
+	ID                 string
+	FileName           string
+	Owner              string
+	Repository         string
+	Branch             string
+	BaseBranch         string
+	Path               string
+	UploadBucket       string
+	UploadObjectKey    string
+	MarkdownBucket     string
+	MarkdownObjectKey  string
+	CreatePR           bool
+	ConversionStrategy string
+	ExtractTables      bool
 }
 
 type updateDocumentStatusDTO struct {
@@ -45,35 +47,39 @@ type listDocumentsDTO struct {
 
 func fromCreateDocumentRequest(req *documentv1.CreateDocumentRequest) createDocumentDTO {
 	return createDocumentDTO{
-		ID:                req.GetId(),
-		FileName:          req.GetFileName(),
-		Owner:             req.GetOwner(),
-		Repository:        req.GetRepository(),
-		Branch:            req.GetBranch(),
-		BaseBranch:        req.GetBaseBranch(),
-		Path:              req.GetPath(),
-		UploadBucket:      req.GetUploadBucket(),
-		UploadObjectKey:   req.GetUploadObjectKey(),
-		MarkdownBucket:    req.GetMarkdownBucket(),
-		MarkdownObjectKey: req.GetMarkdownObjectKey(),
-		CreatePR:          req.GetCreatePr(),
+		ID:                 req.GetId(),
+		FileName:           req.GetFileName(),
+		Owner:              req.GetOwner(),
+		Repository:         req.GetRepository(),
+		Branch:             req.GetBranch(),
+		BaseBranch:         req.GetBaseBranch(),
+		Path:               req.GetPath(),
+		UploadBucket:       req.GetUploadBucket(),
+		UploadObjectKey:    req.GetUploadObjectKey(),
+		MarkdownBucket:     req.GetMarkdownBucket(),
+		MarkdownObjectKey:  req.GetMarkdownObjectKey(),
+		CreatePR:           req.GetCreatePr(),
+		ConversionStrategy: req.GetConversionStrategy(),
+		ExtractTables:      req.GetExtractTables(),
 	}
 }
 
 func toCreateDocumentCommand(dto createDocumentDTO) document.CreateDocumentInput {
 	return document.CreateDocumentInput{
-		ID:                dto.ID,
-		FileName:          dto.FileName,
-		Owner:             dto.Owner,
-		Repository:        dto.Repository,
-		Branch:            dto.Branch,
-		BaseBranch:        dto.BaseBranch,
-		Path:              dto.Path,
-		UploadBucket:      dto.UploadBucket,
-		UploadObjectKey:   dto.UploadObjectKey,
-		MarkdownBucket:    dto.MarkdownBucket,
-		MarkdownObjectKey: dto.MarkdownObjectKey,
-		CreatePR:          dto.CreatePR,
+		ID:                 dto.ID,
+		FileName:           dto.FileName,
+		Owner:              dto.Owner,
+		Repository:         dto.Repository,
+		Branch:             dto.Branch,
+		BaseBranch:         dto.BaseBranch,
+		Path:               dto.Path,
+		UploadBucket:       dto.UploadBucket,
+		UploadObjectKey:    dto.UploadObjectKey,
+		MarkdownBucket:     dto.MarkdownBucket,
+		MarkdownObjectKey:  dto.MarkdownObjectKey,
+		CreatePR:           dto.CreatePR,
+		ConversionStrategy: dto.ConversionStrategy,
+		ExtractTables:      dto.ExtractTables,
 	}
 }
 

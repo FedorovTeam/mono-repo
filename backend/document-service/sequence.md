@@ -8,9 +8,10 @@ sequenceDiagram
     participant S as PostgreSQL (documents + processing_jobs)
     participant ST as StorageService (gRPC)
     participant TR as TransformerService (gRPC)
+    participant TE as TableExtractorService (gRPC)
     participant GP as GithubPublisherService (gRPC)
     participant UR as UploadReconciler (cron)
-    participant SW as StageWorker (store/preprocess/convert/publish)
+    participant SW as StageWorker (store/preprocess/extract/convert/publish)
     participant F as JobFollower (cron)
     participant PR as ProcessingReconciler (cron)
 
@@ -34,13 +35,17 @@ sequenceDiagram
 
     Note over F,S: JobFollower читает completed/failed после postpone окна
     alt store_original completed
-        alt preprocess.enabled AND ext in (doc, pdf)
+        alt router.table_extractor.enabled AND (extract_tables=true OR conversion_strategy=tables_only) AND ext in table_extractor_extensions
+            F->>S: INSERT job extract_tables(pending, payload=original_bucket/object_key, artifacts_bucket/prefix, correlation_id=workflow_id)
+        else preprocess.enabled AND ext in preprocess_extensions
             F->>S: INSERT job preprocess_to_docx(pending, payload=original_bucket/object_key, correlation_id=workflow_id)
         else docx/other
             F->>S: INSERT job convert_to_markdown(pending, payload=original_bucket/object_key, markdown_bucket/object_key, correlation_id=workflow_id)
         end
     else preprocess_to_docx completed
         F->>S: INSERT job convert_to_markdown(pending, payload=preprocessed_bucket/object_key?, markdown_bucket/object_key, correlation_id=workflow_id)
+    else extract_tables completed
+        F->>S: INSERT job publish_to_github(pending, payload=markdown_bucket/object_key, repo/branch/base_branch/path, create_pr, commit_message/pr_title/pr_body, author_*, correlation_id=workflow_id)
     else convert_to_markdown completed
         F->>S: INSERT job publish_to_github(pending, payload=markdown_bucket/object_key, repo/branch/base_branch/path, create_pr, commit_message/pr_title/pr_body, author_*, correlation_id=workflow_id)
     else любой failed
@@ -49,7 +54,8 @@ sequenceDiagram
     end
 
     Note over SW,S: StageWorker(preprocess_to_docx) опрашивает preprocess-service; при статусах pending/processing переносит задачу в pending с next_run=now()+preprocess_retry_delay, временные gRPC ошибки используют backoff от того же интервала
-    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа или preprocessed_bucket/key/target_object_key, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false) при success пишет job_event со ссылкой на источник и preprocess_job_id
+    Note over SW,TE: StageWorker(extract_tables) вызывает ExtractTablesFromPdf(wait=false), сохраняет queue_id/artifacts_prefix, по статусам pending/processing/failed_retryable откладывает задачу с backoff, при status=done помечает документ ConvertedToMarkdown с markdown_object_key=<artifacts_prefix>/tables.md
+    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа, при наличии preprocessed_bucket/object_key использует их как источник, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false) при success пишет job_event со ссылкой на источник и preprocess_job_id
     alt Документ уже Converted/Published
         SW-->>S: Activities.MarkConverted (no-op), job_event completed
     else Временная gRPC ошибка (Unavailable/ResourceExhausted/...)

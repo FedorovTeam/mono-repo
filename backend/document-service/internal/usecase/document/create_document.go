@@ -89,24 +89,28 @@ func (uc *CreateDocument) Execute(ctx context.Context, in CreateDocumentInput) (
 		path = defaultDocumentPath(in.ID)
 	}
 
+	strategy := domain.NormalizeConversionStrategy(in.ConversionStrategy)
+
 	originalKey := strings.TrimSpace(in.UploadObjectKey)
 	markdownKey := strings.TrimSpace(in.MarkdownObjectKey)
 
 	doc := &domain.Document{
-		ID:                in.ID,
-		Name:              in.FileName,
-		Owner:             owner,
-		Repository:        repository,
-		Branch:            branch,
-		BaseBranch:        baseBranch,
-		Path:              path,
-		WorkflowID:        in.ID,
-		Status:            domain.DocumentStatusUploaded,
-		OriginalBucket:    originalBucket,
-		OriginalObjectKey: originalKey,
-		MarkdownBucket:    markdownBucket,
-		MarkdownObjectKey: markdownKey,
-		CreatePR:          in.CreatePR,
+		ID:                 in.ID,
+		Name:               in.FileName,
+		Owner:              owner,
+		Repository:         repository,
+		Branch:             branch,
+		BaseBranch:         baseBranch,
+		Path:               path,
+		WorkflowID:         in.ID,
+		Status:             domain.DocumentStatusUploaded,
+		OriginalBucket:     originalBucket,
+		OriginalObjectKey:  originalKey,
+		MarkdownBucket:     markdownBucket,
+		MarkdownObjectKey:  markdownKey,
+		CreatePR:           in.CreatePR,
+		ConversionStrategy: strategy,
+		ExtractTables:      in.ExtractTables,
 	}
 
 	if err := doc.ValidateForCreation(); err != nil {

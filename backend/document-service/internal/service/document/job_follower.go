@@ -159,12 +159,20 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 			if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStagePreprocessToDocx, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 				return fmt.Errorf("enqueue preprocess for %s: %w", doc.ID, err)
 			}
-		default:
+		case domain.JobStageExtractTables:
+			payload := f.extractTablesPayloadForDocument(doc, correlationFromDoc(doc)).ToMap()
+			event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: extract_tables"}
+			if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
+				return fmt.Errorf("enqueue extract_tables for %s: %w", doc.ID, err)
+			}
+		case domain.JobStageConvertToMarkdown:
 			payload := f.convertPayloadForDocument(doc, domain.ConvertPayload{}, correlationFromDoc(doc)).ToMap()
 			event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: convert"}
 			if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 				return fmt.Errorf("enqueue convert for %s: %w", doc.ID, err)
 			}
+		default:
+			return fmt.Errorf("unsupported next stage %s", nextStage)
 		}
 	case domain.JobStagePreprocessToDocx:
 		overrides, correlationID := preprocessConversion(job.Payload, doc)
@@ -174,6 +182,26 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 			return fmt.Errorf("enqueue convert after preprocess for %s: %w", doc.ID, err)
 		}
 	case domain.JobStageConvertToMarkdown:
+		payload := domain.PublishPayload{
+			MarkdownBucket:     doc.MarkdownBucket,
+			MarkdownObjectKey:  doc.MarkdownObjectKey,
+			Repository:         fmt.Sprintf("%s/%s", doc.Owner, doc.Repository),
+			Branch:             doc.Branch,
+			BaseBranch:         doc.BaseBranch,
+			GitHubPath:         doc.Path,
+			CreatePR:           boolPtr(doc.CreatePR),
+			CommitMessage:      pickCommitMessage(doc, f.defaults),
+			PRTitle:            pickPRTitle(doc, f.defaults),
+			PRBody:             f.defaults.PRBody,
+			AuthorName:         f.defaults.AuthorName,
+			AuthorEmail:        f.defaults.AuthorEmail,
+			JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
+		}.ToMap()
+		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: publish"}
+		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
+			return fmt.Errorf("enqueue publish for %s: %w", doc.ID, err)
+		}
+	case domain.JobStageExtractTables:
 		payload := domain.PublishPayload{
 			MarkdownBucket:     doc.MarkdownBucket,
 			MarkdownObjectKey:  doc.MarkdownObjectKey,
@@ -240,6 +268,18 @@ func correlationFromDoc(doc *domain.Document) string {
 		return doc.WorkflowID
 	}
 	return doc.ID
+}
+
+func (f *JobFollower) extractTablesPayloadForDocument(doc *domain.Document, correlationID string) domain.ExtractTablesPayload {
+	markdownKey := resolvedMarkdownKey(doc)
+	return domain.ExtractTablesPayload{
+		OriginalBucket:     doc.OriginalBucket,
+		OriginalObjectKey:  doc.OriginalObjectKey,
+		ArtifactsBucket:    doc.MarkdownBucket,
+		ArtifactsPrefix:    tablesArtifactsPrefix(markdownKey),
+		MarkdownObjectKey:  markdownKey,
+		JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationID},
+	}
 }
 
 func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides domain.ConvertPayload, correlationID string) domain.ConvertPayload {

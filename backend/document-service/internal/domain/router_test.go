@@ -35,4 +35,28 @@ func TestStageRouterRepositoryOverride(t *testing.T) {
 	}
 }
 
+func TestStageRouterUsesTableExtractorForFlaggedPdf(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, PreprocessEnabled: true})
+	doc := &Document{OriginalObjectKey: "incoming/report.pdf", ExtractTables: true}
+	if stage := router.NextStageAfterStore(doc); stage != JobStageExtractTables {
+		t.Fatalf("expected extract_tables for flagged pdf, got %s", stage)
+	}
+}
+
+func TestStageRouterFallsBackToPreprocessWhenTableExtractorDisabled(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: false, PreprocessEnabled: true})
+	doc := &Document{OriginalObjectKey: "incoming/report.pdf", ExtractTables: true}
+	if stage := router.NextStageAfterStore(doc); stage != JobStagePreprocessToDocx {
+		t.Fatalf("expected preprocess when table extractor disabled, got %s", stage)
+	}
+}
+
+func TestStageRouterUsesTablesOnlyStrategy(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true})
+	doc := &Document{OriginalObjectKey: "incoming/meeting.pdf", ConversionStrategy: ConversionStrategyTablesOnly}
+	if stage := router.NextStageAfterStore(doc); stage != JobStageExtractTables {
+		t.Fatalf("expected extract_tables for tables_only strategy, got %s", stage)
+	}
+}
+
 func boolPtr(val bool) *bool { return &val }

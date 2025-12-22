@@ -86,6 +86,20 @@ type PreprocessPayload struct {
 	PollAttempts           int
 }
 
+// ExtractTablesPayload описывает данные для извлечения таблиц из PDF.
+type ExtractTablesPayload struct {
+	JobPayloadMetadata
+	OriginalBucket    string
+	OriginalObjectKey string
+	ArtifactsBucket   string
+	ArtifactsPrefix   string
+	QueueID           string
+	Status            string
+	StatusReason      string
+	PollAttempts      int
+	MarkdownObjectKey string
+}
+
 // PublishPayload описывает данные для шага публикации в GitHub.
 type PublishPayload struct {
 	JobPayloadMetadata
@@ -134,6 +148,40 @@ func (p StoreOriginalPayload) ToMap() map[string]any {
 	}
 	if p.OriginalETag != "" {
 		res["original_etag"] = p.OriginalETag
+	}
+	p.JobPayloadMetadata.applyTo(res)
+	return res
+}
+
+// ToMap преобразует ExtractTablesPayload в map.
+func (p ExtractTablesPayload) ToMap() map[string]any {
+	res := map[string]any{}
+	if p.OriginalBucket != "" {
+		res["original_bucket"] = p.OriginalBucket
+	}
+	if p.OriginalObjectKey != "" {
+		res["original_object_key"] = p.OriginalObjectKey
+	}
+	if p.ArtifactsBucket != "" {
+		res["artifacts_bucket"] = p.ArtifactsBucket
+	}
+	if p.ArtifactsPrefix != "" {
+		res["artifacts_prefix"] = p.ArtifactsPrefix
+	}
+	if p.QueueID != "" {
+		res["queue_id"] = p.QueueID
+	}
+	if p.Status != "" {
+		res["status"] = p.Status
+	}
+	if p.StatusReason != "" {
+		res["status_reason"] = p.StatusReason
+	}
+	if p.PollAttempts > 0 {
+		res["poll_attempts"] = p.PollAttempts
+	}
+	if p.MarkdownObjectKey != "" {
+		res["markdown_object_key"] = p.MarkdownObjectKey
 	}
 	p.JobPayloadMetadata.applyTo(res)
 	return res
@@ -266,6 +314,22 @@ func PreprocessPayloadFromMap(payload map[string]any) PreprocessPayload {
 		PreprocessStatus:       stringFromMap(payload, "preprocess_status"),
 		PreprocessErrorMessage: stringFromMap(payload, "preprocess_error_message"),
 		PollAttempts:           intFromMap(payload, "poll_attempts"),
+	}
+}
+
+// ExtractTablesPayloadFromMap восстанавливает ExtractTablesPayload из map.
+func ExtractTablesPayloadFromMap(payload map[string]any) ExtractTablesPayload {
+	return ExtractTablesPayload{
+		JobPayloadMetadata: metadataFromMap(payload),
+		OriginalBucket:     stringFromMap(payload, "original_bucket"),
+		OriginalObjectKey:  stringFromMap(payload, "original_object_key"),
+		ArtifactsBucket:    stringFromMap(payload, "artifacts_bucket"),
+		ArtifactsPrefix:    stringFromMap(payload, "artifacts_prefix"),
+		QueueID:            stringFromMap(payload, "queue_id"),
+		Status:             stringFromMap(payload, "status"),
+		StatusReason:       stringFromMap(payload, "status_reason"),
+		PollAttempts:       intFromMap(payload, "poll_attempts"),
+		MarkdownObjectKey:  stringFromMap(payload, "markdown_object_key"),
 	}
 }
 
