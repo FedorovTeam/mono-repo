@@ -13,12 +13,12 @@ sequenceDiagram
     Client->>API: SubmitPreprocess(document_id, source_bucket/key/etag, target_bucket?, target_key?, callback_url)
     alt Уже есть задача с тем же source_bucket/source_key/source_etag
         API->>Queue: SELECT ... WHERE source_bucket & source_key & source_etag
-        Queue-->>API: Возвращает существующий job (pending/processing/done/failed/stopped)
-        API-->>Client: job_id + текущий статус
+        Queue-->>API: Возвращает существующий job (pending/processing/done/failed/stopped) со счётчиками и таймингами
+        API-->>Client: job_id + статус + attempts/max_attempts + next_run_at + started_at/finished_at + target_media_type
     else Новая задача
         API->>Queue: INSERT status=pending, attempts=0, next_run_at=now(), target_bucket/key с дефолтами
         Queue-->>API: job_id сохранённой задачи
-        API-->>Client: job_id, status=pending
+        API-->>Client: job_id, status=pending, attempts=0, max_attempts=5, next_run_at=now()
     end
 
     loop Каждые poll_interval
@@ -47,6 +47,6 @@ sequenceDiagram
 
     Client->>API: GetPreprocessStatus(job_id, correlation_id?)
     API->>Queue: SELECT job_id=...
-    Queue-->>API: job со статусом, target_bucket/key, error_code/message/details, updated_at
-    API-->>Client: pending/processing/done/failed/stopped + путь к результату или ошибка
+    Queue-->>API: job со статусом, target_bucket/key, error_code/message/details, attempts/max_attempts, next_run_at, started_at/finished_at, target_media_type, updated_at
+    API-->>Client: pending/processing/done/failed/stopped + путь к результату или ошибка + тайминги
 ```

@@ -23,13 +23,13 @@ sequenceDiagram
     participant Callback as callback_url
 
     Client->>GRPC: SubmitPreprocess(source_bucket, source_key, callback_url)
-    GRPC-->>Client: job_id, статус PENDING
+    GRPC-->>Client: job_id, статус PENDING, attempts/max_attempts, next_run_at
     GRPC->>Queue: Сохраняет задание
     Worker->>Queue: Забирает PENDING
     Worker->>MinIO: Читает source_bucket/source_key
     Worker->>MinIO: Записывает target_bucket/target_key (docx)
-    Worker->>Queue: Обновляет статус COMPLETED/FAILED
+    Worker->>Queue: Обновляет статус COMPLETED/FAILED/STOPPED, пишет started_at/finished_at, target_media_type
     Client->>GRPC: GetPreprocessStatus(job_id)
-    GRPC-->>Client: Статус + координаты результата
+    GRPC-->>Client: Статус + координаты результата + attempts/max_attempts/started_at/finished_at/next_run_at/target_media_type
     Worker-->>Callback: POST с job_id, статусом и путём в MinIO
 ```

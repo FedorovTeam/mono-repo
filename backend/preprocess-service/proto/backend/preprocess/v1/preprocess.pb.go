@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v3.21.12
-// source: backend/preprocess/v1/preprocess.proto
+// source: proto/preprocess.proto
 
 package preprocessv1
 
@@ -30,6 +30,7 @@ const (
 	PreprocessStatus_PREPROCESS_STATUS_PROCESSING  PreprocessStatus = 2
 	PreprocessStatus_PREPROCESS_STATUS_COMPLETED   PreprocessStatus = 3
 	PreprocessStatus_PREPROCESS_STATUS_FAILED      PreprocessStatus = 4
+	PreprocessStatus_PREPROCESS_STATUS_STOPPED     PreprocessStatus = 5
 )
 
 // Enum value maps for PreprocessStatus.
@@ -40,6 +41,7 @@ var (
 		2: "PREPROCESS_STATUS_PROCESSING",
 		3: "PREPROCESS_STATUS_COMPLETED",
 		4: "PREPROCESS_STATUS_FAILED",
+		5: "PREPROCESS_STATUS_STOPPED",
 	}
 	PreprocessStatus_value = map[string]int32{
 		"PREPROCESS_STATUS_UNSPECIFIED": 0,
@@ -47,6 +49,7 @@ var (
 		"PREPROCESS_STATUS_PROCESSING":  2,
 		"PREPROCESS_STATUS_COMPLETED":   3,
 		"PREPROCESS_STATUS_FAILED":      4,
+		"PREPROCESS_STATUS_STOPPED":     5,
 	}
 )
 
@@ -61,11 +64,11 @@ func (x PreprocessStatus) String() string {
 }
 
 func (PreprocessStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_backend_preprocess_v1_preprocess_proto_enumTypes[0].Descriptor()
+	return file_proto_preprocess_proto_enumTypes[0].Descriptor()
 }
 
 func (PreprocessStatus) Type() protoreflect.EnumType {
-	return &file_backend_preprocess_v1_preprocess_proto_enumTypes[0]
+	return &file_proto_preprocess_proto_enumTypes[0]
 }
 
 func (x PreprocessStatus) Number() protoreflect.EnumNumber {
@@ -74,7 +77,7 @@ func (x PreprocessStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PreprocessStatus.Descriptor instead.
 func (PreprocessStatus) EnumDescriptor() ([]byte, []int) {
-	return file_backend_preprocess_v1_preprocess_proto_rawDescGZIP(), []int{0}
+	return file_proto_preprocess_proto_rawDescGZIP(), []int{0}
 }
 
 // SubmitPreprocessRequest описывает параметры постановки документа в очередь.
@@ -94,7 +97,7 @@ type SubmitPreprocessRequest struct {
 
 func (x *SubmitPreprocessRequest) Reset() {
 	*x = SubmitPreprocessRequest{}
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[0]
+	mi := &file_proto_preprocess_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -106,7 +109,7 @@ func (x *SubmitPreprocessRequest) String() string {
 func (*SubmitPreprocessRequest) ProtoMessage() {}
 
 func (x *SubmitPreprocessRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[0]
+	mi := &file_proto_preprocess_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -119,7 +122,7 @@ func (x *SubmitPreprocessRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPreprocessRequest.ProtoReflect.Descriptor instead.
 func (*SubmitPreprocessRequest) Descriptor() ([]byte, []int) {
-	return file_backend_preprocess_v1_preprocess_proto_rawDescGZIP(), []int{0}
+	return file_proto_preprocess_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *SubmitPreprocessRequest) GetSourceBucket() string {
@@ -179,18 +182,24 @@ func (x *SubmitPreprocessRequest) GetCallbackUrl() string {
 }
 
 type SubmitPreprocessResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	Status        PreprocessStatus       `protobuf:"varint,2,opt,name=status,proto3,enum=backend.preprocess.v1.PreprocessStatus" json:"status,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	CorrelationId string                 `protobuf:"bytes,4,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	JobId           string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Status          PreprocessStatus       `protobuf:"varint,2,opt,name=status,proto3,enum=backend.preprocess.v1.PreprocessStatus" json:"status,omitempty"`
+	ErrorMessage    string                 `protobuf:"bytes,3,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	CorrelationId   string                 `protobuf:"bytes,4,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	Attempts        int32                  `protobuf:"varint,5,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	MaxAttempts     int32                  `protobuf:"varint,6,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
+	NextRunAt       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=next_run_at,json=nextRunAt,proto3" json:"next_run_at,omitempty"`
+	StartedAt       *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	FinishedAt      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	TargetMediaType string                 `protobuf:"bytes,10,opt,name=target_media_type,json=targetMediaType,proto3" json:"target_media_type,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SubmitPreprocessResponse) Reset() {
 	*x = SubmitPreprocessResponse{}
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[1]
+	mi := &file_proto_preprocess_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -202,7 +211,7 @@ func (x *SubmitPreprocessResponse) String() string {
 func (*SubmitPreprocessResponse) ProtoMessage() {}
 
 func (x *SubmitPreprocessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[1]
+	mi := &file_proto_preprocess_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -215,7 +224,7 @@ func (x *SubmitPreprocessResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPreprocessResponse.ProtoReflect.Descriptor instead.
 func (*SubmitPreprocessResponse) Descriptor() ([]byte, []int) {
-	return file_backend_preprocess_v1_preprocess_proto_rawDescGZIP(), []int{1}
+	return file_proto_preprocess_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *SubmitPreprocessResponse) GetJobId() string {
@@ -246,6 +255,48 @@ func (x *SubmitPreprocessResponse) GetCorrelationId() string {
 	return ""
 }
 
+func (x *SubmitPreprocessResponse) GetAttempts() int32 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
+
+func (x *SubmitPreprocessResponse) GetMaxAttempts() int32 {
+	if x != nil {
+		return x.MaxAttempts
+	}
+	return 0
+}
+
+func (x *SubmitPreprocessResponse) GetNextRunAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NextRunAt
+	}
+	return nil
+}
+
+func (x *SubmitPreprocessResponse) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *SubmitPreprocessResponse) GetFinishedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinishedAt
+	}
+	return nil
+}
+
+func (x *SubmitPreprocessResponse) GetTargetMediaType() string {
+	if x != nil {
+		return x.TargetMediaType
+	}
+	return ""
+}
+
 type GetPreprocessStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -256,7 +307,7 @@ type GetPreprocessStatusRequest struct {
 
 func (x *GetPreprocessStatusRequest) Reset() {
 	*x = GetPreprocessStatusRequest{}
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[2]
+	mi := &file_proto_preprocess_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -268,7 +319,7 @@ func (x *GetPreprocessStatusRequest) String() string {
 func (*GetPreprocessStatusRequest) ProtoMessage() {}
 
 func (x *GetPreprocessStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[2]
+	mi := &file_proto_preprocess_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -281,7 +332,7 @@ func (x *GetPreprocessStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPreprocessStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetPreprocessStatusRequest) Descriptor() ([]byte, []int) {
-	return file_backend_preprocess_v1_preprocess_proto_rawDescGZIP(), []int{2}
+	return file_proto_preprocess_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetPreprocessStatusRequest) GetJobId() string {
@@ -299,26 +350,32 @@ func (x *GetPreprocessStatusRequest) GetCorrelationId() string {
 }
 
 type GetPreprocessStatusResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	DocumentId    string                 `protobuf:"bytes,2,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
-	SourceBucket  string                 `protobuf:"bytes,3,opt,name=source_bucket,json=sourceBucket,proto3" json:"source_bucket,omitempty"`
-	SourceKey     string                 `protobuf:"bytes,4,opt,name=source_key,json=sourceKey,proto3" json:"source_key,omitempty"`
-	TargetBucket  string                 `protobuf:"bytes,5,opt,name=target_bucket,json=targetBucket,proto3" json:"target_bucket,omitempty"`
-	TargetKey     string                 `protobuf:"bytes,6,opt,name=target_key,json=targetKey,proto3" json:"target_key,omitempty"`
-	Status        PreprocessStatus       `protobuf:"varint,7,opt,name=status,proto3,enum=backend.preprocess.v1.PreprocessStatus" json:"status,omitempty"`
-	ErrorMessage  string                 `protobuf:"bytes,8,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	CorrelationId string                 `protobuf:"bytes,9,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	ErrorCode     string                 `protobuf:"bytes,11,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
-	ErrorDetails  map[string]string      `protobuf:"bytes,12,rep,name=error_details,json=errorDetails,proto3" json:"error_details,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	JobId           string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	DocumentId      string                 `protobuf:"bytes,2,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
+	SourceBucket    string                 `protobuf:"bytes,3,opt,name=source_bucket,json=sourceBucket,proto3" json:"source_bucket,omitempty"`
+	SourceKey       string                 `protobuf:"bytes,4,opt,name=source_key,json=sourceKey,proto3" json:"source_key,omitempty"`
+	TargetBucket    string                 `protobuf:"bytes,5,opt,name=target_bucket,json=targetBucket,proto3" json:"target_bucket,omitempty"`
+	TargetKey       string                 `protobuf:"bytes,6,opt,name=target_key,json=targetKey,proto3" json:"target_key,omitempty"`
+	Status          PreprocessStatus       `protobuf:"varint,7,opt,name=status,proto3,enum=backend.preprocess.v1.PreprocessStatus" json:"status,omitempty"`
+	ErrorMessage    string                 `protobuf:"bytes,8,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	CorrelationId   string                 `protobuf:"bytes,9,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	ErrorCode       string                 `protobuf:"bytes,11,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorDetails    map[string]string      `protobuf:"bytes,12,rep,name=error_details,json=errorDetails,proto3" json:"error_details,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Attempts        int32                  `protobuf:"varint,13,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	MaxAttempts     int32                  `protobuf:"varint,14,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
+	NextRunAt       *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=next_run_at,json=nextRunAt,proto3" json:"next_run_at,omitempty"`
+	StartedAt       *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	FinishedAt      *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	TargetMediaType string                 `protobuf:"bytes,18,opt,name=target_media_type,json=targetMediaType,proto3" json:"target_media_type,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetPreprocessStatusResponse) Reset() {
 	*x = GetPreprocessStatusResponse{}
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[3]
+	mi := &file_proto_preprocess_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -330,7 +387,7 @@ func (x *GetPreprocessStatusResponse) String() string {
 func (*GetPreprocessStatusResponse) ProtoMessage() {}
 
 func (x *GetPreprocessStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_backend_preprocess_v1_preprocess_proto_msgTypes[3]
+	mi := &file_proto_preprocess_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -343,7 +400,7 @@ func (x *GetPreprocessStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPreprocessStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetPreprocessStatusResponse) Descriptor() ([]byte, []int) {
-	return file_backend_preprocess_v1_preprocess_proto_rawDescGZIP(), []int{3}
+	return file_proto_preprocess_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetPreprocessStatusResponse) GetJobId() string {
@@ -430,11 +487,53 @@ func (x *GetPreprocessStatusResponse) GetErrorDetails() map[string]string {
 	return nil
 }
 
-var File_backend_preprocess_v1_preprocess_proto protoreflect.FileDescriptor
+func (x *GetPreprocessStatusResponse) GetAttempts() int32 {
+	if x != nil {
+		return x.Attempts
+	}
+	return 0
+}
 
-const file_backend_preprocess_v1_preprocess_proto_rawDesc = "" +
+func (x *GetPreprocessStatusResponse) GetMaxAttempts() int32 {
+	if x != nil {
+		return x.MaxAttempts
+	}
+	return 0
+}
+
+func (x *GetPreprocessStatusResponse) GetNextRunAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NextRunAt
+	}
+	return nil
+}
+
+func (x *GetPreprocessStatusResponse) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *GetPreprocessStatusResponse) GetFinishedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.FinishedAt
+	}
+	return nil
+}
+
+func (x *GetPreprocessStatusResponse) GetTargetMediaType() string {
+	if x != nil {
+		return x.TargetMediaType
+	}
+	return ""
+}
+
+var File_proto_preprocess_proto protoreflect.FileDescriptor
+
+const file_proto_preprocess_proto_rawDesc = "" +
 	"\n" +
-	"&backend/preprocess/v1/preprocess.proto\x12\x15backend.preprocess.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xad\x02\n" +
+	"\x16proto/preprocess.proto\x12\x15backend.preprocess.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xad\x02\n" +
 	"\x17SubmitPreprocessRequest\x12#\n" +
 	"\rsource_bucket\x18\x01 \x01(\tR\fsourceBucket\x12\x1d\n" +
 	"\n" +
@@ -447,15 +546,24 @@ const file_backend_preprocess_v1_preprocess_proto_rawDesc = "" +
 	"\vdocument_id\x18\x06 \x01(\tR\n" +
 	"documentId\x12%\n" +
 	"\x0ecorrelation_id\x18\a \x01(\tR\rcorrelationId\x12!\n" +
-	"\fcallback_url\x18\b \x01(\tR\vcallbackUrl\"\xbe\x01\n" +
+	"\fcallback_url\x18\b \x01(\tR\vcallbackUrl\"\xdd\x03\n" +
 	"\x18SubmitPreprocessResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12?\n" +
 	"\x06status\x18\x02 \x01(\x0e2'.backend.preprocess.v1.PreprocessStatusR\x06status\x12#\n" +
 	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\x12%\n" +
-	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId\"Z\n" +
+	"\x0ecorrelation_id\x18\x04 \x01(\tR\rcorrelationId\x12\x1a\n" +
+	"\battempts\x18\x05 \x01(\x05R\battempts\x12!\n" +
+	"\fmax_attempts\x18\x06 \x01(\x05R\vmaxAttempts\x12:\n" +
+	"\vnext_run_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tnextRunAt\x129\n" +
+	"\n" +
+	"started_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
+	"\vfinished_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"finishedAt\x12*\n" +
+	"\x11target_media_type\x18\n" +
+	" \x01(\tR\x0ftargetMediaType\"Z\n" +
 	"\x1aGetPreprocessStatusRequest\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12%\n" +
-	"\x0ecorrelation_id\x18\x02 \x01(\tR\rcorrelationId\"\xf0\x04\n" +
+	"\x0ecorrelation_id\x18\x02 \x01(\tR\rcorrelationId\"\x8f\a\n" +
 	"\x1bGetPreprocessStatusResponse\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1f\n" +
 	"\vdocument_id\x18\x02 \x01(\tR\n" +
@@ -474,35 +582,44 @@ const file_backend_preprocess_v1_preprocess_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\v \x01(\tR\terrorCode\x12i\n" +
-	"\rerror_details\x18\f \x03(\v2D.backend.preprocess.v1.GetPreprocessStatusResponse.ErrorDetailsEntryR\ferrorDetails\x1a?\n" +
+	"\rerror_details\x18\f \x03(\v2D.backend.preprocess.v1.GetPreprocessStatusResponse.ErrorDetailsEntryR\ferrorDetails\x12\x1a\n" +
+	"\battempts\x18\r \x01(\x05R\battempts\x12!\n" +
+	"\fmax_attempts\x18\x0e \x01(\x05R\vmaxAttempts\x12:\n" +
+	"\vnext_run_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\tnextRunAt\x129\n" +
+	"\n" +
+	"started_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
+	"\vfinished_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"finishedAt\x12*\n" +
+	"\x11target_media_type\x18\x12 \x01(\tR\x0ftargetMediaType\x1a?\n" +
 	"\x11ErrorDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xb5\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xd4\x01\n" +
 	"\x10PreprocessStatus\x12!\n" +
 	"\x1dPREPROCESS_STATUS_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19PREPROCESS_STATUS_PENDING\x10\x01\x12 \n" +
 	"\x1cPREPROCESS_STATUS_PROCESSING\x10\x02\x12\x1f\n" +
 	"\x1bPREPROCESS_STATUS_COMPLETED\x10\x03\x12\x1c\n" +
-	"\x18PREPROCESS_STATUS_FAILED\x10\x042\x86\x02\n" +
+	"\x18PREPROCESS_STATUS_FAILED\x10\x04\x12\x1d\n" +
+	"\x19PREPROCESS_STATUS_STOPPED\x10\x052\x86\x02\n" +
 	"\x11PreprocessService\x12s\n" +
 	"\x10SubmitPreprocess\x12..backend.preprocess.v1.SubmitPreprocessRequest\x1a/.backend.preprocess.v1.SubmitPreprocessResponse\x12|\n" +
 	"\x13GetPreprocessStatus\x121.backend.preprocess.v1.GetPreprocessStatusRequest\x1a2.backend.preprocess.v1.GetPreprocessStatusResponseB=Z;preprocess-service/proto/backend/preprocess/v1;preprocessv1b\x06proto3"
 
 var (
-	file_backend_preprocess_v1_preprocess_proto_rawDescOnce sync.Once
-	file_backend_preprocess_v1_preprocess_proto_rawDescData []byte
+	file_proto_preprocess_proto_rawDescOnce sync.Once
+	file_proto_preprocess_proto_rawDescData []byte
 )
 
-func file_backend_preprocess_v1_preprocess_proto_rawDescGZIP() []byte {
-	file_backend_preprocess_v1_preprocess_proto_rawDescOnce.Do(func() {
-		file_backend_preprocess_v1_preprocess_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_backend_preprocess_v1_preprocess_proto_rawDesc), len(file_backend_preprocess_v1_preprocess_proto_rawDesc)))
+func file_proto_preprocess_proto_rawDescGZIP() []byte {
+	file_proto_preprocess_proto_rawDescOnce.Do(func() {
+		file_proto_preprocess_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_preprocess_proto_rawDesc), len(file_proto_preprocess_proto_rawDesc)))
 	})
-	return file_backend_preprocess_v1_preprocess_proto_rawDescData
+	return file_proto_preprocess_proto_rawDescData
 }
 
-var file_backend_preprocess_v1_preprocess_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_backend_preprocess_v1_preprocess_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_backend_preprocess_v1_preprocess_proto_goTypes = []any{
+var file_proto_preprocess_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_proto_preprocess_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proto_preprocess_proto_goTypes = []any{
 	(PreprocessStatus)(0),               // 0: backend.preprocess.v1.PreprocessStatus
 	(*SubmitPreprocessRequest)(nil),     // 1: backend.preprocess.v1.SubmitPreprocessRequest
 	(*SubmitPreprocessResponse)(nil),    // 2: backend.preprocess.v1.SubmitPreprocessResponse
@@ -511,43 +628,49 @@ var file_backend_preprocess_v1_preprocess_proto_goTypes = []any{
 	nil,                                 // 5: backend.preprocess.v1.GetPreprocessStatusResponse.ErrorDetailsEntry
 	(*timestamppb.Timestamp)(nil),       // 6: google.protobuf.Timestamp
 }
-var file_backend_preprocess_v1_preprocess_proto_depIdxs = []int32{
-	0, // 0: backend.preprocess.v1.SubmitPreprocessResponse.status:type_name -> backend.preprocess.v1.PreprocessStatus
-	0, // 1: backend.preprocess.v1.GetPreprocessStatusResponse.status:type_name -> backend.preprocess.v1.PreprocessStatus
-	6, // 2: backend.preprocess.v1.GetPreprocessStatusResponse.updated_at:type_name -> google.protobuf.Timestamp
-	5, // 3: backend.preprocess.v1.GetPreprocessStatusResponse.error_details:type_name -> backend.preprocess.v1.GetPreprocessStatusResponse.ErrorDetailsEntry
-	1, // 4: backend.preprocess.v1.PreprocessService.SubmitPreprocess:input_type -> backend.preprocess.v1.SubmitPreprocessRequest
-	3, // 5: backend.preprocess.v1.PreprocessService.GetPreprocessStatus:input_type -> backend.preprocess.v1.GetPreprocessStatusRequest
-	2, // 6: backend.preprocess.v1.PreprocessService.SubmitPreprocess:output_type -> backend.preprocess.v1.SubmitPreprocessResponse
-	4, // 7: backend.preprocess.v1.PreprocessService.GetPreprocessStatus:output_type -> backend.preprocess.v1.GetPreprocessStatusResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+var file_proto_preprocess_proto_depIdxs = []int32{
+	0,  // 0: backend.preprocess.v1.SubmitPreprocessResponse.status:type_name -> backend.preprocess.v1.PreprocessStatus
+	6,  // 1: backend.preprocess.v1.SubmitPreprocessResponse.next_run_at:type_name -> google.protobuf.Timestamp
+	6,  // 2: backend.preprocess.v1.SubmitPreprocessResponse.started_at:type_name -> google.protobuf.Timestamp
+	6,  // 3: backend.preprocess.v1.SubmitPreprocessResponse.finished_at:type_name -> google.protobuf.Timestamp
+	0,  // 4: backend.preprocess.v1.GetPreprocessStatusResponse.status:type_name -> backend.preprocess.v1.PreprocessStatus
+	6,  // 5: backend.preprocess.v1.GetPreprocessStatusResponse.updated_at:type_name -> google.protobuf.Timestamp
+	5,  // 6: backend.preprocess.v1.GetPreprocessStatusResponse.error_details:type_name -> backend.preprocess.v1.GetPreprocessStatusResponse.ErrorDetailsEntry
+	6,  // 7: backend.preprocess.v1.GetPreprocessStatusResponse.next_run_at:type_name -> google.protobuf.Timestamp
+	6,  // 8: backend.preprocess.v1.GetPreprocessStatusResponse.started_at:type_name -> google.protobuf.Timestamp
+	6,  // 9: backend.preprocess.v1.GetPreprocessStatusResponse.finished_at:type_name -> google.protobuf.Timestamp
+	1,  // 10: backend.preprocess.v1.PreprocessService.SubmitPreprocess:input_type -> backend.preprocess.v1.SubmitPreprocessRequest
+	3,  // 11: backend.preprocess.v1.PreprocessService.GetPreprocessStatus:input_type -> backend.preprocess.v1.GetPreprocessStatusRequest
+	2,  // 12: backend.preprocess.v1.PreprocessService.SubmitPreprocess:output_type -> backend.preprocess.v1.SubmitPreprocessResponse
+	4,  // 13: backend.preprocess.v1.PreprocessService.GetPreprocessStatus:output_type -> backend.preprocess.v1.GetPreprocessStatusResponse
+	12, // [12:14] is the sub-list for method output_type
+	10, // [10:12] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
-func init() { file_backend_preprocess_v1_preprocess_proto_init() }
-func file_backend_preprocess_v1_preprocess_proto_init() {
-	if File_backend_preprocess_v1_preprocess_proto != nil {
+func init() { file_proto_preprocess_proto_init() }
+func file_proto_preprocess_proto_init() {
+	if File_proto_preprocess_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_backend_preprocess_v1_preprocess_proto_rawDesc), len(file_backend_preprocess_v1_preprocess_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_preprocess_proto_rawDesc), len(file_proto_preprocess_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_backend_preprocess_v1_preprocess_proto_goTypes,
-		DependencyIndexes: file_backend_preprocess_v1_preprocess_proto_depIdxs,
-		EnumInfos:         file_backend_preprocess_v1_preprocess_proto_enumTypes,
-		MessageInfos:      file_backend_preprocess_v1_preprocess_proto_msgTypes,
+		GoTypes:           file_proto_preprocess_proto_goTypes,
+		DependencyIndexes: file_proto_preprocess_proto_depIdxs,
+		EnumInfos:         file_proto_preprocess_proto_enumTypes,
+		MessageInfos:      file_proto_preprocess_proto_msgTypes,
 	}.Build()
-	File_backend_preprocess_v1_preprocess_proto = out.File
-	file_backend_preprocess_v1_preprocess_proto_goTypes = nil
-	file_backend_preprocess_v1_preprocess_proto_depIdxs = nil
+	File_proto_preprocess_proto = out.File
+	file_proto_preprocess_proto_goTypes = nil
+	file_proto_preprocess_proto_depIdxs = nil
 }

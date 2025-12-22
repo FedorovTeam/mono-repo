@@ -106,6 +106,24 @@ func TestSubmitAndWorkerHappyPath(t *testing.T) {
 	if len(statusResp.GetErrorDetails()) != 0 {
 		t.Fatalf("expected empty error details, got %#v", statusResp.GetErrorDetails())
 	}
+	if statusResp.GetStartedAt() == nil || statusResp.GetStartedAt().AsTime().IsZero() {
+		t.Fatalf("expected started_at to be set for completed job")
+	}
+	if statusResp.GetFinishedAt() == nil || statusResp.GetFinishedAt().AsTime().IsZero() {
+		t.Fatalf("expected finished_at to be set for completed job")
+	}
+	if statusResp.GetAttempts() != 1 {
+		t.Fatalf("expected attempts to be incremented to 1, got %d", statusResp.GetAttempts())
+	}
+	if statusResp.GetMaxAttempts() != int32(domain.DefaultMaxAttempts) {
+		t.Fatalf("unexpected max_attempts %d", statusResp.GetMaxAttempts())
+	}
+	if statusResp.GetNextRunAt() == nil || statusResp.GetNextRunAt().AsTime().IsZero() {
+		t.Fatalf("expected next_run_at to be present in response")
+	}
+	if statusResp.GetTargetMediaType() != preprocess.DefaultTargetMediaType {
+		t.Fatalf("expected target_media_type %s, got %s", preprocess.DefaultTargetMediaType, statusResp.GetTargetMediaType())
+	}
 }
 
 func TestWorkerRecoversFromProcessorPanic(t *testing.T) {
