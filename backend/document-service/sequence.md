@@ -48,7 +48,7 @@ sequenceDiagram
         F->>S: UPDATE processing_jobs status=failed {handled}
     end
 
-    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа или preprocessed_bucket/key, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false)
+    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа или preprocessed_bucket/key/target_object_key, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false); при success пишет job_event со ссылкой на источник и preprocess_job_id
     alt Документ уже Converted/Published
         SW-->>S: Activities.MarkConverted (no-op), job_event completed
     else Временная gRPC ошибка (Unavailable/ResourceExhausted/...)

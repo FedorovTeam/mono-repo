@@ -55,13 +55,17 @@ type StoreOriginalPayload struct {
 // ConvertPayload описывает данные для шага конвертации в Markdown.
 type ConvertPayload struct {
 	JobPayloadMetadata
-	OriginalBucket    string
-	OriginalObjectKey string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	QueueID           string
-	Status            string
-	FilenameExtension string
+	OriginalBucket        string
+	OriginalObjectKey     string
+	PreprocessJobID       string
+	PreprocessedBucket    string
+	PreprocessedObjectKey string
+	TargetObjectKey       string
+	MarkdownBucket        string
+	MarkdownObjectKey     string
+	QueueID               string
+	Status                string
+	FilenameExtension     string
 }
 
 // PreprocessPayload описывает данные для шага преобразования в DOCX.
@@ -148,6 +152,18 @@ func (p ConvertPayload) ToMap() map[string]any {
 	if p.OriginalObjectKey != "" {
 		res["original_object_key"] = p.OriginalObjectKey
 	}
+	if p.PreprocessJobID != "" {
+		res["preprocess_job_id"] = p.PreprocessJobID
+	}
+	if p.PreprocessedBucket != "" {
+		res["preprocessed_bucket"] = p.PreprocessedBucket
+	}
+	if p.PreprocessedObjectKey != "" {
+		res["preprocessed_object_key"] = p.PreprocessedObjectKey
+	}
+	if p.TargetObjectKey != "" {
+		res["target_object_key"] = p.TargetObjectKey
+	}
 	if p.MarkdownBucket != "" {
 		res["markdown_bucket"] = p.MarkdownBucket
 	}
@@ -170,14 +186,18 @@ func (p ConvertPayload) ToMap() map[string]any {
 // ConvertPayloadFromMap восстанавливает структуру из map.
 func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 	return ConvertPayload{
-		JobPayloadMetadata: metadataFromMap(payload),
-		OriginalBucket:     stringFromMap(payload, "original_bucket"),
-		OriginalObjectKey:  stringFromMap(payload, "original_object_key"),
-		MarkdownBucket:     stringFromMap(payload, "markdown_bucket"),
-		MarkdownObjectKey:  stringFromMap(payload, "markdown_object_key"),
-		QueueID:            stringFromMap(payload, "queue_id"),
-		Status:             stringFromMap(payload, "status"),
-		FilenameExtension:  stringFromMap(payload, "filename_extension"),
+		JobPayloadMetadata:    metadataFromMap(payload),
+		OriginalBucket:        stringFromMap(payload, "original_bucket"),
+		OriginalObjectKey:     stringFromMap(payload, "original_object_key"),
+		PreprocessJobID:       stringFromMap(payload, "preprocess_job_id"),
+		PreprocessedBucket:    stringFromMap(payload, "preprocessed_bucket"),
+		PreprocessedObjectKey: stringFromMap(payload, "preprocessed_object_key"),
+		TargetObjectKey:       stringFromMap(payload, "target_object_key"),
+		MarkdownBucket:        stringFromMap(payload, "markdown_bucket"),
+		MarkdownObjectKey:     stringFromMap(payload, "markdown_object_key"),
+		QueueID:               stringFromMap(payload, "queue_id"),
+		Status:                stringFromMap(payload, "status"),
+		FilenameExtension:     stringFromMap(payload, "filename_extension"),
 	}
 }
 

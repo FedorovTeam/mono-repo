@@ -229,7 +229,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 		t.Fatalf("unexpected status: %s", result.Status)
 	}
 
-	if err := activities.MarkConverted(context.Background(), repo.doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
+	if err := activities.MarkConverted(context.Background(), repo.doc, result.MarkdownKey, repo.doc.OriginalObjectKey, result.QueueID, result.Version); err != nil {
 		t.Fatalf("mark converted failed: %v", err)
 	}
 

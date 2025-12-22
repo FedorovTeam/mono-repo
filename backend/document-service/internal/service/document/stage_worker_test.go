@@ -25,6 +25,7 @@ type publishRepoStub struct {
 	nextRun        *time.Time
 	statusUpdates  []domain.DocumentStatus
 	lastError      string
+	lastVersion    *domain.DocumentVersion
 	lastUpdateArgs struct {
 		reason      string
 		errorReason string
@@ -105,8 +106,14 @@ func (r *publishRepoStub) UpdateStatus(ctx context.Context, id string, to domain
 	if r.doc != nil {
 		r.doc.Status = to
 		r.doc.ErrorReason = errorReason
-		if version != nil && version.MarkdownObjectKey != "" {
-			r.doc.MarkdownObjectKey = version.MarkdownObjectKey
+		r.lastVersion = version
+		if version != nil {
+			if version.MarkdownObjectKey != "" {
+				r.doc.MarkdownObjectKey = version.MarkdownObjectKey
+			}
+			if version.OriginalObjectKey != "" {
+				r.doc.OriginalObjectKey = version.OriginalObjectKey
+			}
 		}
 	}
 	r.statusUpdates = append(r.statusUpdates, to)
@@ -632,6 +639,75 @@ func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 	}
 	if _, ok := result.Payload["force_ocr"]; ok {
 		t.Fatalf("expected force_ocr to be omitted from payload, got %v", result.Payload)
+	}
+}
+
+func TestHandleConvertUsesPreprocessedSourceWhenPresent(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-preprocessed",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-prep", Status: "done", MarkdownObjectKey: "docs/doc.md"}}
+	activities := NewActivities(repo, nil, transformer, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	payload := domain.ConvertPayload{
+		PreprocessJobID:       "prep-123",
+		PreprocessedBucket:    "prep-bucket",
+		PreprocessedObjectKey: "docs/doc.docx",
+		TargetObjectKey:       "docs/doc.docx",
+		OriginalBucket:        doc.OriginalBucket,
+		OriginalObjectKey:     doc.OriginalObjectKey,
+		MarkdownBucket:        doc.MarkdownBucket,
+		MarkdownObjectKey:     doc.MarkdownObjectKey,
+	}.ToMap()
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-prep", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: payload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if transformer.lastRequest == nil {
+		t.Fatalf("expected transformer request to be sent")
+	}
+	if transformer.lastRequest.GetOriginalBucket() != "prep-bucket" || transformer.lastRequest.GetOriginalObjectKey() != "docs/doc.docx" {
+		t.Fatalf("expected preprocessed source to be used, got bucket=%s key=%s", transformer.lastRequest.GetOriginalBucket(), transformer.lastRequest.GetOriginalObjectKey())
+	}
+	if transformer.lastRequest.GetFilenameExtension() != "docx" {
+		t.Fatalf("expected docx extension to be used, got %s", transformer.lastRequest.GetFilenameExtension())
+	}
+
+	if repo.lastVersion == nil || repo.lastVersion.OriginalObjectKey != "docs/doc.docx" {
+		t.Fatalf("expected version to store preprocessed source, got %+v", repo.lastVersion)
+	}
+	if doc.OriginalObjectKey != "docs/doc.docx" {
+		t.Fatalf("expected document original key to be updated, got %s", doc.OriginalObjectKey)
+	}
+	if repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document status to be converted, got %v", repo.statusUpdates)
+	}
+	if result.Event == nil || result.Event.Payload == nil {
+		t.Fatalf("expected event payload with source info, got %+v", result.Event)
+	}
+	eventPayload := result.Event.Payload
+	if eventPayload["source_bucket"] != "prep-bucket" || eventPayload["source_object_key"] != "docs/doc.docx" {
+		t.Fatalf("unexpected event payload: %+v", eventPayload)
+	}
+	if eventPayload["preprocess_job_id"] != "prep-123" {
+		t.Fatalf("expected preprocess_job_id in event payload, got %+v", eventPayload)
 	}
 }
 

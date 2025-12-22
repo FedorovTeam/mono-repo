@@ -200,6 +200,7 @@ func (w *StageWorker) handlePreprocessToDocx(ctx context.Context, job domain.Pro
 		return workersvc.JobResult{Payload: payload.ToMap()}, pollErr
 	}
 
+	payload.PreprocessJobID = firstNonEmpty(payload.PreprocessJobID, result.JobID)
 	payload.PreprocessStatus = result.Status.String()
 	payload.PreprocessErrorMessage = result.ErrorMessage
 	payload.PreprocessedBucket = firstNonEmpty(payload.PreprocessedBucket, result.TargetBucket, payload.TargetBucket)
@@ -209,6 +210,8 @@ func (w *StageWorker) handlePreprocessToDocx(ctx context.Context, job domain.Pro
 	switch result.Status {
 	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_COMPLETED:
 		payload.PollAttempts = 0
+		payload.PreprocessedBucket = firstNonEmpty(payload.PreprocessedBucket, result.TargetBucket, payload.TargetBucket)
+		payload.PreprocessedObjectKey = firstNonEmpty(payload.PreprocessedObjectKey, result.TargetObjectKey, payload.TargetObjectKey)
 		return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed"}}, nil
 	case preprocessv1.PreprocessStatus_PREPROCESS_STATUS_FAILED:
 		reason := preprocessFailureReason(result.ErrorCode, firstNonEmpty(result.ErrorMessage, payload.PreprocessErrorMessage))
@@ -248,6 +251,8 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
 	payload.FilenameExtension = firstNonEmpty(
 		payload.FilenameExtension,
+		fileExtension(payload.PreprocessedObjectKey),
+		fileExtension(payload.TargetObjectKey),
 		fileExtension(payload.OriginalObjectKey),
 		fileExtension(doc.OriginalObjectKey),
 		fileExtension(doc.Name),
@@ -258,13 +263,15 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 
 	input := convertInput{
 		DocumentID:        job.DocumentID,
-		OriginalBucket:    payload.OriginalBucket,
+		OriginalBucket:    firstNonEmpty(payload.PreprocessedBucket, payload.OriginalBucket),
 		MarkdownBucket:    payload.MarkdownBucket,
-		OriginalObjectKey: payload.OriginalObjectKey,
+		OriginalObjectKey: firstNonEmpty(payload.PreprocessedObjectKey, payload.TargetObjectKey, payload.OriginalObjectKey),
 		MarkdownObjectKey: payload.MarkdownObjectKey,
 		FilenameExtension: payload.FilenameExtension,
 		Version:           latestVersion(doc).Version + 1,
 	}
+	sourceBucket := input.OriginalBucket
+	sourceObjectKey := input.OriginalObjectKey
 
 	convCtx := w.jobContext(ctx, payload.CorrelationID)
 	result, err := w.activities.ConvertToMarkdown(convCtx, input)
@@ -294,11 +301,25 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		}, nil
 	}
 
-	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, result.QueueID, result.Version); err != nil {
+	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, sourceObjectKey, result.QueueID, result.Version); err != nil {
 		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("update status: %w", err)
 	}
 
-	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed"}}, nil
+	eventPayload := map[string]any{}
+	if sourceBucket != "" {
+		eventPayload["source_bucket"] = sourceBucket
+	}
+	if sourceObjectKey != "" {
+		eventPayload["source_object_key"] = sourceObjectKey
+	}
+	if payload.PreprocessJobID != "" {
+		eventPayload["preprocess_job_id"] = payload.PreprocessJobID
+	}
+	if len(eventPayload) == 0 {
+		eventPayload = nil
+	}
+
+	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed", Payload: eventPayload}}, nil
 }
 
 func (w *StageWorker) handlePublish(ctx context.Context, job domain.ProcessingJob) (workersvc.JobResult, error) {
