@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mono-repo/table-extractor-service/internal/telemetry"
 	"github.com/mono-repo/table-extractor-service/internal/usecase"
 	"github.com/mono-repo/table-extractor-service/internal/voting"
+	"go.uber.org/zap"
 )
 
 const (
@@ -34,6 +36,7 @@ type Adapter struct {
 	parser TableParser
 	cfg    Config
 	now    func() time.Time
+	logger *zap.Logger
 }
 
 type Config struct {
@@ -126,7 +129,7 @@ type PDFInfo struct {
 	CreationDate string `json:"creation_date,omitempty"`
 }
 
-func NewAdapter(cfg Config) *Adapter {
+func NewAdapter(cfg Config, logger *zap.Logger) *Adapter {
 	cfg.Mode = normalizeMode(cfg.Mode)
 	if cfg.PdfInfoTimeout <= 0 {
 		cfg.PdfInfoTimeout = defaultPdfInfoTimeout
@@ -156,7 +159,9 @@ func NewAdapter(cfg Config) *Adapter {
 		cfg.PdftoppmDPI = defaultPdftoppmDPI
 	}
 
-	runner := NewExternalCommandRunner(cfg.MaxParallelCommands)
+	logger = resolveLogger(logger)
+
+	runner := NewExternalCommandRunner(cfg.MaxParallelCommands, logger)
 
 	var parser TableParser = DefaultParser{}
 	if cfg.DetectVotingTables {
@@ -169,6 +174,7 @@ func NewAdapter(cfg Config) *Adapter {
 		runner: runner,
 		parser: parser,
 		now:    time.Now,
+		logger: logger,
 	}
 }
 
@@ -178,6 +184,13 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	if strings.TrimSpace(pdfPath) == "" {
 		return usecase.ExtractionResult{}, errors.New("pdf path is required")
 	}
+
+	logger := a.baseLogger(ctx, pdfPath)
+	logger.Debug("starting extraction",
+		zap.String("pages", a.cfg.Pages),
+		zap.Bool("detect_voting_tables", a.cfg.DetectVotingTables),
+		zap.String("mode", a.cfg.Mode),
+	)
 
 	startPage, _ := parsePageRange(a.cfg.Pages)
 	if startPage == 0 {
@@ -192,21 +205,52 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	}
 
 	pdfInfoStart := time.Now()
+	pdfInfoLogger := logger.With(zap.String("step", "pdfinfo"))
+	pdfInfoLogger.Debug("running pdfinfo",
+		zap.Duration("timeout", a.cfg.PdfInfoTimeout),
+	)
 	infoRes, err := a.runner.Run(ctx, a.cfg.PdfInfoTimeout, a.cfg.PdfInfoPath, pdfPath)
 	manifest.Processing.PdfInfoMs = durationMs(pdfInfoStart)
 	if err != nil {
+		pdfInfoLogger.Error("pdfinfo failed",
+			zap.Error(err),
+			zap.Int64("duration_ms", manifest.Processing.PdfInfoMs),
+			zap.Int("stdout_bytes", len(infoRes.Stdout)),
+			zap.Int("stderr_bytes", len(infoRes.Stderr)),
+		)
 		return usecase.ExtractionResult{}, fmt.Errorf("pdfinfo: %w (stderr: %s)", err, string(infoRes.Stderr))
 	}
 	manifest.PDFInfo = parsePDFInfo(string(infoRes.Stdout))
+	pdfInfoLogger.Debug("pdfinfo parsed",
+		zap.Int("pages", manifest.PDFInfo.Pages),
+		zap.String("producer", manifest.PDFInfo.Producer),
+		zap.Int64("duration_ms", manifest.Processing.PdfInfoMs),
+		zap.Int("stdout_bytes", len(infoRes.Stdout)),
+		zap.Int("stderr_bytes", len(infoRes.Stderr)),
+	)
 
 	textStart := time.Now()
 	pdftotextMode := a.cfg.Mode
 	if a.cfg.DetectVotingTables {
 		pdftotextMode = modeBBox
 	}
+	pdftotextLogger := logger.With(
+		zap.String("step", "pdftotext"),
+		zap.String("mode", pdftotextMode),
+	)
+	pdftotextLogger.Debug("running pdftotext",
+		zap.Duration("timeout", a.cfg.PdftotextTimeout),
+		zap.String("pages", a.cfg.Pages),
+	)
 	mainTextRes, err := a.runPdftotext(ctx, pdfPath, pdftotextMode)
 	manifest.Processing.PdftotextMs = durationMs(textStart)
 	if err != nil {
+		pdftotextLogger.Error("pdftotext failed",
+			zap.Error(err),
+			zap.Int("stdout_bytes", len(mainTextRes.Stdout)),
+			zap.Int("stderr_bytes", len(mainTextRes.Stderr)),
+			zap.Int64("duration_ms", manifest.Processing.PdftotextMs),
+		)
 		return usecase.ExtractionResult{}, fmt.Errorf("pdftotext: %w (stderr: %s)", err, string(mainTextRes.Stderr))
 	}
 	layoutText := string(mainTextRes.Stdout)
@@ -215,6 +259,11 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	layoutStderr := mainTextRes.Stderr
 	bboxOutput := []byte(nil)
 	bboxStderr := []byte(nil)
+	pdftotextLogger.Debug("pdftotext completed",
+		zap.Int("stdout_bytes", len(mainTextRes.Stdout)),
+		zap.Int("stderr_bytes", len(mainTextRes.Stderr)),
+		zap.Int64("duration_ms", manifest.Processing.PdftotextMs),
+	)
 
 	if pdftotextMode == modeBBox {
 		bboxOutput = mainTextRes.Stdout
@@ -222,24 +271,61 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 		bboxHTML = layoutText
 
 		layoutStart := time.Now()
+		layoutLogger := logger.With(
+			zap.String("step", "pdftotext"),
+			zap.String("mode", modeLayout),
+		)
+		layoutLogger.Debug("running pdftotext layout",
+			zap.Duration("timeout", a.cfg.PdftotextTimeout),
+			zap.String("pages", a.cfg.Pages),
+		)
 		layoutRes, layoutErr := a.runPdftotext(ctx, pdfPath, modeLayout)
-		manifest.Processing.PdftotextMs += durationMs(layoutStart)
+		layoutDuration := durationMs(layoutStart)
+		manifest.Processing.PdftotextMs += layoutDuration
 		if layoutErr != nil {
+			layoutLogger.Error("pdftotext layout failed",
+				zap.Error(layoutErr),
+				zap.Int("stdout_bytes", len(layoutRes.Stdout)),
+				zap.Int("stderr_bytes", len(layoutRes.Stderr)),
+				zap.Int64("duration_ms", layoutDuration),
+			)
 			return usecase.ExtractionResult{}, fmt.Errorf("pdftotext (layout): %w (stderr: %s)", layoutErr, string(layoutRes.Stderr))
 		}
 		layoutText = string(layoutRes.Stdout)
 		layoutOutput = layoutRes.Stdout
 		layoutStderr = layoutRes.Stderr
+		layoutLogger.Debug("pdftotext layout completed",
+			zap.Int("stdout_bytes", len(layoutRes.Stdout)),
+			zap.Int("stderr_bytes", len(layoutRes.Stderr)),
+			zap.Int64("duration_ms", layoutDuration),
+		)
 	}
 
 	ppmStart := time.Now()
+	ppmLogger := logger.With(zap.String("step", "pdftoppm"))
+	ppmLogger.Debug("rendering checkboxes",
+		zap.Duration("timeout", a.cfg.PdftoppmTimeout),
+		zap.Int("dpi", a.cfg.PdftoppmDPI),
+		zap.String("pages", a.cfg.Pages),
+	)
 	pagePNGs, debugFiles, err := a.renderCheckboxes(ctx, pdfPath)
 	manifest.Processing.PdftoppmMs = durationMs(ppmStart)
 	if err != nil {
+		ppmLogger.Error("pdftoppm failed",
+			zap.Error(err),
+			zap.Int64("duration_ms", manifest.Processing.PdftoppmMs),
+		)
 		return usecase.ExtractionResult{}, err
 	}
+	ppmLogger.Debug("pdftoppm completed",
+		zap.Int("pages_rendered", len(pagePNGs)),
+		zap.Int("debug_files", len(debugFiles)),
+		zap.Int64("duration_ms", manifest.Processing.PdftoppmMs),
+	)
 
 	parseStart := time.Now()
+	parseLogger := logger.With(zap.String("step", "parse_tables"))
+	parseLogger.Debug("parsing tables", zap.Int("start_page", startPage))
 	parsed, err := a.parser.ParseTables(ParseInput{
 		LayoutText: layoutText,
 		BBoxHTML:   bboxHTML,
@@ -247,10 +333,20 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 		StartPage:  startPage,
 	})
 	if err != nil {
+		parseLogger.Error("parse tables failed",
+			zap.Error(err),
+			zap.Int64("duration_ms", durationMs(parseStart)),
+		)
 		return usecase.ExtractionResult{}, fmt.Errorf("parse tables: %w", err)
 	}
 	manifest.Processing.ParseMs = durationMs(parseStart)
 	manifest.TableCount = len(parsed.NormalizedTables)
+	parseLogger.Debug("tables parsed",
+		zap.Int("raw_tables", len(parsed.RawTables)),
+		zap.Int("normalized_tables", len(parsed.NormalizedTables)),
+		zap.Int("normalized_rows", countNormalizedRows(parsed.NormalizedTables)),
+		zap.Int64("duration_ms", manifest.Processing.ParseMs),
+	)
 
 	rawPayload, err := json.MarshalIndent(struct {
 		PDFInfo            PDFInfo    `json:"pdfinfo"`
@@ -285,6 +381,11 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	if err != nil {
 		return usecase.ExtractionResult{}, fmt.Errorf("marshal manifest: %w", err)
 	}
+	logger.Debug("manifest and markdown generated",
+		zap.Int("table_count", manifest.TableCount),
+		zap.Int("raw_tables", len(parsed.RawTables)),
+		zap.Int("normalized_tables", len(parsed.NormalizedTables)),
+	)
 
 	if debugFiles == nil {
 		debugFiles = make(map[string][]byte)
@@ -367,6 +468,32 @@ func (a *Adapter) renderCheckboxes(ctx context.Context, pdfPath string) (map[int
 		}
 	}
 	return pagePNGs, debug, nil
+}
+
+func (a *Adapter) baseLogger(ctx context.Context, pdfPath string) *zap.Logger {
+	logger := resolveLogger(a.logger)
+	fields := []zap.Field{
+		zap.String("pdf_path", pdfPath),
+	}
+	if correlationID := telemetry.CorrelationIDFromContext(ctx); correlationID != "" {
+		fields = append(fields, zap.String("correlation_id", correlationID))
+	}
+	return logger.With(fields...)
+}
+
+func resolveLogger(logger *zap.Logger) *zap.Logger {
+	if logger != nil {
+		return logger
+	}
+	return zap.NewNop()
+}
+
+func countNormalizedRows(tables []NormalizedTable) int {
+	total := 0
+	for _, table := range tables {
+		total += len(table.Rows)
+	}
+	return total
 }
 
 func durationMs(start time.Time) int64 {

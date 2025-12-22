@@ -80,7 +80,7 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 		DetectVotingTables:  cfg.Extractor.DetectVotingTables,
 		TempDir:             cfg.Extractor.TempDir,
 		Mode:                cfg.Extractor.Mode,
-	})
+	}, logger)
 
 	deps := usecase.Dependencies{
 		Queue:     repo,
