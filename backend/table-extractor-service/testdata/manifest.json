@@ -1,21 +1,21 @@
 {
-  "source": "/workspace/mono-repo/backend/table-extractor-service/testdata/input.pdf",
-  "generated_at": "2025-12-22T04:42:30.431197678Z",
+  "source": "/Users/innokentiiogoiukin/IdeaProjects/FedorovTeam/mono-repo/backend/table-extractor-service/testdata/input.pdf",
+  "generated_at": "2025-12-22T05:44:58.006686Z",
   "detect_voting_tables": true,
   "pages": "all",
   "table_count": 1,
   "processing": {
-    "pdfinfo_ms": 44,
-    "pdftotext_ms": 118,
-    "pdftoppm_ms": 695,
-    "parse_ms": 294
+    "pdfinfo_ms": 13,
+    "pdftotext_ms": 33,
+    "pdftoppm_ms": 575,
+    "parse_ms": 132
   },
   "pdfinfo": {
     "pages": 2,
-    "raw": "Title:           Ил Тумэн\nCreator:         Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36\nProducer:        Skia/PDF m142\nCreationDate:    Wed Dec 17 08:45:29 2025 UTC\nModDate:         Wed Dec 17 08:45:29 2025 UTC\nCustom Metadata: no\nMetadata Stream: no\nTagged:          yes\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           2\nEncrypted:       no\nPage size:       594.96 x 841.92 pts (A4)\nPage rot:        0\nFile size:       119739 bytes\nOptimized:       no\nPDF version:     1.4\n",
+    "raw": "Title:           Ил Тумэн\nCreator:         Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36\nProducer:        Skia/PDF m142\nCreationDate:    Wed Dec 17 17:45:29 2025 +09\nModDate:         Wed Dec 17 17:45:29 2025 +09\nCustom Metadata: no\nMetadata Stream: no\nTagged:          yes\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           2\nEncrypted:       no\nPage size:       594.96 x 841.92 pts (A4)\nPage rot:        0\nFile size:       119739 bytes\nOptimized:       no\nPDF version:     1.4\n",
     "producer": "Skia/PDF m142",
     "pdf_version": "1.4",
     "title": "Ил Тумэн",
-    "creation_date": "Wed Dec 17 08:45:29 2025 UTC"
+    "creation_date": "Wed Dec 17 17:45:29 2025 +09"
   }
 }

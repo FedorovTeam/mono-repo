@@ -13,7 +13,7 @@ sequenceDiagram
 
     GW->>TR: ConvertDocumentToMarkdown(document_id, original_bucket, original_object_key,<br/>source_bucket/object_key | source_url,<br/>markdown_bucket?, markdown_object_key?, filename_extension?, correlation_id)
     TR-->>TR: correlation_id из метаданных gRPC или сгенерированный
-    TR->>TR: валидация document_id/original_*;<br/>source_bucket и source_object_key должны быть вместе;<br/>source_url взаимоисключается с bucket/object key
+    TR->>TR: валидация document_id/original_* <br/>source_bucket и source_object_key должны быть вместе <br/>source_url взаимоисключается с bucket/object key
     TR->>TR: markdown_bucket по умолчанию из конфигурации (ошибка, если пустой)
     TR->>TR: NormalizeExtension(filename_extension | original_object_key) + ResolveContentTypeByExtension
     TR->>TR: markdown_object_key по умолчанию через BuildMarkdownKey(original_object_key)
@@ -38,7 +38,7 @@ sequenceDiagram
     end
 
     loop workerLoop (MaxWorkers)
-        WK->>PG: AcquireBatch(BatchSize) // waiting_docling с наступившим next_poll_at → первыми; при наличии любых waiting_docling pending блокируются
+        WK->>PG: AcquireBatch(BatchSize) // waiting_docling с наступившим next_poll_at → первыми при наличии любых waiting_docling pending блокируются
         alt задача с docling_task_id/job_id
             WK->>DL: GET /v1/status/poll/{task_or_job_id} (X-Correlation-Id)
             WK->>PG: UpdateDoclingInfo(docling_task_id/job_id, docling_poll_count++)

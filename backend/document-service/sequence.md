@@ -24,13 +24,13 @@ sequenceDiagram
     G->>UC: Проверка UUID, bucket/object_key и совпадения с документом
     UC->>ST: ValidateObject(bucket, object_key)
     alt Постановка store_original удалась
-        UC->>S: INSERT processing_job(stage=store_original,status=pending,payload=bucket/object_key), job_event scheduled; UPDATE document.active_job_id
+        UC->>S: INSERT processing_job(stage=store_original,status=pending,payload=bucket/object_key), job_event scheduled UPDATE document.active_job_id
     else Ошибка добавления задачи
         UC->>S: UPDATE document status=Failed(reason)
     end
 
     Note over SW,S: StageWorker(store_original) берёт pending store_original через WorkerService
-    SW->>S: Activities.MarkStoredOriginal -> Transition Uploaded->StoredOriginal (idempotent), status_log; job_event completed
+    SW->>S: Activities.MarkStoredOriginal -> Transition Uploaded->StoredOriginal (idempotent), status_log job_event completed
 
     Note over F,S: JobFollower читает completed/failed после postpone окна
     alt store_original completed
@@ -48,11 +48,11 @@ sequenceDiagram
         F->>S: UPDATE processing_jobs status=failed {handled}
     end
 
-    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа или preprocessed_bucket/key/target_object_key, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false); при success пишет job_event со ссылкой на источник и preprocess_job_id
+    Note over SW,TR: StageWorker(convert_to_markdown) заполняет payload из документа или preprocessed_bucket/key/target_object_key, выставляет x-correlation-id и вызывает ConvertDocumentToMarkdown(WaitForResult=false) при success пишет job_event со ссылкой на источник и preprocess_job_id
     alt Документ уже Converted/Published
         SW-->>S: Activities.MarkConverted (no-op), job_event completed
     else Временная gRPC ошибка (Unavailable/ResourceExhausted/...)
-        SW-->>S: UPDATE processing_jobs status=pending, attempts++, payload.last_error, next_run=now()+retry_backoff, event postponed; max_attempts => statuses.Fail
+        SW-->>S: UPDATE processing_jobs status=pending, attempts++, payload.last_error, next_run=now()+retry_backoff, event postponed max_attempts => statuses.Fail
     else Ответ pending/processing/waiting*
         SW-->>S: UPDATE processing_jobs status=pending, payload{queue_id,status,markdown_object_key}, next_run=now()+retry_delay, event postponed
     else Ошибка/пустой markdown_key
@@ -62,14 +62,14 @@ sequenceDiagram
         SW-->>S: UPDATE processing_jobs status=completed, job_event completed
     end
 
-    Note over SW,GP: StageWorker(publish_to_github) требует commit_message и author_name/email; формирует idempotency_key при наличии markdown_object_key
+    Note over SW,GP: StageWorker(publish_to_github) требует commit_message и author_name/email формирует idempotency_key при наличии markdown_object_key
     SW->>GP: PublishMarkdown(bucket/object_key, owner/repo, branch/base_branch, path, create_pr, commit_message, author_*, pr_title/body, correlation_id, idempotency_key)
     GP-->>SW: status + commit_sha/pull_request*/retry_after/idempotency_hit
     alt success
         SW->>S: Activities.PublishMarkdown -> UPDATE document status=PublishedToGitHub (+commit_sha), status_log
         SW-->>S: UPDATE processing_jobs status=completed, job_event payload{commit_sha,pull_request*,retry_after?,idempotency_hit?}
     else Временная gRPC ошибка
-        SW-->>S: UPDATE processing_jobs status=pending, attempts++, payload.last_error, next_run=now()+retry_backoff, event postponed; max_attempts => statuses.Fail
+        SW-->>S: UPDATE processing_jobs status=pending, attempts++, payload.last_error, next_run=now()+retry_backoff, event postponed max_attempts => statuses.Fail
     else Ответ с ошибкой/валидация payload
         SW-->>S: UPDATE processing_jobs status=failed, payload.last_error(+retry_after?), event failed (document отмечается Failed через JobFollower)
     end

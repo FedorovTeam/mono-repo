@@ -111,6 +111,7 @@ sequenceDiagram
             break
         end
     end
+    end
 ```
 
 ## 4) Maintenance loop

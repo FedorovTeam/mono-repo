@@ -7,7 +7,7 @@ sequenceDiagram
     participant Postgres as PostgreSQL
     participant MinIO
 
-    Note over Storage,MinIO: Загрузка config.yaml; uploadBucket = events.upload_bucket или minio.buckets.knowledge_docx (напр. knowledge-original); buckets = {minio.buckets.knowledge_docx, minio.buckets.knowledge_md, uploadBucket (если отличается)}
+    Note over Storage,MinIO: Загрузка config.yaml uploadBucket = events.upload_bucket или minio.buckets.knowledge_docx (напр. knowledge-original) buckets = {minio.buckets.knowledge_docx, minio.buckets.knowledge_md, uploadBucket (если отличается)}
     Storage->>MinIO: NewMinioClient + initializeBuckets(buckets)
     MinIO-->>Storage: OK
     Note over Storage,MinIO: ConfigureUploadNotification(uploadBucket, events.webhook_arn) (ошибка, если arn не задан)
