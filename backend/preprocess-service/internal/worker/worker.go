@@ -33,7 +33,7 @@ type Config struct {
 type Worker struct {
 	cfg       Config
 	sem       *semaphore.Weighted
-	logger    *zap.SugaredLogger
+	logger    *zap.Logger
 	waitGroup sync.WaitGroup
 	processor *preprocess.Service
 	repo      domain.PreprocessJobRepository
@@ -48,7 +48,7 @@ type Dependencies struct {
 	Callback         ports.CallbackSender
 }
 
-func New(deps Dependencies, cfg Config, logger *zap.SugaredLogger) (*Worker, error) {
+func New(deps Dependencies, cfg Config, logger *zap.Logger) (*Worker, error) {
 	if deps.Repo == nil {
 		return nil, fmt.Errorf("queue repository is required")
 	}
@@ -69,7 +69,7 @@ func New(deps Dependencies, cfg Config, logger *zap.SugaredLogger) (*Worker, err
 	}
 
 	if logger == nil {
-		logger = zap.NewNop().Sugar()
+		logger = zap.NewNop()
 	}
 
 	normalizedCfg := normalizeConfig(cfg)
@@ -132,17 +132,22 @@ func (w *Worker) Run(ctx context.Context) error {
 		default:
 		}
 
+		w.logger.Debug("requeuing stuck jobs",
+			zap.Duration("convert_timeout", w.cfg.ConvertTimeout),
+			zap.Duration("backoff", w.cfg.Backoff),
+		)
 		if err := w.repo.RequeueStuck(ctx, w.cfg.ConvertTimeout, w.cfg.Backoff); err != nil {
-			w.logger.Errorw("failed to requeue stuck jobs", "error", err)
+			w.logger.Error("failed to requeue stuck jobs", zap.Error(err))
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
 			continue
 		}
 
+		w.logger.Debug("picking next job for processing")
 		job, found, err := w.repo.NextForProcessing(ctx)
 		if err != nil {
-			w.logger.Errorw("failed to pick job", "error", err)
+			w.logger.Error("failed to pick job", zap.Error(err))
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
@@ -150,12 +155,17 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		if !found {
+			w.logger.Debug("no jobs ready for processing, waiting for next tick")
 			if !w.waitForNext(ctx, ticker) {
 				return ctx.Err()
 			}
 			continue
 		}
 
+		w.logger.Debug("job picked for processing",
+			zap.String("job_id", job.ID),
+			zap.String("correlation_id", job.CorrelationID),
+		)
 		if err := w.sem.Acquire(ctx, 1); err != nil {
 			return err
 		}
@@ -181,12 +191,15 @@ func (w *Worker) waitForNext(ctx context.Context, ticker *time.Ticker) bool {
 
 func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
 	w.ensureLogger()
-	logger := w.logger.With("job_id", job.ID, "correlation_id", job.CorrelationID)
+	logger := w.logger.With(
+		zap.String("job_id", job.ID),
+		zap.String("correlation_id", job.CorrelationID),
+	)
 	logger.Info("start processing job")
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			logger.Errorw("job panicked", "panic", recovered)
+			logger.Error("job panicked", zap.Any("panic", recovered))
 			w.handleJobPanic(ctx, job, recovered)
 		}
 	}()
@@ -197,18 +210,22 @@ func (w *Worker) processJob(ctx context.Context, job domain.PreprocessJob) {
 	}
 
 	if err := w.processor.Process(ctx, preprocess.Job(job)); err != nil {
-		logger.Errorw("job processing finished with error", "error", err)
+		logger.Error("job processing finished with error", zap.Error(err))
 	}
 }
 
 func (w *Worker) ensureLogger() {
 	if w.logger == nil {
-		w.logger = zap.NewNop().Sugar()
+		w.logger = zap.NewNop()
 	}
 }
 
 func (w *Worker) handleJobPanic(ctx context.Context, job domain.PreprocessJob, recovered any) {
 	w.ensureLogger()
+	logger := w.logger.With(
+		zap.String("job_id", job.ID),
+		zap.String("correlation_id", job.CorrelationID),
+	)
 
 	failure := domain.Failure{
 		Code:      domain.ErrorCodeProcessingError,
@@ -227,12 +244,12 @@ func (w *Worker) handleJobPanic(ctx context.Context, job domain.PreprocessJob, r
 	now := time.Now().UTC()
 	updatedJob, update, err := job.MarkFailed(now, policy, failure)
 	if err != nil {
-		w.logger.Errorw("failed to compute panic failure update", "error", err)
+		logger.Error("failed to compute panic failure update", zap.Error(err))
 		return
 	}
 
 	repoCtx := context.WithoutCancel(ctx)
 	if err := w.repo.MarkFailed(repoCtx, updatedJob, update); err != nil {
-		w.logger.Errorw("failed to mark job as failed after panic", "error", err)
+		logger.Error("failed to mark job as failed after panic", zap.Error(err))
 	}
 }

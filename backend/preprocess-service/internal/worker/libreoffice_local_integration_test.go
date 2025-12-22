@@ -111,7 +111,7 @@ func TestLibreOfficeLocalConversion(t *testing.T) {
 		t.Fatalf("save job: %v", err)
 	}
 
-	logger := zap.NewNop().Sugar()
+	logger := zap.NewNop()
 
 	serviceCfg := preprocess.Config{
 		LibreOfficePath: cfg.Preprocess.LibreOfficePath,

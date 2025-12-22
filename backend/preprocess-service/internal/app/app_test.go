@@ -28,7 +28,7 @@ func TestNewAppWithoutTelemetry(t *testing.T) {
 	cfg.Preprocess.PollInterval = 10 * time.Millisecond
 	cfg.Preprocess.WorkerConcurrency = 1
 
-	logger := zaptest.NewLogger(t).Sugar()
+	logger := zaptest.NewLogger(t)
 
 	app, err := New(cfg, Dependencies{
 		Logger:           logger,
