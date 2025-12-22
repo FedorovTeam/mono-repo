@@ -311,7 +311,7 @@ func (s *Service) notifyCallback(ctx context.Context, job Job, status domain.Pre
 			zap.Int("attempt", attempt),
 			zap.String("status", payload.Status),
 		)
-		temporary, err := s.callback.Send(ctx, job.CallbackURL, payload)
+		temporary, err := s.callback.Send(ctx, job.CallbackURL, payload, attempt)
 		if err == nil {
 			logger.Debug("callback delivered successfully", zap.Int("attempt", attempt))
 			return

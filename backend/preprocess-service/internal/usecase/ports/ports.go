@@ -43,7 +43,7 @@ type DocumentConverter interface {
 }
 
 type CallbackSender interface {
-	Send(ctx context.Context, url string, payload CallbackPayload) (temporary bool, err error)
+	Send(ctx context.Context, url string, payload CallbackPayload, attempt int) (temporary bool, err error)
 }
 
 type WorkspaceManager interface {

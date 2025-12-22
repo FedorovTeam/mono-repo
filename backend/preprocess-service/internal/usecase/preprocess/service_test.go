@@ -96,7 +96,7 @@ func TestNotifyCallbackSuccess(t *testing.T) {
 
 	svc := &Service{
 		cfg:      Config{Backoff: 5 * time.Millisecond},
-		callback: callbackclient.NewClient(server.Client()),
+		callback: callbackclient.NewClient(server.Client(), zap.NewNop()),
 		logger:   zap.NewNop(),
 	}
 
@@ -153,7 +153,7 @@ func TestNotifyCallbackRetry(t *testing.T) {
 
 	svc := &Service{
 		cfg:      Config{Backoff: 5 * time.Millisecond},
-		callback: callbackclient.NewClient(server.Client()),
+		callback: callbackclient.NewClient(server.Client(), zap.NewNop()),
 		logger:   zap.NewNop(),
 	}
 
