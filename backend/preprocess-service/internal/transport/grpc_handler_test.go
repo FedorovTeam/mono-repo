@@ -189,9 +189,8 @@ func TestGetPreprocessStatusReturnsErrorDetails(t *testing.T) {
 		ErrorCode:    domain.ErrorCodeConvertFailed.String(),
 		ErrorMessage: "conversion failed",
 		ErrorDetails: map[string]string{
-			"converter_exit_code": "7",
-			"converter_stdout":    "ok",
-			"converter_stderr":    "bad",
+			"lo_exit_code": "7",
+			"lo_output":    "bad output",
 		},
 	}
 	if err := repo.Create(context.Background(), job); err != nil {
@@ -205,11 +204,11 @@ func TestGetPreprocessStatusReturnsErrorDetails(t *testing.T) {
 		t.Fatalf("status failed: %v", err)
 	}
 
-	if statusResp.GetErrorDetails()["converter_exit_code"] != "7" {
+	if statusResp.GetErrorDetails()["lo_exit_code"] != "7" {
 		t.Fatalf("expected converter exit code detail, got %v", statusResp.GetErrorDetails())
 	}
-	if statusResp.GetErrorDetails()["converter_stderr"] != "bad" {
-		t.Fatalf("expected converter stderr detail, got %v", statusResp.GetErrorDetails())
+	if statusResp.GetErrorDetails()["lo_output"] == "" {
+		t.Fatalf("expected converter output detail, got %v", statusResp.GetErrorDetails())
 	}
 }
 

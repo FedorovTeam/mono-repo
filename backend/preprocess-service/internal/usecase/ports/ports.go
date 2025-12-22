@@ -62,6 +62,7 @@ type Workspace interface {
 
 type ConvertResult struct {
 	ExitCode int
+	Output   string
 	Stdout   string
 	Stderr   string
 	Duration time.Duration
@@ -69,14 +70,18 @@ type ConvertResult struct {
 
 func (r ConvertResult) Details(prefix string) map[string]string {
 	if prefix == "" {
-		prefix = "converter"
+		prefix = "lo"
 	}
 
-	return map[string]string{
+	details := map[string]string{
 		prefix + "_exit_code":       fmt.Sprintf("%d", r.ExitCode),
-		prefix + "_stdout":          r.Stdout,
-		prefix + "_stderr":          r.Stderr,
 		prefix + "_duration_ms":     fmt.Sprintf("%d", r.Duration.Milliseconds()),
 		prefix + "_duration_string": r.Duration.String(),
 	}
+
+	if r.Output != "" {
+		details[prefix+"_output"] = r.Output
+	}
+
+	return details
 }

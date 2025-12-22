@@ -66,9 +66,11 @@ func TestExecConverterLogsFailure(t *testing.T) {
 	for _, log := range logs.All() {
 		if log.Message == "libreoffice conversion failed" {
 			ctx := log.ContextMap()
+			output, okOutput := ctx["output"].(string)
 			stdout, okStdout := ctx["stdout"].(string)
 			stderr, okStderr := ctx["stderr"].(string)
-			foundOutput = okStdout && okStderr && strings.Contains(stdout, "stdout") && strings.Contains(stderr, "stderr")
+			foundOutput = (okOutput && strings.Contains(output, "stdout") && strings.Contains(output, "stderr")) ||
+				(okStdout && okStderr && strings.Contains(stdout, "stdout") && strings.Contains(stderr, "stderr"))
 		}
 	}
 
@@ -78,6 +80,9 @@ func TestExecConverterLogsFailure(t *testing.T) {
 
 	if result.ExitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "stdout") || !strings.Contains(result.Output, "stderr") {
+		t.Fatalf("expected result output to contain stdout and stderr, got %+v", result)
 	}
 	if !strings.Contains(result.Stdout, "stdout") || !strings.Contains(result.Stderr, "stderr") {
 		t.Fatalf("expected result to contain stdout and stderr, got %+v", result)
@@ -105,13 +110,16 @@ func TestExecConverterTruncatesOutput(t *testing.T) {
 		t.Fatalf("expected convert to fail")
 	}
 
-	if len(result.Stdout) > maxOutputLength+3 {
-		t.Fatalf("stdout was not truncated, length=%d", len(result.Stdout))
-	}
-	if len(result.Stderr) > maxOutputLength+3 {
-		t.Fatalf("stderr was not truncated, length=%d", len(result.Stderr))
-	}
-	if strings.Contains(result.Stdout, longLine) || strings.Contains(result.Stderr, longLine) {
-		t.Fatalf("expected output to be trimmed, got %s", result.Stdout)
+	for name, out := range map[string]string{
+		"output": result.Output,
+		"stdout": result.Stdout,
+		"stderr": result.Stderr,
+	} {
+		if len(out) > maxOutputLength+3 {
+			t.Fatalf("%s was not truncated, length=%d", name, len(out))
+		}
+		if strings.Contains(out, longLine) {
+			t.Fatalf("expected %s to be trimmed, got %s", name, out)
+		}
 	}
 }

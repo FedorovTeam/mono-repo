@@ -18,7 +18,7 @@ type ExecConverter struct {
 	logger     *zap.Logger
 }
 
-const maxOutputLength = 1024
+const maxOutputLength = 4 * 1024
 
 func NewExecConverter(binaryPath string, logger *zap.Logger) (*ExecConverter, error) {
 	if strings.TrimSpace(binaryPath) == "" {
@@ -57,10 +57,13 @@ func (c *ExecConverter) Convert(ctx context.Context, sourcePath, outDir string) 
 		exitCode = cmd.ProcessState.ExitCode()
 	}
 
+	stdoutOut := truncateOutput(stdout.String(), maxOutputLength)
+	stderrOut := truncateOutput(stderr.String(), maxOutputLength)
 	result := ports.ConvertResult{
 		ExitCode: exitCode,
-		Stdout:   truncateOutput(stdout.String(), maxOutputLength),
-		Stderr:   truncateOutput(stderr.String(), maxOutputLength),
+		Output:   truncateOutput(combineOutput(stdoutOut, stderrOut), maxOutputLength),
+		Stdout:   stdoutOut,
+		Stderr:   stderrOut,
 		Duration: duration,
 	}
 
@@ -69,17 +72,19 @@ func (c *ExecConverter) Convert(ctx context.Context, sourcePath, outDir string) 
 			zap.Duration("duration", duration),
 			zap.String("status", "error"),
 			zap.Int("exit_code", exitCode),
+			zap.String("output", result.Output),
 			zap.String("stdout", result.Stdout),
 			zap.String("stderr", result.Stderr),
 			zap.Error(err),
 		)
-		return result, fmt.Errorf("libreoffice error: %w; stdout: %s; stderr: %s", err, result.Stdout, result.Stderr)
+		return result, fmt.Errorf("libreoffice error (exit_code=%d): %w", exitCode, err)
 	}
 
 	logger.Info("libreoffice conversion finished",
 		zap.Duration("duration", duration),
 		zap.String("status", "success"),
 		zap.Int("exit_code", exitCode),
+		zap.String("output", result.Output),
 		zap.String("stdout", result.Stdout),
 		zap.String("stderr", result.Stderr),
 	)
@@ -93,4 +98,17 @@ func truncateOutput(output string, limit int) string {
 	}
 
 	return trimmed[:limit] + "..."
+}
+
+func combineOutput(stdout, stderr string) string {
+	switch {
+	case stdout == "" && stderr == "":
+		return ""
+	case stdout == "":
+		return stderr
+	case stderr == "":
+		return stdout
+	default:
+		return strings.Join([]string{stdout, stderr}, "\n")
+	}
 }
