@@ -37,13 +37,7 @@ spec:
             replicaCount: 1
             image:
               tag: "latest"
-            resources:
-              requests:
-                cpu: 50m
-                memory: 64Mi
-              limits:
-                cpu: 100m
-                memory: 128Mi
+
       destination:
         server: https://kubernetes.default.svc
         # namespace = <service> (backend/<service>/...)
