@@ -2,7 +2,6 @@ package config
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -14,10 +13,7 @@ import (
 func LoadTestConfig(t *testing.T) Config {
 	t.Helper()
 
-	cfgPath := os.Getenv("CONFIG_PATH")
-	if cfgPath == "" {
-		cfgPath = DefaultConfigPath
-	}
+	cfgPath := "config/testdata/config.yaml"
 
 	absPath, err := resolveConfigPath(cfgPath)
 	if err != nil {

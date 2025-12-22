@@ -15,12 +15,12 @@ minio:
   region: local
 
 preprocess:
-  libreoffice_path: /usr/bin/libreoffice
-  working_dir: /tmp/preprocess-service/work
-  output_dir: /tmp/preprocess-service/output
+  libreoffice_path: /opt/homebrew/bin/soffice
+  working_dir: ./testdata/work
+  output_dir: ./testdata/output
   storage_mode: filesystem
-  local_source_dir: /tmp/preprocess-service/source
-  local_target_dir: /tmp/preprocess-service/target
+  local_source_dir: ./testdata/source
+  local_target_dir: ./testdata/target
   source_bucket: preprocess-source
   target_bucket: preprocess-target
   target_key_prefix: converted
