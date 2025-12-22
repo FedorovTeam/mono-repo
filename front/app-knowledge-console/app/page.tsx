@@ -1,8 +1,29 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
+
+type Category = 'plenary' | 'bibliography';
+type PlenaryDocumentType = 'transcript' | 'voting';
+type BibliographyCategory = 'deputies';
+
+interface PathResolution {
+  path: string | null;
+  error: string | null;
+}
+
+interface PlenaryFields {
+  sessionNumber: string;
+  documentType: PlenaryDocumentType;
+  transcriptNumber: string;
+  votingQuestionNumber: string;
+}
+
+interface BibliographyFields {
+  type: BibliographyCategory;
+  slug: string;
+}
 
 interface UploadResponse {
   data?: {
@@ -25,11 +46,22 @@ export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [repository, setRepository] = useState('docs');
   const [branch, setBranch] = useState('main');
-  const [path, setPath] = useState('knowledge/docs/test.md');
+  const [category, setCategory] = useState<Category>('plenary');
+  const [plenaryFields, setPlenaryFields] = useState<PlenaryFields>({
+    sessionNumber: '',
+    documentType: 'transcript',
+    transcriptNumber: '',
+    votingQuestionNumber: '',
+  });
+  const [bibliographyFields, setBibliographyFields] = useState<BibliographyFields>({
+    type: 'deputies',
+    slug: '',
+  });
 
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
   const apiKey = process.env.NEXT_PUBLIC_API_KEY;
@@ -40,9 +72,71 @@ export default function HomePage() {
     setFile(f);
   };
 
+  const formatWithLeadingZeros = (value: string) => value.padStart(2, '0');
+
+  const resolvePath = useMemo<PathResolution>(() => {
+    const plenaryPath = (): PathResolution => {
+      const session = plenaryFields.sessionNumber.trim();
+      if (!session) {
+        return { path: null, error: 'Введите номер заседания' };
+      }
+
+      if (plenaryFields.documentType === 'transcript') {
+        const transcript = plenaryFields.transcriptNumber.trim();
+        if (!transcript) {
+          return { path: null, error: 'Введите номер стенограммы' };
+        }
+        return {
+          path: `plenary/${formatWithLeadingZeros(session)}/transcripts/stenogramma-${formatWithLeadingZeros(transcript)}.md`,
+          error: null,
+        };
+      }
+
+      const question = plenaryFields.votingQuestionNumber.trim();
+      if (!question) {
+        return { path: null, error: 'Введите номер вопроса голосования' };
+      }
+
+      return {
+        path: `plenary/${formatWithLeadingZeros(session)}/votings/question-${formatWithLeadingZeros(question)}.md`,
+        error: null,
+      };
+    };
+
+    const bibliographyPath = (): PathResolution => {
+      const slug = bibliographyFields.slug.trim();
+      if (!slug) {
+        return { path: null, error: 'Укажите идентификатор/slug' };
+      }
+
+      if (bibliographyFields.type === 'deputies') {
+        return { path: `bibliography/deputies/${slug}.md`, error: null };
+      }
+
+      return { path: null, error: 'Неизвестная категория библиографии' };
+    };
+
+    return category === 'plenary' ? plenaryPath() : bibliographyPath();
+  }, [category, bibliographyFields, plenaryFields]);
+
+  useEffect(() => {
+    if (resolvePath.path) {
+      setValidationError(null);
+    }
+  }, [resolvePath.path]);
+
+  const updatePlenaryFields = (fields: Partial<PlenaryFields>) => {
+    setPlenaryFields((prev) => ({ ...prev, ...fields }));
+  };
+
+  const updateBibliographyFields = (fields: Partial<BibliographyFields>) => {
+    setBibliographyFields((prev) => ({ ...prev, ...fields }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
+    setValidationError(null);
 
     if (!file) {
       setMessage('Выберите файл');
@@ -50,6 +144,10 @@ export default function HomePage() {
     }
     if (!gatewayUrl || !apiKey) {
       setMessage('NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы');
+      return;
+    }
+    if (!resolvePath.path) {
+      setValidationError(resolvePath.error ?? 'Заполните необходимые поля для пути');
       return;
     }
 
@@ -85,7 +183,7 @@ export default function HomePage() {
           fileSizeBytes: file.size,
           repository,
           branch,
-          path,
+          path: resolvePath.path,
         },
       };
 
@@ -196,14 +294,103 @@ export default function HomePage() {
                     className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
-              <div>
-                <label className="block text-sm mb-1">Path в репо</label>
-                <input
-                    type="text"
-                    value={path}
-                    onChange={(e) => setPath(e.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                />
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm mb-1">Категория документа</label>
+                  <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value as Category)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="plenary">Пленарное заседание</option>
+                    <option value="bibliography">Библиография</option>
+                  </select>
+                </div>
+
+                {category === 'plenary' && (
+                    <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div>
+                          <label className="block text-sm mb-1">Номер заседания</label>
+                          <input
+                              type="text"
+                              value={plenaryFields.sessionNumber}
+                              onChange={(e) => updatePlenaryFields({ sessionNumber: e.target.value })}
+                              placeholder="например: 5"
+                              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm mb-1">Тип документа</label>
+                          <select
+                              value={plenaryFields.documentType}
+                              onChange={(e) =>
+                                  updatePlenaryFields({ documentType: e.target.value as PlenaryDocumentType })
+                              }
+                              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            <option value="transcript">Стенограмма</option>
+                            <option value="voting">Протокол голосования</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {plenaryFields.documentType === 'transcript' ? (
+                          <div>
+                            <label className="block text-sm mb-1">Номер стенограммы</label>
+                            <input
+                                type="text"
+                                value={plenaryFields.transcriptNumber}
+                                onChange={(e) => updatePlenaryFields({ transcriptNumber: e.target.value })}
+                                placeholder="например: 3"
+                                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+                      ) : (
+                          <div>
+                            <label className="block text-sm mb-1">Номер вопроса голосования</label>
+                            <input
+                                type="text"
+                                value={plenaryFields.votingQuestionNumber}
+                                onChange={(e) =>
+                                    updatePlenaryFields({ votingQuestionNumber: e.target.value })
+                                }
+                                placeholder="например: 12"
+                                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
+                      )}
+                    </div>
+                )}
+
+                {category === 'bibliography' && (
+                    <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+                      <div>
+                        <label className="block text-sm mb-1">Подкатегория</label>
+                        <select
+                            value={bibliographyFields.type}
+                            onChange={(e) => updateBibliographyFields({ type: e.target.value as BibliographyCategory })}
+                            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          <option value="deputies">Депутаты</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm mb-1">Slug / идентификатор</label>
+                        <input
+                            type="text"
+                            value={bibliographyFields.slug}
+                            onChange={(e) => updateBibliographyFields({ slug: e.target.value })}
+                            placeholder="например: ivanov-ivan"
+                            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <p className="mt-1 text-xs text-slate-400">
+                          Итоговый путь будет вида <code>bibliography/deputies/slug.md</code>.
+                        </p>
+                      </div>
+                    </div>
+                )}
               </div>
             </div>
 
@@ -225,6 +412,19 @@ export default function HomePage() {
                   }`}
               >
                 {message}
+              </div>
+          )}
+
+          {validationError && (
+              <div className="mt-4 rounded-lg border border-amber-500 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+                {validationError}
+              </div>
+          )}
+
+          {resolvePath.path && (
+              <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
+                <p className="text-xs uppercase text-slate-400">Предпросмотр пути</p>
+                <p className="font-mono text-sm text-indigo-200">{resolvePath.path}</p>
               </div>
           )}
 
