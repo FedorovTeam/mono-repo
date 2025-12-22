@@ -16,7 +16,7 @@
 
 ## Очередь и статусы
 - Рабочая таблица: `processing_jobs` со статусами `pending` → `in_progress` → `completed`/`failed`; отбор ведётся по `stage` и `next_run_at<=now()` с `FOR UPDATE SKIP LOCKED`. История фиксируется в `job_events` (event_type `processing`/`retry`/`completed`). 【F:internal/infrastructure/persistence/processing_job_repository.go†L20-L87】
-- При обработке запись документа обновляется до `StoredOriginal` (поля `status`, `actual_status`, `error_reason`) с логом в `document_status_logs`, где `workflow_id` берётся из `payload["correlation_id"]`. Ошибки сохраняются в `payload.last_error` при пересчёте. 【F:internal/infrastructure/persistence/document_repository.go†L16-L34】【F:internal/application/worker_service.go†L82-L113】
+- При обработке запись документа обновляется до `StoredOriginal` (поля `status`, `error_reason`) с логом в `document_status_logs`, где `workflow_id` берётся из `payload["correlation_id"]`. Ошибки сохраняются в `payload.last_error` при пересчёте. 【F:internal/infrastructure/persistence/document_repository.go†L16-L34】【F:internal/application/worker_service.go†L82-L113】
 
 ## Конфигурация
 Конфиг читается из `CONFIG_PATH` (по умолчанию `config/config.yaml`); дефолты подставляются для observability и параметров воркера/загрузок.
