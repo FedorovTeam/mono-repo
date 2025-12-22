@@ -21,5 +21,5 @@ type TableExtractionRepository interface {
 	Save(ctx context.Context, job domain.TableExtractionJob) error
 	ListProcessingBefore(ctx context.Context, updatedBefore time.Time) ([]domain.TableExtractionJob, error)
 	Cleanup(ctx context.Context, finishedBefore time.Time) (int, error)
-	RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) (int, error)
+	RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) ([]domain.TableExtractionJob, error)
 }

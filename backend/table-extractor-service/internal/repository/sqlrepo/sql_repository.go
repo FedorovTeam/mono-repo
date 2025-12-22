@@ -275,10 +275,10 @@ func (r *SQLRepository) Cleanup(ctx context.Context, finishedBefore time.Time) (
 	return int(rows), nil
 }
 
-func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) (int, error) {
+func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryDelay time.Duration, now time.Time) ([]domain.TableExtractionJob, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("begin retry: %w", err)
+		return nil, fmt.Errorf("begin retry: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -305,7 +305,7 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("select failed jobs: %w", err)
+		return nil, fmt.Errorf("select failed jobs: %w", err)
 	}
 	defer rows.Close()
 
@@ -313,7 +313,7 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 	for rows.Next() {
 		job, ok, err := r.scanJob(rows)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		if !ok {
 			continue
@@ -322,31 +322,32 @@ func (r *SQLRepository) RetryFailed(ctx context.Context, maxAttempts int, retryD
 	}
 
 	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate failed jobs: %w", err)
+		return nil, fmt.Errorf("iterate failed jobs: %w", err)
 	}
 
 	if len(jobs) == 0 {
 		if err := tx.Commit(); err != nil {
-			return 0, fmt.Errorf("commit retry: %w", err)
+			return nil, fmt.Errorf("commit retry: %w", err)
 		}
-		return 0, nil
+		return nil, nil
 	}
 
-	updated := 0
+	updated := make([]domain.TableExtractionJob, 0, len(jobs))
 	for _, job := range jobs {
 		aggregate := domain.NewTableExtractionJobAggregate(job)
 		updatedAgg, _, err := aggregate.Retry(now, retryDelay)
 		if err != nil {
 			return updated, err
 		}
-		if err := r.saveTx(ctx, tx, updatedAgg.Job()); err != nil {
+		updatedJob := updatedAgg.Job()
+		if err := r.saveTx(ctx, tx, updatedJob); err != nil {
 			return updated, err
 		}
-		updated++
+		updated = append(updated, updatedJob)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit retry: %w", err)
+		return nil, fmt.Errorf("commit retry: %w", err)
 	}
 
 	return updated, nil

@@ -213,7 +213,7 @@ func TestProcessExtractionJobLogsDurations(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, processed)
 
-	require.True(t, hasLogWithFields(observed.All(), job.ID.String(), "corr-logs", "duration_ms", "queue_id", "correlation_id"),
+	require.True(t, hasLogWithFields(observed.All(), job.ID.String(), "corr-logs", "duration_ms", "queue_id", "correlation_id", "status", "attempts", "next_run_at", "error_code", "error_message"),
 		"expected log entry with duration and identifiers")
 }
 
@@ -492,8 +492,8 @@ func TestRestoreStuckProcessingReschedules(t *testing.T) {
 
 	restored, failed, err := uc.RestoreStuckProcessing(context.Background(), 30*time.Minute, 3, 5*time.Second, time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, 1, restored)
-	require.Zero(t, failed)
+	require.Len(t, restored, 1)
+	require.Empty(t, failed)
 
 	updated, err := uc.GetJob(context.Background(), stuckJob.ID)
 	require.NoError(t, err)
@@ -525,13 +525,42 @@ func TestRestoreStuckProcessingMarksFailed(t *testing.T) {
 
 	restored, failed, err := uc.RestoreStuckProcessing(context.Background(), 20*time.Minute, 3, 5*time.Second, 20*time.Second)
 	require.NoError(t, err)
-	require.Zero(t, restored)
-	require.Equal(t, 1, failed)
+	require.Empty(t, restored)
+	require.Len(t, failed, 1)
 
 	updated, err := uc.GetJob(context.Background(), stuckJob.ID)
 	require.NoError(t, err)
 	require.Equal(t, domain.StatusFailed, updated.Status)
 	require.NotNil(t, updated.FinishedAt)
+}
+
+func TestRestoreStuckProcessingLogsJobState(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	now := time.Date(2024, 6, 2, 12, 0, 0, 0, time.UTC)
+	core, observed := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue: repo,
+		Clock: fixedClock{now: now},
+	}, Config{
+		QueueLimit:             10,
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, logger)
+
+	stuckJob := newJobFromFactory(t, "doc-log", now.Add(-time.Hour))
+	startedAgg, _, err := domain.NewTableExtractionJobAggregate(stuckJob).StartProcessing(now.Add(-30 * time.Minute))
+	require.NoError(t, err)
+	stuckJob = startedAgg.Job()
+	_, _, err = repo.UpsertOrGetActive(context.Background(), stuckJob, 10)
+	require.NoError(t, err)
+
+	restored, failed, err := uc.RestoreStuckProcessing(context.Background(), 15*time.Minute, 5, time.Second, 10*time.Second)
+	require.NoError(t, err)
+	require.Len(t, restored, 1)
+	require.Empty(t, failed)
+
+	require.True(t, hasLogWithFields(observed.All(), stuckJob.ID.String(), stuckJob.CorrelationID, "status", "attempts", "next_run_at", "error_code", "error_message"))
 }
 
 func TestRetryFailedAndCleanupFinished(t *testing.T) {
@@ -566,7 +595,7 @@ func TestRetryFailedAndCleanupFinished(t *testing.T) {
 
 	retried, err := uc.RetryFailed(context.Background(), 3, 15*time.Second)
 	require.NoError(t, err)
-	require.Equal(t, 1, retried)
+	require.Len(t, retried, 1)
 
 	updated, err := uc.GetJob(context.Background(), failedJob.ID)
 	require.NoError(t, err)
