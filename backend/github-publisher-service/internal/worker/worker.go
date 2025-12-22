@@ -211,7 +211,7 @@ func (w *Worker) failJob(ctx context.Context, tx pgx.Tx, j *job, reason error) e
 func (w *Worker) markDocument(ctx context.Context, tx pgx.Tx, documentID, status string, payload map[string]any) error {
 	_, err := tx.Exec(ctx, `
         UPDATE documents
-        SET status=$1, actual_status=$1, error_reason='', updated_at=now()
+        SET status=$1, error_reason=NULL, updated_at=now()
         WHERE id=$2
     `, status, documentID)
 	if err != nil {
