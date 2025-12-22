@@ -213,9 +213,9 @@ func TestHandleJobWritesOutputToConfiguredDir(t *testing.T) {
 	}
 
 	var convertedWithDir string
-	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) error {
+	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) (ports.ConvertResult, error) {
 		convertedWithDir = ws.OutputDir()
-		return nil
+		return ports.ConvertResult{}, nil
 	}
 
 	var uploadedPath string
@@ -281,7 +281,9 @@ func TestProcessTemporaryFailureSchedulesRetry(t *testing.T) {
 	svc.downloadSourceFn = func(ctx context.Context, job Job, ws ports.Workspace) (string, error) {
 		return "", temporaryError(domain.ErrorCodeDownloadFailed, errors.New("network glitch"))
 	}
-	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) error { return nil }
+	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) (ports.ConvertResult, error) {
+		return ports.ConvertResult{}, nil
+	}
 	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error { return nil }
 
 	job := Job{
@@ -341,7 +343,9 @@ func TestProcessPermanentFailureStops(t *testing.T) {
 	svc.downloadSourceFn = func(ctx context.Context, job Job, ws ports.Workspace) (string, error) {
 		return "", permanentError(domain.ErrorCodeSourceMissing, errors.New("not found"))
 	}
-	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) error { return nil }
+	svc.convertFn = func(ctx context.Context, sourcePath string, ws ports.Workspace) (ports.ConvertResult, error) {
+		return ports.ConvertResult{}, nil
+	}
 	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error { return nil }
 
 	job := Job{
@@ -376,6 +380,74 @@ func TestProcessPermanentFailureStops(t *testing.T) {
 	}
 	if update.NextRunAt.IsZero() {
 		t.Fatalf("expected next run time to be set, got %s", update.NextRunAt)
+	}
+}
+
+func TestConvertFailureAddsConverterDetails(t *testing.T) {
+	t.Helper()
+
+	repo := &capturingRepo{}
+	logger := zap.NewNop()
+	workspace := &fakeWorkspace{
+		sourcePath: "/tmp/source",
+		outputPath: "/tmp/output/result.docx",
+		outputDir:  "/tmp/output",
+	}
+	converterResult := ports.ConvertResult{
+		ExitCode: 3,
+		Stdout:   "sample stdout",
+		Stderr:   "sample stderr",
+		Duration: 1500 * time.Millisecond,
+	}
+	svc := &Service{
+		repo:      repo,
+		cfg:       Config{WorkingDir: t.TempDir(), OutputDir: t.TempDir(), TargetMediaType: DefaultTargetMediaType, Backoff: time.Second, ConvertTimeout: 3 * time.Second},
+		logger:    logger,
+		policy:    domain.NewRetryPolicy(time.Second),
+		workspace: &fakeWorkspaceManager{workspace: workspace},
+		converter: failingConverter{result: converterResult, err: errors.New("conversion failed")},
+	}
+	svc.downloadSourceFn = func(ctx context.Context, job Job, ws ports.Workspace) (string, error) {
+		return workspace.sourcePath, nil
+	}
+	svc.convertFn = svc.convertToDocx
+	svc.uploadResultFn = func(ctx context.Context, bucket, key, path string) error { return nil }
+
+	job := Job{
+		ID:           "job-convert-fail",
+		DocumentID:   "doc-3",
+		SourceBucket: "src",
+		SourceKey:    "file.doc",
+		SourceETag:   "etag",
+		TargetBucket: "bucket",
+		TargetKey:    "out.docx",
+		Status:       StatusProcessing,
+		Attempts:     1,
+		MaxAttempts:  3,
+		NextRunAt:    time.Now().UTC(),
+	}
+
+	err := svc.Process(context.Background(), job)
+	if err == nil {
+		t.Fatalf("expected error from process")
+	}
+
+	if len(repo.failures) != 1 {
+		t.Fatalf("expected one failure update, got %d", len(repo.failures))
+	}
+
+	details := repo.failures[0].Details
+	if details["converter_exit_code"] != "3" {
+		t.Fatalf("unexpected converter exit code detail: %s", details["converter_exit_code"])
+	}
+	if details["converter_stdout"] != converterResult.Stdout {
+		t.Fatalf("unexpected converter stdout detail: %s", details["converter_stdout"])
+	}
+	if details["converter_stderr"] != converterResult.Stderr {
+		t.Fatalf("unexpected converter stderr detail: %s", details["converter_stderr"])
+	}
+	if details["converter_duration_ms"] == "" {
+		t.Fatalf("expected converter duration to be recorded, got empty string")
 	}
 }
 
@@ -432,4 +504,13 @@ func (w *fakeWorkspace) EnsureExists(path string) error {
 func (w *fakeWorkspace) Cleanup() error {
 	w.cleaned = true
 	return nil
+}
+
+type failingConverter struct {
+	result ports.ConvertResult
+	err    error
+}
+
+func (c failingConverter) Convert(context.Context, string, string) (ports.ConvertResult, error) {
+	return c.result, c.err
 }

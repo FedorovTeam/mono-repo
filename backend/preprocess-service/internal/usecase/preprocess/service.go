@@ -36,7 +36,7 @@ type Service struct {
 	policy     domain.RetryPolicy
 
 	downloadSourceFn func(ctx context.Context, job Job, workspace ports.Workspace) (string, error)
-	convertFn        func(ctx context.Context, sourcePath string, workspace ports.Workspace) error
+	convertFn        func(ctx context.Context, sourcePath string, workspace ports.Workspace) (ports.ConvertResult, error)
 	uploadResultFn   func(ctx context.Context, bucket, key, path string) error
 }
 
@@ -180,7 +180,7 @@ func (s *Service) handleJob(ctx context.Context, job *Job) error {
 	}
 
 	logger.Debug("source downloaded", zap.String("source_path", sourcePath))
-	if err := s.convertFn(ctx, sourcePath, workspace); err != nil {
+	if _, err := s.convertFn(ctx, sourcePath, workspace); err != nil {
 		return err
 	}
 
@@ -244,7 +244,7 @@ func (s *Service) downloadSource(ctx context.Context, job Job, workspace ports.W
 	return targetPath, nil
 }
 
-func (s *Service) convertToDocx(ctx context.Context, sourcePath string, workspace ports.Workspace) error {
+func (s *Service) convertToDocx(ctx context.Context, sourcePath string, workspace ports.Workspace) (ports.ConvertResult, error) {
 	convertCtx, cancel := context.WithTimeout(ctx, s.cfg.ConvertTimeout)
 	defer cancel()
 
@@ -253,14 +253,15 @@ func (s *Service) convertToDocx(ctx context.Context, sourcePath string, workspac
 		zap.String("output_dir", workspace.OutputDir()),
 	)
 	logger.Debug("starting document conversion")
-	if err := s.converter.Convert(convertCtx, sourcePath, workspace.OutputDir()); err != nil {
+	result, err := s.converter.Convert(convertCtx, sourcePath, workspace.OutputDir())
+	if err != nil {
 		if errors.Is(convertCtx.Err(), context.DeadlineExceeded) {
-			return temporaryError(domain.ErrorCodeConvertTimeout, fmt.Errorf("conversion timeout: %w", err))
+			return result, temporaryErrorWithDetails(domain.ErrorCodeConvertTimeout, fmt.Errorf("conversion timeout: %w", err), result.Details("converter"))
 		}
-		return permanentError(domain.ErrorCodeConvertFailed, err)
+		return result, permanentErrorWithDetails(domain.ErrorCodeConvertFailed, err, result.Details("converter"))
 	}
 	logger.Debug("document conversion finished")
-	return nil
+	return result, nil
 }
 
 func (s *Service) uploadResult(ctx context.Context, bucket, key, path string) error {
@@ -349,23 +350,35 @@ func (s *Service) ensureFunctions() {
 
 func (s *Service) failureFromError(job Job, err error) domain.Failure {
 	var typed jobError
+	details := map[string]string{
+		"attempt": strconv.Itoa(job.Attempts),
+	}
 	failure := domain.Failure{
 		Code:      domain.ErrorCodeProcessingError,
 		Message:   err.Error(),
 		Permanent: false,
-		Details: map[string]string{
-			"attempt": strconv.Itoa(job.Attempts),
-		},
+		Details:   details,
 	}
 
 	if errors.As(err, &typed) {
 		failure.Code = typed.Code
 		failure.Permanent = typed.Permanent
 		failure.Message = typed.Error()
+		mergeDetails(details, typed.DetailsMap())
 	}
 
-	failure.Details["code"] = failure.Code.String()
-	failure.Details["permanent"] = strconv.FormatBool(failure.Permanent)
+	details["code"] = failure.Code.String()
+	details["permanent"] = strconv.FormatBool(failure.Permanent)
 
 	return failure
+}
+
+func mergeDetails(target, source map[string]string) {
+	if target == nil || len(source) == 0 {
+		return
+	}
+
+	for k, v := range source {
+		target[k] = v
+	}
 }

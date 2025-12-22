@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"preprocess-service/internal/config"
+	"preprocess-service/internal/domain"
 	"preprocess-service/internal/storage/memory"
 	"preprocess-service/internal/usecase/submit"
 	preprocessv1 "preprocess-service/proto/backend/preprocess/v1"
@@ -118,6 +119,55 @@ func TestGetPreprocessStatus(t *testing.T) {
 
 	if statusResp.GetUpdatedAt().AsTime().After(time.Now().Add(1 * time.Minute)) {
 		t.Fatalf("updated_at is in the future: %v", statusResp.GetUpdatedAt())
+	}
+}
+
+func TestGetPreprocessStatusReturnsErrorDetails(t *testing.T) {
+	cfg := loadTestConfig(t)
+
+	repo := memory.NewRepository()
+	service, err := submit.NewService(repo, cfg.Preprocess.TargetBucket, cfg.Preprocess.TargetKeyPrefix, zaptest.NewLogger(t))
+	if err != nil {
+		t.Fatalf("init service: %v", err)
+	}
+	handler := NewPreprocessHandler(service, zaptest.NewLogger(t))
+
+	now := time.Now().UTC()
+	job := domain.PreprocessJob{
+		ID:           "job-error-details",
+		DocumentID:   "doc-err",
+		SourceBucket: cfg.Preprocess.SourceBucket,
+		SourceKey:    "error.docx",
+		SourceETag:   "etag-err",
+		Status:       domain.StatusFailed,
+		Attempts:     1,
+		MaxAttempts:  3,
+		NextRunAt:    now,
+		UpdatedAt:    now,
+		ErrorCode:    domain.ErrorCodeConvertFailed.String(),
+		ErrorMessage: "conversion failed",
+		ErrorDetails: map[string]string{
+			"converter_exit_code": "7",
+			"converter_stdout":    "ok",
+			"converter_stderr":    "bad",
+		},
+	}
+	if err := repo.Create(context.Background(), job); err != nil {
+		t.Fatalf("prepare job: %v", err)
+	}
+
+	statusResp, err := handler.GetPreprocessStatus(context.Background(), &preprocessv1.GetPreprocessStatusRequest{
+		JobId: job.ID,
+	})
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+
+	if statusResp.GetErrorDetails()["converter_exit_code"] != "7" {
+		t.Fatalf("expected converter exit code detail, got %v", statusResp.GetErrorDetails())
+	}
+	if statusResp.GetErrorDetails()["converter_stderr"] != "bad" {
+		t.Fatalf("expected converter stderr detail, got %v", statusResp.GetErrorDetails())
 	}
 }
 

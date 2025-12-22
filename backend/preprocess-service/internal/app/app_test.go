@@ -60,7 +60,9 @@ func (noopStorage) Upload(context.Context, string, string, string, string) error
 
 type noopConverter struct{}
 
-func (noopConverter) Convert(context.Context, string, string) error { return nil }
+func (noopConverter) Convert(context.Context, string, string) (ports.ConvertResult, error) {
+	return ports.ConvertResult{}, nil
+}
 
 type noopWorkspaceManager struct{}
 
