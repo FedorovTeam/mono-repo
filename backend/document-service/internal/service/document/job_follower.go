@@ -235,12 +235,16 @@ func correlationFromDoc(doc *domain.Document) string {
 
 func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides domain.ConvertPayload, correlationID string) domain.ConvertPayload {
 	payload := domain.ConvertPayload{
-		OriginalBucket:     firstNonEmpty(overrides.OriginalBucket, doc.OriginalBucket),
-		OriginalObjectKey:  firstNonEmpty(overrides.OriginalObjectKey, doc.OriginalObjectKey),
-		MarkdownBucket:     firstNonEmpty(overrides.MarkdownBucket, doc.MarkdownBucket),
-		MarkdownObjectKey:  firstNonEmpty(overrides.MarkdownObjectKey, doc.MarkdownObjectKey),
-		FilenameExtension:  overrides.FilenameExtension,
-		JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationID},
+		OriginalBucket:        firstNonEmpty(overrides.OriginalBucket, doc.OriginalBucket),
+		OriginalObjectKey:     firstNonEmpty(overrides.OriginalObjectKey, doc.OriginalObjectKey),
+		PreprocessJobID:       overrides.PreprocessJobID,
+		PreprocessedBucket:    overrides.PreprocessedBucket,
+		PreprocessedObjectKey: overrides.PreprocessedObjectKey,
+		TargetObjectKey:       overrides.TargetObjectKey,
+		MarkdownBucket:        firstNonEmpty(overrides.MarkdownBucket, doc.MarkdownBucket),
+		MarkdownObjectKey:     firstNonEmpty(overrides.MarkdownObjectKey, doc.MarkdownObjectKey),
+		FilenameExtension:     overrides.FilenameExtension,
+		JobPayloadMetadata:    domain.JobPayloadMetadata{CorrelationID: correlationID},
 	}
 
 	if payload.FilenameExtension == "" {
@@ -266,8 +270,12 @@ func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.
 	}
 
 	return domain.ConvertPayload{
-		OriginalBucket:    originalBucket,
-		OriginalObjectKey: originalKey,
-		FilenameExtension: firstNonEmpty(preprocessPayload.FilenameExtension, "docx"),
+		OriginalBucket:        originalBucket,
+		OriginalObjectKey:     originalKey,
+		PreprocessJobID:       preprocessPayload.PreprocessJobID,
+		PreprocessedBucket:    preprocessPayload.PreprocessedBucket,
+		PreprocessedObjectKey: preprocessPayload.PreprocessedObjectKey,
+		TargetObjectKey:       preprocessPayload.TargetObjectKey,
+		FilenameExtension:     firstNonEmpty(preprocessPayload.FilenameExtension, "docx"),
 	}, correlationID
 }

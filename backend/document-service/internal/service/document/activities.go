@@ -289,7 +289,7 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: statusVal, Version: version, Ready: ready}, nil
 }
 
-func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, queueID string, version int32) error {
+func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, sourceObjectKey, queueID string, version int32) error {
 	if doc == nil {
 		return fmt.Errorf("document is required")
 	}
@@ -312,8 +312,13 @@ func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, ma
 		version = latestVersion(doc).Version + 1
 	}
 
+	if sourceObjectKey == "" {
+		sourceObjectKey = doc.OriginalObjectKey
+	}
+
 	_, err = a.statuses.Transition(ctx, doc, domain.DocumentStatusConvertedToMarkdown, "", "", &domain.DocumentVersion{
 		Version:           version,
+		OriginalObjectKey: sourceObjectKey,
 		MarkdownObjectKey: markdownKey,
 		MarkdownQueueID:   queueID,
 	})
