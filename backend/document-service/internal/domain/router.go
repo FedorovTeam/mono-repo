@@ -171,7 +171,7 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 }
 
 // ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
-func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32, _ bool) bool {
+func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32, markdownTablesHint bool) bool {
 	if doc == nil {
 		return false
 	}
@@ -197,11 +197,15 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 		return true
 	}
 
-	if !extractTables {
-		return false
+	if detectionSatisfied {
+		return true
 	}
 
-	return detectionSatisfied
+	if markdownTablesHint && ext == "pdf" && rules.forceTableExtraction {
+		return true
+	}
+
+	return extractTables && detectionSatisfied
 }
 
 func uniquePages(pages []int32) []int32 {

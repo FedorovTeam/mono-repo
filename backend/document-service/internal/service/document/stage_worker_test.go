@@ -780,7 +780,8 @@ func TestHandleConvertKeepsDoclingPayloadWhenTablesDetected(t *testing.T) {
 		MarkdownObjectKey: "docs/doc.md",
 		TableMetadata:     &transformerv1.TableMetadata{TablesCount: 2, Pages: []int32{1, 2}},
 	}}
-	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, nil)
+	router := domain.NewStageRouter(domain.RouterRules{})
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, router)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
 	if err != nil {
@@ -803,14 +804,61 @@ func TestHandleConvertKeepsDoclingPayloadWhenTablesDetected(t *testing.T) {
 	if !reflect.DeepEqual(payload.TablePages, []int32{1, 2}) {
 		t.Fatalf("expected table pages propagated, got %v", payload.TablePages)
 	}
-	if payload.ExtractTables {
-		t.Fatalf("expected extract_tables to stay false; router decides based on detection data")
+	if !payload.ExtractTables {
+		t.Fatalf("expected extract_tables to be enabled when tables are detected")
 	}
 	if payload.ConversionStrategy != domain.ConversionStrategyDoclingWithTables {
 		t.Fatalf("expected conversion strategy to stay docling_with_tables, got %s", payload.ConversionStrategy)
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event without status change, got %+v", result.Event)
+	}
+}
+
+func TestHandleConvertRequiresTablesChainWithRouterWhenTablesDetected(t *testing.T) {
+	doc := &domain.Document{
+		ID:                 "doc-docling-router",
+		Name:               "Doc.pdf",
+		Owner:              "owner",
+		Repository:         "repo",
+		Branch:             "main",
+		BaseBranch:         "main",
+		Path:               "docs/doc.md",
+		Status:             domain.DocumentStatusStoredOriginal,
+		OriginalBucket:     "orig-bucket",
+		OriginalObjectKey:  "docs/doc.pdf",
+		MarkdownBucket:     "md-bucket",
+		MarkdownObjectKey:  "docs/doc.md",
+		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+		Versions:           []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           "queue-docling",
+		Status:            "done",
+		MarkdownObjectKey: "docs/doc.md",
+		TableMetadata:     &transformerv1.TableMetadata{TablesCount: 1, Pages: []int32{2}},
+	}}
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, router)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected document status to remain unchanged before table extraction, got %v", repo.statusUpdates)
+	}
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if !payload.ExtractTables {
+		t.Fatalf("expected extract_tables to be enabled when tables detected")
+	}
+	if payload.TableCount != 1 || !reflect.DeepEqual(payload.TablePages, []int32{2}) {
+		t.Fatalf("unexpected table info in payload: count=%d pages=%v", payload.TableCount, payload.TablePages)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event to proceed with tables extraction, got %+v", result.Event)
 	}
 }
 
@@ -956,6 +1004,51 @@ func TestHandleConvertEnablesTablesWhenMetadataArrivesWithoutStrategy(t *testing
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+}
+
+func TestHandleConvertForcesTablesExtractionFromMarkdownHint(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-docling-hint",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           "queue-docling",
+		Status:            "done",
+		MarkdownObjectKey: "tables.md",
+	}}
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, ForceTableExtractionPDF: true, TableDetectionMinCount: 1})
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, router)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling-hint", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected document status to remain unchanged before table extraction, got %v", repo.statusUpdates)
+	}
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if !payload.ExtractTables {
+		t.Fatalf("expected extract_tables to be forced by markdown hint")
+	}
+	if payload.TableCount != 0 || len(payload.TablePages) != 0 {
+		t.Fatalf("expected no detected tables, got count=%d pages=%v", payload.TableCount, payload.TablePages)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event to proceed with table extraction, got %+v", result.Event)
 	}
 }
 

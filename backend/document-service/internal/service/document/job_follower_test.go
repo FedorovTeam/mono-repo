@@ -319,7 +319,7 @@ func TestJobFollowerSchedulesExtractAfterDetectionWithoutStrategy(t *testing.T) 
 	require.True(t, payload.ExtractTables)
 }
 
-func TestJobFollowerSkipsExtractWhenOnlyTablesHint(t *testing.T) {
+func TestJobFollowerSchedulesExtractWhenTablesHintInMarkdown(t *testing.T) {
 	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, ForceTableExtractionPDF: true})
 	repo := &followerRepo{
 		jobs: []domain.ProcessingJob{
@@ -350,10 +350,47 @@ func TestJobFollowerSkipsExtractWhenOnlyTablesHint(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, repo.createdJobs, 1)
-	require.Equal(t, domain.JobStagePublishToGitHub, repo.createdJobs[0].Stage)
-	payload := domain.PublishPayloadFromMap(repo.createdJobs[0].Payload)
+	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
+	payload := domain.ExtractTablesPayloadFromMap(repo.createdJobs[0].Payload)
 	require.Equal(t, "md-bucket", payload.MarkdownBucket)
 	require.Equal(t, "tables.md", payload.MarkdownObjectKey)
+	require.True(t, payload.ExtractTables)
+}
+
+func TestJobFollowerSchedulesExtractWhenTablesDetectedWithoutFlag(t *testing.T) {
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
+	repo := &followerRepo{
+		jobs: []domain.ProcessingJob{
+			{
+				TaskID:     "job-convert",
+				DocumentID: "doc-1",
+				Stage:      domain.JobStageConvertToMarkdown,
+				Status:     domain.JobStatusCompleted,
+				Payload: (domain.ConvertPayload{
+					MarkdownBucket:    "md-bucket",
+					MarkdownObjectKey: "markdown/key.md",
+					TableCount:        2,
+					TablePages:        []int32{1, 2},
+				}).ToMap(),
+			},
+		},
+		document: &domain.Document{
+			ID:                "doc-1",
+			Status:            domain.DocumentStatusStoredOriginal,
+			OriginalBucket:    "orig-bucket",
+			OriginalObjectKey: "incoming/file.pdf",
+			MarkdownBucket:    "md-bucket",
+			MarkdownObjectKey: "markdown/key.md",
+		},
+	}
+
+	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, router)
+
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.createdJobs, 1)
+	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
 }
 
 func TestPreprocessConversionForcesDocxExtension(t *testing.T) {

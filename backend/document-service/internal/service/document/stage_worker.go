@@ -437,7 +437,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if payload.DoclingMarkdownObjectKey == "" {
 		payload.DoclingMarkdownObjectKey = payload.MarkdownObjectKey
 	}
-	if payload.ConversionStrategy == "" && count > 0 {
+	if payload.HasMarkdownTablesHint() {
 		payload.ExtractTables = true
 	}
 	shouldExtractTables := w.shouldExtractAfterConvert(doc, payload, count, pages)
