@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import React, { useCallback, useEffect, useState } from 'react';
+import { generateCorrelationId } from '@/lib/correlation';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -49,11 +50,6 @@ const STATUS_STYLES: Record<KnowledgeDocumentStatus, string> = {
   FAILED: 'bg-red-50 text-red-800 border-red-300',
 };
 
-const generateCorrelationId = () =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `corr-${Date.now()}`;
-
 const formatUploadDate = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -85,15 +81,7 @@ export default function DocumentsPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
 
-  const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY;
-
   const fetchDocuments = useCallback(async () => {
-    if (!gatewayUrl || !apiKey) {
-      setListError('NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы');
-      return;
-    }
-
     try {
       setIsListLoading(true);
       setListError(null);
@@ -118,11 +106,11 @@ export default function DocumentsPage() {
         }
       `;
 
-      const res = await fetch(gatewayUrl, {
+      const res = await fetch('/api/graphql', {
         method: 'POST',
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
           'X-Correlation-ID': correlationId,
         },
         body: JSON.stringify({
@@ -130,6 +118,10 @@ export default function DocumentsPage() {
           variables: { pagination: { limit: 20, offset: 0 } },
         }),
       });
+
+      if (res.status === 401) {
+        throw new Error('Сессия недействительна, войдите заново.');
+      }
 
       if (!res.ok) {
         throw new Error(`Ошибка загрузки списка документов: ${res.status} ${res.statusText}`);
@@ -155,14 +147,10 @@ export default function DocumentsPage() {
     } finally {
       setIsListLoading(false);
     }
-  }, [apiKey, gatewayUrl]);
+  }, []);
 
   const pollDocument = useCallback(
     async (id: string) => {
-      if (!gatewayUrl || !apiKey) {
-        return;
-      }
-
       try {
         const correlationId = generateCorrelationId();
         const query = `
@@ -181,11 +169,11 @@ export default function DocumentsPage() {
           }
         `;
 
-        const res = await fetch(gatewayUrl, {
+        const res = await fetch('/api/graphql', {
           method: 'POST',
+          cache: 'no-store',
           headers: {
             'Content-Type': 'application/json',
-            'X-API-Key': apiKey,
             'X-Correlation-ID': correlationId,
           },
           body: JSON.stringify({ query, variables: { id } }),
@@ -210,7 +198,7 @@ export default function DocumentsPage() {
         console.error(err);
       }
     },
-    [apiKey, gatewayUrl],
+    [],
   );
 
   useEffect(() => {

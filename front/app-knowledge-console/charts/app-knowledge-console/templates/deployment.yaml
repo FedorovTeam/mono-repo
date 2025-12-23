@@ -26,10 +26,26 @@ spec:
             - name: http
               containerPort: {{ .Values.service.targetPort }}
           env:
-            - name: NEXT_PUBLIC_GATEWAY_URL
-              value: {{ .Values.env.NEXT_PUBLIC_GATEWAY_URL | quote }}
-            - name: NEXT_PUBLIC_API_KEY
-              value: {{ .Values.env.NEXT_PUBLIC_API_KEY | quote }}
+            - name: NEXTAUTH_URL
+              value: {{ .Values.env.NEXTAUTH_URL | quote }}
+            - name: NEXTAUTH_SECRET
+              value: {{ .Values.env.NEXTAUTH_SECRET | quote }}
+            - name: AUTHENTIK_ISSUER
+              value: {{ .Values.env.AUTHENTIK_ISSUER | quote }}
+            - name: AUTHENTIK_CLIENT_ID
+              value: {{ .Values.env.AUTHENTIK_CLIENT_ID | quote }}
+            - name: AUTHENTIK_CLIENT_SECRET
+              value: {{ .Values.env.AUTHENTIK_CLIENT_SECRET | quote }}
+            - name: AUTHENTIK_REDIRECT_URI
+              value: {{ .Values.env.AUTHENTIK_REDIRECT_URI | quote }}
+            - name: AUTHENTIK_JWKS_URL
+              value: {{ .Values.env.AUTHENTIK_JWKS_URL | quote }}
+            - name: GATEWAY_URL
+              value: {{ .Values.env.GATEWAY_URL | quote }}
+            - name: NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL
+              value: {{ .Values.env.NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL | quote }}
+            - name: NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT
+              value: {{ .Values.env.NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT | quote }}
             - name: NEXT_PUBLIC_DEFAULT_REPOSITORY
               value: {{ .Values.env.NEXT_PUBLIC_DEFAULT_REPOSITORY | quote }}
             - name: NEXT_PUBLIC_DEFAULT_BRANCH

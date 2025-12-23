@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { generateCorrelationId } from '@/lib/correlation';
 
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -51,11 +52,6 @@ interface UploadResponse {
 
 const KNOWLEDGE_ROOT = 'knowledge/docs';
 
-const generateCorrelationId = () =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `corr-${Date.now()}`;
-
 export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [category, setCategory] = useState<Category>('plenary');
@@ -75,8 +71,6 @@ export default function HomePage() {
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY;
   const repository = process.env.NEXT_PUBLIC_DEFAULT_REPOSITORY ?? 'docs';
   const branch = process.env.NEXT_PUBLIC_DEFAULT_BRANCH ?? 'main';
 
@@ -155,10 +149,6 @@ export default function HomePage() {
       setMessage('Выберите файл');
       return;
     }
-    if (!gatewayUrl || !apiKey) {
-      setMessage('NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы');
-      return;
-    }
     if (!resolvePath.path) {
       setValidationError(resolvePath.error ?? 'Заполните необходимые поля для пути');
       return;
@@ -195,15 +185,22 @@ export default function HomePage() {
         },
       };
 
-      const gqlResp = await fetch(gatewayUrl, {
+      const gqlResp = await fetch('/api/graphql', {
         method: 'POST',
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
           'X-Correlation-ID': correlationId,
         },
         body: JSON.stringify({ query: mutation, variables }),
       });
+
+      if (gqlResp.status === 401) {
+        throw new Error('Сессия недействительна, войдите заново.');
+      }
+      if (!gqlResp.ok) {
+        throw new Error(`Ошибка gateway: ${gqlResp.status} ${gqlResp.statusText}`);
+      }
 
       const gqlJson: UploadResponse = await gqlResp.json();
 

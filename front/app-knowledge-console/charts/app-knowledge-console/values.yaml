@@ -25,8 +25,16 @@ ingress:
     secretName: console-fedorov-team-tech-tls
 
 env:
-  NEXT_PUBLIC_GATEWAY_URL: "https://gateway.fedorov-team.tech/query"
-  NEXT_PUBLIC_API_KEY: "secret"
+  NEXTAUTH_URL: "https://console.fedorov-team.tech"
+  NEXTAUTH_SECRET: "change-me"
+  AUTHENTIK_ISSUER: "https://authentik.fedorov-team.tech/application/o/knowledge/"
+  AUTHENTIK_CLIENT_ID: "knowledge-console"
+  AUTHENTIK_CLIENT_SECRET: "secret"
+  AUTHENTIK_REDIRECT_URI: "https://console.fedorov-team.tech/api/auth/callback/authentik"
+  AUTHENTIK_JWKS_URL: "https://authentik.fedorov-team.tech/application/o/knowledge/jwks/"
+  GATEWAY_URL: "https://gateway.fedorov-team.tech/query"
+  NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL: "https://authentik.fedorov-team.tech/application/o/knowledge/end-session/"
+  NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT: "https://console.fedorov-team.tech"
   NEXT_PUBLIC_DEFAULT_REPOSITORY: "docs"
   NEXT_PUBLIC_DEFAULT_BRANCH: "main"
 

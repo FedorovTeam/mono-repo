@@ -46,3 +46,14 @@ The upload form now builds the repository path automatically based on structured
   - _Библиография_ → **Депутаты** – requires a slug/identifier, generating a path like `bibliography/deputies/ivanov-ivan.md`.
 
 The computed path is shown as a preview and is sent to the GraphQL mutation; manual path entry is no longer required.
+
+## Настройка аутентификации и BFF
+
+Консоль использует OIDC-аутентификацию через Authentik и серверный прокси `/api/graphql`, который добавляет `Authorization: Bearer <access_token>` в запросы к gateway. Необходимые переменные окружения:
+
+- `NEXTAUTH_URL` – базовый URL приложения.
+- `NEXTAUTH_SECRET` – ключ для подписи сессий NextAuth.
+- `AUTHENTIK_ISSUER`, `AUTHENTIK_CLIENT_ID`, `AUTHENTIK_CLIENT_SECRET`, `AUTHENTIK_REDIRECT_URI`, `AUTHENTIK_JWKS_URL` – параметры OIDC-провайдера Authentik.
+- `GATEWAY_URL` – внутренняя точка GraphQL gateway, вызываемая прокси.
+- `NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL` – endpoint logout Authentik.
+- `NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT` – необязательно, редирект после logout (по умолчанию origin приложения).
