@@ -1,9 +1,13 @@
 package extractor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
+	"os"
 	"testing"
 	"time"
 
@@ -186,6 +190,44 @@ func TestAdapterUsesBBoxAndLayoutWhenVotingDetectionEnabled(t *testing.T) {
 	require.Contains(t, result.DebugFiles, "pdftotext.layout.txt")
 }
 
+func TestAdapterFallsBackWhenVotingHeaderMissing(t *testing.T) {
+	runner := &votingFallbackRunner{
+		t:          t,
+		layoutText: "Name Votes\nAlice 1\nBob 2\n",
+		bboxHTML:   `<page number="1" width="200" height="200"><word xMin="10" yMin="10" xMax="20" yMax="12">Header</word></page>`,
+	}
+	adapter := &Adapter{
+		cfg: Config{
+			PdfInfoPath:         defaultPdfinfo,
+			PdftotextPath:       defaultPdftotext,
+			PdftoppmPath:        defaultPdftoppm,
+			PdfInfoTimeout:      time.Second,
+			PdftotextTimeout:    time.Second,
+			PdftoppmTimeout:     time.Second,
+			MaxParallelCommands: 1,
+			Pages:               "all",
+			TempDir:             t.TempDir(),
+			Mode:                modeLayout,
+			DetectVotingTables:  true,
+		},
+		runner: runner,
+		parser: NewVotingTableParser(),
+		now:    time.Now,
+	}
+
+	result, err := adapter.Extract(context.Background(), "/tmp/demo.pdf")
+	require.NoError(t, err)
+
+	var normalized struct {
+		Tables []NormalizedTable `json:"tables"`
+	}
+	require.NoError(t, json.Unmarshal(result.NormalizedJSON, &normalized))
+	require.Len(t, normalized.Tables, 1)
+	require.Equal(t, "table_1", normalized.Tables[0].Name)
+	require.Contains(t, string(result.Markdown), "table_1")
+	require.NotContains(t, string(result.Markdown), "voting_table")
+}
+
 func TestExternalRunnerHonorsTimeout(t *testing.T) {
 	core, observed := observer.New(zap.DebugLevel)
 	runner := NewExternalCommandRunner(1, zap.New(core))
@@ -219,6 +261,48 @@ func TestExternalRunnerLogsCommandError(t *testing.T) {
 	require.Equal(t, "false", entry.ContextMap()["command"])
 	require.Equal(t, "corr-error", entry.ContextMap()["correlation_id"])
 	require.Equal(t, false, entry.ContextMap()["timed_out"])
+}
+
+type votingFallbackRunner struct {
+	t          testing.TB
+	layoutText string
+	bboxHTML   string
+	calls      []commandCall
+}
+
+func (r *votingFallbackRunner) Run(_ context.Context, _ time.Duration, name string, args ...string) (CommandResult, error) {
+	r.calls = append(r.calls, commandCall{name: name, args: args})
+	switch name {
+	case defaultPdfinfo:
+		return CommandResult{Stdout: []byte("Pages: 1")}, nil
+	case defaultPdftotext:
+		for _, arg := range args {
+			if arg == "-bbox" {
+				return CommandResult{Stdout: []byte(r.bboxHTML)}, nil
+			}
+		}
+		return CommandResult{Stdout: []byte(r.layoutText)}, nil
+	case defaultPdftoppm:
+		if len(args) == 0 {
+			return CommandResult{}, nil
+		}
+		prefix := args[len(args)-1]
+		img := blankPNG(r.t)
+		return CommandResult{}, os.WriteFile(prefix+"-1.png", img, 0o644)
+	default:
+		return CommandResult{}, nil
+	}
+}
+
+func blankPNG(t testing.TB) []byte {
+	t.Helper()
+	img := image.NewGray(image.Rect(0, 0, 50, 50))
+	for i := range img.Pix {
+		img.Pix[i] = 255
+	}
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, img))
+	return buf.Bytes()
 }
 
 type fakeRunner struct {

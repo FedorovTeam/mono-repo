@@ -326,12 +326,27 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	parseStart := time.Now()
 	parseLogger := logger.With(zap.String("step", "parse_tables"))
 	parseLogger.Debug("parsing tables", zap.Int("start_page", startPage))
-	parsed, err := a.parser.ParseTables(ParseInput{
+	parseInput := ParseInput{
 		LayoutText: layoutText,
 		BBoxHTML:   bboxHTML,
 		PagePNGs:   pagePNGs,
 		StartPage:  startPage,
-	})
+	}
+	parser := a.parser
+	if a.cfg.DetectVotingTables {
+		if _, ok := parser.(VotingTableParser); ok {
+			useVoting, detectErr := canUseVotingParser(parseInput)
+			if detectErr != nil {
+				parseLogger.Error("voting parser precheck failed", zap.Error(detectErr))
+				return usecase.ExtractionResult{}, fmt.Errorf("parse tables: %w", detectErr)
+			}
+			if !useVoting {
+				parseLogger.Info("voting headers not found, falling back to default parser")
+				parser = DefaultParser{}
+			}
+		}
+	}
+	parsed, err := parser.ParseTables(parseInput)
 	if err != nil {
 		parseLogger.Error("parse tables failed",
 			zap.Error(err),
@@ -376,7 +391,7 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 		return usecase.ExtractionResult{}, fmt.Errorf("marshal normalized json: %w", err)
 	}
 
-	md := a.parser.RenderMarkdown(parsed)
+	md := parser.RenderMarkdown(parsed)
 	manifestPayload, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return usecase.ExtractionResult{}, fmt.Errorf("marshal manifest: %w", err)
@@ -412,6 +427,24 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 		Manifest:       manifestPayload,
 		DebugFiles:     debugFiles,
 	}, nil
+}
+
+func canUseVotingParser(input ParseInput) (bool, error) {
+	if strings.TrimSpace(input.BBoxHTML) == "" {
+		return false, errors.New("bbox html is required for voting parser")
+	}
+	pageSegments := splitBBoxPages(input.BBoxHTML, input.StartPage)
+	if len(pageSegments) == 0 {
+		return false, errors.New("bbox html does not contain <page> tags")
+	}
+	firstPage, err := voting.ParseBBoxHTML(pageSegments[0].HTML)
+	if err != nil {
+		return false, fmt.Errorf("parse bbox page %d: %w", pageSegments[0].Number, err)
+	}
+	if _, _, _, err := voting.ExtractColumns(firstPage); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (a *Adapter) runPdftotext(ctx context.Context, pdfPath string, mode string) (CommandResult, error) {
