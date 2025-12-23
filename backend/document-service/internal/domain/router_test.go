@@ -11,8 +11,8 @@ func TestStageRouterChoosesPreprocessForDocAndPdf(t *testing.T) {
 	}
 
 	pdf := &Document{OriginalObjectKey: "incoming/report.pdf"}
-	if stage := router.NextStageAfterStore(pdf); stage != JobStagePreprocessToDocx {
-		t.Fatalf("expected preprocess stage for pdf, got %s", stage)
+	if stage := router.NextStageAfterStore(pdf); stage != JobStageConvertToMarkdown {
+		t.Fatalf("expected convert stage for pdf, got %s", stage)
 	}
 
 	docx := &Document{OriginalObjectKey: "incoming/report.DOCX"}
@@ -46,8 +46,8 @@ func TestStageRouterUsesTableExtractorForFlaggedPdf(t *testing.T) {
 func TestStageRouterFallsBackToPreprocessWhenTableExtractorDisabled(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: false, PreprocessEnabled: true})
 	doc := &Document{OriginalObjectKey: "incoming/report.pdf", ExtractTables: true}
-	if stage := router.NextStageAfterStore(doc); stage != JobStagePreprocessToDocx {
-		t.Fatalf("expected preprocess when table extractor disabled, got %s", stage)
+	if stage := router.NextStageAfterStore(doc); stage != JobStageConvertToMarkdown {
+		t.Fatalf("expected convert when table extractor disabled, got %s", stage)
 	}
 }
 
@@ -116,23 +116,23 @@ func TestTableExtractionConfigUsesRepositoryDefaults(t *testing.T) {
 }
 
 func TestDefaultExtractTablesPrefersConfiguredExtensions(t *testing.T) {
-	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableExtractorExtensions: []string{"pdf"}})
-	pdf := &Document{OriginalObjectKey: "incoming/report.pdf"}
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true})
+	pdf := &Document{OriginalObjectKey: "incoming/report.pdf", ConversionStrategy: ConversionStrategyTablesOnly}
 	if !router.DefaultExtractTables(pdf) {
-		t.Fatalf("expected pdf to use table extraction by default")
+		t.Fatalf("expected tables_only strategy to enable table extraction by default")
 	}
 
 	docx := &Document{OriginalObjectKey: "incoming/report.docx"}
 	if router.DefaultExtractTables(docx) {
-		t.Fatalf("expected docx not to use table extraction by default")
+		t.Fatalf("expected docx without strategy not to use table extraction by default")
 	}
 }
 
 func TestStageRouterUsesDetectedTablesWhenEnabled(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
-	if !router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}) {
-		t.Fatalf("expected router to schedule table extraction when tables detected")
+	if router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}) {
+		t.Fatalf("expected router to skip table extraction without explicit intent")
 	}
 }
 
@@ -140,26 +140,26 @@ func TestStageRouterHonorsDetectionThreshold(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 2})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
 	if router.ShouldExtractTablesAfterConvert(doc, false, 1, []int32{1}) {
-		t.Fatalf("expected router to skip extraction when below threshold")
+		t.Fatalf("expected router to skip extraction without explicit intent")
 	}
-	if !router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}) {
-		t.Fatalf("expected router to extract when threshold met")
+	if router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}) {
+		t.Fatalf("expected router to skip extraction without explicit intent even when threshold met")
 	}
 }
 
 func TestStageRouterDetectsTablesForDocx(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.docx"}
-	if !router.ShouldExtractTablesAfterConvert(doc, false, 3, []int32{1}) {
-		t.Fatalf("expected router to schedule extraction for docx when tables are detected")
+	if router.ShouldExtractTablesAfterConvert(doc, false, 3, []int32{1}) {
+		t.Fatalf("expected router to skip extraction without explicit intent")
 	}
 }
 
 func TestStageRouterUsesPagesWhenCountMissing(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
-	if !router.ShouldExtractTablesAfterConvert(doc, false, 0, []int32{3, 3}) {
-		t.Fatalf("expected router to use detected pages when count is missing")
+	if router.ShouldExtractTablesAfterConvert(doc, false, 0, []int32{3, 3}) {
+		t.Fatalf("expected router to skip extraction without explicit intent")
 	}
 }
 

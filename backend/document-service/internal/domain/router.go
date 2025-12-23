@@ -79,9 +79,6 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 	if len(router.preprocessExt) == 0 {
 		router.preprocessExt = defaultPreprocessExtensions()
 	}
-	if len(router.tableExtractorExt) == 0 {
-		router.tableExtractorExt = defaultTableExtractorExtensions()
-	}
 	if router.tableDetectionMinCount <= 0 {
 		router.tableDetectionMinCount = 1
 	}
@@ -117,19 +114,20 @@ func (r *StageRouter) NextStageAfterStore(doc *Document) JobStage {
 	ext := documentExtension(doc)
 	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
 	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
-	wantsTables := doc.ExtractTables || strategy == ConversionStrategyTablesOnly || doclingWithTables
+	wantsTables := doc.ExtractTables || strategy == ConversionStrategyTablesOnly
 
 	if doclingWithTables {
 		return JobStageConvertToMarkdown
 	}
 
 	if wantsTables && rules.tableExtractorEnabled {
-		if ext == "" {
+		if canUseTableExtractor(ext, rules.tableExtractorExt) {
 			return JobStageExtractTables
 		}
-		if _, ok := rules.tableExtractorExt[ext]; ok {
-			return JobStageExtractTables
-		}
+	}
+
+	if ext == "pdf" {
+		return JobStageConvertToMarkdown
 	}
 
 	if ext == "docx" {
@@ -161,16 +159,8 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 	if doc == nil {
 		return false
 	}
-	rules := r.effectiveRules(doc)
-	if !rules.tableExtractorEnabled {
-		return false
-	}
-	ext := documentExtension(doc)
-	if ext == "" {
-		return rules.tableExtractorEnabled
-	}
-	_, ok := rules.tableExtractorExt[ext]
-	return ok
+	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
+	return strategy == ConversionStrategyTablesOnly || strategy == ConversionStrategyDoclingWithTables
 }
 
 // ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
@@ -183,29 +173,38 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 		return false
 	}
 	pages := uniquePages(tablePages)
+
+	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
+	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
+	wantsTables := extractTables || doc.ExtractTables || strategy == ConversionStrategyTablesOnly || doclingWithTables
+
+	if !wantsTables {
+		return false
+	}
+
+	ext := documentExtension(doc)
+	if !canUseTableExtractor(ext, rules.tableExtractorExt) {
+		return false
+	}
+
+	if doclingWithTables {
+		return true
+	}
+
+	if strategy == ConversionStrategyTablesOnly || doc.ExtractTables || extractTables {
+		return true
+	}
+
 	detectedTables := tableCount
 	if detectedTables == 0 && len(pages) > 0 {
 		detectedTables = len(pages)
 	}
 
-	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
-	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
-	wantsTables := extractTables || doc.ExtractTables || doclingWithTables
-
-	if !wantsTables && detectedTables < rules.tableDetectionMinCount {
+	if detectedTables == 0 {
 		return false
 	}
 
-	if doclingWithTables || detectedTables >= rules.tableDetectionMinCount {
-		return true
-	}
-
-	ext := documentExtension(doc)
-	if ext == "" {
-		return true
-	}
-	_, ok := rules.tableExtractorExt[ext]
-	return ok
+	return detectedTables >= rules.tableDetectionMinCount
 }
 
 func uniquePages(pages []int32) []int32 {
@@ -271,9 +270,6 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 
 	if len(extensions) == 0 {
 		extensions = defaultPreprocessExtensions()
-	}
-	if len(tableExtractorExt) == 0 {
-		tableExtractorExt = defaultTableExtractorExtensions()
 	}
 	if strings.TrimSpace(artifactsPrefix) == "" {
 		artifactsPrefix = "tables/{{ .DocumentID }}/{{ .QueueID }}/"
@@ -362,11 +358,7 @@ func normalizeRepository(owner, repo string) (string, string) {
 }
 
 func defaultPreprocessExtensions() map[string]struct{} {
-	return map[string]struct{}{"doc": {}, "pdf": {}}
-}
-
-func defaultTableExtractorExtensions() map[string]struct{} {
-	return map[string]struct{}{"pdf": {}}
+	return map[string]struct{}{"doc": {}}
 }
 
 func cloneExtensions(src map[string]struct{}) map[string]struct{} {
@@ -387,4 +379,12 @@ type TableExtractionConfig struct {
 	ArtifactsPrefixTmpl  string
 	Extensions           map[string]struct{}
 	PreprocessExtensions map[string]struct{}
+}
+
+func canUseTableExtractor(ext string, allowed map[string]struct{}) bool {
+	if len(allowed) == 0 || ext == "" {
+		return true
+	}
+	_, ok := allowed[ext]
+	return ok
 }

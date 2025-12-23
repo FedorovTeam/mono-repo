@@ -38,5 +38,5 @@ func TestNewStageRouterUsesRouterConfig(t *testing.T) {
 	require.Equal(t, "repo/{{ .DocumentID }}/", cfg.ArtifactsPrefixTmpl)
 
 	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, nil))
-	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 3, nil))
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 3, nil))
 }
