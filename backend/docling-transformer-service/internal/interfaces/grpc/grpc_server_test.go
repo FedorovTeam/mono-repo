@@ -35,6 +35,9 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 				Status:            transformations.StatusPending,
 				MarkdownBucket:    "markdown-bucket",
 				MarkdownObjectKey: "md/file.md",
+				TableMetadata:     &domain.TableMetadata{TablesCount: 1, Pages: []int32{2}},
+				TableCount:        1,
+				TablePages:        []int32{2},
 			},
 			MarkdownBucket:    "markdown-bucket",
 			MarkdownObjectKey: "md/file.md",
@@ -74,6 +77,12 @@ func TestConvertDocumentToMarkdownQueuesTask(t *testing.T) {
 	if resp.GetCorrelationId() != "corr-123" {
 		t.Fatalf("response correlation id mismatch: %s", resp.GetCorrelationId())
 	}
+	if resp.GetTableCount() != 1 || len(resp.GetTablePages()) != 1 || resp.GetTablePages()[0] != 2 {
+		t.Fatalf("unexpected table metadata: count=%d pages=%v", resp.GetTableCount(), resp.GetTablePages())
+	}
+	if resp.GetTableMetadata() == nil || resp.GetTableMetadata().GetTablesCount() != 1 {
+		t.Fatalf("missing table metadata message: %+v", resp.GetTableMetadata())
+	}
 }
 
 func TestConvertDocumentToMarkdownRespectsRequestCorrelation(t *testing.T) {
@@ -108,7 +117,15 @@ func TestConvertDocumentToMarkdownRespectsRequestCorrelation(t *testing.T) {
 
 func TestConvertDocumentToMarkdownWaitsForResult(t *testing.T) {
 	queueID := uuid.New()
-	doneTask := &transformations.TransformationTask{ID: queueID, Status: transformations.StatusDone, MarkdownBucket: "md-bucket", MarkdownObjectKey: "ready.md"}
+	doneTask := &transformations.TransformationTask{
+		ID:                queueID,
+		Status:            transformations.StatusDone,
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "ready.md",
+		TableMetadata:     &domain.TableMetadata{TablesCount: 2, Pages: []int32{1, 3}},
+		TableCount:        2,
+		TablePages:        []int32{1, 3},
+	}
 
 	uc := &mockTransformerUseCase{}
 	uc.submitFunc = func(_ context.Context, req usecase.SubmitConversionRequest) (usecase.SubmitConversionResult, error) {
@@ -145,6 +162,12 @@ func TestConvertDocumentToMarkdownWaitsForResult(t *testing.T) {
 	}
 	if resp.GetMarkdownObjectKey() != "ready.md" {
 		t.Fatalf("expected ready key, got %s", resp.GetMarkdownObjectKey())
+	}
+	if resp.GetTableCount() != 2 || len(resp.GetTablePages()) != 2 {
+		t.Fatalf("unexpected table metadata: count=%d pages=%v", resp.GetTableCount(), resp.GetTablePages())
+	}
+	if resp.GetTableMetadata() == nil || resp.GetTableMetadata().GetTablesCount() != 2 {
+		t.Fatalf("missing table metadata message: %+v", resp.GetTableMetadata())
 	}
 	if uc.waitCalls != 1 {
 		t.Fatalf("expected wait to be called once, got %d", uc.waitCalls)
