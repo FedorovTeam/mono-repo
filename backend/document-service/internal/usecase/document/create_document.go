@@ -114,6 +114,10 @@ func (uc *CreateDocument) Execute(ctx context.Context, in CreateDocumentInput) (
 		ExtractTables:      in.ExtractTables,
 	}
 
+	if doc.ConversionStrategy == domain.ConversionStrategyDoclingWithTables {
+		doc.ExtractTables = true
+	}
+
 	if !doc.ExtractTables && uc.router != nil && uc.router.DefaultExtractTables(doc) {
 		doc.ExtractTables = true
 	}

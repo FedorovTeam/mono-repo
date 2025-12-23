@@ -260,7 +260,18 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 	payload.OriginalBucket = firstNonEmpty(payload.OriginalBucket, doc.OriginalBucket)
 	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
 	payload.ArtifactsBucket = firstNonEmpty(payload.ArtifactsBucket, doc.MarkdownBucket)
+	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, doc.MarkdownBucket)
 	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.DoclingMarkdownBucket = firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket)
+	payload.DoclingMarkdownObjectKey = firstNonEmpty(payload.DoclingMarkdownObjectKey, payload.MarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	if payload.ConversionStrategy == "" {
+		payload.ConversionStrategy = doc.ConversionStrategy
+	} else {
+		payload.ConversionStrategy = domain.NormalizeConversionStrategy(string(payload.ConversionStrategy))
+	}
+	if !payload.ExtractTables {
+		payload.ExtractTables = doc.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables
+	}
 	prefix, prefixErr := resolveArtifactsPrefix(payload.ArtifactsPrefixTemplate, doc.ID, payload.TableQueueID, payload.ArtifactsPrefix, payload.MarkdownObjectKey)
 	if prefixErr != nil {
 		payload.LastError = prefixErr.Error()
@@ -328,6 +339,8 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
 	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, doc.MarkdownBucket)
 	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.DoclingMarkdownBucket = firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket)
+	payload.DoclingMarkdownObjectKey = firstNonEmpty(payload.DoclingMarkdownObjectKey, payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
 	preprocessedExtension := firstNonEmpty(
 		fileExtension(payload.PreprocessedObjectKey),
 		fileExtension(payload.TargetObjectKey),
@@ -339,6 +352,15 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		fileExtension(doc.OriginalObjectKey),
 		fileExtension(doc.Name),
 	)
+	if payload.ConversionStrategy == "" {
+		payload.ConversionStrategy = doc.ConversionStrategy
+	} else {
+		payload.ConversionStrategy = domain.NormalizeConversionStrategy(string(payload.ConversionStrategy))
+	}
+	requiresTablesChain := payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables
+	if payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables {
+		payload.ExtractTables = true
+	}
 	if payload.CorrelationID == "" {
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
@@ -374,6 +396,8 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	}
 
 	payload.MarkdownObjectKey = result.MarkdownKey
+	payload.DoclingMarkdownBucket = firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket)
+	payload.DoclingMarkdownObjectKey = firstNonEmpty(payload.DoclingMarkdownObjectKey, payload.MarkdownObjectKey)
 	if queueID := strings.TrimSpace(result.QueueID); queueID != "" {
 		payload.QueueID = queueID
 	}
@@ -391,10 +415,6 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		}, nil
 	}
 
-	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, sourceObjectKey, result.QueueID, result.Version); err != nil {
-		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("update status: %w", err)
-	}
-
 	eventPayload := map[string]any{}
 	if sourceBucket != "" {
 		eventPayload["source_bucket"] = sourceBucket
@@ -405,8 +425,22 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if payload.PreprocessJobID != "" {
 		eventPayload["preprocess_job_id"] = payload.PreprocessJobID
 	}
+	if payload.DoclingMarkdownBucket != "" {
+		eventPayload["docling_markdown_bucket"] = payload.DoclingMarkdownBucket
+	}
+	if payload.DoclingMarkdownObjectKey != "" {
+		eventPayload["docling_markdown_object_key"] = payload.DoclingMarkdownObjectKey
+	}
 	if len(eventPayload) == 0 {
 		eventPayload = nil
+	}
+
+	if requiresTablesChain {
+		return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed", Payload: eventPayload}}, nil
+	}
+
+	if err := w.activities.MarkConverted(convCtx, doc, result.MarkdownKey, sourceObjectKey, result.QueueID, result.Version); err != nil {
+		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("update status: %w", err)
 	}
 
 	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed", Payload: eventPayload}}, nil
@@ -425,12 +459,22 @@ func (w *StageWorker) processTableExtractionResult(ctx context.Context, job doma
 	}
 	payload.ArtifactsPrefix = prefix
 	payload.MarkdownObjectKey = firstNonEmpty(result.MarkdownObjectKey, payload.MarkdownObjectKey, tablesMarkdownKey(payload.ArtifactsPrefix))
+	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, doc.MarkdownBucket)
 	payload.CorrelationID = firstNonEmpty(result.CorrelationID, payload.CorrelationID)
 	if payload.ConversionStrategy == "" {
 		payload.ConversionStrategy = doc.ConversionStrategy
+	} else {
+		payload.ConversionStrategy = domain.NormalizeConversionStrategy(string(payload.ConversionStrategy))
 	}
 	if !payload.ExtractTables {
 		payload.ExtractTables = doc.ExtractTables
+	}
+	if payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables {
+		payload.ExtractTables = true
+	}
+	payload.DoclingMarkdownBucket = firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket)
+	if payload.DoclingMarkdownObjectKey == "" {
+		payload.DoclingMarkdownObjectKey = resolvedMarkdownKey(doc)
 	}
 
 	if payload.TableQueueID == "" {
@@ -469,18 +513,23 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	if doc == nil {
 		return workersvc.JobResult{Payload: payload.ToMap()}, errors.New("document is required")
 	}
-	markdownKey := payload.MarkdownObjectKey
-	if markdownKey == "" {
-		markdownKey = tablesMarkdownKey(payload.ArtifactsPrefix)
+	tableMarkdownKey := payload.MarkdownObjectKey
+	if tableMarkdownKey == "" {
+		tableMarkdownKey = tablesMarkdownKey(payload.ArtifactsPrefix)
 	}
-	if markdownKey == "" {
+	if tableMarkdownKey == "" {
 		err := errors.New("table extraction markdown_object_key is empty")
 		payload.LastError = err.Error()
 		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
 
+	finalMarkdownKey := tableMarkdownKey
+	if payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables && payload.DoclingMarkdownObjectKey != "" {
+		finalMarkdownKey = payload.DoclingMarkdownObjectKey
+	}
+
 	version := latestVersion(doc).Version + 1
-	if err := w.activities.MarkConverted(ctx, doc, markdownKey, payload.OriginalObjectKey, payload.TableQueueID, version); err != nil {
+	if err := w.activities.MarkConverted(ctx, doc, finalMarkdownKey, payload.OriginalObjectKey, payload.TableQueueID, version); err != nil {
 		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("update status: %w", err)
 	}
 
@@ -494,8 +543,14 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	if payload.TableQueueID != "" {
 		eventPayload["table_queue_id"] = payload.TableQueueID
 	}
-	if markdownKey != "" {
-		eventPayload["markdown_object_key"] = markdownKey
+	if tableMarkdownKey != "" {
+		eventPayload["tables_markdown_object_key"] = tableMarkdownKey
+	}
+	if payload.DoclingMarkdownObjectKey != "" {
+		eventPayload["docling_markdown_object_key"] = payload.DoclingMarkdownObjectKey
+	}
+	if finalMarkdownKey != "" {
+		eventPayload["markdown_object_key"] = finalMarkdownKey
 	}
 
 	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed", Payload: eventPayload}}, nil
