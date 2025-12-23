@@ -32,9 +32,12 @@ if (!authentikTokenUrl) {
   throw new Error("Не удалось определить URL token endpoint для Authentik");
 }
 
-const authorizationParams: Record<string, string> = authentikRedirectUri
-  ? { scope: "openid email profile", redirect_uri: authentikRedirectUri }
-  : { scope: "openid email profile" };
+const authorizationParams: Record<string, string> = {
+  scope: "openid email profile offline_access",
+  access_type: "offline",
+  prompt: "consent",
+  ...(authentikRedirectUri ? { redirect_uri: authentikRedirectUri } : {}),
+};
 
 const authentikProvider: OAuthConfig<Record<string, unknown>> = {
   id: "authentik",
@@ -122,11 +125,18 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
     }
 
     const data = (await response.json()) as AuthentikTokenResponse;
-    const updatedToken = token;
-    updatedToken.accessToken = data.access_token ?? token.accessToken;
-    updatedToken.idToken = data.id_token ?? token.idToken;
-    updatedToken.refreshToken = data.refresh_token ?? token.refreshToken;
-    updatedToken.expiresAt = data.expires_in ? Date.now() + data.expires_in * 1000 : token.expiresAt;
+
+    if (!data.access_token) {
+      throw new Error("Authentik refresh response is missing access_token");
+    }
+
+    const updatedToken: ExtendedJWT = {
+      ...token,
+      accessToken: data.access_token,
+      idToken: data.id_token ?? token.idToken,
+      refreshToken: data.refresh_token ?? token.refreshToken,
+      expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : token.expiresAt,
+    };
 
     return updatedToken;
   } catch (error) {
