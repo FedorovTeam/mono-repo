@@ -39,13 +39,13 @@ func (s *stubProvider) ListDocuments(ctx context.Context, filter domain.Document
 	return s.listFunc(ctx, filter, pagination)
 }
 
-func TestUploadRequiresAPIKey(t *testing.T) {
+func TestUploadRequiresAuthentication(t *testing.T) {
 	resolver := &Resolver{DocumentUploader: &stubUploader{}, DocumentService: &stubProvider{}, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	_, err := mr.UploadKnowledgeDocument(context.Background(), model.UploadKnowledgeDocumentInput{})
 	if err == nil {
-		t.Fatalf("expected api key error")
+		t.Fatalf("expected authentication error")
 	}
 }
 
@@ -93,7 +93,7 @@ func TestUploadValidationErrorFromUseCase(t *testing.T) {
 	resolver := &Resolver{DocumentUploader: uploader, DocumentService: &stubProvider{}, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
-	ctx := ctxutils.WithAPIKey(context.Background(), "secret")
+	ctx := ctxutils.WithUser(context.Background(), ctxutils.User{ID: "user-1"})
 	_, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{})
 	if err == nil || err.Error() != "fileName is required" {
 		t.Fatalf("unexpected error: %v", err)

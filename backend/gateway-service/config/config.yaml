@@ -1,7 +1,13 @@
 server:
   port: 8080
 security:
-  apiKey: "secret"
+  apiKey:
+    enabled: true
+    value: "secret"
+  oidc:
+    jwksUrl: "https://auth.tech.fedorov-team.tech/application/o/console/jwks/"
+    issuer: "https://auth.tech.fedorov-team.tech/application/o/console/"
+    audience: "L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF"
 documentService:
   address: "document-service.document-service.svc.cluster.local:9090"
   grpc:

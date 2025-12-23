@@ -68,9 +68,12 @@ classDiagram
         +Parse()
     }
     class Middleware {
-        +APIKeyMiddleware()
+        +AuthenticationMiddleware()
         +CorrelationIDMiddleware()
         +CORSMiddleware()
+    }
+    class OIDCValidator {
+        +ValidateToken()
     }
     Main --> Config : Load
     Main --> Server : New + Run
@@ -84,6 +87,7 @@ classDiagram
     Server --> DocumentService
     Server --> UploadConfirmationService
     Server --> Middleware
+    Server --> OIDCValidator
     Server --> Resolver : GraphQL handler
     Resolver --> UploadService : DocumentUploader
     Resolver --> DocumentService : DocumentProvider

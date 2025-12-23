@@ -3,6 +3,7 @@ package storage
 import (
 	"backend-gateway-service/pkg/ctxutils"
 	"context"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -82,6 +83,16 @@ func withMetadata(ctx context.Context) context.Context {
 	}
 	if apiKey := ctxutils.APIKey(ctx); apiKey != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", apiKey)
+	}
+	if user := ctxutils.UserFromContext(ctx); user != nil {
+		pairs := []string{"x-user-id", user.ID}
+		if user.Email != "" {
+			pairs = append(pairs, "x-user-email", user.Email)
+		}
+		if len(user.Groups) > 0 {
+			pairs = append(pairs, "x-user-groups", strings.Join(user.Groups, ","))
+		}
+		ctx = metadata.AppendToOutgoingContext(ctx, pairs...)
 	}
 	return ctx
 }
