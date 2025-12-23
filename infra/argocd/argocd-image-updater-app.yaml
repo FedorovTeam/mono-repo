@@ -9,7 +9,7 @@ spec:
   source:
     repoURL: git@github.com:FedorovTeam/mono-repo.git
     targetRevision: main
-    path: infra/manifests/argocd-image-updater-classic
+    path: infra/manifests/argocd-image-updater
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
