@@ -7,6 +7,11 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
+
+  ignoreApplicationDifferences:
+    - jsonPointers:
+        - /spec/source/helm/parameters
+
   generators:
     - git:
         repoURL: git@github.com:FedorovTeam/mono-repo.git
