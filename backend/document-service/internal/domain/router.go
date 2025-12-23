@@ -9,10 +9,13 @@ import (
 type RepositoryRouterRule struct {
 	Owner                    string
 	Repository               string
+	PathPrefix               string
 	PreprocessEnabled        *bool
 	PreprocessExtensions     []string
 	TableExtractorEnabled    *bool
 	TableExtractorExtensions []string
+	ArtifactsBucket          string
+	ArtifactsPrefixTemplate  string
 }
 
 // RouterRules описывает глобальные и репозиторные правила выбора стадий обработки.
@@ -21,16 +24,21 @@ type RouterRules struct {
 	PreprocessExtensions     []string
 	TableExtractorEnabled    bool
 	TableExtractorExtensions []string
+	ArtifactsBucket          string
+	ArtifactsPrefixTemplate  string
 	RepositoryRules          []RepositoryRouterRule
 }
 
 type repositoryRule struct {
 	owner                 string
 	repo                  string
+	pathPrefix            string
 	preprocessEnabled     *bool
 	preprocessExt         map[string]struct{}
 	tableExtractorEnabled *bool
 	tableExtractorExt     map[string]struct{}
+	artifactsBucket       string
+	artifactsPrefixTmpl   string
 }
 
 type effectiveRoutingRules struct {
@@ -38,6 +46,8 @@ type effectiveRoutingRules struct {
 	preprocessExt         map[string]struct{}
 	tableExtractorEnabled bool
 	tableExtractorExt     map[string]struct{}
+	artifactsBucket       string
+	artifactsPrefixTmpl   string
 }
 
 // StageRouter выбирает следующую стадию обработки документа на основе расширения и конфигурации.
@@ -46,6 +56,8 @@ type StageRouter struct {
 	preprocessExt         map[string]struct{}
 	tableExtractorEnabled bool
 	tableExtractorExt     map[string]struct{}
+	artifactsBucket       string
+	artifactsPrefixTmpl   string
 	repoRules             []repositoryRule
 }
 
@@ -56,6 +68,8 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 		preprocessExt:         normalizeExtensions(rules.PreprocessExtensions),
 		tableExtractorEnabled: rules.TableExtractorEnabled,
 		tableExtractorExt:     normalizeExtensions(rules.TableExtractorExtensions),
+		artifactsBucket:       strings.TrimSpace(rules.ArtifactsBucket),
+		artifactsPrefixTmpl:   strings.TrimSpace(rules.ArtifactsPrefixTemplate),
 	}
 	if len(router.preprocessExt) == 0 {
 		router.preprocessExt = defaultPreprocessExtensions()
@@ -66,16 +80,19 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 
 	for _, rule := range rules.RepositoryRules {
 		owner, repo := normalizeRepository(rule.Owner, rule.Repository)
-		if owner == "" && repo == "" {
+		if owner == "" && repo == "" && strings.TrimSpace(rule.PathPrefix) == "" {
 			continue
 		}
 		router.repoRules = append(router.repoRules, repositoryRule{
 			owner:                 owner,
 			repo:                  repo,
+			pathPrefix:            strings.TrimSpace(rule.PathPrefix),
 			preprocessEnabled:     rule.PreprocessEnabled,
 			preprocessExt:         normalizeExtensions(rule.PreprocessExtensions),
 			tableExtractorEnabled: rule.TableExtractorEnabled,
 			tableExtractorExt:     normalizeExtensions(rule.TableExtractorExtensions),
+			artifactsBucket:       strings.TrimSpace(rule.ArtifactsBucket),
+			artifactsPrefixTmpl:   strings.TrimSpace(rule.ArtifactsPrefixTemplate),
 		})
 	}
 
@@ -114,6 +131,35 @@ func (r *StageRouter) NextStageAfterStore(doc *Document) JobStage {
 	return JobStageConvertToMarkdown
 }
 
+// TableExtractionConfig возвращает конфигурацию для шага извлечения таблиц.
+func (r *StageRouter) TableExtractionConfig(doc *Document) TableExtractionConfig {
+	rules := r.effectiveRules(doc)
+	return TableExtractionConfig{
+		Enabled:              rules.tableExtractorEnabled,
+		ArtifactsBucket:      rules.artifactsBucket,
+		ArtifactsPrefixTmpl:  rules.artifactsPrefixTmpl,
+		Extensions:           cloneExtensions(rules.tableExtractorExt),
+		PreprocessExtensions: cloneExtensions(rules.preprocessExt),
+	}
+}
+
+// DefaultExtractTables определяет, нужно ли включать извлечение таблиц по умолчанию.
+func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
+	if doc == nil {
+		return false
+	}
+	rules := r.effectiveRules(doc)
+	if !rules.tableExtractorEnabled {
+		return false
+	}
+	ext := documentExtension(doc)
+	if ext == "" {
+		return rules.tableExtractorEnabled
+	}
+	_, ok := rules.tableExtractorExt[ext]
+	return ok
+}
+
 func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 	if doc == nil {
 		return effectiveRoutingRules{
@@ -121,6 +167,8 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 			preprocessExt:         cloneExtensions(r.preprocessExt),
 			tableExtractorEnabled: r.tableExtractorEnabled,
 			tableExtractorExt:     cloneExtensions(r.tableExtractorExt),
+			artifactsBucket:       r.artifactsBucket,
+			artifactsPrefixTmpl:   r.artifactsPrefixTmpl,
 		}
 	}
 
@@ -128,6 +176,8 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 	extensions := r.preprocessExt
 	tableExtractorEnabled := r.tableExtractorEnabled
 	tableExtractorExt := r.tableExtractorExt
+	artifactsBucket := r.artifactsBucket
+	artifactsPrefix := r.artifactsPrefixTmpl
 
 	for _, rule := range r.repoRules {
 		if rule.matches(doc) {
@@ -143,6 +193,12 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 			if len(rule.tableExtractorExt) > 0 {
 				tableExtractorExt = rule.tableExtractorExt
 			}
+			if strings.TrimSpace(rule.artifactsBucket) != "" {
+				artifactsBucket = rule.artifactsBucket
+			}
+			if strings.TrimSpace(rule.artifactsPrefixTmpl) != "" {
+				artifactsPrefix = rule.artifactsPrefixTmpl
+			}
 			break
 		}
 	}
@@ -153,12 +209,17 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 	if len(tableExtractorExt) == 0 {
 		tableExtractorExt = defaultTableExtractorExtensions()
 	}
+	if strings.TrimSpace(artifactsPrefix) == "" {
+		artifactsPrefix = "tables/{{ .DocumentID }}/{{ .QueueID }}/"
+	}
 
 	return effectiveRoutingRules{
 		preprocessEnabled:     enabled,
 		preprocessExt:         cloneExtensions(extensions),
 		tableExtractorEnabled: tableExtractorEnabled,
 		tableExtractorExt:     cloneExtensions(tableExtractorExt),
+		artifactsBucket:       artifactsBucket,
+		artifactsPrefixTmpl:   artifactsPrefix,
 	}
 }
 
@@ -178,14 +239,21 @@ func (r repositoryRule) matches(doc *Document) bool {
 
 	switch {
 	case r.owner != "" && r.repo != "":
-		return r.owner == owner && r.repo == repo
+		return r.owner == owner && r.repo == repo && r.matchesPath(doc.Path)
 	case r.owner != "":
-		return r.owner == owner
+		return r.owner == owner && r.matchesPath(doc.Path)
 	case r.repo != "":
-		return r.repo == repo
+		return r.repo == repo && r.matchesPath(doc.Path)
 	default:
-		return false
+		return r.matchesPath(doc.Path)
 	}
+}
+
+func (r repositoryRule) matchesPath(pathValue string) bool {
+	if strings.TrimSpace(r.pathPrefix) == "" {
+		return true
+	}
+	return strings.HasPrefix(strings.TrimSpace(pathValue), r.pathPrefix)
 }
 
 func documentExtension(doc *Document) string {
@@ -243,4 +311,13 @@ func cloneExtensions(src map[string]struct{}) map[string]struct{} {
 		dst[k] = struct{}{}
 	}
 	return dst
+}
+
+// TableExtractionConfig описывает настройки артефактов для шага извлечения таблиц.
+type TableExtractionConfig struct {
+	Enabled              bool
+	ArtifactsBucket      string
+	ArtifactsPrefixTmpl  string
+	Extensions           map[string]struct{}
+	PreprocessExtensions map[string]struct{}
 }

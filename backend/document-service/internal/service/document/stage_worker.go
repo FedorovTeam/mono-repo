@@ -1,12 +1,14 @@
 package document
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"path"
 	"strings"
+	"text/template"
 	"time"
 
 	"google.golang.org/grpc/metadata"
@@ -250,13 +252,21 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("document %s not found", job.DocumentID)
 	}
 
+	if tableQueueID := firstNonEmpty(payload.TableQueueID, payload.QueueID); tableQueueID != "" {
+		payload.TableQueueID = tableQueueID
+		payload.QueueID = tableQueueID
+	}
+
 	payload.OriginalBucket = firstNonEmpty(payload.OriginalBucket, doc.OriginalBucket)
 	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
 	payload.ArtifactsBucket = firstNonEmpty(payload.ArtifactsBucket, doc.MarkdownBucket)
 	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc))
-	if payload.ArtifactsPrefix == "" {
-		payload.ArtifactsPrefix = tablesArtifactsPrefix(payload.MarkdownObjectKey)
+	prefix, prefixErr := resolveArtifactsPrefix(payload.ArtifactsPrefixTemplate, doc.ID, payload.TableQueueID, payload.ArtifactsPrefix, payload.MarkdownObjectKey)
+	if prefixErr != nil {
+		payload.LastError = prefixErr.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, prefixErr
 	}
+	payload.ArtifactsPrefix = prefix
 	if payload.CorrelationID == "" {
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
@@ -269,7 +279,7 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 	}
 
 	jobCtx := w.jobContext(ctx, payload.CorrelationID)
-	if payload.QueueID == "" {
+	if payload.TableQueueID == "" {
 		result, submitErr := w.activities.ExtractTables(jobCtx, tableExtractionInput{
 			DocumentID:        job.DocumentID,
 			OriginalBucket:    payload.OriginalBucket,
@@ -288,7 +298,7 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 		return w.processTableExtractionResult(jobCtx, job, doc, payload, result)
 	}
 
-	result, pollErr := w.activities.GetTableExtractionJob(jobCtx, payload.QueueID, payload.CorrelationID)
+	result, pollErr := w.activities.GetTableExtractionJob(jobCtx, payload.TableQueueID, payload.CorrelationID)
 	if pollErr != nil {
 		if isTemporaryGRPCError(pollErr) {
 			payload.LastError = pollErr.Error()
@@ -403,15 +413,27 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 }
 
 func (w *StageWorker) processTableExtractionResult(ctx context.Context, job domain.ProcessingJob, doc *domain.Document, payload domain.ExtractTablesPayload, result tableExtractionResult) (workersvc.JobResult, error) {
-	payload.QueueID = firstNonEmpty(result.QueueID, payload.QueueID)
+	payload.TableQueueID = firstNonEmpty(result.QueueID, payload.TableQueueID, payload.QueueID)
+	payload.QueueID = payload.TableQueueID
 	payload.Status = result.Status.String()
 	payload.StatusReason = firstNonEmpty(result.StatusReason, payload.StatusReason)
 	payload.ArtifactsBucket = firstNonEmpty(result.ArtifactsBucket, payload.ArtifactsBucket)
-	payload.ArtifactsPrefix = firstNonEmpty(result.ArtifactsPrefix, payload.ArtifactsPrefix)
+	prefix, prefixErr := resolveArtifactsPrefix(payload.ArtifactsPrefixTemplate, doc.ID, payload.TableQueueID, firstNonEmpty(result.ArtifactsPrefix, payload.ArtifactsPrefix), payload.MarkdownObjectKey)
+	if prefixErr != nil {
+		payload.LastError = prefixErr.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, prefixErr
+	}
+	payload.ArtifactsPrefix = prefix
 	payload.MarkdownObjectKey = firstNonEmpty(result.MarkdownObjectKey, payload.MarkdownObjectKey, tablesMarkdownKey(payload.ArtifactsPrefix))
 	payload.CorrelationID = firstNonEmpty(result.CorrelationID, payload.CorrelationID)
+	if payload.ConversionStrategy == "" {
+		payload.ConversionStrategy = doc.ConversionStrategy
+	}
+	if !payload.ExtractTables {
+		payload.ExtractTables = doc.ExtractTables
+	}
 
-	if payload.QueueID == "" {
+	if payload.TableQueueID == "" {
 		err := fmt.Errorf("table extraction queue_id is empty for document %s", job.DocumentID)
 		payload.LastError = err.Error()
 		return workersvc.JobResult{Payload: payload.ToMap()}, err
@@ -458,7 +480,7 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	}
 
 	version := latestVersion(doc).Version + 1
-	if err := w.activities.MarkConverted(ctx, doc, markdownKey, payload.OriginalObjectKey, payload.QueueID, version); err != nil {
+	if err := w.activities.MarkConverted(ctx, doc, markdownKey, payload.OriginalObjectKey, payload.TableQueueID, version); err != nil {
 		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("update status: %w", err)
 	}
 
@@ -469,8 +491,8 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	if payload.ArtifactsPrefix != "" {
 		eventPayload["artifacts_prefix"] = payload.ArtifactsPrefix
 	}
-	if payload.QueueID != "" {
-		eventPayload["table_queue_id"] = payload.QueueID
+	if payload.TableQueueID != "" {
+		eventPayload["table_queue_id"] = payload.TableQueueID
 	}
 	if markdownKey != "" {
 		eventPayload["markdown_object_key"] = markdownKey
@@ -666,6 +688,47 @@ func (w *StageWorker) jobContext(ctx context.Context, correlationID string) cont
 
 func metadataAppend(ctx context.Context, correlationID string) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, correlationIDHeader, correlationID)
+}
+
+type artifactsPrefixTemplateData struct {
+	DocumentID string
+	QueueID    string
+}
+
+func resolveArtifactsPrefix(templateStr, documentID, queueID, existingPrefix, markdownKey string) (string, error) {
+	trimmedTemplate := strings.TrimSpace(templateStr)
+	if trimmedTemplate != "" && queueID != "" {
+		return renderArtifactsPrefixTemplate(trimmedTemplate, artifactsPrefixTemplateData{DocumentID: documentID, QueueID: queueID})
+	}
+	if strings.TrimSpace(existingPrefix) != "" {
+		return existingPrefix, nil
+	}
+	if trimmedTemplate != "" {
+		if markdownKey != "" {
+			return tablesArtifactsPrefix(markdownKey), nil
+		}
+		return "", nil
+	}
+	if markdownKey != "" {
+		return tablesArtifactsPrefix(markdownKey), nil
+	}
+	return "", nil
+}
+
+func renderArtifactsPrefixTemplate(tmpl string, data artifactsPrefixTemplateData) (string, error) {
+	parsed, err := template.New("artifacts_prefix").Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := parsed.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	prefix := strings.TrimSpace(buf.String())
+	if prefix == "" {
+		return "", errors.New("artifacts prefix template produced empty value")
+	}
+	return prefix, nil
 }
 
 func tablesArtifactsPrefix(markdownKey string) string {

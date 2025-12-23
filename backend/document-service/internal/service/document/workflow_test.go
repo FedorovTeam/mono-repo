@@ -58,6 +58,10 @@ func (f *fakeRepo) UpdateStatus(ctx context.Context, id string, to domain.Docume
 	return &domain.Document{ID: id, Status: to}, nil
 }
 
+func (f *fakeRepo) UpdateDocumentOptions(context.Context, string, domain.ConversionStrategy, *bool) (*domain.Document, error) {
+	return f.doc, nil
+}
+
 func (f *fakeRepo) CreateProcessingJob(ctx context.Context, job *domain.ProcessingJob, event *domain.JobEvent) (*domain.ProcessingJob, error) {
 	if job.TaskID == "" {
 		job.TaskID = uuid.NewString()

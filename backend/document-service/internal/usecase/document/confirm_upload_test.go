@@ -32,6 +32,19 @@ func (r *confirmUploadRepositoryStub) UpdateStatus(context.Context, string, doma
 	return nil, errors.New("not implemented")
 }
 
+func (r *confirmUploadRepositoryStub) UpdateDocumentOptions(_ context.Context, _ string, strategy domain.ConversionStrategy, extractTables *bool) (*domain.Document, error) {
+	if r.doc == nil {
+		return nil, errors.New("document not found")
+	}
+	if strategy != "" {
+		r.doc.ConversionStrategy = strategy
+	}
+	if extractTables != nil {
+		r.doc.ExtractTables = *extractTables
+	}
+	return r.doc, nil
+}
+
 func (r *confirmUploadRepositoryStub) LastNonFailedStatus(context.Context, string) (domain.DocumentStatus, error) {
 	return "", errors.New("not implemented")
 }
@@ -78,7 +91,7 @@ func TestConfirmUploadFailsWhenETagIsEmpty(t *testing.T) {
 			OriginalObjectKey: "object",
 		},
 	}
-	uc := NewConfirmUpload(repo, &storageStub{})
+	uc := NewConfirmUpload(repo, &storageStub{}, nil)
 
 	_, err := uc.Execute(context.Background(), ConfirmUploadInput{
 		DocumentID: repo.doc.ID,
@@ -89,4 +102,31 @@ func TestConfirmUploadFailsWhenETagIsEmpty(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "etag")
 	require.False(t, repo.jobCreated)
+}
+
+func TestConfirmUploadAppliesRouterDefaults(t *testing.T) {
+	repo := &confirmUploadRepositoryStub{
+		doc: &domain.Document{
+			ID:                "00000000-0000-0000-0000-000000000002",
+			OriginalBucket:    "bucket",
+			OriginalObjectKey: "incoming/report.pdf",
+			MarkdownBucket:    "md",
+			Path:              "reports/report.md",
+		},
+	}
+	router := domain.NewStageRouter(domain.RouterRules{
+		TableExtractorEnabled:    true,
+		TableExtractorExtensions: []string{"pdf"},
+		ArtifactsBucket:          "tables-bucket",
+	})
+	uc := NewConfirmUpload(repo, &storageStub{etag: "etag"}, router)
+
+	doc, err := uc.Execute(context.Background(), ConfirmUploadInput{
+		DocumentID: repo.doc.ID,
+		Bucket:     repo.doc.OriginalBucket,
+		ObjectKey:  repo.doc.OriginalObjectKey,
+	})
+
+	require.NoError(t, err)
+	require.True(t, doc.ExtractTables)
 }

@@ -272,13 +272,22 @@ func correlationFromDoc(doc *domain.Document) string {
 
 func (f *JobFollower) extractTablesPayloadForDocument(doc *domain.Document, correlationID string) domain.ExtractTablesPayload {
 	markdownKey := resolvedMarkdownKey(doc)
+	config := f.router.TableExtractionConfig(doc)
+	artifactsBucket := doc.MarkdownBucket
+	if strings.TrimSpace(config.ArtifactsBucket) != "" {
+		artifactsBucket = config.ArtifactsBucket
+	}
+	artifactsPrefix := tablesArtifactsPrefix(markdownKey)
 	return domain.ExtractTablesPayload{
-		OriginalBucket:     doc.OriginalBucket,
-		OriginalObjectKey:  doc.OriginalObjectKey,
-		ArtifactsBucket:    doc.MarkdownBucket,
-		ArtifactsPrefix:    tablesArtifactsPrefix(markdownKey),
-		MarkdownObjectKey:  markdownKey,
-		JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationID},
+		OriginalBucket:          doc.OriginalBucket,
+		OriginalObjectKey:       doc.OriginalObjectKey,
+		ArtifactsBucket:         artifactsBucket,
+		ArtifactsPrefix:         artifactsPrefix,
+		ArtifactsPrefixTemplate: config.ArtifactsPrefixTmpl,
+		MarkdownObjectKey:       markdownKey,
+		ConversionStrategy:      doc.ConversionStrategy,
+		ExtractTables:           doc.ExtractTables,
+		JobPayloadMetadata:      domain.JobPayloadMetadata{CorrelationID: correlationID},
 	}
 }
 
@@ -294,6 +303,8 @@ func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides 
 		MarkdownObjectKey:     firstNonEmpty(overrides.MarkdownObjectKey, doc.MarkdownObjectKey),
 		FilenameExtension:     overrides.FilenameExtension,
 		JobPayloadMetadata:    domain.JobPayloadMetadata{CorrelationID: correlationID},
+		ConversionStrategy:    doc.ConversionStrategy,
+		ExtractTables:         doc.ExtractTables,
 	}
 
 	if payload.FilenameExtension == "" {

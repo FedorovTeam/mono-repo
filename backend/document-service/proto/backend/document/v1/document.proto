@@ -97,6 +97,8 @@ message ConfirmUploadRequest {
   string bucket = 2;
   string object_key = 3;
   string correlation_id = 4;
+  bool extract_tables = 5;
+  string conversion_strategy = 6;
 }
 
 service DocumentService {

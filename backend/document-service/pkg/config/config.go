@@ -105,16 +105,21 @@ type Router struct {
 	PreprocessExtensions     []string               `yaml:"preprocess_extensions"`
 	TableExtractorEnabled    bool                   `yaml:"table_extractor_enabled"`
 	TableExtractorExtensions []string               `yaml:"table_extractor_extensions"`
+	ArtifactsBucket          string                 `yaml:"artifacts_bucket"`
+	ArtifactsPrefixTemplate  string                 `yaml:"artifacts_prefix_template"`
 	RepositoryRules          []RepositoryRouterRule `yaml:"repositories"`
 }
 
 type RepositoryRouterRule struct {
 	Owner                    string   `yaml:"owner"`
 	Repository               string   `yaml:"repository"`
+	PathPrefix               string   `yaml:"path_prefix"`
 	PreprocessEnabled        *bool    `yaml:"preprocess_enabled"`
 	PreprocessExtensions     []string `yaml:"preprocess_extensions"`
 	TableExtractorEnabled    *bool    `yaml:"table_extractor_enabled"`
 	TableExtractorExtensions []string `yaml:"table_extractor_extensions"`
+	ArtifactsBucket          string   `yaml:"artifacts_bucket"`
+	ArtifactsPrefixTemplate  string   `yaml:"artifacts_prefix_template"`
 }
 
 func Load(path string) (*Config, error) {
@@ -203,16 +208,26 @@ func (r *Router) normalize() {
 	if len(r.TableExtractorExtensions) == 0 {
 		r.TableExtractorExtensions = []string{"pdf"}
 	}
+	if strings.TrimSpace(r.ArtifactsPrefixTemplate) == "" {
+		r.ArtifactsPrefixTemplate = "tables/{{ .DocumentID }}/{{ .QueueID }}/"
+	}
 	for i := range r.RepositoryRules {
 		r.RepositoryRules[i].PreprocessExtensions = normalizeExtensions(r.RepositoryRules[i].PreprocessExtensions)
 		r.RepositoryRules[i].TableExtractorExtensions = normalizeExtensions(r.RepositoryRules[i].TableExtractorExtensions)
+		if strings.TrimSpace(r.RepositoryRules[i].ArtifactsBucket) == "" {
+			r.RepositoryRules[i].ArtifactsBucket = strings.TrimSpace(r.ArtifactsBucket)
+		}
+		if strings.TrimSpace(r.RepositoryRules[i].ArtifactsPrefixTemplate) == "" {
+			r.RepositoryRules[i].ArtifactsPrefixTemplate = r.ArtifactsPrefixTemplate
+		}
+		r.RepositoryRules[i].PathPrefix = strings.TrimSpace(r.RepositoryRules[i].PathPrefix)
 	}
 }
 
 func (r Router) validate() error {
 	for i, rule := range r.RepositoryRules {
-		if strings.TrimSpace(rule.Owner) == "" && strings.TrimSpace(rule.Repository) == "" {
-			return fmt.Errorf("repositories[%d]: owner or repository is required", i)
+		if strings.TrimSpace(rule.Owner) == "" && strings.TrimSpace(rule.Repository) == "" && strings.TrimSpace(rule.PathPrefix) == "" {
+			return fmt.Errorf("repositories[%d]: owner, repository or path_prefix is required", i)
 		}
 	}
 	return nil

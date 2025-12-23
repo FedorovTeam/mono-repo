@@ -59,4 +59,57 @@ func TestStageRouterUsesTablesOnlyStrategy(t *testing.T) {
 	}
 }
 
+func TestStageRouterPathPrefixOverrides(t *testing.T) {
+	router := NewStageRouter(RouterRules{
+		TableExtractorEnabled: true,
+		RepositoryRules: []RepositoryRouterRule{
+			{PathPrefix: "docs/private/", TableExtractorEnabled: boolPtr(false)},
+		},
+	})
+
+	doc := &Document{Path: "docs/private/report.pdf", OriginalObjectKey: "docs/private/report.pdf", ExtractTables: true}
+	if stage := router.NextStageAfterStore(doc); stage != JobStageConvertToMarkdown {
+		t.Fatalf("expected convert_to_markdown when path rule disables table extractor, got %s", stage)
+	}
+}
+
+func TestTableExtractionConfigUsesRepositoryDefaults(t *testing.T) {
+	router := NewStageRouter(RouterRules{
+		TableExtractorEnabled:    true,
+		ArtifactsBucket:          "fallback-bucket",
+		ArtifactsPrefixTemplate:  "tables/{{ .DocumentID }}/{{ .QueueID }}/",
+		TableExtractorExtensions: []string{"pdf"},
+		RepositoryRules: []RepositoryRouterRule{
+			{
+				Owner:                   "acme",
+				Repository:              "kb",
+				PathPrefix:              "reports/",
+				ArtifactsBucket:         "custom-bucket",
+				ArtifactsPrefixTemplate: "custom/{{ .Repository }}/{{ .QueueID }}/",
+			},
+		},
+	})
+
+	cfg := router.TableExtractionConfig(&Document{Owner: "acme", Repository: "kb", Path: "reports/monthly.md"})
+	if cfg.ArtifactsBucket != "custom-bucket" {
+		t.Fatalf("expected rule artifacts_bucket, got %s", cfg.ArtifactsBucket)
+	}
+	if cfg.ArtifactsPrefixTmpl != "custom/{{ .Repository }}/{{ .QueueID }}/" {
+		t.Fatalf("unexpected prefix template: %s", cfg.ArtifactsPrefixTmpl)
+	}
+}
+
+func TestDefaultExtractTablesPrefersConfiguredExtensions(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableExtractorExtensions: []string{"pdf"}})
+	pdf := &Document{OriginalObjectKey: "incoming/report.pdf"}
+	if !router.DefaultExtractTables(pdf) {
+		t.Fatalf("expected pdf to use table extraction by default")
+	}
+
+	docx := &Document{OriginalObjectKey: "incoming/report.docx"}
+	if router.DefaultExtractTables(docx) {
+		t.Fatalf("expected docx not to use table extraction by default")
+	}
+}
+
 func boolPtr(val bool) *bool { return &val }

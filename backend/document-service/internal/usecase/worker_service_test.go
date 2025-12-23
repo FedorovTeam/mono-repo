@@ -41,6 +41,9 @@ func (r *fakeJobRepo) ListDocuments(context.Context, int, int, *domain.DocumentS
 func (r *fakeJobRepo) UpdateStatus(context.Context, string, domain.DocumentStatus, string, string, *domain.DocumentVersion) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }
+func (r *fakeJobRepo) UpdateDocumentOptions(context.Context, string, domain.ConversionStrategy, *bool) (*domain.Document, error) {
+	return nil, errors.New("not implemented")
+}
 func (r *fakeJobRepo) LastNonFailedStatus(context.Context, string) (domain.DocumentStatus, error) {
 	return "", errors.New("not implemented")
 }

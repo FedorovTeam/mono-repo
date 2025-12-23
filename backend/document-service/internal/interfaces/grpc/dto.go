@@ -34,9 +34,11 @@ type updateDocumentStatusDTO struct {
 }
 
 type confirmUploadDTO struct {
-	DocumentID string
-	Bucket     string
-	ObjectKey  string
+	DocumentID         string
+	Bucket             string
+	ObjectKey          string
+	ExtractTables      *bool
+	ConversionStrategy string
 }
 
 type listDocumentsDTO struct {
@@ -108,18 +110,27 @@ func toUpdateDocumentStatusCommand(dto updateDocumentStatusDTO) document.UpdateS
 }
 
 func fromConfirmUploadRequest(req *documentv1.ConfirmUploadRequest) confirmUploadDTO {
+	var extractTables *bool
+	if req.GetExtractTables() {
+		val := req.GetExtractTables()
+		extractTables = &val
+	}
 	return confirmUploadDTO{
-		DocumentID: req.GetDocumentId(),
-		Bucket:     req.GetBucket(),
-		ObjectKey:  req.GetObjectKey(),
+		DocumentID:         req.GetDocumentId(),
+		Bucket:             req.GetBucket(),
+		ObjectKey:          req.GetObjectKey(),
+		ExtractTables:      extractTables,
+		ConversionStrategy: req.GetConversionStrategy(),
 	}
 }
 
 func toConfirmUploadCommand(dto confirmUploadDTO) document.ConfirmUploadInput {
 	return document.ConfirmUploadInput{
-		DocumentID: dto.DocumentID,
-		Bucket:     dto.Bucket,
-		ObjectKey:  dto.ObjectKey,
+		DocumentID:         dto.DocumentID,
+		Bucket:             dto.Bucket,
+		ObjectKey:          dto.ObjectKey,
+		ExtractTables:      dto.ExtractTables,
+		ConversionStrategy: dto.ConversionStrategy,
 	}
 }
 

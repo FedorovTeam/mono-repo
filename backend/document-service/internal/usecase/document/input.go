@@ -20,9 +20,11 @@ type CreateDocumentInput struct {
 
 // ConfirmUploadInput подтверждает загрузку исходного файла.
 type ConfirmUploadInput struct {
-	DocumentID string
-	Bucket     string
-	ObjectKey  string
+	DocumentID         string
+	Bucket             string
+	ObjectKey          string
+	ExtractTables      *bool
+	ConversionStrategy string
 }
 
 // UpdateStatusInput обновляет статус документа и опционально версионные ключи.
