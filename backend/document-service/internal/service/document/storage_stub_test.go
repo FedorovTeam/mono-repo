@@ -10,8 +10,10 @@ import (
 )
 
 type stubStorageClient struct {
-	attempts int
-	err      error
+	attempts   int
+	err        error
+	objects    map[string]map[string][]byte
+	lastUpload *storagev1.UploadMarkdownRequest
 }
 
 func (s *stubStorageClient) UploadOriginal(ctx context.Context, in *storagev1.UploadOriginalRequest, opts ...grpc.CallOption) (*storagev1.UploadObjectResponse, error) {
@@ -19,7 +21,17 @@ func (s *stubStorageClient) UploadOriginal(ctx context.Context, in *storagev1.Up
 }
 
 func (s *stubStorageClient) UploadMarkdown(ctx context.Context, in *storagev1.UploadMarkdownRequest, opts ...grpc.CallOption) (*storagev1.UploadObjectResponse, error) {
-	return nil, errors.New("not implemented")
+	s.lastUpload = in
+	if s.objects == nil {
+		s.objects = make(map[string]map[string][]byte)
+	}
+	bucket := "markdown-bucket"
+	if _, ok := s.objects[bucket]; !ok {
+		s.objects[bucket] = make(map[string][]byte)
+	}
+	objectKey := in.GetDocumentId() + ".md"
+	s.objects[bucket][objectKey] = in.GetContent()
+	return &storagev1.UploadObjectResponse{Bucket: bucket, ObjectKey: objectKey}, nil
 }
 
 func (s *stubStorageClient) GetObject(ctx context.Context, in *storagev1.GetObjectRequest, opts ...grpc.CallOption) (*storagev1.GetObjectResponse, error) {
@@ -28,7 +40,16 @@ func (s *stubStorageClient) GetObject(ctx context.Context, in *storagev1.GetObje
 		return nil, s.err
 	}
 
-	return &storagev1.GetObjectResponse{Bucket: in.GetBucket(), ObjectKey: in.GetObjectKey()}, nil
+	content := []byte{}
+	if s.objects != nil {
+		if bucketObjects, ok := s.objects[in.GetBucket()]; ok {
+			if data, ok := bucketObjects[in.GetObjectKey()]; ok {
+				content = data
+			}
+		}
+	}
+
+	return &storagev1.GetObjectResponse{Bucket: in.GetBucket(), ObjectKey: in.GetObjectKey(), Content: content}, nil
 }
 
 func (s *stubStorageClient) GenerateUploadURL(ctx context.Context, in *storagev1.GenerateUploadURLRequest, opts ...grpc.CallOption) (*storagev1.GenerateUploadURLResponse, error) {

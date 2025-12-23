@@ -173,7 +173,7 @@ func TestConvertToMarkdownFailsOnTransformerFailureStatus(t *testing.T) {
 	repo := &fakeRepo{doc: &domain.Document{ID: "doc-1", Status: domain.DocumentStatusStoredOriginal, Versions: []domain.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "failed"}}
 
-	activities := NewActivities(repo, nil, transformer, nil, fakePublisher{})
+	activities := NewActivities(repo, nil, transformer, nil, fakePublisher{}, nil)
 
 	_, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        "doc-1",
@@ -199,7 +199,7 @@ func TestConvertToMarkdownUsesUpdatedStub(t *testing.T) {
 	repo := &fakeRepo{doc: &domain.Document{ID: "doc-1", Status: domain.DocumentStatusStoredOriginal, Versions: []domain.DocumentVersion{{Version: 2, MarkdownObjectKey: "path/doc-1.md"}}, OriginalBucket: "orig-bucket", OriginalObjectKey: "path/doc-1.docx", MarkdownBucket: "md-bucket", MarkdownObjectKey: "path/doc-1.md"}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: string(domain.DocumentStatusConvertedToMarkdown), MarkdownObjectKey: "md-key"}}
 
-	activities := NewActivities(repo, nil, transformer, nil, fakePublisher{})
+	activities := NewActivities(repo, nil, transformer, nil, fakePublisher{}, nil)
 
 	result, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        "doc-1",
@@ -263,7 +263,7 @@ func TestConvertToMarkdownFillsExtensionFromDocument(t *testing.T) {
 	}}
 	transformer := &fakeTransformerClient{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ext", Status: "pending"}}
 
-	activities := NewActivities(repo, nil, transformer, nil, fakePublisher{})
+	activities := NewActivities(repo, nil, transformer, nil, fakePublisher{}, nil)
 
 	_, err := activities.ConvertToMarkdown(context.Background(), convertInput{
 		DocumentID:        repo.doc.ID,
@@ -302,7 +302,7 @@ func TestAwaitOriginalLoadsDocumentAndUpdatesStatus(t *testing.T) {
 		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "orig/doc-1.docx", MarkdownObjectKey: "md/doc-1.md"}},
 	}
 	repo := &fakeRepo{doc: doc}
-	activities := NewActivities(repo, nil, nil, nil, nil)
+	activities := NewActivities(repo, nil, nil, nil, nil, nil)
 
 	if err := activities.MarkStoredOriginal(context.Background(), doc.ID, "etag-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -317,7 +317,7 @@ func TestPublishMarkdownContinuesWhenRepositoryAccessible(t *testing.T) {
 	repo := &fakeRepo{doc: &domain.Document{ID: "doc-2", Owner: "owner", Repository: "repo", Branch: "main", BaseBranch: "main", Path: "doc.md", MarkdownBucket: "bucket", MarkdownObjectKey: "object", Status: domain.DocumentStatusConvertedToMarkdown}}
 	publisher := &trackingPublisher{}
 
-	activities := NewActivities(repo, nil, nil, nil, publisher)
+	activities := NewActivities(repo, nil, nil, nil, publisher, nil)
 
 	_, err := activities.PublishMarkdown(context.Background(), publishInput{
 		DocumentID:        "doc-2",

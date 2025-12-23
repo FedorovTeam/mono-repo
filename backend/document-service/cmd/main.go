@@ -149,6 +149,7 @@ func main() {
 		transformerClient,
 		tableExtractorClient,
 		publisherClient,
+		storageClient,
 	)
 
 	reconciler := docservice.NewUploadReconciler(

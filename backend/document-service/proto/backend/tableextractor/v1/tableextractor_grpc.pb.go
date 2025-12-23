@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v3.21.12
-// source: proto/backend/tableextractor/v1/tableextractor.proto
+// source: backend/tableextractor/v1/tableextractor.proto
 
 package tableextractorv1
 
@@ -155,5 +155,5 @@ var TableExtractorService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/backend/tableextractor/v1/tableextractor.proto",
+	Metadata: "backend/tableextractor/v1/tableextractor.proto",
 }

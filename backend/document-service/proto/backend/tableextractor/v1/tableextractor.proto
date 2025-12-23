@@ -48,6 +48,8 @@ message ExtractTablesFromPdfRequest {
   string artifacts_prefix = 6;
   bool wait_for_result = 7;
   string correlation_id = 8;
+  string markdown_bucket = 9;
+  string markdown_object_key = 10;
 }
 
 message ExtractTablesFromPdfResponse {
