@@ -42,11 +42,11 @@ const STATUS_LABELS: Record<KnowledgeDocumentStatus, string> = {
 };
 
 const STATUS_STYLES: Record<KnowledgeDocumentStatus, string> = {
-  UPLOADED: 'bg-slate-800 text-slate-100 border-slate-700',
-  STORED_ORIGINAL: 'bg-blue-900/40 text-blue-100 border-blue-700/60',
-  CONVERTED_TO_MARKDOWN: 'bg-indigo-900/40 text-indigo-100 border-indigo-700/60',
-  PUBLISHED_TO_GITHUB: 'bg-emerald-900/40 text-emerald-100 border-emerald-700/60',
-  FAILED: 'bg-red-900/40 text-red-100 border-red-700/60',
+  UPLOADED: 'bg-slate-50 text-slate-800 border-slate-300',
+  STORED_ORIGINAL: 'bg-blue-50 text-blue-800 border-blue-300',
+  CONVERTED_TO_MARKDOWN: 'bg-indigo-50 text-indigo-800 border-indigo-300',
+  PUBLISHED_TO_GITHUB: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+  FAILED: 'bg-red-50 text-red-800 border-red-300',
 };
 
 const generateCorrelationId = () =>
@@ -232,36 +232,34 @@ export default function DocumentsPage() {
     <main className="px-4 pb-12">
       <div className="mx-auto max-w-6xl space-y-4">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold">Просмотр документов</h1>
-          <p className="text-sm text-slate-400">
+          <h1 className="text-2xl font-semibold text-slate-900">Просмотр документов</h1>
+          <p className="text-sm text-slate-600">
             Лента последних документов. Список автоматически обновляется, можно принудительно обновить вручную.
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-lg shadow-indigo-500/5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-semibold">Документы</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Документы</h2>
             <button
               type="button"
               onClick={fetchDocuments}
               disabled={isListLoading}
-              className="inline-flex items-center justify-center rounded-lg bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Обновить
             </button>
           </div>
 
           {listError && (
-            <div className="mt-4 rounded-lg border border-red-500 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
               {listError}
             </div>
           )}
 
           <div className="mt-4 space-y-4">
-            {isListLoading && <p className="text-sm text-slate-400">Загружаем список…</p>}
-            {!isListLoading && documents.length === 0 && (
-              <p className="text-sm text-slate-400">Документы пока не загружались.</p>
-            )}
+            {isListLoading && <p className="text-sm text-slate-600">Загружаем список…</p>}
+            {!isListLoading && documents.length === 0 && <p className="text-sm text-slate-600">Документы пока не загружались.</p>}
 
             {documents.length > 0 && (
               <>
@@ -301,14 +299,14 @@ function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
         {documents.map((document) => (
           <TableRow key={document.id}>
             <TableCell>
-              <p className="font-medium text-slate-100">{getDocumentName(document)}</p>
-              <p className="text-xs text-slate-400">
-                <span className="font-mono text-slate-300">{document.repository}</span> / ветка{' '}
-                <span className="font-mono text-slate-300">{document.branch}</span>
+              <p className="font-medium text-slate-900">{getDocumentName(document)}</p>
+              <p className="text-xs text-slate-700">
+                <span className="font-mono text-slate-700">{document.repository}</span> / ветка{' '}
+                <span className="font-mono text-slate-700">{document.branch}</span>
               </p>
-              <p className="text-xs text-slate-500">Путь: {document.path}</p>
+              <p className="text-xs text-slate-600">Путь: {document.path}</p>
               {document.jobId && (
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600">
                   jobId: <span className="font-mono">{document.jobId}</span>
                 </p>
               )}
@@ -316,10 +314,10 @@ function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
             <TableCell>
               <StatusBadge status={document.status} />
               {document.status === 'FAILED' && document.error && (
-                <p className="mt-1 text-xs text-red-200">{document.error}</p>
+                <p className="mt-1 text-xs text-red-700">{document.error}</p>
               )}
             </TableCell>
-            <TableCell className="whitespace-nowrap text-slate-200">{formatUploadDate(document.createdAt)}</TableCell>
+            <TableCell className="whitespace-nowrap text-slate-900">{formatUploadDate(document.createdAt)}</TableCell>
             <TableCell className="text-right">
               <OpenButton document={document} />
             </TableCell>
@@ -332,31 +330,31 @@ function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
 
 function DocumentCard({ document }: { document: KnowledgeDocument }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-slate-100">{getDocumentName(document)}</p>
-          <p className="text-xs text-slate-500">
-            <span className="font-mono text-slate-300">{document.repository}</span> • ветка{' '}
-            <span className="font-mono text-slate-300">{document.branch}</span>
+          <p className="text-sm font-semibold text-slate-900">{getDocumentName(document)}</p>
+          <p className="text-xs text-slate-700">
+            <span className="font-mono text-slate-700">{document.repository}</span> • ветка{' '}
+            <span className="font-mono text-slate-700">{document.branch}</span>
           </p>
-          <p className="mt-1 text-xs text-slate-500">Путь: {document.path}</p>
+          <p className="mt-1 text-xs text-slate-600">Путь: {document.path}</p>
         </div>
         <StatusBadge status={document.status} />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-300">
-        <span className="text-slate-400">Загружено:</span>
-        <span className="font-mono text-slate-200">{formatUploadDate(document.createdAt)}</span>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+        <span className="text-slate-600">Загружено:</span>
+        <span className="font-mono text-slate-700">{formatUploadDate(document.createdAt)}</span>
         {document.jobId && (
-          <span className="ml-auto rounded-full bg-slate-800 px-2 py-1 font-mono text-[10px] text-slate-200">
+          <span className="ml-auto rounded-full bg-slate-100 px-2 py-1 font-mono text-[10px] text-slate-700">
             jobId: {document.jobId}
           </span>
         )}
       </div>
 
       {document.status === 'FAILED' && document.error && (
-        <p className="mt-2 text-xs text-red-200">Ошибка: {document.error}</p>
+        <p className="mt-2 text-xs text-red-700">Ошибка: {document.error}</p>
       )}
 
       <div className="mt-3 flex justify-end">
@@ -402,7 +400,7 @@ function Table({ children }: { children: React.ReactNode }) {
 }
 
 function TableHeader({ children }: { children: React.ReactNode }) {
-  return <thead className="[&_tr]:border-b [&_tr]:border-slate-800">{children}</thead>;
+  return <thead className="[&_tr]:border-b [&_tr]:border-slate-200">{children}</thead>;
 }
 
 function TableBody({ children }: { children: React.ReactNode }) {
@@ -410,17 +408,17 @@ function TableBody({ children }: { children: React.ReactNode }) {
 }
 
 function TableRow({ children }: { children: React.ReactNode }) {
-  return <tr className="border-b border-slate-800 transition hover:bg-slate-800/50">{children}</tr>;
+  return <tr className="border-b border-slate-200 transition hover:bg-slate-50">{children}</tr>;
 }
 
 function TableHead({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <th className={cn('h-12 px-4 text-left align-middle text-xs font-semibold text-slate-400', className)} scope="col">
+    <th className={cn('h-12 px-4 text-left align-middle text-xs font-semibold text-slate-600', className)} scope="col">
       {children}
     </th>
   );
 }
 
 function TableCell({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn('p-4 align-top text-sm text-slate-200', className)}>{children}</td>;
+  return <td className={cn('p-4 align-top text-sm text-slate-900', className)}>{children}</td>;
 }

@@ -187,45 +187,45 @@ export default function DocumentDetailsPage() {
           <div className="flex items-center gap-3">
             <Link
               href="/documents"
-              className="inline-flex items-center gap-2 text-sm text-slate-300 underline-offset-4 hover:text-slate-100 hover:underline"
+              className="inline-flex items-center gap-2 text-sm text-slate-700 underline-offset-4 hover:text-slate-900 hover:underline"
             >
               ← К списку документов
             </Link>
-            <p className="text-xs text-slate-500">ID: {documentId}</p>
+            <p className="text-xs text-slate-600">ID: {documentId}</p>
           </div>
-          <h1 className="text-2xl font-semibold text-slate-50">Детали документа</h1>
-          <p className="text-sm text-slate-400">
+          <h1 className="text-2xl font-semibold text-slate-900">Детали документа</h1>
+          <p className="text-sm text-slate-600">
             Здесь отображаются статусы прохождения документа по цепочке и ссылка для скачивания оригинального файла.
           </p>
         </div>
 
         {error && (
-          <div className="rounded-xl border border-red-500/60 bg-red-900/30 px-4 py-3 text-sm text-red-100">{error}</div>
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
         )}
 
         <div className="grid gap-4 lg:grid-cols-3">
-          <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-lg shadow-indigo-500/5 lg:col-span-2">
-            {isLoading && <p className="text-sm text-slate-400">Загружаем данные документа…</p>}
+          <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
+            {isLoading && <p className="text-sm text-slate-600">Загружаем данные документа…</p>}
 
             {!isLoading && document && (
               <div className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="space-y-1">
-                    <p className="text-lg font-semibold text-slate-50">{document.fileName || 'Без названия'}</p>
-                    <p className="text-sm text-slate-400">
+                    <p className="text-lg font-semibold text-slate-900">{document.fileName || 'Без названия'}</p>
+                    <p className="text-sm text-slate-700">
                       Репозиторий:{' '}
-                      <span className="font-mono text-slate-200">
+                      <span className="font-mono text-slate-800">
                         {document.repositoryOwner ? `${document.repositoryOwner}/` : ''}
                         {document.repository}
                       </span>
                     </p>
-                    <p className="text-sm text-slate-400">
-                      Ветка: <span className="font-mono text-slate-200">{document.branch}</span>
+                    <p className="text-sm text-slate-700">
+                      Ветка: <span className="font-mono text-slate-800">{document.branch}</span>
                     </p>
-                    <p className="text-sm text-slate-400">Путь в репозитории: {document.path}</p>
-                    <p className="text-sm text-slate-400">Загружено: {formatUploadDate(document.createdAt)}</p>
+                    <p className="text-sm text-slate-700">Путь в репозитории: {document.path}</p>
+                    <p className="text-sm text-slate-700">Загружено: {formatUploadDate(document.createdAt)}</p>
                     {document.jobId && (
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-slate-600">
                         jobId: <span className="font-mono">{document.jobId}</span>
                       </p>
                     )}
@@ -238,7 +238,7 @@ export default function DocumentDetailsPage() {
                         href={repositoryLink}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-sm text-indigo-300 underline-offset-4 hover:text-indigo-200 hover:underline"
+                        className="text-sm text-indigo-700 underline-offset-4 hover:text-indigo-800 hover:underline"
                       >
                         Открыть в GitHub
                       </a>
@@ -249,7 +249,7 @@ export default function DocumentDetailsPage() {
                 <StatusStepper status={document.status} />
 
                 {simplifiedError && (
-                  <div className="rounded-lg border border-amber-500/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-100">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                     Ошибка: {simplifiedError}
                   </div>
                 )}
@@ -257,9 +257,9 @@ export default function DocumentDetailsPage() {
             )}
           </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-lg shadow-indigo-500/5">
-            <h2 className="text-lg font-semibold text-slate-50">Действия</h2>
-            <p className="mt-1 text-sm text-slate-400">Скачайте загруженный пользователем файл при необходимости.</p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Действия</h2>
+            <p className="mt-1 text-sm text-slate-600">Скачайте загруженный пользователем файл при необходимости.</p>
 
             <div className="mt-4 flex flex-col gap-3">
               <a
@@ -268,10 +268,10 @@ export default function DocumentDetailsPage() {
                 target={downloadAvailable ? '_blank' : undefined}
                 rel="noreferrer"
                 className={cn(
-                  'inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-white transition',
+                  'inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition shadow-sm',
                   downloadAvailable
-                    ? 'bg-emerald-600 hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400'
-                    : 'cursor-not-allowed bg-slate-800 text-slate-400 opacity-70',
+                    ? 'bg-emerald-600 text-white hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400'
+                    : 'cursor-not-allowed bg-slate-100 text-slate-500 opacity-70',
                 )}
                 aria-disabled={!downloadAvailable}
               >
@@ -282,7 +282,7 @@ export default function DocumentDetailsPage() {
                 type="button"
                 onClick={fetchDocument}
                 disabled={isLoading}
-                className="inline-flex items-center justify-center rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Обновить
               </button>
@@ -299,13 +299,13 @@ function StatusStepper({ status }: { status: KnowledgeDocumentStatus }) {
   const activeIndex = isFailed ? STATUS_FLOW.length - 1 : Math.max(STATUS_FLOW.indexOf(status), 0);
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-      <p className="text-sm font-medium text-slate-100">Ход обработки</p>
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-medium text-slate-900">Ход обработки</p>
       <div className="mt-4 flex flex-col gap-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-3">
           {STATUS_FLOW.map((step, index) => {
             const state = getStepState(index, activeIndex, isFailed);
-            const lineColor = state === 'done' ? 'bg-emerald-500/80' : state === 'failed' ? 'bg-red-500/80' : 'bg-slate-700';
+            const lineColor = state === 'done' ? 'bg-emerald-500/50' : state === 'failed' ? 'bg-red-500/50' : 'bg-slate-200';
 
             return (
               <div key={step} className="flex flex-1 items-center gap-3">
@@ -314,9 +314,9 @@ function StatusStepper({ status }: { status: KnowledgeDocumentStatus }) {
                     <span className={cn('flex h-5 w-5 items-center justify-center rounded-full', stepRingClass(state))}>
                       <span className={cn('h-2.5 w-2.5 rounded-full', stepDotClass(state))} aria-hidden />
                     </span>
-                    <span className="text-sm text-slate-100">{STATUS_LABELS[step]}</span>
+                    <span className="text-sm text-slate-900">{STATUS_LABELS[step]}</span>
                   </div>
-                  <span className="text-[11px] uppercase tracking-wide text-slate-500">{step}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-slate-600">{step}</span>
                 </div>
 
                 {index < STATUS_FLOW.length - 1 && <div className={cn('hidden h-px flex-1 sm:block', lineColor)} aria-hidden />}
@@ -325,7 +325,7 @@ function StatusStepper({ status }: { status: KnowledgeDocumentStatus }) {
           })}
         </div>
 
-        {isFailed && <p className="text-sm text-red-200">Обработка остановилась с ошибкой.</p>}
+        {isFailed && <p className="text-sm text-red-700">Обработка остановилась с ошибкой.</p>}
       </div>
     </div>
   );
@@ -340,20 +340,20 @@ function getStepState(index: number, activeIndex: number, isFailed: boolean) {
 
 function stepRingClass(state: ReturnType<typeof getStepState>) {
   return cn(
-    'border px-0.5 py-0.5',
-    state === 'done' && 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400',
-    state === 'active' && 'border-indigo-500/70 bg-indigo-500/10 text-indigo-300',
-    state === 'failed' && 'border-red-500/70 bg-red-500/10 text-red-300',
-    state === 'pending' && 'border-slate-700 bg-slate-900 text-slate-500',
+    'border px-0.5 py-0.5 shadow-sm',
+    state === 'done' && 'border-emerald-300 bg-emerald-50 text-emerald-700',
+    state === 'active' && 'border-indigo-300 bg-indigo-50 text-indigo-700',
+    state === 'failed' && 'border-red-300 bg-red-50 text-red-700',
+    state === 'pending' && 'border-slate-200 bg-white text-slate-500',
   );
 }
 
 function stepDotClass(state: ReturnType<typeof getStepState>) {
   return cn(
-    state === 'done' && 'bg-emerald-400',
-    state === 'active' && 'bg-indigo-300 animate-pulse',
-    state === 'failed' && 'bg-red-400 animate-pulse',
-    state === 'pending' && 'bg-slate-500',
+    state === 'done' && 'bg-emerald-500',
+    state === 'active' && 'bg-indigo-500 animate-pulse',
+    state === 'failed' && 'bg-red-500 animate-pulse',
+    state === 'pending' && 'bg-slate-300',
   );
 }
 
@@ -367,11 +367,11 @@ function StatusBadge({ status }: { status: KnowledgeDocumentStatus }) {
 }
 
 const STATUS_STYLES: Record<KnowledgeDocumentStatus, string> = {
-  UPLOADED: 'bg-slate-800 text-slate-100 border-slate-700',
-  STORED_ORIGINAL: 'bg-blue-900/40 text-blue-100 border-blue-700/60',
-  CONVERTED_TO_MARKDOWN: 'bg-indigo-900/40 text-indigo-100 border-indigo-700/60',
-  PUBLISHED_TO_GITHUB: 'bg-emerald-900/40 text-emerald-100 border-emerald-700/60',
-  FAILED: 'bg-red-900/40 text-red-100 border-red-700/60',
+  UPLOADED: 'bg-slate-50 text-slate-800 border-slate-300',
+  STORED_ORIGINAL: 'bg-blue-50 text-blue-800 border-blue-300',
+  CONVERTED_TO_MARKDOWN: 'bg-indigo-50 text-indigo-800 border-indigo-300',
+  PUBLISHED_TO_GITHUB: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+  FAILED: 'bg-red-50 text-red-800 border-red-300',
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
