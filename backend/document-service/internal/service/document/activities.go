@@ -789,7 +789,8 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) string {
 		return strings.TrimSpace(md), false
 	}
 
-	tablesContent, hasMarkers := extractContent(trimmedTables)
+	tablesContent, _ := extractContent(trimmedTables)
+	tablesBlock := fmt.Sprintf("%s\n%s\n%s", tablesStart, tablesContent, tablesEnd)
 
 	if start := strings.Index(baseMarkdown, tablesStart); start != -1 {
 		if end := strings.Index(baseMarkdown, tablesEnd); end != -1 && end >= start {
@@ -800,19 +801,10 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) string {
 	}
 
 	if strings.TrimSpace(baseMarkdown) == "" {
-		return trimmedTables
+		return tablesBlock
 	}
 
-	if !hasMarkers {
-		block := fmt.Sprintf("%s\n%s\n%s", tablesStart, tablesContent, tablesEnd)
-		if strings.HasPrefix(trimmedTables, "## ") {
-			trimmedTables = fmt.Sprintf("%s\n\n%s", strings.TrimSpace(trimmedTables), block)
-		} else {
-			trimmedTables = fmt.Sprintf("## Таблицы\n\n%s", block)
-		}
-	}
-
-	return fmt.Sprintf("%s\n\n%s\n", strings.TrimSpace(baseMarkdown), trimmedTables)
+	return fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), tablesBlock)
 }
 
 func isTransformerFailureStatus(val string) bool {
