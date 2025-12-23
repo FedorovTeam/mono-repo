@@ -1358,8 +1358,8 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 		Versions:          []domain.DocumentVersion{{Version: 1}},
 	}
 	repo := &publishRepoStub{doc: doc}
-	baseMarkdown := "# Docling\n\n<!-- tables:start -->\nold\n<!-- tables:end -->"
-	tablesMarkdown := "|t|"
+	baseMarkdown := "# Docling\n\nВведение\n\n## Таблицы\n\n<!-- tables:start -->\nстарые таблицы\n<!-- tables:end -->\n\nЗавершение"
+	tablesMarkdown := "## Таблицы\n\n<!-- tables:start -->\n| новая | таблица |\n<!-- tables:end -->"
 	tableExtractor := &tableExtractorStub{
 		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
 			Job: &tableextractorv1.TableExtractionJob{
@@ -1404,9 +1404,22 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 		t.Fatalf("expected markdown version to be recorded, got %+v", repo.lastVersion)
 	}
 	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
+	uploadedStr := string(uploaded)
 	expectedMerged := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
-	if string(uploaded) != expectedMerged {
-		t.Fatalf("expected merged markdown to be uploaded, got %q", string(uploaded))
+	if uploadedStr != expectedMerged {
+		t.Fatalf("expected merged markdown to be uploaded, got %q", uploadedStr)
+	}
+	if strings.Count(uploadedStr, "Введение") != 1 {
+		t.Fatalf("expected intro text to appear once, got %d", strings.Count(uploadedStr, "Введение"))
+	}
+	if strings.Count(uploadedStr, "## Таблицы") != 1 {
+		t.Fatalf("expected single tables header, got %d", strings.Count(uploadedStr, "## Таблицы"))
+	}
+	if strings.Contains(uploadedStr, "старые таблицы") {
+		t.Fatalf("expected old tables to be replaced, got %q", uploadedStr)
+	}
+	if strings.Count(uploadedStr, "| новая | таблица |") != 1 {
+		t.Fatalf("expected extracted tables to appear once, got %d", strings.Count(uploadedStr, "| новая | таблица |"))
 	}
 	if repo.doc.MarkdownObjectKey != repo.lastVersion.MarkdownObjectKey {
 		t.Fatalf("expected document to store final markdown key, got %s vs %s", repo.doc.MarkdownObjectKey, repo.lastVersion.MarkdownObjectKey)

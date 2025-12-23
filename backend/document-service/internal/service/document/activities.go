@@ -777,19 +777,42 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) string {
 		tablesEnd   = "<!-- tables:end -->"
 	)
 
+	trimmedTables := strings.TrimSpace(tablesMarkdown)
+
+	extractContent := func(md string) (string, bool) {
+		start := strings.Index(md, tablesStart)
+		end := strings.Index(md, tablesEnd)
+		if start != -1 && end != -1 && end >= start {
+			content := strings.TrimSpace(md[start+len(tablesStart) : end])
+			return content, true
+		}
+		return strings.TrimSpace(md), false
+	}
+
+	tablesContent, hasMarkers := extractContent(trimmedTables)
+
 	if start := strings.Index(baseMarkdown, tablesStart); start != -1 {
 		if end := strings.Index(baseMarkdown, tablesEnd); end != -1 && end >= start {
 			prefix := baseMarkdown[:start+len(tablesStart)]
 			suffix := baseMarkdown[end:]
-			return fmt.Sprintf("%s\n\n%s\n%s", prefix, strings.TrimSpace(tablesMarkdown), suffix)
+			return fmt.Sprintf("%s\n\n%s\n%s", prefix, tablesContent, suffix)
 		}
 	}
 
 	if strings.TrimSpace(baseMarkdown) == "" {
-		return strings.TrimSpace(tablesMarkdown)
+		return trimmedTables
 	}
 
-	return fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), strings.TrimSpace(tablesMarkdown))
+	if !hasMarkers {
+		block := fmt.Sprintf("%s\n%s\n%s", tablesStart, tablesContent, tablesEnd)
+		if strings.HasPrefix(trimmedTables, "## ") {
+			trimmedTables = fmt.Sprintf("%s\n\n%s", strings.TrimSpace(trimmedTables), block)
+		} else {
+			trimmedTables = fmt.Sprintf("## Таблицы\n\n%s", block)
+		}
+	}
+
+	return fmt.Sprintf("%s\n\n%s\n", strings.TrimSpace(baseMarkdown), trimmedTables)
 }
 
 func isTransformerFailureStatus(val string) bool {
