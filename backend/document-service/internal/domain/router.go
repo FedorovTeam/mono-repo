@@ -172,39 +172,30 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	if !rules.tableExtractorEnabled {
 		return false
 	}
-	pages := uniquePages(tablePages)
-
 	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
 	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
-	wantsTables := extractTables || doc.ExtractTables || strategy == ConversionStrategyTablesOnly || doclingWithTables
-
-	if !wantsTables {
-		return false
+	explicitTables := extractTables || doc.ExtractTables || strategy == ConversionStrategyTablesOnly
+	pages := uniquePages(tablePages)
+	detectedTables := tableCount
+	if detectedTables == 0 && len(pages) > 0 {
+		detectedTables = len(pages)
 	}
+	detectionSatisfied := detectedTables > 0 && detectedTables >= rules.tableDetectionMinCount
 
 	ext := documentExtension(doc)
 	if !canUseTableExtractor(ext, rules.tableExtractorExt) {
 		return false
 	}
 
+	if explicitTables {
+		return true
+	}
+
 	if doclingWithTables {
-		return true
+		return detectionSatisfied
 	}
 
-	if strategy == ConversionStrategyTablesOnly || doc.ExtractTables || extractTables {
-		return true
-	}
-
-	detectedTables := tableCount
-	if detectedTables == 0 && len(pages) > 0 {
-		detectedTables = len(pages)
-	}
-
-	if detectedTables == 0 {
-		return false
-	}
-
-	return detectedTables >= rules.tableDetectionMinCount
+	return detectionSatisfied
 }
 
 func uniquePages(pages []int32) []int32 {

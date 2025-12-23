@@ -195,7 +195,7 @@ func TestJobFollowerSchedulesExtractTablesForTablesOnlyStrategy(t *testing.T) {
 	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
 }
 
-func TestJobFollowerSchedulesExtractAfterConvertForDoclingStrategy(t *testing.T) {
+func TestJobFollowerSkipsExtractAfterConvertWhenNoTablesDetected(t *testing.T) {
 	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true})
 	repo := &followerRepo{
 		jobs: []domain.ProcessingJob{
@@ -230,11 +230,7 @@ func TestJobFollowerSchedulesExtractAfterConvertForDoclingStrategy(t *testing.T)
 	require.NoError(t, err)
 
 	require.Len(t, repo.createdJobs, 1)
-	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
-	payload := domain.ExtractTablesPayloadFromMap(repo.createdJobs[0].Payload)
-	require.Equal(t, "markdown/key.md", payload.DoclingMarkdownObjectKey)
-	require.Equal(t, "md-bucket", payload.DoclingMarkdownBucket)
-	require.True(t, payload.ExtractTables)
+	require.Equal(t, domain.JobStagePublishToGitHub, repo.createdJobs[0].Stage)
 }
 
 func TestJobFollowerSchedulesExtractAfterDoclingTableDetection(t *testing.T) {
@@ -280,6 +276,44 @@ func TestJobFollowerSchedulesExtractAfterDoclingTableDetection(t *testing.T) {
 	require.Equal(t, "docling/key.md", payload.DoclingMarkdownObjectKey)
 	require.Equal(t, "orig-bucket", payload.OriginalBucket)
 	require.Equal(t, "incoming/file.docx", payload.OriginalObjectKey)
+	require.True(t, payload.ExtractTables)
+}
+
+func TestJobFollowerSchedulesExtractAfterDetectionWithoutStrategy(t *testing.T) {
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
+	repo := &followerRepo{
+		jobs: []domain.ProcessingJob{
+			{
+				TaskID:     "job-convert",
+				DocumentID: "doc-1",
+				Stage:      domain.JobStageConvertToMarkdown,
+				Status:     domain.JobStatusCompleted,
+				Payload: (domain.ConvertPayload{
+					MarkdownBucket:    "md-bucket",
+					MarkdownObjectKey: "markdown/key.md",
+					TableCount:        1,
+					TablePages:        []int32{2},
+				}).ToMap(),
+			},
+		},
+		document: &domain.Document{
+			ID:                "doc-1",
+			Status:            domain.DocumentStatusStoredOriginal,
+			OriginalBucket:    "orig-bucket",
+			OriginalObjectKey: "incoming/file.pdf",
+			MarkdownBucket:    "md-bucket",
+			MarkdownObjectKey: "markdown/key.md",
+		},
+	}
+
+	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, router)
+
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.createdJobs, 1)
+	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
+	payload := domain.ExtractTablesPayloadFromMap(repo.createdJobs[0].Payload)
 	require.True(t, payload.ExtractTables)
 }
 

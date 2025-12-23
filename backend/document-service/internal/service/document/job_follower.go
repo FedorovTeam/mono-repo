@@ -303,7 +303,7 @@ func (f *JobFollower) extractTablesPayloadForDocument(doc *domain.Document, corr
 		DoclingMarkdownBucket:    doc.MarkdownBucket,
 		DoclingMarkdownObjectKey: markdownKey,
 		ConversionStrategy:       doc.ConversionStrategy,
-		ExtractTables:            doc.ExtractTables || doc.ConversionStrategy == domain.ConversionStrategyDoclingWithTables,
+		ExtractTables:            doc.ExtractTables || doc.ConversionStrategy == domain.ConversionStrategyDoclingWithTables || doc.ConversionStrategy == domain.ConversionStrategyTablesOnly,
 		JobPayloadMetadata:       domain.JobPayloadMetadata{CorrelationID: correlationID},
 	}
 }
@@ -324,7 +324,7 @@ func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides 
 		FilenameExtension:        overrides.FilenameExtension,
 		JobPayloadMetadata:       domain.JobPayloadMetadata{CorrelationID: correlationID},
 		ConversionStrategy:       doc.ConversionStrategy,
-		ExtractTables:            doc.ExtractTables || doc.ConversionStrategy == domain.ConversionStrategyDoclingWithTables,
+		ExtractTables:            doc.ExtractTables || doc.ConversionStrategy == domain.ConversionStrategyTablesOnly,
 	}
 
 	if payload.FilenameExtension == "" {
@@ -349,7 +349,12 @@ func (f *JobFollower) extractTablesPayloadFromConvert(doc *domain.Document, conv
 	payload.DoclingMarkdownObjectKey = firstNonEmpty(convertPayload.DoclingMarkdownObjectKey, payload.DoclingMarkdownObjectKey, resolvedMarkdownKey(doc))
 	payload.DoclingStatus = firstNonEmpty(convertPayload.DoclingStatus, payload.DoclingStatus)
 	payload.ConversionStrategy = domain.ConversionStrategy(firstNonEmpty(string(convertPayload.ConversionStrategy), string(payload.ConversionStrategy), string(doc.ConversionStrategy)))
-	payload.ExtractTables = convertPayload.ExtractTables || payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables
+	payload.ExtractTables = convertPayload.ExtractTables || payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables || payload.ConversionStrategy == domain.ConversionStrategyTablesOnly
+	if !payload.ExtractTables {
+		if count, pages := convertPayload.TableInfo(); count > 0 || len(pages) > 0 {
+			payload.ExtractTables = true
+		}
+	}
 	return payload
 }
 
