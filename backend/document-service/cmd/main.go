@@ -222,15 +222,20 @@ func newStageRouter(cfg config.Router) *domain.StageRouter {
 		PreprocessExtensions:     cfg.PreprocessExtensions,
 		TableExtractorEnabled:    cfg.TableExtractorEnabled,
 		TableExtractorExtensions: cfg.TableExtractorExtensions,
+		ArtifactsBucket:          cfg.ArtifactsBucket,
+		ArtifactsPrefixTemplate:  cfg.ArtifactsPrefixTemplate,
 	}
 	for _, rule := range cfg.RepositoryRules {
 		rules.RepositoryRules = append(rules.RepositoryRules, domain.RepositoryRouterRule{
 			Owner:                    rule.Owner,
 			Repository:               rule.Repository,
+			PathPrefix:               rule.PathPrefix,
 			PreprocessEnabled:        rule.PreprocessEnabled,
 			PreprocessExtensions:     rule.PreprocessExtensions,
 			TableExtractorEnabled:    rule.TableExtractorEnabled,
 			TableExtractorExtensions: rule.TableExtractorExtensions,
+			ArtifactsBucket:          rule.ArtifactsBucket,
+			ArtifactsPrefixTemplate:  rule.ArtifactsPrefixTemplate,
 		})
 	}
 	return domain.NewStageRouter(rules)

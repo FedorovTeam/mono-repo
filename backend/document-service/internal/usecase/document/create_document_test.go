@@ -31,6 +31,9 @@ func (*repositoryStub) ListDocuments(context.Context, int, int, *domain.Document
 func (*repositoryStub) UpdateStatus(context.Context, string, domain.DocumentStatus, string, string, *domain.DocumentVersion) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }
+func (*repositoryStub) UpdateDocumentOptions(context.Context, string, domain.ConversionStrategy, *bool) (*domain.Document, error) {
+	return nil, errors.New("not implemented")
+}
 func (*repositoryStub) LastNonFailedStatus(context.Context, string) (domain.DocumentStatus, error) {
 	return "", errors.New("not implemented")
 }
@@ -64,7 +67,7 @@ func TestCreateDocumentGeneratesDefaultPath(t *testing.T) {
 		BaseBranch:     "main",
 	}
 
-	uc := NewCreateDocument(repo, defaults)
+	uc := NewCreateDocument(repo, defaults, nil)
 	doc, err := uc.Execute(context.Background(), CreateDocumentInput{
 		FileName:          "file.docx",
 		UploadBucket:      "original-bucket",

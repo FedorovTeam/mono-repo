@@ -25,10 +25,11 @@ type Defaults struct {
 type CreateDocument struct {
 	repo     Repository
 	defaults Defaults
+	router   *domain.StageRouter
 }
 
-func NewCreateDocument(repo Repository, defaults Defaults) *CreateDocument {
-	return &CreateDocument{repo: repo, defaults: defaults}
+func NewCreateDocument(repo Repository, defaults Defaults, router *domain.StageRouter) *CreateDocument {
+	return &CreateDocument{repo: repo, defaults: defaults, router: router}
 }
 
 func (uc *CreateDocument) Execute(ctx context.Context, in CreateDocumentInput) (*domain.Document, error) {
@@ -111,6 +112,10 @@ func (uc *CreateDocument) Execute(ctx context.Context, in CreateDocumentInput) (
 		CreatePR:           in.CreatePR,
 		ConversionStrategy: strategy,
 		ExtractTables:      in.ExtractTables,
+	}
+
+	if !doc.ExtractTables && uc.router != nil && uc.router.DefaultExtractTables(doc) {
+		doc.ExtractTables = true
 	}
 
 	if err := doc.ValidateForCreation(); err != nil {

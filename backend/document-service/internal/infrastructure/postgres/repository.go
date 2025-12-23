@@ -475,6 +475,61 @@ func (r *Repository) UpdateWorkflowID(ctx context.Context, id, workflowID string
 	return &doc, nil
 }
 
+// UpdateDocumentOptions обновляет флаги стратегии документа.
+func (r *Repository) UpdateDocumentOptions(ctx context.Context, id string, strategy domain.ConversionStrategy, extractTables *bool) (*domain.Document, error) {
+	if err := domain.ValidateConversionStrategy(strategy); err != nil {
+		return nil, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var doc domain.Document
+	row := tx.QueryRowContext(ctx, `
+        SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, conversion_strategy, extract_tables, created_at, updated_at
+        FROM documents WHERE id=$1 FOR UPDATE
+    `, id)
+	if err := scanDocument(row, &doc); err != nil {
+		return nil, err
+	}
+
+	changed := false
+	if strategy != "" && doc.ConversionStrategy != strategy {
+		doc.ConversionStrategy = strategy
+		changed = true
+	}
+	if extractTables != nil && doc.ExtractTables != *extractTables {
+		doc.ExtractTables = *extractTables
+		changed = true
+	}
+
+	if changed {
+		doc.UpdatedAt = time.Now().UTC()
+		if _, err := tx.ExecContext(ctx, `
+            UPDATE documents SET conversion_strategy=$1, extract_tables=$2, updated_at=$3 WHERE id=$4
+        `, doc.ConversionStrategy, doc.ExtractTables, doc.UpdatedAt, id); err != nil {
+			return nil, err
+		}
+	}
+
+	versions, err := r.fetchVersionsTx(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	doc.Versions = versions
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	if err := r.attachActiveJob(ctx, &doc); err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
 // ActiveJob возвращает активную задачу для документа, если она есть.
 func (r *Repository) ActiveJob(ctx context.Context, documentID string) (*domain.ProcessingJob, error) {
 	row := r.db.QueryRowContext(ctx, `

@@ -67,6 +67,8 @@ type ConvertPayload struct {
 	QueueID               string
 	Status                string
 	FilenameExtension     string
+	ConversionStrategy    ConversionStrategy
+	ExtractTables         bool
 }
 
 // PreprocessPayload описывает данные для шага преобразования в DOCX.
@@ -89,15 +91,19 @@ type PreprocessPayload struct {
 // ExtractTablesPayload описывает данные для извлечения таблиц из PDF.
 type ExtractTablesPayload struct {
 	JobPayloadMetadata
-	OriginalBucket    string
-	OriginalObjectKey string
-	ArtifactsBucket   string
-	ArtifactsPrefix   string
-	QueueID           string
-	Status            string
-	StatusReason      string
-	PollAttempts      int
-	MarkdownObjectKey string
+	OriginalBucket          string
+	OriginalObjectKey       string
+	ArtifactsBucket         string
+	ArtifactsPrefix         string
+	ArtifactsPrefixTemplate string
+	QueueID                 string
+	TableQueueID            string
+	Status                  string
+	StatusReason            string
+	PollAttempts            int
+	MarkdownObjectKey       string
+	ConversionStrategy      ConversionStrategy
+	ExtractTables           bool
 }
 
 // PublishPayload описывает данные для шага публикации в GitHub.
@@ -168,8 +174,16 @@ func (p ExtractTablesPayload) ToMap() map[string]any {
 	if p.ArtifactsPrefix != "" {
 		res["artifacts_prefix"] = p.ArtifactsPrefix
 	}
+	if p.ArtifactsPrefixTemplate != "" {
+		res["artifacts_prefix_template"] = p.ArtifactsPrefixTemplate
+	}
+	if p.TableQueueID != "" {
+		res["table_queue_id"] = p.TableQueueID
+	}
 	if p.QueueID != "" {
 		res["queue_id"] = p.QueueID
+	} else if p.TableQueueID != "" {
+		res["queue_id"] = p.TableQueueID
 	}
 	if p.Status != "" {
 		res["status"] = p.Status
@@ -183,6 +197,10 @@ func (p ExtractTablesPayload) ToMap() map[string]any {
 	if p.MarkdownObjectKey != "" {
 		res["markdown_object_key"] = p.MarkdownObjectKey
 	}
+	if p.ConversionStrategy != "" {
+		res["conversion_strategy"] = string(p.ConversionStrategy)
+	}
+	res["extract_tables"] = p.ExtractTables
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }
@@ -233,6 +251,10 @@ func (p ConvertPayload) ToMap() map[string]any {
 	if p.FilenameExtension != "" {
 		res["filename_extension"] = p.FilenameExtension
 	}
+	if p.ConversionStrategy != "" {
+		res["conversion_strategy"] = string(p.ConversionStrategy)
+	}
+	res["extract_tables"] = p.ExtractTables
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }
@@ -252,6 +274,8 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		QueueID:               stringFromMap(payload, "queue_id"),
 		Status:                stringFromMap(payload, "status"),
 		FilenameExtension:     stringFromMap(payload, "filename_extension"),
+		ConversionStrategy:    ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
+		ExtractTables:         boolFromMap(payload, "extract_tables"),
 	}
 }
 
@@ -319,18 +343,29 @@ func PreprocessPayloadFromMap(payload map[string]any) PreprocessPayload {
 
 // ExtractTablesPayloadFromMap восстанавливает ExtractTablesPayload из map.
 func ExtractTablesPayloadFromMap(payload map[string]any) ExtractTablesPayload {
-	return ExtractTablesPayload{
-		JobPayloadMetadata: metadataFromMap(payload),
-		OriginalBucket:     stringFromMap(payload, "original_bucket"),
-		OriginalObjectKey:  stringFromMap(payload, "original_object_key"),
-		ArtifactsBucket:    stringFromMap(payload, "artifacts_bucket"),
-		ArtifactsPrefix:    stringFromMap(payload, "artifacts_prefix"),
-		QueueID:            stringFromMap(payload, "queue_id"),
-		Status:             stringFromMap(payload, "status"),
-		StatusReason:       stringFromMap(payload, "status_reason"),
-		PollAttempts:       intFromMap(payload, "poll_attempts"),
-		MarkdownObjectKey:  stringFromMap(payload, "markdown_object_key"),
+	result := ExtractTablesPayload{
+		JobPayloadMetadata:      metadataFromMap(payload),
+		OriginalBucket:          stringFromMap(payload, "original_bucket"),
+		OriginalObjectKey:       stringFromMap(payload, "original_object_key"),
+		ArtifactsBucket:         stringFromMap(payload, "artifacts_bucket"),
+		ArtifactsPrefix:         stringFromMap(payload, "artifacts_prefix"),
+		ArtifactsPrefixTemplate: stringFromMap(payload, "artifacts_prefix_template"),
+		QueueID:                 stringFromMap(payload, "queue_id"),
+		TableQueueID:            stringFromMap(payload, "table_queue_id"),
+		Status:                  stringFromMap(payload, "status"),
+		StatusReason:            stringFromMap(payload, "status_reason"),
+		PollAttempts:            intFromMap(payload, "poll_attempts"),
+		MarkdownObjectKey:       stringFromMap(payload, "markdown_object_key"),
+		ConversionStrategy:      ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
+		ExtractTables:           boolFromMap(payload, "extract_tables"),
 	}
+	if result.TableQueueID == "" {
+		result.TableQueueID = result.QueueID
+	}
+	if result.QueueID == "" {
+		result.QueueID = result.TableQueueID
+	}
+	return result
 }
 
 // ToMap преобразует PublishPayload в map для хранения в БД.
@@ -432,5 +467,23 @@ func intFromMap(payload map[string]any, key string) int {
 		return int(v)
 	default:
 		return 0
+	}
+}
+
+func boolFromMap(payload map[string]any, key string) bool {
+	if payload == nil {
+		return false
+	}
+	val, ok := payload[key]
+	if !ok {
+		return false
+	}
+	switch v := val.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		return false
 	}
 }

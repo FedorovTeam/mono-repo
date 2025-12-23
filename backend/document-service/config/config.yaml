@@ -56,6 +56,8 @@ router:
   table_extractor_enabled: true
   table_extractor_extensions:
     - pdf
+  artifacts_bucket: "knowledge-md"
+  artifacts_prefix_template: "tables/{{ .DocumentID }}/{{ .QueueID }}/"
   repositories:
     - owner: "FedorovTeam"
       repository: "knowledge-base"
@@ -65,6 +67,9 @@ router:
       table_extractor_enabled: true
       table_extractor_extensions:
         - pdf
+      path_prefix: "knowledge/docs/"
+      artifacts_bucket: "knowledge-md"
+      artifacts_prefix_template: "tables/{{ .Owner }}/{{ .Repository }}/{{ .DocumentID }}/{{ .QueueID }}/"
 observability:
   logs:
     enabled: true

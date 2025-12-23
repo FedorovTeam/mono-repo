@@ -123,6 +123,10 @@ func (r *publishRepoStub) UpdateStatus(ctx context.Context, id string, to domain
 	return r.doc, nil
 }
 
+func (r *publishRepoStub) UpdateDocumentOptions(context.Context, string, domain.ConversionStrategy, *bool) (*domain.Document, error) {
+	return r.doc, nil
+}
+
 func (r *publishRepoStub) LastNonFailedStatus(context.Context, string) (domain.DocumentStatus, error) {
 	if r.doc != nil {
 		return r.doc.Status, nil

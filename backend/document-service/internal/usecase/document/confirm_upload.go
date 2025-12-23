@@ -15,10 +15,11 @@ import (
 type ConfirmUpload struct {
 	repo    Repository
 	storage Storage
+	router  *domain.StageRouter
 }
 
-func NewConfirmUpload(repo Repository, storage Storage) *ConfirmUpload {
-	return &ConfirmUpload{repo: repo, storage: storage}
+func NewConfirmUpload(repo Repository, storage Storage, router *domain.StageRouter) *ConfirmUpload {
+	return &ConfirmUpload{repo: repo, storage: storage, router: router}
 }
 
 func (uc *ConfirmUpload) Execute(ctx context.Context, in ConfirmUploadInput) (*domain.Document, error) {
@@ -57,6 +58,11 @@ func (uc *ConfirmUpload) Execute(ctx context.Context, in ConfirmUploadInput) (*d
 		return nil, errors.New("etag is required")
 	}
 
+	doc, err = uc.applyStrategyOverrides(ctx, doc, in)
+	if err != nil {
+		return nil, err
+	}
+
 	payload := domain.StoreOriginalPayload{Bucket: in.Bucket, ObjectKey: in.ObjectKey, OriginalETag: etag}.ToMap()
 	job := &domain.ProcessingJob{
 		DocumentID: doc.ID,
@@ -77,4 +83,29 @@ func (uc *ConfirmUpload) Execute(ctx context.Context, in ConfirmUploadInput) (*d
 	}
 
 	return doc, nil
+}
+
+func (uc *ConfirmUpload) applyStrategyOverrides(ctx context.Context, doc *domain.Document, in ConfirmUploadInput) (*domain.Document, error) {
+	if doc == nil {
+		return nil, errors.New("document not found")
+	}
+
+	desiredStrategy := doc.ConversionStrategy
+	desiredExtract := doc.ExtractTables
+
+	if in.ExtractTables != nil {
+		desiredExtract = *in.ExtractTables
+	} else if !desiredExtract && uc.router != nil && uc.router.DefaultExtractTables(doc) {
+		desiredExtract = true
+	}
+
+	if strategy := strings.TrimSpace(in.ConversionStrategy); strategy != "" {
+		desiredStrategy = domain.NormalizeConversionStrategy(strategy)
+	}
+
+	if desiredStrategy == doc.ConversionStrategy && desiredExtract == doc.ExtractTables {
+		return doc, nil
+	}
+
+	return uc.repo.UpdateDocumentOptions(ctx, doc.ID, desiredStrategy, &desiredExtract)
 }

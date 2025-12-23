@@ -43,6 +43,8 @@
   - `markdown_bucket`, `markdown_object_key` — куда писать результат (`documents.markdown_*`, обновляется версией). Если `markdown_object_key` пуст, воркер использует ключ из `documents`.
 - **Опциональные поля:**
   - `correlation_id` — прокидывается в gRPC‑метаданные (`x-correlation-id`).
+  - `conversion_strategy` — стратегия конвертации (`tables_only`/`""`), дублирует `documents.conversion_strategy`.
+  - `extract_tables` — флаг, с которым документ пришёл в конвейер.
 - **Пример:**
   ```json
   {
@@ -50,10 +52,40 @@
     "original_object_key": "org/knowledge/project/documents/year=2024/month=05/day=14/7c1.../report.docx",
     "markdown_bucket": "knowledge-md",
     "markdown_object_key": "org/knowledge/project/documents/year=2024/month=05/day=14/7c1.../report.md",
-    "correlation_id": "7f3d7c8b-1c3f-4a4c-9f2e-8c6a1e8dbbaf"
+    "correlation_id": "7f3d7c8b-1c3f-4a4c-9f2e-8c6a1e8dbbaf",
+    "conversion_strategy": "tables_only",
+    "extract_tables": true
   }
   ```
 - **Связь с хранилищами:** воркер передаёт bucket/object_key в `transformer-service`, который сам скачивает исходник из MinIO, ставит задачу конвертации и дожидается готовности результата. Document-service получает финальные `queue_id` и `markdown_object_key` от конвертера и записывает их в `document_versions`/`documents`.
+
+### `extract_tables`
+- **Назначение:** вынести таблицы из PDF через `table-extractor-service` и зафиксировать артефакты в MinIO.
+- **Обязательные поля:**
+  - `original_bucket`, `original_object_key` — откуда читать PDF (`documents.original_*`).
+  - `artifacts_bucket` — куда писать артефакты таблиц (по умолчанию глобальный `router.artifacts_bucket` или `documents.markdown_bucket`).
+- **Опциональные поля:**
+  - `artifacts_prefix_template` — шаблон хранения артефактов (`tables/{{ .DocumentID }}/{{ .QueueID }}/` по умолчанию, может переопределяться в `router.repositories[].artifacts_prefix_template`).
+  - `artifacts_prefix` — вычисленный префикс (заполняется после получения `table_queue_id`).
+  - `table_queue_id` — идентификатор очереди в `table-extractor-service` (дублируется в `queue_id` для обратной совместимости).
+  - `markdown_object_key` — путь до `tables.md`, если `table-extractor-service` его уже вернул.
+  - `conversion_strategy`/`extract_tables` — исходные флаги документа, прокидываются для трассировки.
+  - `correlation_id` — прокидывается в gRPC‑метаданные (`x-correlation-id`).
+- **Пример:**
+  ```json
+  {
+    "original_bucket": "knowledge-original",
+    "original_object_key": "incoming/docs/report.pdf",
+    "artifacts_bucket": "knowledge-md",
+    "artifacts_prefix_template": "tables/{{ .Owner }}/{{ .Repository }}/{{ .DocumentID }}/{{ .QueueID }}/",
+    "table_queue_id": "e52c8b51-9e78-4ef0-af68-ef4c3f3b7cda",
+    "artifacts_prefix": "tables/fedorovteam/knowledge-base/1a2b/3c4d/",
+    "markdown_object_key": "tables/fedorovteam/knowledge-base/1a2b/3c4d/tables.md",
+    "conversion_strategy": "tables_only",
+    "extract_tables": true
+  }
+  ```
+- **Связь с хранилищами:** воркер вызывает `table-extractor-service` с `artifacts_bucket`/`artifacts_prefix`; сервис сохраняет JSON/Markdown/manifest в указанный префикс. После статуса `DONE` документ переводится в `ConvertedToMarkdown` с очередью `table_queue_id`.
 
 ### `publish_to_github`
 - **Назначение:** передать все данные для публикации Markdown в GitHub.

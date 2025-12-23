@@ -42,6 +42,10 @@ func (r *repoStub) UpdateStatus(context.Context, string, domain.DocumentStatus, 
 	return r.doc, nil
 }
 
+func (r *repoStub) UpdateDocumentOptions(context.Context, string, domain.ConversionStrategy, *bool) (*domain.Document, error) {
+	return r.doc, nil
+}
+
 func (r *repoStub) ActiveJob(context.Context, string) (*domain.ProcessingJob, error) { return nil, nil }
 
 func (r *repoStub) CreateProcessingJob(context.Context, *domain.ProcessingJob, *domain.JobEvent) (*domain.ProcessingJob, error) {

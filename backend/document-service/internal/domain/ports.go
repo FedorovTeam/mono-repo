@@ -11,6 +11,7 @@ type DocumentRepository interface {
 	GetDocument(ctx context.Context, id string) (*Document, error)
 	ListDocuments(ctx context.Context, limit, offset int, status *DocumentStatus) ([]Document, error)
 	UpdateStatus(ctx context.Context, id string, to DocumentStatus, reason, errorReason string, version *DocumentVersion) (*Document, error)
+	UpdateDocumentOptions(ctx context.Context, id string, strategy ConversionStrategy, extractTables *bool) (*Document, error)
 	LastNonFailedStatus(ctx context.Context, id string) (DocumentStatus, error)
 	CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status DocumentStatus, reasonPrefix string) (int, error)
 }

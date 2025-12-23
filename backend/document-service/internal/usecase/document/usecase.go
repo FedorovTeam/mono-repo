@@ -20,8 +20,8 @@ func New(repo Repository, storage Storage, defaults Defaults, router *domain.Sta
 		router = domain.NewStageRouter(domain.RouterRules{})
 	}
 	return &UseCase{
-		create:        NewCreateDocument(repo, defaults),
-		confirmUpload: NewConfirmUpload(repo, storage),
+		create:        NewCreateDocument(repo, defaults, router),
+		confirmUpload: NewConfirmUpload(repo, storage, router),
 		updateStatus:  NewUpdateStatus(repo, router),
 		repo:          repo,
 		router:        router,

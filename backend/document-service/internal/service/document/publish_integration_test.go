@@ -110,6 +110,10 @@ func (r *integrationRepo) UpdateStatus(ctx context.Context, id string, to domain
 	return &domain.Document{ID: id, Status: to}, nil
 }
 
+func (r *integrationRepo) UpdateDocumentOptions(context.Context, string, domain.ConversionStrategy, *bool) (*domain.Document, error) {
+	return nil, nil
+}
+
 func (r *integrationRepo) UpdateWorkflowID(context.Context, string, string) (*domain.Document, error) {
 	return nil, nil
 }
