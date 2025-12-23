@@ -257,25 +257,25 @@ export default function HomePage() {
   return (
     <main className="px-4 pb-12">
       <div className="mx-auto max-w-4xl space-y-6">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-lg shadow-indigo-500/5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-2">
             <h1 className="text-2xl font-semibold">Загрузка DOC/DOCX/PDF</h1>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-600">
               Укажите категорию и путь для будущего Markdown-файла, затем загрузите исходный документ.
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div>
-              <label className="mb-1 block text-sm text-slate-200">Файл</label>
+              <label className="mb-1 block text-sm text-slate-600">Файл</label>
               <input
                 type="file"
                 accept=".doc,.docx,.pdf"
                 onChange={handleFileChange}
-                className="block w-full cursor-pointer text-sm text-slate-100 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-500 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-indigo-400"
+                className="block w-full cursor-pointer rounded-lg border border-slate-300 bg-white text-sm text-slate-900 file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-indigo-500 disabled:file:cursor-not-allowed disabled:file:bg-indigo-300 disabled:file:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               {file && (
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-500">
                   {file.name} ({file.size} байт)
                 </p>
               )}
@@ -284,11 +284,11 @@ export default function HomePage() {
             <div className="grid grid-cols-1 gap-4">
               <div className="space-y-3">
                 <div>
-                  <label className="mb-1 block text-sm text-slate-200">Категория документа</label>
+                  <label className="mb-1 block text-sm text-slate-600">Категория документа</label>
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value as Category)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="plenary">Пленарное заседание</option>
                     <option value="bibliography">Библиография</option>
@@ -296,26 +296,26 @@ export default function HomePage() {
                 </div>
 
                 {category === 'plenary' && (
-                  <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+                  <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                       <div>
-                        <label className="mb-1 block text-sm text-slate-200">Номер заседания</label>
+                        <label className="mb-1 block text-sm text-slate-600">Номер заседания</label>
                         <input
                           type="text"
                           value={plenaryFields.sessionNumber}
                           onChange={(e) => updatePlenaryFields({ sessionNumber: e.target.value })}
                           placeholder="например: 5"
-                          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                         />
                       </div>
                       <div>
-                        <label className="mb-1 block text-sm text-slate-200">Тип документа</label>
+                        <label className="mb-1 block text-sm text-slate-600">Тип документа</label>
                         <select
                           value={plenaryFields.documentType}
                           onChange={(e) =>
                             updatePlenaryFields({ documentType: e.target.value as PlenaryDocumentType })
                           }
-                          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                         >
                           <option value="transcript">Стенограмма</option>
                           <option value="voting">Протокол голосования</option>
@@ -325,24 +325,24 @@ export default function HomePage() {
 
                     {plenaryFields.documentType === 'transcript' ? (
                       <div>
-                        <label className="mb-1 block text-sm text-slate-200">Номер стенограммы</label>
+                        <label className="mb-1 block text-sm text-slate-600">Номер стенограммы</label>
                         <input
                           type="text"
                           value={plenaryFields.transcriptNumber}
                           onChange={(e) => updatePlenaryFields({ transcriptNumber: e.target.value })}
                           placeholder="например: 3"
-                          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                         />
                       </div>
                     ) : (
                       <div>
-                        <label className="mb-1 block text-sm text-slate-200">Номер вопроса голосования</label>
+                        <label className="mb-1 block text-sm text-slate-600">Номер вопроса голосования</label>
                         <input
                           type="text"
                           value={plenaryFields.votingQuestionNumber}
                           onChange={(e) => updatePlenaryFields({ votingQuestionNumber: e.target.value })}
                           placeholder="например: 12"
-                          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                         />
                       </div>
                     )}
@@ -350,27 +350,27 @@ export default function HomePage() {
                 )}
 
                 {category === 'bibliography' && (
-                  <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+                  <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                     <div>
-                      <label className="mb-1 block text-sm text-slate-200">Подкатегория</label>
+                      <label className="mb-1 block text-sm text-slate-600">Подкатегория</label>
                       <select
                         value={bibliographyFields.type}
                         onChange={(e) => updateBibliographyFields({ type: e.target.value as BibliographyCategory })}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                       >
                         <option value="deputies">Депутаты</option>
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm text-slate-200">Slug / идентификатор</label>
+                      <label className="mb-1 block text-sm text-slate-600">Slug / идентификатор</label>
                       <input
                         type="text"
                         value={bibliographyFields.slug}
                         onChange={(e) => updateBibliographyFields({ slug: e.target.value })}
                         placeholder="например: ivanov-ivan"
-                        className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                       />
-                      <p className="mt-1 text-xs text-slate-400">
+                      <p className="mt-1 text-xs text-slate-500">
                         Итоговый путь будет вида <code>bibliography/deputies/slug.md</code>.
                       </p>
                     </div>
@@ -382,7 +382,7 @@ export default function HomePage() {
             <button
               type="submit"
               disabled={status === 'uploading'}
-              className="mt-2 inline-flex items-center justify-center rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {status === 'uploading' ? 'Загружаю…' : 'Загрузить документ'}
             </button>
@@ -392,8 +392,8 @@ export default function HomePage() {
             <div
               className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
                 status === 'error'
-                  ? 'border-red-500 bg-red-950/40 text-red-400'
-                  : 'border-emerald-500 bg-emerald-950/40 text-emerald-400'
+                  ? 'border-red-200 bg-red-50 text-red-800'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-800'
               }`}
             >
               {message}
@@ -401,15 +401,15 @@ export default function HomePage() {
           )}
 
           {validationError && (
-            <div className="mt-4 rounded-lg border border-amber-500 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
               {validationError}
             </div>
           )}
 
           {resolvePath.path && (
-            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2">
-              <p className="text-xs uppercase text-slate-400">Предпросмотр пути</p>
-              <p className="font-mono text-sm text-indigo-200">{resolvePath.path}</p>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs uppercase text-slate-500">Предпросмотр пути</p>
+              <p className="font-mono text-sm text-slate-900">{resolvePath.path}</p>
             </div>
           )}
 
