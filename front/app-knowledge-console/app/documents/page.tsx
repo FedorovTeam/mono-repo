@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -8,8 +8,6 @@ type KnowledgeDocumentStatus =
   | 'CONVERTED_TO_MARKDOWN'
   | 'PUBLISHED_TO_GITHUB'
   | 'FAILED';
-
-type NonFailedStatus = Exclude<KnowledgeDocumentStatus, 'FAILED'>;
 
 type KnowledgeDocument = {
   id: string;
@@ -19,6 +17,8 @@ type KnowledgeDocument = {
   branch: string;
   jobId?: string | null;
   error?: string | null;
+  fileName: string;
+  createdAt: string;
 };
 
 type KnowledgeDocumentsResponse = {
@@ -32,34 +32,20 @@ type KnowledgeDocumentResponse = {
   knowledgeDocument: KnowledgeDocument | null;
 };
 
-const STATUS_SEQUENCE: NonFailedStatus[] = [
-  'UPLOADED',
-  'STORED_ORIGINAL',
-  'CONVERTED_TO_MARKDOWN',
-  'PUBLISHED_TO_GITHUB',
-];
+const STATUS_LABELS: Record<KnowledgeDocumentStatus, string> = {
+  UPLOADED: 'Файл принят',
+  STORED_ORIGINAL: 'Оригинал сохранён',
+  CONVERTED_TO_MARKDOWN: 'Преобразован в Markdown',
+  PUBLISHED_TO_GITHUB: 'Опубликован в GitHub',
+  FAILED: 'Ошибка обработки',
+};
 
-const STATUS_META: Record<NonFailedStatus, { label: string; description: string; icon: string }> = {
-  UPLOADED: {
-    label: 'Файл принят',
-    description: 'Файл получен и ожидает сохранения',
-    icon: '⬆️',
-  },
-  STORED_ORIGINAL: {
-    label: 'Оригинал сохранён',
-    description: 'Исходный файл положен в хранилище',
-    icon: '🗄️',
-  },
-  CONVERTED_TO_MARKDOWN: {
-    label: 'Преобразован в Markdown',
-    description: 'Файл сконвертирован и готов к публикации',
-    icon: '📄',
-  },
-  PUBLISHED_TO_GITHUB: {
-    label: 'Опубликован в GitHub',
-    description: 'Markdown отправлен в репозиторий',
-    icon: '🚀',
-  },
+const STATUS_STYLES: Record<KnowledgeDocumentStatus, string> = {
+  UPLOADED: 'bg-slate-800 text-slate-100 border-slate-700',
+  STORED_ORIGINAL: 'bg-blue-900/40 text-blue-100 border-blue-700/60',
+  CONVERTED_TO_MARKDOWN: 'bg-indigo-900/40 text-indigo-100 border-indigo-700/60',
+  PUBLISHED_TO_GITHUB: 'bg-emerald-900/40 text-emerald-100 border-emerald-700/60',
+  FAILED: 'bg-red-900/40 text-red-100 border-red-700/60',
 };
 
 const generateCorrelationId = () =>
@@ -67,12 +53,45 @@ const generateCorrelationId = () =>
     ? crypto.randomUUID()
     : `corr-${Date.now()}`;
 
+const formatUploadDate = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+    .format(date)
+    .replace(',', '');
+};
+
+const getDocumentName = (document: KnowledgeDocument) => {
+  if (document.fileName?.trim()) {
+    return document.fileName.trim();
+  }
+  const parts = document.path.split('/').filter(Boolean);
+  return parts[parts.length - 1] || document.path;
+};
+
+const getDocumentLink = (document: KnowledgeDocument) => {
+  if (!document.repository || !document.path) {
+    return null;
+  }
+
+  const normalizedPath = document.path.replace(/^\//, '');
+  return `https://github.com/${document.repository}/tree/${document.branch}/${normalizedPath}`;
+};
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [documentsTotal, setDocumentsTotal] = useState<number | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
-  const lastNonFailedStatusRef = useRef<Record<string, NonFailedStatus | undefined>>({});
 
   const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
   const apiKey = process.env.NEXT_PUBLIC_API_KEY;
@@ -99,6 +118,8 @@ export default function DocumentsPage() {
               branch
               jobId
               error
+              fileName
+              createdAt
             }
             totalCount
           }
@@ -135,11 +156,6 @@ export default function DocumentsPage() {
 
       setDocuments(payload.nodes);
       setDocumentsTotal(payload.totalCount);
-      payload.nodes.forEach((doc) => {
-        if (doc.status !== 'FAILED') {
-          lastNonFailedStatusRef.current[doc.id] = doc.status;
-        }
-      });
     } catch (err) {
       const messageText = err instanceof Error ? err.message : 'Не удалось загрузить список документов';
       console.error(messageText);
@@ -167,6 +183,8 @@ export default function DocumentsPage() {
               branch
               jobId
               error
+              fileName
+              createdAt
             }
           }
         `;
@@ -195,15 +213,7 @@ export default function DocumentsPage() {
           return;
         }
 
-        setDocuments((prev) =>
-          prev.map((item) => {
-            if (item.id !== doc.id) return item;
-            if (doc.status !== 'FAILED') {
-              lastNonFailedStatusRef.current[doc.id] = doc.status;
-            }
-            return { ...item, ...doc };
-          }),
-        );
+        setDocuments((prev) => prev.map((item) => (item.id === doc.id ? { ...item, ...doc } : item)));
       } catch (err) {
         console.error(err);
       }
@@ -237,13 +247,13 @@ export default function DocumentsPage() {
         </div>
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-lg shadow-indigo-500/5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold">Документы</h2>
             <button
               type="button"
               onClick={fetchDocuments}
               disabled={isListLoading}
-              className="inline-flex items-center rounded-lg bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center rounded-lg bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Обновить
             </button>
@@ -261,13 +271,18 @@ export default function DocumentsPage() {
               <p className="text-sm text-slate-400">Документы пока не загружались.</p>
             )}
 
-            {documents.map((doc) => (
-              <DocumentCard
-                key={doc.id}
-                document={doc}
-                lastNonFailedStatus={lastNonFailedStatusRef.current[doc.id]}
-              />
-            ))}
+            {documents.length > 0 && (
+              <>
+                <div className="hidden md:block">
+                  <DocumentsTable documents={documents} />
+                </div>
+                <div className="grid gap-3 md:hidden">
+                  {documents.map((doc) => (
+                    <DocumentCard key={doc.id} document={doc} />
+                  ))}
+                </div>
+              </>
+            )}
           </div>
 
           {typeof documentsTotal === 'number' && (
@@ -279,106 +294,148 @@ export default function DocumentsPage() {
   );
 }
 
-function DocumentCard({
-  document,
-  lastNonFailedStatus,
-}: {
-  document: KnowledgeDocument;
-  lastNonFailedStatus?: NonFailedStatus;
-}) {
-  const currentStatus = document.status;
-  const finalStatus: NonFailedStatus =
-    currentStatus === 'FAILED' ? lastNonFailedStatus ?? STATUS_SEQUENCE[0] : currentStatus;
-
-  const getStageState = (stage: NonFailedStatus) => {
-    if (currentStatus === 'FAILED') {
-      if (stage === finalStatus) return 'error';
-      if (STATUS_SEQUENCE.indexOf(stage) <= STATUS_SEQUENCE.indexOf(finalStatus)) return 'completed';
-      return 'upcoming';
-    }
-
-    const stageIndex = STATUS_SEQUENCE.indexOf(stage);
-    const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
-    if (stageIndex < currentIndex) return 'completed';
-    if (stageIndex === currentIndex) return 'active';
-    return 'upcoming';
-  };
-
+function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-      <div className="flex items-start justify-between gap-4">
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[40%] min-w-[200px]">Название</TableHead>
+          <TableHead className="w-[20%]">Статус</TableHead>
+          <TableHead className="w-[20%]">Дата загрузки</TableHead>
+          <TableHead className="w-[20%]" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {documents.map((document) => (
+          <TableRow key={document.id}>
+            <TableCell>
+              <p className="font-medium text-slate-100">{getDocumentName(document)}</p>
+              <p className="text-xs text-slate-400">
+                <span className="font-mono text-slate-300">{document.repository}</span> / ветка{' '}
+                <span className="font-mono text-slate-300">{document.branch}</span>
+              </p>
+              <p className="text-xs text-slate-500">Путь: {document.path}</p>
+              {document.jobId && (
+                <p className="text-xs text-slate-500">
+                  jobId: <span className="font-mono">{document.jobId}</span>
+                </p>
+              )}
+            </TableCell>
+            <TableCell>
+              <StatusBadge status={document.status} />
+              {document.status === 'FAILED' && document.error && (
+                <p className="mt-1 text-xs text-red-200">{document.error}</p>
+              )}
+            </TableCell>
+            <TableCell className="whitespace-nowrap text-slate-200">{formatUploadDate(document.createdAt)}</TableCell>
+            <TableCell className="text-right">
+              <OpenButton document={document} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function DocumentCard({ document }: { document: KnowledgeDocument }) {
+  const openUrl = getDocumentLink(document);
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm text-slate-400">Путь</p>
-          <p className="break-all font-mono text-sm text-indigo-200">{document.path}</p>
-          <p className="mt-1 text-xs text-slate-500">
-            Репозиторий: <span className="font-mono">{document.repository}</span> / ветка:{' '}
-            <span className="font-mono">{document.branch}</span>
+          <p className="text-sm font-semibold text-slate-100">{getDocumentName(document)}</p>
+          <p className="text-xs text-slate-500">
+            <span className="font-mono text-slate-300">{document.repository}</span> • ветка{' '}
+            <span className="font-mono text-slate-300">{document.branch}</span>
           </p>
-          {document.jobId && (
-            <p className="text-xs text-slate-500">
-              jobId: <span className="font-mono">{document.jobId}</span>
-            </p>
-          )}
+          <p className="mt-1 text-xs text-slate-500">Путь: {document.path}</p>
         </div>
-        <span
-          className={`rounded-full px-3 py-1 text-xs font-medium ${
-            currentStatus === 'FAILED' ? 'bg-red-900/60 text-red-200' : 'bg-slate-800 text-slate-200'
-          }`}
-        >
-          {currentStatus === 'FAILED' ? 'Ошибка' : STATUS_META[currentStatus]?.label ?? currentStatus}
-        </span>
+        <StatusBadge status={document.status} />
       </div>
 
-      <div className="mt-4 space-y-3">
-        {STATUS_SEQUENCE.map((stage, index) => {
-          const state = getStageState(stage);
-          const meta = STATUS_META[stage];
-          const isLast = index === STATUS_SEQUENCE.length - 1;
-          const lineColor =
-            state === 'completed' ? 'bg-emerald-500' : state === 'active' ? 'bg-indigo-500' : 'bg-slate-700';
-
-          return (
-            <div key={stage} className="flex items-start gap-3">
-              <div className="flex flex-col items-center">
-                <div
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg ${
-                    state === 'completed'
-                      ? 'border-emerald-500 bg-emerald-500/20 text-emerald-200'
-                      : state === 'active'
-                        ? 'border-indigo-500 bg-indigo-500/20 text-indigo-200'
-                        : 'border-slate-700 bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  {meta.icon}
-                </div>
-                {!isLast && <div className={`mt-1 h-8 w-px ${lineColor}`} aria-hidden />}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-slate-100">{meta.label}</p>
-                <p className="text-xs text-slate-400">{meta.description}</p>
-                {state === 'active' && currentStatus !== 'FAILED' && (
-                  <p className="mt-1 text-xs text-indigo-200">Статус обновляется…</p>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {currentStatus === 'FAILED' && (
-          <div className="flex items-start gap-3">
-            <div className="flex flex-col items-center">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-red-500 bg-red-500/20 text-red-200">
-                ⚠️
-              </div>
-            </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-red-200">Процесс завершился с ошибкой</p>
-              <p className="text-xs text-red-300">
-                {document.error ? document.error : 'Неизвестная ошибка обработки'}
-              </p>
-            </div>
-          </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+        <span className="text-slate-400">Загружено:</span>
+        <span className="font-mono text-slate-200">{formatUploadDate(document.createdAt)}</span>
+        {document.jobId && (
+          <span className="ml-auto rounded-full bg-slate-800 px-2 py-1 font-mono text-[10px] text-slate-200">
+            jobId: {document.jobId}
+          </span>
         )}
+      </div>
+
+      {document.status === 'FAILED' && document.error && (
+        <p className="mt-2 text-xs text-red-200">Ошибка: {document.error}</p>
+      )}
+
+      <div className="mt-3 flex justify-end">
+        <OpenButton document={document} fullWidth={!openUrl} />
       </div>
     </div>
   );
+}
+
+function OpenButton({ document, fullWidth }: { document: KnowledgeDocument; fullWidth?: boolean }) {
+  const url = getDocumentLink(document);
+
+  return (
+    <a
+      href={url ?? '#'}
+      target="_blank"
+      rel="noreferrer"
+      aria-disabled={!url}
+      className={cn(
+        'inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400',
+        !url && 'pointer-events-none opacity-60',
+        fullWidth ? 'w-full' : 'min-w-[120px]',
+      )}
+    >
+      Открыть
+    </a>
+  );
+}
+
+function StatusBadge({ status }: { status: KnowledgeDocumentStatus }) {
+  return (
+    <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium', STATUS_STYLES[status])}>
+      <span className="h-2 w-2 rounded-full bg-current opacity-80" aria-hidden />
+      {STATUS_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
+function Table({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="w-full overflow-x-auto">
+      <table className="w-full caption-bottom text-sm">{children}</table>
+    </div>
+  );
+}
+
+function TableHeader({ children }: { children: React.ReactNode }) {
+  return <thead className="[&_tr]:border-b [&_tr]:border-slate-800">{children}</thead>;
+}
+
+function TableBody({ children }: { children: React.ReactNode }) {
+  return <tbody className="[&_tr:last-child]:border-0">{children}</tbody>;
+}
+
+function TableRow({ children }: { children: React.ReactNode }) {
+  return <tr className="border-b border-slate-800 transition hover:bg-slate-800/50">{children}</tr>;
+}
+
+function TableHead({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <th className={cn('h-12 px-4 text-left align-middle text-xs font-semibold text-slate-400', className)} scope="col">
+      {children}
+    </th>
+  );
+}
+
+function TableCell({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <td className={cn('p-4 align-top text-sm text-slate-200', className)}>{children}</td>;
 }

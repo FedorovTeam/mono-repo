@@ -21,6 +21,10 @@ func mapDocument(doc *pb.Document) *domain.Document {
 		ConversionStrategy: domain.NormalizeConversionStrategy(doc.GetConversionStrategy()),
 	}
 
+	if ts := doc.GetCreatedAt(); ts != nil {
+		result.CreatedAt = ts.AsTime()
+	}
+
 	if doc.GetOwner() != "" {
 		owner := doc.GetOwner()
 		result.RepositoryOwner = &owner

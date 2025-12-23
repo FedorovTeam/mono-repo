@@ -1,3 +1,5 @@
+scalar Timestamp
+
 """Запросы статуса и списка документов знаний."""
 type Query {
   """Возвращает документ и его текущий статус по идентификатору Temporal/БД."""
@@ -32,6 +34,7 @@ type KnowledgeDocument {
   repositoryOwner: String
   branch: String!
   path: String!
+  createdAt: Timestamp!
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String

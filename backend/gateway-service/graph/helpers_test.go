@@ -2,6 +2,7 @@ package graph
 
 import (
 	"testing"
+	"time"
 
 	"backend-gateway-service/graph/model"
 	"backend-gateway-service/internal/domain"
@@ -10,13 +11,17 @@ import (
 func TestMapDocument(t *testing.T) {
 	owner := "org"
 	job := "job-1"
-	doc := mapDocument(&domain.Document{ID: "1", FileName: "file", Repository: "org/repo", RepositoryOwner: &owner, Branch: "main", Path: "docs/file", Status: domain.DocumentStatusConvertedToMarkdown, JobID: &job})
+	createdAt := time.Now()
+	doc := mapDocument(&domain.Document{ID: "1", FileName: "file", Repository: "org/repo", RepositoryOwner: &owner, Branch: "main", Path: "docs/file", CreatedAt: createdAt, Status: domain.DocumentStatusConvertedToMarkdown, JobID: &job})
 
 	if doc == nil || doc.ID != "1" {
 		t.Fatalf("expected document mapped")
 	}
 	if doc.RepositoryOwner == nil || *doc.RepositoryOwner != owner {
 		t.Fatalf("repository owner not mapped")
+	}
+	if !doc.CreatedAt.Equal(createdAt) {
+		t.Fatalf("createdAt not mapped")
 	}
 	if doc.Status != model.KnowledgeDocumentStatusConvertedToMarkdown {
 		t.Fatalf("unexpected status: %s", doc.Status)
