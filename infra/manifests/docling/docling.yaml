@@ -53,7 +53,7 @@ spec:
               memory: "2Gi"
             limits:
               cpu: "5"
-              memory: "4Gi"
+              memory: "6Gi"
           # Если потребуется доступ к модели/кэшу на диске – сюда можно добавить volumeMounts
 ---
 apiVersion: v1
