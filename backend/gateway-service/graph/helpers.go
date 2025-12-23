@@ -20,12 +20,13 @@ func mapDocument(doc *domain.Document) *model.KnowledgeDocument {
 	}
 
 	result := &model.KnowledgeDocument{
-		ID:         doc.ID,
-		FileName:   doc.FileName,
-		Repository: doc.Repository,
-		Branch:     doc.Branch,
-		Path:       doc.Path,
-		Status:     modelStatusFromDomain(doc.Status),
+		ID:            doc.ID,
+		FileName:      doc.FileName,
+		Repository:    doc.Repository,
+		Branch:        doc.Branch,
+		Path:          doc.Path,
+		Status:        modelStatusFromDomain(doc.Status),
+		StatusHistory: make([]*model.DocumentStatusChange, 0, len(doc.StatusHistory)),
 	}
 
 	if doc.RepositoryOwner != nil {
@@ -37,6 +38,21 @@ func mapDocument(doc *domain.Document) *model.KnowledgeDocument {
 	}
 	if doc.Error != nil {
 		result.Error = doc.Error
+	}
+
+	for i := range doc.StatusHistory {
+		change := doc.StatusHistory[i]
+		var reason *string
+		if change.Reason != "" {
+			r := change.Reason
+			reason = &r
+		}
+		changeCopy := model.DocumentStatusChange{
+			Status:    modelStatusFromDomain(change.Status),
+			Reason:    reason,
+			ChangedAt: change.ChangedAt,
+		}
+		result.StatusHistory = append(result.StatusHistory, &changeCopy)
 	}
 
 	return result

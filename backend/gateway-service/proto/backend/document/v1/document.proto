@@ -89,9 +89,24 @@ message ConfirmUploadRequest {
   string correlation_id = 4;
 }
 
+message ListDocumentStatusLogsRequest {
+  string document_id = 1;
+}
+
+message DocumentStatusLog {
+  DocumentStatus status = 1;
+  string reason = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message ListDocumentStatusLogsResponse {
+  repeated DocumentStatusLog logs = 1;
+}
+
 service DocumentService {
   rpc CreateDocument(CreateDocumentRequest) returns (Document);
   rpc GetDocument(GetDocumentRequest) returns (Document);
   rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
   rpc ConfirmUpload(ConfirmUploadRequest) returns (Document);
+  rpc ListDocumentStatusLogs(ListDocumentStatusLogsRequest) returns (ListDocumentStatusLogsResponse);
 }

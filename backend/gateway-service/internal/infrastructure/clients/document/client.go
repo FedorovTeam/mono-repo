@@ -107,6 +107,15 @@ func (c *GRPCClient) ConfirmUpload(ctx context.Context, req domain.ConfirmUpload
 	return mapDocument(resp), nil
 }
 
+// ListDocumentStatusLogs возвращает историю смен статусов документа.
+func (c *GRPCClient) ListDocumentStatusLogs(ctx context.Context, documentID string) ([]domain.DocumentStatusChange, error) {
+	resp, err := c.DocumentServiceClient.ListDocumentStatusLogs(withMetadata(ctx), &pb.ListDocumentStatusLogsRequest{DocumentId: documentID})
+	if err != nil {
+		return nil, err
+	}
+	return mapStatusLogs(resp.GetLogs()), nil
+}
+
 func withMetadata(ctx context.Context) context.Context {
 	correlationID := ctxutils.CorrelationID(ctx)
 	if correlationID != "" {

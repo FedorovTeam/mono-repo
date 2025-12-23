@@ -45,6 +45,10 @@ func (s *stubDocumentClient) ListDocuments(context.Context, domain.DocumentFilte
 	return nil, errors.New("not implemented")
 }
 
+func (s *stubDocumentClient) ListDocumentStatusLogs(context.Context, string) ([]domain.DocumentStatusChange, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (s *stubDocumentClient) Close() error { return nil }
 
 func newTestServer(docClient *stubDocumentClient) *Server {

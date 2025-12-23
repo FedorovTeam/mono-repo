@@ -5,6 +5,20 @@ import (
 	pb "backend-gateway-service/proto/backend/document/v1"
 )
 
+func mapStatusLogs(logs []*pb.DocumentStatusLog) []domain.DocumentStatusChange {
+	result := make([]domain.DocumentStatusChange, 0, len(logs))
+	for i := range logs {
+		log := logs[i]
+		changedAt := log.GetCreatedAt().AsTime()
+		result = append(result, domain.DocumentStatusChange{
+			Status:    domainStatusFromProto(log.GetStatus()),
+			Reason:    log.GetReason(),
+			ChangedAt: changedAt,
+		})
+	}
+	return result
+}
+
 func mapDocument(doc *pb.Document) *domain.Document {
 	if doc == nil {
 		return nil

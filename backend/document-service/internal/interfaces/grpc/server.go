@@ -93,6 +93,25 @@ func (s *Server) ConfirmUpload(ctx context.Context, req *documentv1.ConfirmUploa
 	return toProto(doc), nil
 }
 
+func (s *Server) ListDocumentStatusLogs(ctx context.Context, req *documentv1.ListDocumentStatusLogsRequest) (*documentv1.ListDocumentStatusLogsResponse, error) {
+	s.logWithCorrelation(ctx, "ListDocumentStatusLogs")
+	logs, err := s.service.ListStatusLogs(ctx, req.GetDocumentId())
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &documentv1.ListDocumentStatusLogsResponse{}
+	for i := range logs {
+		log := logs[i]
+		resp.Logs = append(resp.Logs, &documentv1.DocumentStatusLog{
+			Status:    toProtoStatus(log.ToStatus),
+			Reason:    log.Reason,
+			CreatedAt: timestamppb.New(log.CreatedAt),
+		})
+	}
+	return resp, nil
+}
+
 func toProto(doc *domain.Document) *documentv1.Document {
 	p := &documentv1.Document{
 		Id:                 doc.ID,

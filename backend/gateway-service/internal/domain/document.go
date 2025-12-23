@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // DocumentStatus описывает статус документа.
 type DocumentStatus string
 
@@ -10,6 +12,13 @@ const (
 	DocumentStatusPublishedToGithub   DocumentStatus = "PUBLISHED_TO_GITHUB"
 	DocumentStatusFailed              DocumentStatus = "FAILED"
 )
+
+// DocumentStatusChange хранит историю смен статусов.
+type DocumentStatusChange struct {
+	Status    DocumentStatus
+	Reason    string
+	ChangedAt time.Time
+}
 
 // Document представляет доменную модель документа.
 type Document struct {
@@ -22,6 +31,7 @@ type Document struct {
 	Status          DocumentStatus
 	JobID           *string
 	Error           *string
+	StatusHistory   []DocumentStatusChange
 }
 
 // DocumentFilter задает параметры фильтрации документов.

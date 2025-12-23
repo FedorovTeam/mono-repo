@@ -13,6 +13,7 @@ type DocumentService interface {
 	UpdateStatus(ctx context.Context, in UpdateStatusInput) (*domain.Document, error)
 	GetDocument(ctx context.Context, id string) (*domain.Document, error)
 	ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) ([]domain.Document, error)
+	ListStatusLogs(ctx context.Context, documentID string) ([]domain.DocumentStatusLog, error)
 }
 
 var _ DocumentService = (*UseCase)(nil)

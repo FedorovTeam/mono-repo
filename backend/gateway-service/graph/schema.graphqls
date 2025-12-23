@@ -35,6 +35,7 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
+  statusHistory: [DocumentStatusChange!]!
 }
 
 enum KnowledgeDocumentStatus {
@@ -43,6 +44,12 @@ enum KnowledgeDocumentStatus {
   CONVERTED_TO_MARKDOWN
   PUBLISHED_TO_GITHUB
   FAILED
+}
+
+type DocumentStatusChange {
+  status: KnowledgeDocumentStatus!
+  reason: String
+  changedAt: Time!
 }
 
 input UploadKnowledgeDocumentInput {
@@ -63,3 +70,5 @@ input Pagination {
   limit: Int = 10
   offset: Int = 0
 }
+
+scalar Time

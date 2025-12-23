@@ -33,6 +33,10 @@ func (s *stubDocumentClient) ConfirmUpload(context.Context, domain.ConfirmUpload
 	return nil, errors.New("not implemented")
 }
 
+func (s *stubDocumentClient) ListDocumentStatusLogs(context.Context, string) ([]domain.DocumentStatusChange, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (s *stubDocumentClient) Close() error { return nil }
 
 type stubStorageClient struct{}

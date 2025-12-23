@@ -26,11 +26,36 @@ func NewDocumentService(docClient domain.DocumentClient) *DocumentService {
 // GetDocument возвращает документ по идентификатору.
 func (s *DocumentService) GetDocument(ctx context.Context, id string) (*domain.Document, error) {
 	ctx, _ = ctxutils.EnsureCorrelationID(ctx)
-	return s.documents.GetDocument(ctx, id)
+	doc, err := s.documents.GetDocument(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachStatusHistory(ctx, doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
 }
 
 // ListDocuments возвращает список документов с учётом фильтров.
 func (s *DocumentService) ListDocuments(ctx context.Context, filter domain.DocumentFilter, pagination domain.Pagination) (*domain.DocumentList, error) {
 	ctx, _ = ctxutils.EnsureCorrelationID(ctx)
-	return s.documents.ListDocuments(ctx, filter, pagination)
+	list, err := s.documents.ListDocuments(ctx, filter, pagination)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list.Documents {
+		if err := s.attachStatusHistory(ctx, &list.Documents[i]); err != nil {
+			return nil, err
+		}
+	}
+	return list, nil
+}
+
+func (s *DocumentService) attachStatusHistory(ctx context.Context, doc *domain.Document) error {
+	history, err := s.documents.ListDocumentStatusLogs(ctx, doc.ID)
+	if err != nil {
+		return err
+	}
+	doc.StatusHistory = history
+	return nil
 }

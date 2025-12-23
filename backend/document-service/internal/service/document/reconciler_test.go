@@ -38,6 +38,10 @@ func (r *repoStub) ListDocuments(context.Context, int, int, *domain.DocumentStat
 	return r.docs, nil
 }
 
+func (r *repoStub) ListStatusLogs(context.Context, string) ([]domain.DocumentStatusLog, error) {
+	return nil, nil
+}
+
 func (r *repoStub) UpdateStatus(context.Context, string, domain.DocumentStatus, string, string, *domain.DocumentVersion) (*domain.Document, error) {
 	return r.doc, nil
 }

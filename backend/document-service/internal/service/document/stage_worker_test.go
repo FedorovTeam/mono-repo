@@ -99,6 +99,10 @@ func (r *publishRepoStub) ListDocuments(context.Context, int, int, *domain.Docum
 	return nil, nil
 }
 
+func (r *publishRepoStub) ListStatusLogs(context.Context, string) ([]domain.DocumentStatusLog, error) {
+	return nil, nil
+}
+
 func (r *publishRepoStub) CountStatusLogsWithReasonPrefix(context.Context, string, domain.DocumentStatus, string) (int, error) {
 	return 0, nil
 }

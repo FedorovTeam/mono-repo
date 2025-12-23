@@ -40,6 +40,10 @@ func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status 
 	return nil, nil
 }
 
+func (f *fakeRepo) ListStatusLogs(context.Context, string) ([]domain.DocumentStatusLog, error) {
+	return nil, nil
+}
+
 func (f *fakeRepo) CountStatusLogsWithReasonPrefix(ctx context.Context, id string, status domain.DocumentStatus, reasonPrefix string) (int, error) {
 	return 0, nil
 }

@@ -101,10 +101,25 @@ message ConfirmUploadRequest {
   string conversion_strategy = 6;
 }
 
+message ListDocumentStatusLogsRequest {
+  string document_id = 1;
+}
+
+message DocumentStatusLog {
+  DocumentStatus status = 1;
+  string reason = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message ListDocumentStatusLogsResponse {
+  repeated DocumentStatusLog logs = 1;
+}
+
 service DocumentService {
   rpc CreateDocument(CreateDocumentRequest) returns (Document);
   rpc GetDocument(GetDocumentRequest) returns (Document);
   rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
   rpc UpdateDocumentStatus(UpdateDocumentStatusRequest) returns (Document);
   rpc ConfirmUpload(ConfirmUploadRequest) returns (Document);
+  rpc ListDocumentStatusLogs(ListDocumentStatusLogsRequest) returns (ListDocumentStatusLogsResponse);
 }

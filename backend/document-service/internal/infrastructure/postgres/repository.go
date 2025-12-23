@@ -298,6 +298,35 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	return result, nil
 }
 
+func (r *Repository) ListStatusLogs(ctx context.Context, documentID string) ([]domain.DocumentStatusLog, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, document_id, from_status, to_status, workflow_id, reason, created_at FROM document_status_logs WHERE document_id=$1 ORDER BY created_at ASC`, documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []domain.DocumentStatusLog
+	for rows.Next() {
+		var log domain.DocumentStatusLog
+		var fromStatus sql.NullString
+		var toStatus string
+		if err := rows.Scan(&log.ID, &log.DocumentID, &fromStatus, &toStatus, &log.WorkflowID, &log.Reason, &log.CreatedAt); err != nil {
+			return nil, err
+		}
+		if fromStatus.Valid {
+			log.FromStatus = domain.DocumentStatus(fromStatus.String)
+		}
+		log.ToStatus = domain.DocumentStatus(strings.TrimSpace(toStatus))
+		result = append(result, log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (r *Repository) UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

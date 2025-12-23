@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	DocumentService_CreateDocument_FullMethodName = "/backend.document.v1.DocumentService/CreateDocument"
-	DocumentService_GetDocument_FullMethodName    = "/backend.document.v1.DocumentService/GetDocument"
-	DocumentService_ListDocuments_FullMethodName  = "/backend.document.v1.DocumentService/ListDocuments"
-	DocumentService_ConfirmUpload_FullMethodName  = "/backend.document.v1.DocumentService/ConfirmUpload"
+	DocumentService_CreateDocument_FullMethodName         = "/backend.document.v1.DocumentService/CreateDocument"
+	DocumentService_GetDocument_FullMethodName            = "/backend.document.v1.DocumentService/GetDocument"
+	DocumentService_ListDocuments_FullMethodName          = "/backend.document.v1.DocumentService/ListDocuments"
+	DocumentService_ConfirmUpload_FullMethodName          = "/backend.document.v1.DocumentService/ConfirmUpload"
+	DocumentService_ListDocumentStatusLogs_FullMethodName = "/backend.document.v1.DocumentService/ListDocumentStatusLogs"
 )
 
 // DocumentServiceClient is the client API for DocumentService service.
@@ -33,6 +34,7 @@ type DocumentServiceClient interface {
 	GetDocument(ctx context.Context, in *GetDocumentRequest, opts ...grpc.CallOption) (*Document, error)
 	ListDocuments(ctx context.Context, in *ListDocumentsRequest, opts ...grpc.CallOption) (*ListDocumentsResponse, error)
 	ConfirmUpload(ctx context.Context, in *ConfirmUploadRequest, opts ...grpc.CallOption) (*Document, error)
+	ListDocumentStatusLogs(ctx context.Context, in *ListDocumentStatusLogsRequest, opts ...grpc.CallOption) (*ListDocumentStatusLogsResponse, error)
 }
 
 type documentServiceClient struct {
@@ -79,6 +81,15 @@ func (c *documentServiceClient) ConfirmUpload(ctx context.Context, in *ConfirmUp
 	return out, nil
 }
 
+func (c *documentServiceClient) ListDocumentStatusLogs(ctx context.Context, in *ListDocumentStatusLogsRequest, opts ...grpc.CallOption) (*ListDocumentStatusLogsResponse, error) {
+	out := new(ListDocumentStatusLogsResponse)
+	err := c.cc.Invoke(ctx, DocumentService_ListDocumentStatusLogs_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DocumentServiceServer is the server API for DocumentService service.
 // All implementations must embed UnimplementedDocumentServiceServer
 // for forward compatibility
@@ -87,6 +98,7 @@ type DocumentServiceServer interface {
 	GetDocument(context.Context, *GetDocumentRequest) (*Document, error)
 	ListDocuments(context.Context, *ListDocumentsRequest) (*ListDocumentsResponse, error)
 	ConfirmUpload(context.Context, *ConfirmUploadRequest) (*Document, error)
+	ListDocumentStatusLogs(context.Context, *ListDocumentStatusLogsRequest) (*ListDocumentStatusLogsResponse, error)
 	mustEmbedUnimplementedDocumentServiceServer()
 }
 
@@ -105,6 +117,9 @@ func (UnimplementedDocumentServiceServer) ListDocuments(context.Context, *ListDo
 }
 func (UnimplementedDocumentServiceServer) ConfirmUpload(context.Context, *ConfirmUploadRequest) (*Document, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConfirmUpload not implemented")
+}
+func (UnimplementedDocumentServiceServer) ListDocumentStatusLogs(context.Context, *ListDocumentStatusLogsRequest) (*ListDocumentStatusLogsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListDocumentStatusLogs not implemented")
 }
 func (UnimplementedDocumentServiceServer) mustEmbedUnimplementedDocumentServiceServer() {}
 
@@ -191,6 +206,24 @@ func _DocumentService_ConfirmUpload_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DocumentService_ListDocumentStatusLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDocumentStatusLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DocumentServiceServer).ListDocumentStatusLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DocumentService_ListDocumentStatusLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DocumentServiceServer).ListDocumentStatusLogs(ctx, req.(*ListDocumentStatusLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DocumentService_ServiceDesc is the grpc.ServiceDesc for DocumentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -213,6 +246,10 @@ var DocumentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConfirmUpload",
 			Handler:    _DocumentService_ConfirmUpload_Handler,
+		},
+		{
+			MethodName: "ListDocumentStatusLogs",
+			Handler:    _DocumentService_ListDocumentStatusLogs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

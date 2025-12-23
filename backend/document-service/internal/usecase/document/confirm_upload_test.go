@@ -28,6 +28,10 @@ func (r *confirmUploadRepositoryStub) ListDocuments(context.Context, int, int, *
 	return nil, errors.New("not implemented")
 }
 
+func (r *confirmUploadRepositoryStub) ListStatusLogs(context.Context, string) ([]domain.DocumentStatusLog, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (r *confirmUploadRepositoryStub) UpdateStatus(context.Context, string, domain.DocumentStatus, string, string, *domain.DocumentVersion) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }

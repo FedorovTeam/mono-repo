@@ -201,6 +201,29 @@ func TestGetDocumentNullErrorReason(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestListStatusLogs(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := New(db)
+	ctx := context.Background()
+	now := time.Now()
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, document_id, from_status, to_status, workflow_id, reason, created_at FROM document_status_logs WHERE document_id=$1 ORDER BY created_at ASC")).
+		WithArgs("doc-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "document_id", "from_status", "to_status", "workflow_id", "reason", "created_at"}).
+			AddRow("log-1", "doc-1", nil, domain.DocumentStatusUploaded, "wf", "created", now).
+			AddRow("log-2", "doc-1", domain.DocumentStatusUploaded, domain.DocumentStatusStoredOriginal, "wf", "stored", now.Add(time.Minute)))
+
+	logs, err := repo.ListStatusLogs(ctx, "doc-1")
+	require.NoError(t, err)
+	require.Len(t, logs, 2)
+	require.Equal(t, domain.DocumentStatusUploaded, logs[0].ToStatus)
+	require.Equal(t, domain.DocumentStatusStoredOriginal, logs[1].ToStatus)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestListFinishedJobs(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

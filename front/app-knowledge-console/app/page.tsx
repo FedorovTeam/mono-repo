@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -11,6 +11,12 @@ type KnowledgeDocumentStatus =
   | 'PUBLISHED_TO_GITHUB'
   | 'FAILED';
 
+interface DocumentStatusChange {
+  status: KnowledgeDocumentStatus;
+  reason?: string | null;
+  changedAt: string;
+}
+
 interface KnowledgeDocument {
   id: string;
   status: KnowledgeDocumentStatus;
@@ -19,6 +25,7 @@ interface KnowledgeDocument {
   branch: string;
   jobId?: string | null;
   error?: string | null;
+  statusHistory: DocumentStatusChange[];
 }
 
 type Category = 'plenary' | 'bibliography';
@@ -51,6 +58,7 @@ interface UploadResponse {
         repository: string;
         branch: string;
         path: string;
+        statusHistory?: DocumentStatusChange[];
       };
       uploadUrl: string;
       uploadMethod: string;
@@ -61,13 +69,13 @@ interface UploadResponse {
 
 interface KnowledgeDocumentsResponse {
   knowledgeDocuments: {
-    nodes: KnowledgeDocument[];
+    nodes: Array<Omit<KnowledgeDocument, 'statusHistory'> & { statusHistory?: DocumentStatusChange[] }>;
     totalCount: number;
   };
 }
 
 interface KnowledgeDocumentResponse {
-  knowledgeDocument: KnowledgeDocument | null;
+  knowledgeDocument: (Omit<KnowledgeDocument, 'statusHistory'> & { statusHistory?: DocumentStatusChange[] }) | null;
 }
 
 const KNOWLEDGE_ROOT = 'knowledge/docs';
@@ -103,6 +111,43 @@ const STATUS_META: Record<NonFailedStatus, { label: string; description: string;
   },
 };
 
+const STATUS_REASON_DEFAULTS: Record<KnowledgeDocumentStatus, string> = {
+  UPLOADED: 'Файл принят системой',
+  STORED_ORIGINAL: 'Оригинал сохранён в хранилище',
+  CONVERTED_TO_MARKDOWN: 'Преобразование завершено',
+  PUBLISHED_TO_GITHUB: 'Документ опубликован',
+  FAILED: 'Произошла ошибка при обработке',
+};
+
+const normalizeHistory = (history?: DocumentStatusChange[]) =>
+  (history ?? [])
+    .map((log) => ({
+      ...log,
+      changedAt: log.changedAt ?? new Date().toISOString(),
+    }))
+    .sort((a, b) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime());
+
+const normalizeDocument = (doc: Omit<KnowledgeDocument, 'statusHistory'> & { statusHistory?: DocumentStatusChange[] }): KnowledgeDocument => ({
+  ...doc,
+  statusHistory: normalizeHistory(doc.statusHistory),
+});
+
+const humanizeReason = (status: KnowledgeDocumentStatus, reason?: string | null) => {
+  const base = STATUS_REASON_DEFAULTS[status] ?? 'Статус обновлён';
+  if (!reason) return base;
+  const text = reason.toLowerCase();
+  if (text.includes('timeout')) return 'Выполнение заняло больше времени, повторяем попытку';
+  if (text.includes('etag') || text.includes('bucket') || text.includes('s3')) return 'Проверяем доступ к хранилищу';
+  if (text.includes('convert') || text.includes('markdown')) return 'Обрабатываем документ, готовим Markdown';
+  if (text.includes('publish') || text.includes('github')) return 'Публикуем изменения в репозитории';
+  if (text.includes('retry')) return 'Назначена повторная попытка обработки';
+  if (text.includes('error') || text.includes('fail') || text.includes('exception')) return 'Возникла ошибка, команда разбирается';
+  return base;
+};
+
+const formatTimestamp = (value: string) =>
+  new Date(value).toLocaleString('ru-RU', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+
 const generateCorrelationId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -130,7 +175,6 @@ export default function HomePage() {
   const [documentsTotal, setDocumentsTotal] = useState<number | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
-  const lastNonFailedStatusRef = useRef<Record<string, NonFailedStatus | undefined>>({});
 
   const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
   const apiKey = process.env.NEXT_PUBLIC_API_KEY;
@@ -226,6 +270,11 @@ export default function HomePage() {
               branch
               jobId
               error
+              statusHistory {
+                status
+                reason
+                changedAt
+              }
             }
             totalCount
           }
@@ -260,13 +309,8 @@ export default function HomePage() {
         throw new Error('Пустой ответ knowledgeDocuments');
       }
 
-      setDocuments(payload.nodes);
+      setDocuments(payload.nodes.map((doc) => normalizeDocument(doc)));
       setDocumentsTotal(payload.totalCount);
-      payload.nodes.forEach((doc) => {
-        if (doc.status !== 'FAILED') {
-          lastNonFailedStatusRef.current[doc.id] = doc.status;
-        }
-      });
     } catch (err) {
       const messageText = err instanceof Error ? err.message : 'Не удалось загрузить список документов';
       console.error(messageText);
@@ -294,6 +338,11 @@ export default function HomePage() {
               branch
               jobId
               error
+              statusHistory {
+                status
+                reason
+                changedAt
+              }
             }
           }
         `;
@@ -325,10 +374,7 @@ export default function HomePage() {
         setDocuments((prev) =>
           prev.map((item) => {
             if (item.id !== doc.id) return item;
-            if (doc.status !== 'FAILED') {
-              lastNonFailedStatusRef.current[doc.id] = doc.status;
-            }
-            return { ...item, ...doc };
+            return { ...item, ...normalizeDocument(doc) };
           }),
         );
       } catch (err) {
@@ -660,11 +706,7 @@ export default function HomePage() {
               )}
 
               {documents.map((doc) => (
-                <DocumentCard
-                  key={doc.id}
-                  document={doc}
-                  lastNonFailedStatus={lastNonFailedStatusRef.current[doc.id]}
-                />
+                <DocumentCard key={doc.id} document={doc} />
               ))}
             </div>
 
@@ -677,28 +719,28 @@ export default function HomePage() {
   );
 }
 
-function DocumentCard({
-  document,
-  lastNonFailedStatus,
-}: {
-  document: KnowledgeDocument;
-  lastNonFailedStatus?: NonFailedStatus;
-}) {
+function DocumentCard({ document }: { document: KnowledgeDocument }) {
   const currentStatus = document.status;
-  const finalStatus: NonFailedStatus =
+  const history = [...document.statusHistory].sort(
+    (a, b) => new Date(a.changedAt).getTime() - new Date(b.changedAt).getTime(),
+  );
+  const lastNonFailedStatus = history
+    .filter((log) => log.status !== 'FAILED')
+    .map((log) => log.status as NonFailedStatus)
+    .at(-1);
+  const activeStatus: NonFailedStatus =
     currentStatus === 'FAILED' ? lastNonFailedStatus ?? STATUS_SEQUENCE[0] : currentStatus;
+  const historyByStatus = new Map<KnowledgeDocumentStatus, DocumentStatusChange>();
+  history.forEach((log) => historyByStatus.set(log.status, log));
+  const failureLog = historyByStatus.get('FAILED');
+  const failureDescription = humanizeReason('FAILED', failureLog?.reason ?? document.error);
 
   const getStageState = (stage: NonFailedStatus) => {
-    if (currentStatus === 'FAILED') {
-      if (stage === finalStatus) return 'error';
-      if (STATUS_SEQUENCE.indexOf(stage) <= STATUS_SEQUENCE.indexOf(finalStatus)) return 'completed';
-      return 'upcoming';
-    }
-
     const stageIndex = STATUS_SEQUENCE.indexOf(stage);
-    const currentIndex = STATUS_SEQUENCE.indexOf(currentStatus);
-    if (stageIndex < currentIndex) return 'completed';
-    if (stageIndex === currentIndex) return 'active';
+    const activeIndex = STATUS_SEQUENCE.indexOf(activeStatus);
+    if (currentStatus === 'FAILED' && stage === activeStatus) return 'error';
+    if (stage === activeStatus && currentStatus !== 'FAILED') return 'active';
+    if (stageIndex < activeIndex && historyByStatus.has(stage)) return 'completed';
     return 'upcoming';
   };
 
@@ -731,6 +773,9 @@ function DocumentCard({
         {STATUS_SEQUENCE.map((stage, index) => {
           const state = getStageState(stage);
           const meta = STATUS_META[stage];
+          const stageLog = historyByStatus.get(stage);
+          const reasonText = humanizeReason(stage, stageLog?.reason);
+          const timestamp = stageLog?.changedAt;
           const isLast = index === STATUS_SEQUENCE.length - 1;
           const lineColor =
             state === 'completed' ? 'bg-emerald-500' : state === 'active' ? 'bg-indigo-500' : 'bg-slate-700';
@@ -753,7 +798,10 @@ function DocumentCard({
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium text-slate-100">{meta.label}</p>
-                <p className="text-xs text-slate-400">{meta.description}</p>
+                <p className="text-xs text-slate-400">{reasonText}</p>
+                {timestamp && (
+                  <p className="text-[11px] text-slate-500">Обновлено {formatTimestamp(timestamp)}</p>
+                )}
                 {state === 'active' && currentStatus !== 'FAILED' && (
                   <p className="mt-1 text-xs text-indigo-200">Статус обновляется…</p>
                 )}
@@ -770,9 +818,10 @@ function DocumentCard({
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium text-red-200">Процесс завершился с ошибкой</p>
-              <p className="text-xs text-red-300">
-                {document.error ? document.error : 'Неизвестная ошибка обработки'}
-              </p>
+              <p className="text-xs text-red-300">{failureDescription}</p>
+              {failureLog?.changedAt && (
+                <p className="text-[11px] text-red-300/80">Время: {formatTimestamp(failureLog.changedAt)}</p>
+              )}
             </div>
           </div>
         )}

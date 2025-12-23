@@ -50,6 +50,7 @@ type DocumentClient interface {
 	GetDocument(ctx context.Context, id string) (*Document, error)
 	ListDocuments(ctx context.Context, filter DocumentFilter, pagination Pagination) (*DocumentList, error)
 	ConfirmUpload(ctx context.Context, req ConfirmUploadRequest) (*Document, error)
+	ListDocumentStatusLogs(ctx context.Context, documentID string) ([]DocumentStatusChange, error)
 	Close() error
 }
 

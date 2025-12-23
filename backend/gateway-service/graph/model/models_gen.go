@@ -7,7 +7,14 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 )
+
+type DocumentStatusChange struct {
+	Status    KnowledgeDocumentStatus `json:"status"`
+	Reason    *string                 `json:"reason,omitempty"`
+	ChangedAt time.Time               `json:"changedAt"`
+}
 
 type KnowledgeDocument struct {
 	ID       string `json:"id"`
@@ -21,6 +28,7 @@ type KnowledgeDocument struct {
 	Status          KnowledgeDocumentStatus `json:"status"`
 	JobID           *string                 `json:"jobId,omitempty"`
 	Error           *string                 `json:"error,omitempty"`
+	StatusHistory   []*DocumentStatusChange `json:"statusHistory"`
 }
 
 type KnowledgeDocumentConnection struct {

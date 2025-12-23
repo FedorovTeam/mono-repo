@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
@@ -46,6 +47,12 @@ type DirectiveRoot struct {
 }
 
 type ComplexityRoot struct {
+	DocumentStatusChange struct {
+		ChangedAt func(childComplexity int) int
+		Reason    func(childComplexity int) int
+		Status    func(childComplexity int) int
+	}
+
 	KnowledgeDocument struct {
 		Branch          func(childComplexity int) int
 		Error           func(childComplexity int) int
@@ -56,6 +63,7 @@ type ComplexityRoot struct {
 		Repository      func(childComplexity int) int
 		RepositoryOwner func(childComplexity int) int
 		Status          func(childComplexity int) int
+		StatusHistory   func(childComplexity int) int
 	}
 
 	KnowledgeDocumentConnection struct {
@@ -105,6 +113,25 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	ec := executionContext{nil, e, 0, 0, nil}
 	_ = ec
 	switch typeName + "." + field {
+
+	case "DocumentStatusChange.changedAt":
+		if e.complexity.DocumentStatusChange.ChangedAt == nil {
+			break
+		}
+
+		return e.complexity.DocumentStatusChange.ChangedAt(childComplexity), true
+	case "DocumentStatusChange.reason":
+		if e.complexity.DocumentStatusChange.Reason == nil {
+			break
+		}
+
+		return e.complexity.DocumentStatusChange.Reason(childComplexity), true
+	case "DocumentStatusChange.status":
+		if e.complexity.DocumentStatusChange.Status == nil {
+			break
+		}
+
+		return e.complexity.DocumentStatusChange.Status(childComplexity), true
 
 	case "KnowledgeDocument.branch":
 		if e.complexity.KnowledgeDocument.Branch == nil {
@@ -160,6 +187,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.Status(childComplexity), true
+	case "KnowledgeDocument.statusHistory":
+		if e.complexity.KnowledgeDocument.StatusHistory == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.StatusHistory(childComplexity), true
 
 	case "KnowledgeDocumentConnection.nodes":
 		if e.complexity.KnowledgeDocumentConnection.Nodes == nil {
@@ -373,6 +406,7 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
+  statusHistory: [DocumentStatusChange!]!
 }
 
 enum KnowledgeDocumentStatus {
@@ -381,6 +415,12 @@ enum KnowledgeDocumentStatus {
   CONVERTED_TO_MARKDOWN
   PUBLISHED_TO_GITHUB
   FAILED
+}
+
+type DocumentStatusChange {
+  status: KnowledgeDocumentStatus!
+  reason: String
+  changedAt: Time!
 }
 
 input UploadKnowledgeDocumentInput {
@@ -401,6 +441,8 @@ input Pagination {
   limit: Int = 10
   offset: Int = 0
 }
+
+scalar Time
 `, BuiltIn: false},
 }
 var parsedSchema = gqlparser.MustLoadSchema(sources...)
@@ -509,6 +551,93 @@ func (ec *executionContext) field___Type_fields_args(ctx context.Context, rawArg
 // endregion ************************** directives.gotpl **************************
 
 // region    **************************** field.gotpl *****************************
+
+func (ec *executionContext) _DocumentStatusChange_status(ctx context.Context, field graphql.CollectedField, obj *model.DocumentStatusChange) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_DocumentStatusChange_status,
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		ec.marshalNKnowledgeDocumentStatus2backendᚑgatewayᚑserviceᚋgraphᚋmodelᚐKnowledgeDocumentStatus,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_DocumentStatusChange_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "DocumentStatusChange",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type KnowledgeDocumentStatus does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _DocumentStatusChange_reason(ctx context.Context, field graphql.CollectedField, obj *model.DocumentStatusChange) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_DocumentStatusChange_reason,
+		func(ctx context.Context) (any, error) {
+			return obj.Reason, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_DocumentStatusChange_reason(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "DocumentStatusChange",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _DocumentStatusChange_changedAt(ctx context.Context, field graphql.CollectedField, obj *model.DocumentStatusChange) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_DocumentStatusChange_changedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.ChangedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_DocumentStatusChange_changedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "DocumentStatusChange",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
 
 func (ec *executionContext) _KnowledgeDocument_id(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
@@ -771,6 +900,43 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_error(_ context.Conte
 	return fc, nil
 }
 
+func (ec *executionContext) _KnowledgeDocument_statusHistory(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_KnowledgeDocument_statusHistory,
+		func(ctx context.Context) (any, error) {
+			return obj.StatusHistory, nil
+		},
+		nil,
+		ec.marshalNDocumentStatusChange2ᚕᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐDocumentStatusChangeᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeDocument_statusHistory(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeDocument",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "status":
+				return ec.fieldContext_DocumentStatusChange_status(ctx, field)
+			case "reason":
+				return ec.fieldContext_DocumentStatusChange_reason(ctx, field)
+			case "changedAt":
+				return ec.fieldContext_DocumentStatusChange_changedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type DocumentStatusChange", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _KnowledgeDocumentConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocumentConnection) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -813,6 +979,8 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "statusHistory":
+				return ec.fieldContext_KnowledgeDocument_statusHistory(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -941,6 +1109,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "statusHistory":
+				return ec.fieldContext_KnowledgeDocument_statusHistory(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -1156,6 +1326,8 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "statusHistory":
+				return ec.fieldContext_KnowledgeDocument_statusHistory(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -2805,6 +2977,52 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 
 // region    **************************** object.gotpl ****************************
 
+var documentStatusChangeImplementors = []string{"DocumentStatusChange"}
+
+func (ec *executionContext) _DocumentStatusChange(ctx context.Context, sel ast.SelectionSet, obj *model.DocumentStatusChange) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, documentStatusChangeImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("DocumentStatusChange")
+		case "status":
+			out.Values[i] = ec._DocumentStatusChange_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "reason":
+			out.Values[i] = ec._DocumentStatusChange_reason(ctx, field, obj)
+		case "changedAt":
+			out.Values[i] = ec._DocumentStatusChange_changedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var knowledgeDocumentImplementors = []string{"KnowledgeDocument"}
 
 func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.SelectionSet, obj *model.KnowledgeDocument) graphql.Marshaler {
@@ -2852,6 +3070,11 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			out.Values[i] = ec._KnowledgeDocument_jobId(ctx, field, obj)
 		case "error":
 			out.Values[i] = ec._KnowledgeDocument_error(ctx, field, obj)
+		case "statusHistory":
+			out.Values[i] = ec._KnowledgeDocument_statusHistory(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3459,6 +3682,60 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 	return res
 }
 
+func (ec *executionContext) marshalNDocumentStatusChange2ᚕᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐDocumentStatusChangeᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.DocumentStatusChange) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNDocumentStatusChange2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐDocumentStatusChange(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNDocumentStatusChange2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐDocumentStatusChange(ctx context.Context, sel ast.SelectionSet, v *model.DocumentStatusChange) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._DocumentStatusChange(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNID2string(ctx context.Context, v any) (string, error) {
 	res, err := graphql.UnmarshalID(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -3577,6 +3854,22 @@ func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) 
 func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.SelectionSet, v string) graphql.Marshaler {
 	_ = sel
 	res := graphql.MarshalString(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
+func (ec *executionContext) unmarshalNTime2timeᚐTime(ctx context.Context, v any) (time.Time, error) {
+	res, err := graphql.UnmarshalTime(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNTime2timeᚐTime(ctx context.Context, sel ast.SelectionSet, v time.Time) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalTime(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")

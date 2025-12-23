@@ -47,3 +47,7 @@ func (uc *UseCase) GetDocument(ctx context.Context, id string) (*domain.Document
 func (uc *UseCase) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) ([]domain.Document, error) {
 	return uc.repo.ListDocuments(ctx, limit, offset, status)
 }
+
+func (uc *UseCase) ListStatusLogs(ctx context.Context, documentID string) ([]domain.DocumentStatusLog, error) {
+	return uc.repo.ListStatusLogs(ctx, documentID)
+}
