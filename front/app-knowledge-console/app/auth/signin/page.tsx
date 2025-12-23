@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 const BENEFITS = [
   "Доступ к загрузке и просмотру документов",
@@ -13,7 +13,7 @@ const BENEFITS = [
 
 function SignInContent() {
   const searchParams = useSearchParams();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isManualLoading, setIsManualLoading] = useState(false);
 
   const callbackUrl = useMemo(() => {
     const requested = searchParams?.get("callbackUrl");
@@ -38,11 +38,57 @@ function SignInContent() {
     return "/";
   }, [searchParams]);
 
+  const autoLoginDisabled =
+    typeof window !== "undefined" && sessionStorage.getItem("authAutoLoginDisabled") === "true";
   const nextUrl = callbackUrl === "/" ? "главную страницу" : `страницу ${callbackUrl}`;
   const errorMessage = searchParams?.get("error");
+  const isLoginRequiredError = errorMessage === "login_required";
+  const isAutoLoginAttempting = !errorMessage && !autoLoginDisabled;
+  const isLoading = isManualLoading || isAutoLoginAttempting;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if (errorMessage) {
+      sessionStorage.setItem("authAutoLoginDisabled", "true");
+      return;
+    }
+
+    const isAutoLoginBlocked = sessionStorage.getItem("authAutoLoginDisabled") === "true";
+    if (isAutoLoginBlocked) {
+      return;
+    }
+
+    sessionStorage.removeItem("authAutoLoginDisabled");
+
+    const attemptAutoLogin = async () => {
+      try {
+        await signIn("authentik", { callbackUrl, redirect: true, prompt: "none" });
+      } catch (error) {
+        console.error("Авто-вход Authentik завершился ошибкой", error);
+        sessionStorage.setItem("authAutoLoginDisabled", "true");
+      }
+    };
+
+    void attemptAutoLogin();
+  }, [callbackUrl, errorMessage]);
+
+  const friendlyErrorMessage = useMemo(() => {
+    if (!errorMessage) return null;
+    if (isLoginRequiredError) {
+      return "Не удалось выполнить бесшумный вход. Пожалуйста, войдите вручную.";
+    }
+
+    if (errorMessage === "AccessDenied") {
+      return "Доступ запрещён. Обратитесь к администратору.";
+    }
+
+    return errorMessage;
+  }, [errorMessage, isLoginRequiredError]);
 
   const handleSignIn = () => {
-    setIsLoading(true);
+    setIsManualLoading(true);
+    sessionStorage.removeItem("authAutoLoginDisabled");
     void signIn("authentik", { callbackUrl });
   };
 
@@ -80,11 +126,21 @@ function SignInContent() {
               <p className="text-sm text-slate-600">Используйте корпоративную учётную запись Authentik.</p>
             </div>
 
-            {errorMessage && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                {errorMessage === "AccessDenied" ? "Доступ запрещён. Обратитесь к администратору." : errorMessage}
+            <div className="space-y-3">
+              <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
+                {isAutoLoginAttempting
+                  ? "Пробуем выполнить автоматический вход…"
+                  : isLoginRequiredError
+                    ? "Бесшумный вход недоступен (требуется интерактивная авторизация). Попробуйте войти вручную."
+                    : "Автоматический вход недоступен. Вы можете продолжить вручную."}
               </div>
-            )}
+
+              {friendlyErrorMessage && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  {friendlyErrorMessage}
+                </div>
+              )}
+            </div>
 
             <button
               type="button"
