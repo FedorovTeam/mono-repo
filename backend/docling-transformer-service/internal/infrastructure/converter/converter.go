@@ -787,8 +787,10 @@ func (c *DoclingConverter) writeDoclingOptions(
 	}
 
 	// to_formats[]: IMPORTANT — не "json,md", а отдельными значениями
-	if err := writer.WriteField("to_formats", "md"); err != nil {
-		return fmt.Errorf("write to_formats md: %w", err)
+	for _, format := range []string{"md", "json"} {
+		if err := writer.WriteField("to_formats", format); err != nil {
+			return fmt.Errorf("write to_formats %s: %w", format, err)
+		}
 	}
 
 	if strings.EqualFold(fileExt, "pdf") {
@@ -807,7 +809,7 @@ func (c *DoclingConverter) writeDoclingOptions(
 
 func (c *DoclingConverter) buildDoclingOptions(fileExt string, useOCR bool) doclingOptions {
 	opts := doclingOptions{
-		ToFormats: []string{"md"},
+		ToFormats: []string{"md", "json"},
 	}
 
 	if useOCR {

@@ -36,7 +36,7 @@ func TestDoclingConverterSubmitAndCheckStatusSuccess(t *testing.T) {
 			}
 
 			formats := r.MultipartForm.Value["to_formats"]
-			if !reflect.DeepEqual(formats, []string{"md"}) {
+			if !reflect.DeepEqual(formats, []string{"md", "json"}) {
 				t.Fatalf("unexpected to_formats: %+v", formats)
 			}
 
@@ -514,7 +514,7 @@ func TestDoclingConverterSubmitSourceAsyncSuccess(t *testing.T) {
 		t.Fatalf("unexpected target credentials: %+v", receivedRequest.Target)
 	}
 
-	if !reflect.DeepEqual(receivedRequest.Options.ToFormats, []string{"md"}) {
+	if !reflect.DeepEqual(receivedRequest.Options.ToFormats, []string{"md", "json"}) {
 		t.Fatalf("unexpected to_formats: %+v", receivedRequest.Options.ToFormats)
 	}
 
@@ -852,7 +852,7 @@ func TestDoclingConverterSubmitSourceAsyncTemporaryError(t *testing.T) {
 		t.Fatalf("expected retry, got %d attempts", attempts)
 	}
 
-	if !reflect.DeepEqual(receivedOptions.ToFormats, []string{"md"}) {
+	if !reflect.DeepEqual(receivedOptions.ToFormats, []string{"md", "json"}) {
 		t.Fatalf("unexpected to_formats: %+v", receivedOptions.ToFormats)
 	}
 	if !reflect.DeepEqual(receivedOptions.FromFormats, []string{"docx"}) {
