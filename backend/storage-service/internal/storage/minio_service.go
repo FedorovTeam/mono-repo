@@ -120,6 +120,7 @@ type PresignedUpload struct {
 	ExpiresInSeconds  int64
 	MarkdownBucket    string
 	MarkdownObjectKey string
+	RequiredHeaders   map[string]string
 }
 
 // PresignedDownload содержит ссылку на скачивание объекта.
@@ -313,8 +314,10 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 	markdownKey := strings.TrimSuffix(key, filepath.Ext(key)) + ".md"
 
 	headers := http.Header{}
+	requiredHeaders := map[string]string{}
 	if params.CorrelationID != "" {
 		headers.Set("x-amz-meta-correlation-id", params.CorrelationID)
+		requiredHeaders["x-amz-meta-correlation-id"] = params.CorrelationID
 	}
 
 	expires := time.Duration(expiresInSeconds) * time.Second
@@ -330,6 +333,7 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 		MarkdownBucket:    s.markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		ExpiresInSeconds:  expiresInSeconds,
+		RequiredHeaders:   requiredHeaders,
 	}, nil
 }
 

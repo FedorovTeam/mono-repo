@@ -29,6 +29,7 @@ type UploadResult struct {
 	Document     *domain.Document
 	UploadURL    string
 	UploadMethod string
+	Headers      map[string]string
 }
 
 // UploadConfig содержит настройки сценария загрузки.
@@ -106,6 +107,7 @@ func (s *UploadService) UploadKnowledgeDocument(ctx context.Context, input Uploa
 		Document:     created,
 		UploadURL:    uploadURL.URL,
 		UploadMethod: http.MethodPut,
+		Headers:      uploadURL.RequiredHeaders,
 	}, nil
 }
 
@@ -159,6 +161,11 @@ func validateUploadURL(uploadURL *domain.UploadURL) error {
 
 	if len(missingFields) > 0 {
 		return fmt.Errorf("cannot generate upload url: storage service returned empty %s", strings.Join(missingFields, ", "))
+	}
+
+	correlationHeader := uploadURL.RequiredHeaders["x-amz-meta-correlation-id"]
+	if correlationHeader == "" {
+		return errors.New("cannot generate upload url: x-amz-meta-correlation-id header is required")
 	}
 
 	return nil

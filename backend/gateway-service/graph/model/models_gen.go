@@ -54,6 +54,11 @@ type Pagination struct {
 type Query struct {
 }
 
+type UploadHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 type UploadKnowledgeDocumentInput struct {
 	FileName      string `json:"fileName"`
 	FileSizeBytes int    `json:"fileSizeBytes"`
@@ -71,6 +76,8 @@ type UploadKnowledgeDocumentPayload struct {
 	Document     *KnowledgeDocument `json:"document"`
 	UploadURL    string             `json:"uploadUrl"`
 	UploadMethod string             `json:"uploadMethod"`
+	// Обязательные заголовки, которые нужно передать в PUT запросе.
+	RequiredHeaders []*UploadHeader `json:"requiredHeaders"`
 }
 
 type ConversionStrategy string

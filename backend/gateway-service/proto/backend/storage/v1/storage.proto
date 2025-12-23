@@ -28,6 +28,7 @@ message GenerateUploadURLResponse {
   int64 expires_in_seconds = 4;
   string markdown_bucket = 5;
   string markdown_object_key = 6;
+  map<string, string> required_headers = 7;
 }
 
 message GenerateDownloadURLRequest {

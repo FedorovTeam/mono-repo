@@ -58,6 +58,7 @@ type UploadURL struct {
 	ObjectKey         string
 	MarkdownBucket    string
 	MarkdownObjectKey string
+	RequiredHeaders   map[string]string
 }
 
 // DocumentClient описывает порт для работы с сервисом документов.

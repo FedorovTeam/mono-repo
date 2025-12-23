@@ -50,7 +50,7 @@ func TestUploadRequiresAuthentication(t *testing.T) {
 }
 
 func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
-	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded, ExtractTables: true, ConversionStrategy: domain.ConversionStrategyDoclingWithTables}, UploadURL: "http://upload", UploadMethod: "PUT"}}
+	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded, ExtractTables: true, ConversionStrategy: domain.ConversionStrategyDoclingWithTables}, UploadURL: "http://upload", UploadMethod: "PUT", Headers: map[string]string{"x-amz-meta-correlation-id": "corr-123"}}}
 	resolver := &Resolver{DocumentUploader: uploader, DocumentService: &stubProvider{}, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
@@ -65,6 +65,9 @@ func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
 
 	if payload.UploadURL != "http://upload" || payload.UploadMethod != "PUT" {
 		t.Fatalf("unexpected upload data: %+v", payload)
+	}
+	if len(payload.RequiredHeaders) != 1 || payload.RequiredHeaders[0].Name != "x-amz-meta-correlation-id" || payload.RequiredHeaders[0].Value != "corr-123" {
+		t.Fatalf("required headers not mapped: %+v", payload.RequiredHeaders)
 	}
 
 	if payload.Document == nil || payload.Document.ID != "doc-1" {

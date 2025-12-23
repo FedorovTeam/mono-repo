@@ -55,6 +55,7 @@ func (c *GRPCClient) GenerateUploadURL(ctx context.Context, req domain.GenerateU
 		ObjectKey:         resp.GetObjectKey(),
 		MarkdownBucket:    resp.GetMarkdownBucket(),
 		MarkdownObjectKey: resp.GetMarkdownObjectKey(),
+		RequiredHeaders:   resp.GetRequiredHeaders(),
 	}, nil
 }
 

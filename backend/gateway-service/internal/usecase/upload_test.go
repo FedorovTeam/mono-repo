@@ -53,6 +53,9 @@ func (stubStorageClient) GenerateUploadURL(context.Context, domain.GenerateUploa
 		ObjectKey:         "object-key",
 		MarkdownBucket:    "markdown-bucket",
 		MarkdownObjectKey: "markdown-key",
+		RequiredHeaders: map[string]string{
+			"x-amz-meta-correlation-id": "corr-1",
+		},
 	}, nil
 }
 
@@ -104,3 +107,46 @@ func TestUploadKnowledgeDocument_ForwardsTableOptions(t *testing.T) {
 	require.True(t, result.Document.ExtractTables)
 	require.Equal(t, domain.ConversionStrategyTablesOnly, result.Document.ConversionStrategy)
 }
+
+func TestUploadKnowledgeDocument_FailsWhenRequiredHeaderMissing(t *testing.T) {
+	docClient := &stubDocumentClient{}
+	storageClient := stubStorageClient{}
+	svc := NewUploadService(docClient, storageClient, UploadConfig{SignedURLTTLSeconds: 60})
+
+	_, err := svc.UploadKnowledgeDocument(context.Background(), UploadInput{
+		FileName:      "report.pdf",
+		Repository:    "org/repo",
+		Branch:        "main",
+		Path:          "docs/report.md",
+		FileSizeBytes: 256,
+	})
+	require.NoError(t, err)
+
+	svcMissingHeaders := NewUploadService(docClient, storageClientWithoutHeaders{}, UploadConfig{SignedURLTTLSeconds: 60})
+	_, err = svcMissingHeaders.UploadKnowledgeDocument(context.Background(), UploadInput{
+		FileName:      "report.pdf",
+		Repository:    "org/repo",
+		Branch:        "main",
+		Path:          "docs/report.md",
+		FileSizeBytes: 256,
+	})
+	require.EqualError(t, err, "cannot generate upload url: x-amz-meta-correlation-id header is required")
+}
+
+type storageClientWithoutHeaders struct{}
+
+func (storageClientWithoutHeaders) GenerateUploadURL(context.Context, domain.GenerateUploadURLRequest) (*domain.UploadURL, error) {
+	return &domain.UploadURL{
+		URL:               "http://storage/upload",
+		Bucket:            "original-bucket",
+		ObjectKey:         "object-key",
+		MarkdownBucket:    "markdown-bucket",
+		MarkdownObjectKey: "markdown-key",
+	}, nil
+}
+
+func (storageClientWithoutHeaders) GenerateDownloadURL(context.Context, domain.GenerateDownloadURLRequest) (*domain.DownloadURL, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (storageClientWithoutHeaders) Close() error { return nil }

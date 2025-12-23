@@ -46,9 +46,10 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	}
 
 	return &model.UploadKnowledgeDocumentPayload{
-		Document:     mapDocument(result.Document),
-		UploadURL:    result.UploadURL,
-		UploadMethod: result.UploadMethod,
+		Document:        mapDocument(result.Document),
+		UploadURL:       result.UploadURL,
+		UploadMethod:    result.UploadMethod,
+		RequiredHeaders: mapHeaders(result.Headers),
 	}, nil
 }
 

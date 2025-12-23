@@ -205,6 +205,7 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 	require.Equal(t, int64(600), resp.ExpiresInSeconds)
 	require.Equal(t, "http://example.com/presigned", resp.UploadURL.String())
 	require.Equal(t, "corr-1", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
+	require.Equal(t, "corr-1", resp.RequiredHeaders["x-amz-meta-correlation-id"])
 
 	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{})
 	require.ErrorIs(t, err, ErrInvalidArgument)

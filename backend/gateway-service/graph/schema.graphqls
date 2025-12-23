@@ -18,6 +18,8 @@ type UploadKnowledgeDocumentPayload {
   document: KnowledgeDocument!
   uploadUrl: String!
   uploadMethod: String!
+  """Обязательные заголовки, которые нужно передать в PUT запросе."""
+  requiredHeaders: [UploadHeader!]!
 }
 
 type KnowledgeDocumentConnection {
@@ -44,6 +46,11 @@ type KnowledgeDocument {
   extractTables: Boolean!
   """Стратегия конвертации Docling/TableExtractor."""
   conversionStrategy: ConversionStrategy
+}
+
+type UploadHeader {
+  name: String!
+  value: String!
 }
 
 enum KnowledgeDocumentStatus {
