@@ -87,7 +87,7 @@ const getRepositoryLink = (document: KnowledgeDocument) => {
 };
 
 export default function DocumentDetailsPage() {
-  const params = useParams<{ id: string }>();
+  const params = useParams<{ id: string | string[] }>();
   const documentId = useMemo(() => {
     const value = params?.id;
     if (typeof value === 'string') return value;
