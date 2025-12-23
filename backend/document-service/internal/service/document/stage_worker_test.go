@@ -1358,8 +1358,8 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 		Versions:          []domain.DocumentVersion{{Version: 1}},
 	}
 	repo := &publishRepoStub{doc: doc}
-	baseMarkdown := "# Docling\n\n<!-- tables:start -->\nold\n<!-- tables:end -->"
-	tablesMarkdown := "|t|"
+	baseMarkdown := "# Docling\n\nВведение\n\n## Таблицы\n\n<!-- tables:start -->\nстарые таблицы\n<!-- tables:end -->\n\nЗавершение"
+	tablesMarkdown := "## Таблицы\n\n<!-- tables:start -->\n| новая | таблица |\n<!-- tables:end -->"
 	tableExtractor := &tableExtractorStub{
 		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
 			Job: &tableextractorv1.TableExtractionJob{
@@ -1404,12 +1404,91 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 		t.Fatalf("expected markdown version to be recorded, got %+v", repo.lastVersion)
 	}
 	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
+	uploadedStr := string(uploaded)
 	expectedMerged := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
-	if string(uploaded) != expectedMerged {
-		t.Fatalf("expected merged markdown to be uploaded, got %q", string(uploaded))
+	if uploadedStr != expectedMerged {
+		t.Fatalf("expected merged markdown to be uploaded, got %q", uploadedStr)
+	}
+	if strings.Count(uploadedStr, "Введение") != 1 {
+		t.Fatalf("expected intro text to appear once, got %d", strings.Count(uploadedStr, "Введение"))
+	}
+	if strings.Count(uploadedStr, "## Таблицы") != 1 {
+		t.Fatalf("expected single tables header, got %d", strings.Count(uploadedStr, "## Таблицы"))
+	}
+	if strings.Contains(uploadedStr, "старые таблицы") {
+		t.Fatalf("expected old tables to be replaced, got %q", uploadedStr)
+	}
+	if strings.Count(uploadedStr, "| новая | таблица |") != 1 {
+		t.Fatalf("expected extracted tables to appear once, got %d", strings.Count(uploadedStr, "| новая | таблица |"))
 	}
 	if repo.doc.MarkdownObjectKey != repo.lastVersion.MarkdownObjectKey {
 		t.Fatalf("expected document to store final markdown key, got %s vs %s", repo.doc.MarkdownObjectKey, repo.lastVersion.MarkdownObjectKey)
+	}
+}
+
+func TestHandleExtractTablesSkipsHeaderTextFromTablesArtifact(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-merge-header",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/input.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/output.md",
+		Versions:          []domain.DocumentVersion{{Version: 1}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	baseMarkdown := "# Docling\n\nВведение раздела"
+	tablesMarkdown := "# Docling\n\nВведение раздела\n\n## Таблицы\n\n<!-- tables:start -->\n| новая | таблица |\n<!-- tables:end -->"
+	tableExtractor := &tableExtractorStub{
+		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-merge-header",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "artifacts-bucket", ObjectKey: "tables/doc-merge-header/tables.md"},
+				},
+			},
+		},
+	}
+	storage := &stubStorageClient{
+		objects: map[string]map[string][]byte{
+			"md-bucket": {
+				"docs/output.md": []byte(baseMarkdown),
+			},
+			"artifacts-bucket": {
+				"tables/doc-merge-header/tables.md": []byte(tablesMarkdown),
+			},
+		},
+	}
+	payload := (domain.ExtractTablesPayload{
+		TableQueueID:             "queue-merge-header",
+		ArtifactsBucket:          "artifacts-bucket",
+		MarkdownBucket:           doc.MarkdownBucket,
+		MarkdownObjectKey:        doc.MarkdownObjectKey,
+		DoclingMarkdownBucket:    doc.MarkdownBucket,
+		DoclingMarkdownObjectKey: doc.MarkdownObjectKey,
+	}).ToMap()
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+	if repo.doc.Status != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document converted status, got %s", repo.doc.Status)
+	}
+	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
+	uploadedStr := string(uploaded)
+	if strings.Count(uploadedStr, "# Docling") != 1 {
+		t.Fatalf("expected document header to appear once, got %d", strings.Count(uploadedStr, "# Docling"))
+	}
+	if strings.Count(uploadedStr, "Введение раздела") != 1 {
+		t.Fatalf("expected header text to appear once, got %d", strings.Count(uploadedStr, "Введение раздела"))
+	}
+	if strings.Count(uploadedStr, "<!-- tables:start -->") != 1 || strings.Count(uploadedStr, "<!-- tables:end -->") != 1 {
+		t.Fatalf("expected single tables block, got %s", uploadedStr)
 	}
 }
 
