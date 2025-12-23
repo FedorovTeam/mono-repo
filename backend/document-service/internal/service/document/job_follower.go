@@ -320,6 +320,7 @@ func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides 
 		MarkdownObjectKey:        firstNonEmpty(overrides.MarkdownObjectKey, doc.MarkdownObjectKey),
 		DoclingMarkdownBucket:    firstNonEmpty(overrides.DoclingMarkdownBucket, doc.MarkdownBucket),
 		DoclingMarkdownObjectKey: firstNonEmpty(overrides.DoclingMarkdownObjectKey, doc.MarkdownObjectKey),
+		DoclingStatus:            overrides.DoclingStatus,
 		FilenameExtension:        overrides.FilenameExtension,
 		JobPayloadMetadata:       domain.JobPayloadMetadata{CorrelationID: correlationID},
 		ConversionStrategy:       doc.ConversionStrategy,
@@ -346,6 +347,7 @@ func (f *JobFollower) extractTablesPayloadFromConvert(doc *domain.Document, conv
 	payload.MarkdownObjectKey = firstNonEmpty(convertPayload.MarkdownObjectKey, payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
 	payload.DoclingMarkdownBucket = firstNonEmpty(convertPayload.DoclingMarkdownBucket, payload.DoclingMarkdownBucket, doc.MarkdownBucket)
 	payload.DoclingMarkdownObjectKey = firstNonEmpty(convertPayload.DoclingMarkdownObjectKey, payload.DoclingMarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.DoclingStatus = firstNonEmpty(convertPayload.DoclingStatus, payload.DoclingStatus)
 	payload.ConversionStrategy = domain.ConversionStrategy(firstNonEmpty(string(convertPayload.ConversionStrategy), string(payload.ConversionStrategy), string(doc.ConversionStrategy)))
 	payload.ExtractTables = convertPayload.ExtractTables || payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables
 	return payload
