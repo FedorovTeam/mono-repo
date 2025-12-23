@@ -1,0 +1,134 @@
+# infra/manifests/argo-ci-workflows/workflowtemplate-mono-repo-diff-build.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: mono-repo-diff-build
+  namespace: argo
+spec:
+  serviceAccountName: ci-bot
+  entrypoint: pipeline
+  parallelism: 3
+
+  arguments:
+    parameters:
+      - name: before
+      - name: after
+      - name: ref
+
+  templates:
+    - name: pipeline
+      steps:
+        - - name: detect
+            template: detect-changes
+        - - name: fanout
+            template: submit-service-build
+            arguments:
+              parameters:
+                - name: service
+                  value: "{{item}}"
+                - name: git_sha
+                  value: "{{workflow.parameters.after}}"
+            withParam: "{{steps.detect.outputs.parameters.services}}"
+
+    - name: detect-changes
+      outputs:
+        parameters:
+          - name: services
+            valueFrom:
+              path: /tmp/services.json
+      container:
+        image: alpine/git:latest
+        command: ["sh", "-c"]
+        env:
+          - name: BEFORE
+            value: "{{workflow.parameters.before}}"
+          - name: AFTER
+            value: "{{workflow.parameters.after}}"
+          - name: REF
+            value: "{{workflow.parameters.ref}}"
+          - name: GIT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: github-secret
+                key: username
+          - name: GIT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-secret
+                key: password
+        args: |
+          set -euo pipefail
+          ulimit -n 1048576 || true
+
+          echo "Webhook ref=$REF before=$BEFORE after=$AFTER"
+
+          REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
+
+          rm -rf /repo
+          git clone --no-checkout --depth 1 "$REPO" /repo >/dev/null 2>&1
+          cd /repo
+
+          git fetch --depth 1 origin "$AFTER" >/dev/null 2>&1 || true
+          git checkout -q "$AFTER" >/dev/null 2>&1
+
+          BUILD_ALL=false
+          if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BUILD_ALL=true
+          else
+            git fetch --depth 1 origin "$BEFORE" >/dev/null 2>&1 || true
+            if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              BUILD_ALL=true
+            fi
+          fi
+
+          ALL_SERVICES="$(find backend -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sed 's#^backend/##' | sort -u || true)"
+
+          if [ "$BUILD_ALL" = "true" ]; then
+            CANDIDATES="$ALL_SERVICES"
+          else
+            CHANGED="$(git diff --name-only "$BEFORE" "$AFTER" || true)"
+
+            # общие изменения -> rebuild all
+            if echo "$CHANGED" | grep -qE '^proto/|^backend/pkg/|^backend/libs/|^backend/go\.mod$|^backend/go\.sum$'; then
+              CANDIDATES="$ALL_SERVICES"
+            else
+              CANDIDATES="$(echo "$CHANGED" | awk -F/ '$1=="backend" && NF>=3 {print $2}' | sort -u || true)"
+            fi
+          fi
+
+          out='['
+          first=true
+          for svc in $CANDIDATES; do
+            [ -d "backend/$svc" ] || continue
+            [ -f "backend/$svc/Dockerfile" ] || continue
+
+            if [ "$first" = "true" ]; then first=false; else out="$out,"; fi
+            out="$out\"$svc\""
+          done
+          out="$out]"
+
+          echo "Services: $out"
+          echo -n "$out" > /tmp/services.json
+
+    - name: submit-service-build
+      inputs:
+        parameters:
+          - name: service
+          - name: git_sha
+      resource:
+        action: create
+        manifest: |
+          apiVersion: argoproj.io/v1alpha1
+          kind: Workflow
+          metadata:
+            generateName: "{{inputs.parameters.service}}-"
+            namespace: argo
+          spec:
+            workflowTemplateRef:
+              name: service-build
+            arguments:
+              parameters:
+                - name: service
+                  value: "{{inputs.parameters.service}}"
+                - name: git_sha
+                  value: "{{inputs.parameters.git_sha}}"

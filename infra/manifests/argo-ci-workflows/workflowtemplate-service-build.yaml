@@ -1,0 +1,141 @@
+# infra/manifests/argo-ci-workflows/workflowtemplate-service-build.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: service-build
+  namespace: argo
+spec:
+  serviceAccountName: ci-bot
+  entrypoint: build
+
+  arguments:
+    parameters:
+      - name: service
+      - name: git_sha
+
+  volumes:
+    - name: docker-config
+      secret:
+        secretName: harbor-docker-config
+
+  templates:
+    - name: build
+      steps:
+        - - name: clone
+            template: git-clone
+            arguments:
+              parameters:
+                - name: service
+                  value: "{{workflow.parameters.service}}"
+                - name: git_sha
+                  value: "{{workflow.parameters.git_sha}}"
+
+        - - name: test
+            template: run-tests
+            arguments:
+              parameters:
+                - name: service
+                  value: "{{workflow.parameters.service}}"
+              artifacts:
+                - name: source
+                  from: "{{steps.clone.outputs.artifacts.source}}"
+
+        - - name: build-image
+            template: kaniko-build
+            arguments:
+              parameters:
+                - name: service
+                  value: "{{workflow.parameters.service}}"
+                - name: git_sha
+                  value: "{{workflow.parameters.git_sha}}"
+              artifacts:
+                - name: source
+                  from: "{{steps.clone.outputs.artifacts.source}}"
+
+    - name: git-clone
+      inputs:
+        parameters:
+          - name: service
+          - name: git_sha
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: alpine/git:latest
+        command: ["sh", "-c"]
+        env:
+          - name: GIT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: github-secret
+                key: username
+          - name: GIT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: github-secret
+                key: password
+        args: |
+          set -euo pipefail
+          ulimit -n 1048576 || true
+
+          REPO="https://${GIT_USERNAME}:${GIT_TOKEN}@github.com/FedorovTeam/mono-repo.git"
+          echo "Checkout {{inputs.parameters.git_sha}} service={{inputs.parameters.service}}"
+
+          git clone --depth 1 --sparse "$REPO" /workspace >/dev/null 2>&1
+          cd /workspace
+          git sparse-checkout init --cone
+
+          # сервис + общие папки (если есть)
+          git sparse-checkout set backend/{{inputs.parameters.service}} proto backend/pkg backend/libs 2>/dev/null || \
+            git sparse-checkout set backend/{{inputs.parameters.service}}
+
+          git fetch --depth 1 origin {{inputs.parameters.git_sha}} >/dev/null 2>&1
+          git checkout -q {{inputs.parameters.git_sha}} >/dev/null 2>&1
+
+    - name: run-tests
+      inputs:
+        parameters:
+          - name: service
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: golang:1.23
+        command: ["sh", "-c"]
+        args: |
+          set -euo pipefail
+          ulimit -n 1048576 || true
+          cd /workspace/backend/{{inputs.parameters.service}}
+          if [ -f go.mod ]; then
+            go test ./...
+          else
+            echo "No go.mod -> skip tests"
+          fi
+
+    - name: kaniko-build
+      inputs:
+        parameters:
+          - name: service
+          - name: git_sha
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: gcr.io/kaniko-project/executor:v1.22.0
+        command: ["/kaniko/executor"]
+        args:
+          - --dockerfile=/workspace/backend/{{inputs.parameters.service}}/Dockerfile
+          - --context=/workspace/backend/{{inputs.parameters.service}}
+          - --destination=harbor.tech.fedorov-team.tech/backend/{{inputs.parameters.service}}:{{inputs.parameters.git_sha}}
+          - --destination=harbor.tech.fedorov-team.tech/backend/{{inputs.parameters.service}}:latest
+          - --cache=true
+          - --cache-repo=harbor.tech.fedorov-team.tech/backend/kaniko-cache
+          - --verbosity=info
+        env:
+          - name: DOCKER_CONFIG
+            value: /kaniko/.docker
+        volumeMounts:
+          - name: docker-config
+            mountPath: /kaniko/.docker/config.json
+            subPath: .dockerconfigjson

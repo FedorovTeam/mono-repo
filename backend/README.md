@@ -1,68 +1,40 @@
-## **База знаний через GitHub / DOCX → Markdown → GitHub**
+Проблема:
+Сейчас консоль доступен из веба, все пользователи которые имеют ссылку могут загружать то что вздумается - это не бозопасно
 
-**Версия:** 2.1
-**Инфраструктура:** Docker/Kubernetes (опционально)
+Решение:
+Добавить авторизацию через сервис authentik
 
----
+Client id: L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF
+Client secret: lGhLYG9Usi845ndGd7R8yEVuauxMKZQYhbBVmcuaPAbewC9pUvQPH5uhSiuSGKWq8nYydBoUDNnbngr38nxiecE1qgeoO7e4nrh3carhwG89a3xoHXENDa1XIfh3sUfP
+Callback URL: https://console.fedorov-team.tech/auth/sso/authentik
+URI-s:
+URL-адрес конфигурации OpenID
+https://auth.tech.fedorov-team.tech/application/o/console/.well-known/openid-configuration
+Эмитент конфигурации OpenID
+https://auth.tech.fedorov-team.tech/application/o/console/
+URL-адрес авторизации
+https://auth.tech.fedorov-team.tech/application/o/authorize/
+URL-адрес токена
+https://auth.tech.fedorov-team.tech/application/o/token/
+URL-адрес информации о пользователе
+https://auth.tech.fedorov-team.tech/application/o/userinfo/
+URL-адрес выхода из системы
+https://auth.tech.fedorov-team.tech/application/o/console/end-session/
+URL-адрес JWKS
+https://auth.tech.fedorov-team.tech/application/o/console/jwks/
 
-# 1. 📌 Цель проекта
+Как я это вижу:
+- Как пользователь открывает консоль, если пользователь не авторизован - показывается кнопка авторизоваться
+- При нажатии кнопку авторизации перенаправляет на authentik для авторизации
+- Если пользователь авторизован открывается консоль
 
-Создать минимально работоспособную систему (MVP), которая:
+На верху страницы в NavBar имеется кнопка выйти - с правого края
 
-1. Принимает от пользователя файлы **DOC/DOCX/PDF**;
-2. Сохраняет оригинал файлов в **MinIO**;
-3. Конвертирует документ в Markdown с помощью **docling** (как отдельного сервиса);
-4. Сохраняет Markdown в MinIO;
-5. Публикует Markdown-файл в **GitHub Repository**;
-6. Показывает клиенту **статусы** всех этапов процесса.
+Библиотеки для UI компонентов:
+- https://github.com/radix-ui/primitives
+- https://github.com/shadcn-ui/ui
+- tailwind
 
-Система устойчива к сбоям за счёт **цепочки cron-воркеров**, которые читают и обновляют статусы в PostgreSQL.
-
----
-
-# 2. 📌 Базовые принципы
-
-### 2.1. Сетевые взаимодействия
-
-- Внешний API: **GraphQL** через `99designs/gqlgen`
-- Внутренние коммуникации: **gRPC**
-- Межсервисные операции — **асинхронные**, через cron-воркеры, которые опираются на статусы в PostgreSQL
-
-### 2.2. Авторизация
-
-- На этапе MVP: **единый секретный пароль** в `gateway-service`
-- Без OAuth2/OIDC
-
-### 2.3. Observability
-
-- Лишь **логирование** (`zap`)
-- Без rate limiting
-- Без трейсинга
-- Без метрик (опционально можно добавить Prometheus в будущем)
-
-### 2.4. Устойчивость
-
-- Цепочка cron-воркеров гарантирует повторное выполнение шагов до успеха
-- Каждое состояние документа фиксируется в **PostgreSQL** и служит источником правды
-- Каждый сервис должен быть безопасно повторяемым (idempotent)
-
----
-
-# 8. 🔐 Конфигурация безопасности (MVP)
-
-- единый секретный пароль `X-API-Key` в `gateway-service` 8 символов
-- gRPC трафик внутризонный (Kubernetes / Internal network)
-- Нет ACL между сервисами на MVP
-- GitHub токен хранится в config.yaml
-
----
-
-# 9. 📦 Краткая схема микросервисов
-
-```
-Client → gateway-service → document-service → cron-воркеры (upload→convert→publish по статусам в PostgreSQL)
-                         ↘ gRPC calls →
-      storage-service | transformation-service | publishing-service
-```
-
-MinIO и PostgreSQL — отдельные сервисы; оркестрация строится на cron-задачах, которые читают статусы и двигают процесс дальше.
+как лучше реализовать авторизацию в console через authentik
+Как это лучше реализовать
+Спроектируй пожалуйста архитектуру

@@ -1,0 +1,43 @@
+# infra/manifests/argo-ci-events/github-eventsource.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github
+  namespace: argo-events
+spec:
+  eventBusName: default
+
+  service:
+    ports:
+      - name: push
+        port: 12000
+        targetPort: 12000
+
+  github:
+    mono-repo:
+      repositories:
+        - owner: FedorovTeam
+          names:
+            - mono-repo
+
+      webhook:
+        endpoint: /push
+        port: "12000"
+        method: POST
+        url: https://events.tech.fedorov-team.tech
+
+      events:
+        - push
+
+      # Если хочешь авто-создание webhook в GitHub — оставляй apiToken.
+      apiToken:
+        name: github-access
+        key: token
+
+      webhookSecret:
+        name: github-access
+        key: secret
+
+      insecure: false
+      active: true
+      contentType: json

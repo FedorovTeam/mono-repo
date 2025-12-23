@@ -1,0 +1,6 @@
+# infra/manifests/argo-ci-events/sensor-sa.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: operate-workflow-sa
+  namespace: argo-events

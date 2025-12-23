@@ -1,0 +1,8 @@
+# infra/manifests/argo-ci-events/kustomization.yaml
+resources:
+  - eventbus.yaml
+  - sensor-sa.yaml
+  - github-access-secret.yaml
+  - github-eventsource.yaml
+  - github-eventsource-ingress.yaml
+  - sensor.yaml

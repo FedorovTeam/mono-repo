@@ -1,0 +1,5 @@
+# infra/manifests/argo-ci-workflows/kustomization.yaml
+resources:
+  - sensor-rbac-argo.yaml
+  - workflowtemplate-mono-repo-diff-build.yaml
+  - workflowtemplate-service-build.yaml

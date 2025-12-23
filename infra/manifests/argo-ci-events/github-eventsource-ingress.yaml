@@ -1,0 +1,26 @@
+# infra/manifests/argo-ci-events/github-eventsource-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: github-eventsource
+  namespace: argo-events
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - events.tech.fedorov-team.tech
+      secretName: github-eventsource-tls
+  rules:
+    - host: events.tech.fedorov-team.tech
+      http:
+        paths:
+          - path: /push
+            pathType: Prefix
+            backend:
+              service:
+                name: github-eventsource-svc
+                port:
+                  number: 12000

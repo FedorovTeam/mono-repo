@@ -1,0 +1,21 @@
+## infra/argocd/argo-ci-workflows-app.yaml
+#apiVersion: argoproj.io/v1alpha1
+#kind: Application
+#metadata:
+#  name: argo-ci-workflows
+#  namespace: argocd
+#spec:
+#  project: default
+#  source:
+#    repoURL: git@github.com:FedorovTeam/mono-repo.git
+#    targetRevision: main
+#    path: infra/manifests/argo-ci-workflows
+#  destination:
+#    server: https://kubernetes.default.svc
+#    namespace: argo
+#  syncPolicy:
+#    automated:
+#      selfHeal: true
+#      prune: true
+#    syncOptions:
+#      - CreateNamespace=true

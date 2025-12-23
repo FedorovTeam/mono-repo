@@ -1,0 +1,59 @@
+# infra/manifests/argo-ci-events/sensor.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: github-push-main
+  namespace: argo-events
+spec:
+  eventBusName: default
+
+  template:
+    serviceAccountName: operate-workflow-sa
+
+  dependencies:
+    - name: push
+      eventSourceName: github
+      eventName: mono-repo
+      filters:
+        data:
+          - path: body.ref
+            type: string
+            value:
+              - refs/heads/main
+
+  triggers:
+    - template:
+        name: trigger-mono-repo-diff-build
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: mono-repo-ci-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: mono-repo-diff-build
+                arguments:
+                  parameters:
+                    - name: before
+                      value: ""
+                    - name: after
+                      value: ""
+                    - name: ref
+                      value: ""
+          parameters:
+            - src:
+                dependencyName: push
+                dataKey: body.before
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: push
+                dataKey: body.after
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: push
+                dataKey: body.ref
+              dest: spec.arguments.parameters.2.value
