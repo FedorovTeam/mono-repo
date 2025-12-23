@@ -90,10 +90,11 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 	}
 
 	uc := usecase.NewTableExtractorUseCase(deps, usecase.Config{
-		QueueLimit:             cfg.Service.QueueLimit,
-		DefaultArtifactsBucket: cfg.Minio.ArtifactsBucket,
-		DefaultArtifactsPrefix: cfg.Minio.DefaultArtifactsPrefix,
-		AcquireBatchSize:       cfg.Service.BatchSize,
+		QueueLimit:              cfg.Service.QueueLimit,
+		DefaultArtifactsBucket:  cfg.Minio.ArtifactsBucket,
+		DefaultArtifactsPrefix:  cfg.Minio.DefaultArtifactsPrefix,
+		ArtifactsPrefixTemplate: cfg.Minio.ArtifactsPrefixTemplate,
+		AcquireBatchSize:        cfg.Service.BatchSize,
 	}, logger)
 
 	grpcServer := server.NewGRPCServer(logger, uc, cfg.Service.Port, tracerProvider, nil)

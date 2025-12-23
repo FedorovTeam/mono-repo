@@ -37,12 +37,13 @@ type RetryConfig struct {
 }
 
 type MinioConfig struct {
-	Endpoint               string `yaml:"endpoint"`
-	AccessKey              string `yaml:"access_key"`
-	SecretKey              string `yaml:"secret_key"`
-	UseSSL                 bool   `yaml:"use_ssl"`
-	ArtifactsBucket        string `yaml:"artifacts_bucket"`
-	DefaultArtifactsPrefix string `yaml:"default_artifacts_prefix"`
+	Endpoint                string `yaml:"endpoint"`
+	AccessKey               string `yaml:"access_key"`
+	SecretKey               string `yaml:"secret_key"`
+	UseSSL                  bool   `yaml:"use_ssl"`
+	ArtifactsBucket         string `yaml:"artifacts_bucket"`
+	DefaultArtifactsPrefix  string `yaml:"default_artifacts_prefix"`
+	ArtifactsPrefixTemplate string `yaml:"artifacts_prefix_template"`
 }
 
 type DatabaseConfig struct {
@@ -101,11 +102,12 @@ func defaultConfig() Config {
 			},
 		},
 		Minio: MinioConfig{
-			Endpoint:               "http://localhost:9000",
-			AccessKey:              "minioadmin",
-			SecretKey:              "minioadmin",
-			ArtifactsBucket:        "table-extractor-artifacts",
-			DefaultArtifactsPrefix: "tables",
+			Endpoint:                "http://localhost:9000",
+			AccessKey:               "minioadmin",
+			SecretKey:               "minioadmin",
+			ArtifactsBucket:         "table-extractor-artifacts",
+			DefaultArtifactsPrefix:  "tables",
+			ArtifactsPrefixTemplate: "{{ .DefaultPrefix }}/{{ .DocumentID }}/{{ .QueueID }}",
 		},
 		Database: DatabaseConfig{
 			Driver:            "sqlite",

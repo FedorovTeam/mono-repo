@@ -19,6 +19,7 @@ minio:
   use_ssl: true
   artifacts_bucket: table-extractor-artifacts
   default_artifacts_prefix: tables
+  artifacts_prefix_template: "{{ .DefaultPrefix }}/{{ .DocumentID }}/{{ .QueueID }}"
 
 database:
   driver: postgres

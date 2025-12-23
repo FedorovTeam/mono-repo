@@ -55,6 +55,25 @@ func TestUpsertOrGetActiveQueueLimit(t *testing.T) {
 	require.ErrorIs(t, err, repository.ErrQueueLimitReached)
 }
 
+func TestUpsertOrGetActivePersistsMarkdownOverride(t *testing.T) {
+	repo, _ := setupRepo(t)
+	ctx := context.Background()
+
+	job := newJob(t, "doc-markdown")
+	job.MarkdownLocation = domain.ArtifactLocation{Bucket: "custom-md", ObjectKey: "path/to.md"}
+	job.Artifacts = domain.BuildArtifactsWithMarkdown(job.ArtifactsBucket, job.ArtifactsPrefix, job.MarkdownLocation)
+
+	created, existed, err := repo.UpsertOrGetActive(ctx, job, 10)
+	require.NoError(t, err)
+	require.False(t, existed)
+
+	stored, ok, err := repo.GetByID(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "custom-md", stored.MarkdownLocation.Bucket)
+	require.Equal(t, "path/to.md", stored.Artifacts.Markdown.ObjectKey)
+}
+
 func TestUpsertOrGetActiveValidatesJob(t *testing.T) {
 	repo, _ := setupRepo(t)
 	ctx := context.Background()

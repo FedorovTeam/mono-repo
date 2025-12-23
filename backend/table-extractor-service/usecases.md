@@ -49,6 +49,7 @@
 - `original_bucket` и `original_object_key` обязательны.
 - Расширение должно быть `pdf` (либо `filename_extension=pdf`, либо вычисляется из `original_object_key`). Иначе `InvalidArgument`.
 - `artifacts_bucket` берётся из запроса или из конфигурации; если оба пустые — `InvalidArgument`.
+- `markdown_bucket/markdown_object_key` разрешены только вместе и приоритетнее дефолтного пути.
 - `source_bucket/source_object_key` (если присутствуют) заполняются только вместе.
 - `source_url` взаимоисключён с `source_bucket/source_object_key`.
 - При превышении лимита очереди (`pending`/`processing` >= `service.queue_limit`, если задан) — `ResourceExhausted`.
@@ -58,13 +59,13 @@
 - Выходные `artifacts_bucket/prefix` берутся из найденной задачи или из запроса/конфига.
 
 ### Шаги
-1. Принять gRPC `ExtractTablesFromPdf(document_id, original_bucket, original_object_key, artifacts_bucket?, artifacts_prefix?, options?, wait_for_result?)`.  
+1. Принять gRPC `ExtractTablesFromPdf(document_id, original_bucket, original_object_key, artifacts_bucket?, artifacts_prefix?, markdown_bucket/object_key?, options?, wait_for_result?)`.  
    `x-correlation-id` читается из metadata или генерируется.
 2. Нормализовать `filename_extension` (если передано) или вычислить из ключа; проверить `pdf`.
 3. Вычислить `artifacts_prefix`, если не передан:
-    - рекомендуемый шаблон: `tables/<document_id>/<queue_id>/`
-4. Создать запись в `table_extraction_queue` со статусом `pending`, путями original и artifacts, опциями извлечения, `correlation_id`.
-5. Вернуть `queue_id`, `status`, `correlation_id`, фактические `artifacts_bucket` и `artifacts_prefix`.
+    - рекомендуемый шаблон: `tables/<document_id>/<queue_id>/` или `minio.artifacts_prefix_template`
+4. Создать запись в `table_extraction_queue` со статусом `pending`, путями original и artifacts (включая переопределённый `markdown_bucket/object_key`, если задан), опциями извлечения, `correlation_id`.
+5. Вернуть `queue_id`, `status`, `correlation_id`, фактические `artifacts_bucket` и `artifacts_prefix` + итоговые пути артефактов.
 6. Если `wait_for_result=true`, сервис опрашивает `GetJob(queue_id)` с backoff (учитывая `next_poll_at`) до `done/failed`.  
    При тайм-ауте/исчерпании попыток — `DeadlineExceeded` с текстом `table extraction result not ready`.
 
