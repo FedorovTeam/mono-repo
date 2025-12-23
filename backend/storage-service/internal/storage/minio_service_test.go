@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -118,7 +119,20 @@ func (m *mockClient) PresignHeader(_ context.Context, method, bucketName, object
 	m.lastPresign.expires = expires
 	m.lastPresign.headers = headers
 
-	return url.Parse("http://example.com/presigned")
+	signedHeaders := make([]string, 0, len(headers))
+	for header := range headers {
+		signedHeaders = append(signedHeaders, strings.ToLower(header))
+	}
+	sort.Strings(signedHeaders)
+
+	u, _ := url.Parse("http://example.com/presigned")
+	if len(signedHeaders) > 0 {
+		q := u.Query()
+		q.Set("X-Amz-SignedHeaders", strings.Join(signedHeaders, ";"))
+		u.RawQuery = q.Encode()
+	}
+
+	return u, nil
 }
 
 func TestObjectKeyGenerator_BuildKey(t *testing.T) {
@@ -196,6 +210,9 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 		ContentLength:    1024,
 		CorrelationID:    "corr-1",
 		ExpiresInSeconds: 600,
+		UserMetadata: map[string]string{
+			"x-amz-meta-source": "mobile",
+		},
 	}
 
 	resp, err := svc.GenerateUploadURL(ctx, "knowledge-original", params)
@@ -203,9 +220,13 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 	require.Equal(t, "knowledge-original", resp.Bucket)
 	require.Contains(t, resp.ObjectKey, "doc-1.docx")
 	require.Equal(t, int64(600), resp.ExpiresInSeconds)
-	require.Equal(t, "http://example.com/presigned", resp.UploadURL.String())
+	require.Equal(t, "example.com", resp.UploadURL.Host)
 	require.Equal(t, "corr-1", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
 	require.Equal(t, "corr-1", resp.RequiredHeaders["x-amz-meta-correlation-id"])
+	require.Equal(t, "mobile", client.lastPresign.headers.Get("x-amz-meta-source"))
+	require.Equal(t, "mobile", resp.RequiredHeaders["x-amz-meta-source"])
+	require.Contains(t, resp.UploadURL.Query().Get("X-Amz-SignedHeaders"), "x-amz-meta-correlation-id")
+	require.Contains(t, resp.UploadURL.Query().Get("X-Amz-SignedHeaders"), "x-amz-meta-source")
 
 	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{})
 	require.ErrorIs(t, err, ErrInvalidArgument)
@@ -233,6 +254,26 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 		ExpiresInSeconds: 10,
 	})
 	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{
+		DocumentID:    "doc-1",
+		FileName:      "demo.docx",
+		ContentLength: 10,
+		UserMetadata: map[string]string{
+			"meta-custom": "value",
+		},
+	})
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.GenerateUploadURL(ctx, "knowledge-original", GenerateUploadURLParams{
+		DocumentID:    "doc-1",
+		FileName:      "demo.docx",
+		ContentLength: 10,
+		UserMetadata: map[string]string{
+			"x-amz-meta-correlation-id": "override",
+		},
+	})
+	require.ErrorIs(t, err, ErrInvalidArgument)
 }
 
 func TestGenerateDownloadURL_ValidatesAndPresigns(t *testing.T) {
@@ -246,11 +287,12 @@ func TestGenerateDownloadURL_ValidatesAndPresigns(t *testing.T) {
 
 	resp, err := svc.GenerateDownloadURL(context.Background(), "knowledge-original", "doc-key", 0, "corr-dl")
 	require.NoError(t, err)
-	require.Equal(t, "http://example.com/presigned", resp.DownloadURL.String())
+	require.Equal(t, "example.com", resp.DownloadURL.Host)
 	require.Equal(t, int64(300), resp.ExpiresInSeconds)
 	require.Equal(t, http.MethodGet, client.lastPresign.method)
 	require.Equal(t, 300*time.Second, client.lastPresign.expires)
 	require.Equal(t, "corr-dl", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
+	require.Contains(t, resp.DownloadURL.Query().Get("X-Amz-SignedHeaders"), "x-amz-meta-correlation-id")
 
 	_, err = svc.GenerateDownloadURL(context.Background(), "", "doc-key", 0, "")
 	require.ErrorIs(t, err, ErrInvalidArgument)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,9 @@ func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 	if len(resp.RequiredHeaders) != 1 || resp.RequiredHeaders["x-amz-meta-correlation-id"] != "corr-1" {
 		t.Fatalf("required headers missing: %+v", resp.RequiredHeaders)
 	}
+	uploadURL, err := url.Parse(resp.GetUploadUrl())
+	require.NoError(t, err)
+	require.Contains(t, uploadURL.Query().Get("X-Amz-SignedHeaders"), "x-amz-meta-correlation-id")
 }
 
 func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
@@ -86,6 +90,38 @@ func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
 	if resp.RequiredHeaders["x-amz-meta-correlation-id"] != "corr-meta" {
 		t.Fatalf("required headers not returned: %+v", resp.RequiredHeaders)
 	}
+}
+
+func TestGenerateUploadURLIncludesUserMetadata(t *testing.T) {
+	client := &mockPresignClient{bucketExists: true}
+	generator := storage.NewObjectKeyGenerator(func() time.Time { return time.Date(2024, time.May, 10, 0, 0, 0, 0, time.UTC) })
+	server := New(client, generator, "knowledge-original", "knowledge-md", storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig()))
+
+	resp, err := server.GenerateUploadURL(context.Background(), &storagev1.GenerateUploadURLRequest{
+		DocumentId:    "doc-777",
+		FileName:      "note.pdf",
+		ContentLength: 512,
+		CorrelationId: "corr-extra",
+		UserMetadata: map[string]string{
+			"x-amz-meta-source": "cli",
+			"x-amz-meta-owner":  "qa",
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.GetUploadUrl())
+	require.Equal(t, "cli", client.lastHeaders.Get("x-amz-meta-source"))
+	require.Equal(t, "qa", client.lastHeaders.Get("x-amz-meta-owner"))
+	require.Equal(t, 3, len(resp.RequiredHeaders))
+	require.Equal(t, "cli", resp.RequiredHeaders["x-amz-meta-source"])
+	require.Equal(t, "qa", resp.RequiredHeaders["x-amz-meta-owner"])
+	require.Equal(t, "corr-extra", resp.RequiredHeaders["x-amz-meta-correlation-id"])
+
+	uploadURL, err := url.Parse(resp.GetUploadUrl())
+	require.NoError(t, err)
+	signedHeaders := uploadURL.Query().Get("X-Amz-SignedHeaders")
+	require.Contains(t, signedHeaders, "x-amz-meta-source")
+	require.Contains(t, signedHeaders, "x-amz-meta-owner")
+	require.Contains(t, signedHeaders, "x-amz-meta-correlation-id")
 }
 
 func TestGenerateUploadURL_ValidatesLengthAndExtension(t *testing.T) {
@@ -226,11 +262,14 @@ func TestGenerateDownloadURLReturnsPresignedLink(t *testing.T) {
 		ExpiresInSeconds: 180,
 	})
 	require.NoError(t, err)
-	require.Equal(t, "http://example.com/presigned", resp.GetDownloadUrl())
+	downloadURL, err := url.Parse(resp.GetDownloadUrl())
+	require.NoError(t, err)
+	require.Equal(t, "example.com", downloadURL.Host)
 	require.Equal(t, int64(180), resp.GetExpiresInSeconds())
 	require.Equal(t, http.MethodGet, client.lastPresign.method)
 	require.Equal(t, 180*time.Second, client.lastPresign.expires)
 	require.Equal(t, "corr-download", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
+	require.Contains(t, downloadURL.Query().Get("X-Amz-SignedHeaders"), "x-amz-meta-correlation-id")
 }
 
 func validationConfig() storage.UploadValidationConfig {
@@ -287,7 +326,20 @@ func (m *mockPresignClient) PresignHeader(_ context.Context, method, bucketName,
 	m.lastHeaders = headers
 	m.lastObject = objectName
 
-	return url.Parse("http://minio/upload")
+	signedHeaders := make([]string, 0, len(headers))
+	for header := range headers {
+		signedHeaders = append(signedHeaders, strings.ToLower(header))
+	}
+	sort.Strings(signedHeaders)
+
+	u, _ := url.Parse("http://minio/upload")
+	if len(signedHeaders) > 0 {
+		q := u.Query()
+		q.Set("X-Amz-SignedHeaders", strings.Join(signedHeaders, ";"))
+		u.RawQuery = q.Encode()
+	}
+
+	return u, nil
 }
 
 func (m *mockPresignClient) ListenBucketNotification(context.Context, string, string, string, []string) <-chan notification.Info {
@@ -404,7 +456,20 @@ func (m *mockClient) PresignHeader(_ context.Context, method, bucketName, object
 	m.lastPresign.expires = expires
 	m.lastPresign.headers = headers
 
-	return url.Parse("http://example.com/presigned")
+	signedHeaders := make([]string, 0, len(headers))
+	for header := range headers {
+		signedHeaders = append(signedHeaders, strings.ToLower(header))
+	}
+	sort.Strings(signedHeaders)
+
+	u, _ := url.Parse("http://example.com/presigned")
+	if len(signedHeaders) > 0 {
+		q := u.Query()
+		q.Set("X-Amz-SignedHeaders", strings.Join(signedHeaders, ";"))
+		u.RawQuery = q.Encode()
+	}
+
+	return u, nil
 }
 
 type headerCapturingStream struct {
