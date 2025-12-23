@@ -50,13 +50,15 @@ func TestUploadRequiresAPIKey(t *testing.T) {
 }
 
 func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
-	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded}, UploadURL: "http://upload", UploadMethod: "PUT"}}
+	uploader := &stubUploader{result: &usecase.UploadResult{Document: &domain.Document{ID: "doc-1", FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: "docs/file.md", Status: domain.DocumentStatusUploaded, ExtractTables: true, ConversionStrategy: domain.ConversionStrategyDoclingWithTables}, UploadURL: "http://upload", UploadMethod: "PUT"}}
 	resolver := &Resolver{DocumentUploader: uploader, DocumentService: &stubProvider{}, UploadConfig: UploadValidationConfig{SignedURLTTLSeconds: 900}, Logger: zap.NewNop()}
 	mr := &mutationResolver{resolver}
 
 	ctx := ctxutils.WithAPIKey(context.Background(), "secret")
 	path := strPtr("docs/file.md")
-	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: path, FileSizeBytes: 100})
+	extract := true
+	strategy := model.ConversionStrategyDoclingWithTables
+	payload, err := mr.UploadKnowledgeDocument(ctx, model.UploadKnowledgeDocumentInput{FileName: "file.docx", Repository: "org/repo", Branch: "main", Path: path, FileSizeBytes: 100, ExtractTables: &extract, ConversionStrategy: &strategy})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,9 +70,21 @@ func TestUploadUsesUseCaseAndCorrelationID(t *testing.T) {
 	if payload.Document == nil || payload.Document.ID != "doc-1" {
 		t.Fatalf("document not mapped: %+v", payload.Document)
 	}
+	if !payload.Document.ExtractTables {
+		t.Fatalf("extractTables should be true in response")
+	}
+	if payload.Document.ConversionStrategy == nil || *payload.Document.ConversionStrategy != model.ConversionStrategyDoclingWithTables {
+		t.Fatalf("conversionStrategy not mapped: %+v", payload.Document.ConversionStrategy)
+	}
 
 	if ctxutils.CorrelationID(uploader.lastCtx) == "" {
 		t.Fatalf("correlation id not ensured")
+	}
+	if !uploader.input.ExtractTables {
+		t.Fatalf("extractTables not passed to usecase")
+	}
+	if uploader.input.ConversionStrategy != domain.ConversionStrategyDoclingWithTables {
+		t.Fatalf("conversionStrategy not passed to usecase")
 	}
 }
 

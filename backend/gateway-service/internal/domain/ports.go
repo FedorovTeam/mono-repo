@@ -4,18 +4,20 @@ import "context"
 
 // CreateDocumentRequest описывает параметры создания документа.
 type CreateDocumentRequest struct {
-	ID                string
-	FileName          string
-	Repository        string
-	RepositoryOwner   *string
-	Branch            string
-	Path              string
-	CorrelationID     string
-	ContentLength     int64
-	UploadBucket      string
-	UploadObjectKey   string
-	MarkdownBucket    string
-	MarkdownObjectKey string
+	ID                 string
+	FileName           string
+	Repository         string
+	RepositoryOwner    *string
+	Branch             string
+	Path               string
+	CorrelationID      string
+	ContentLength      int64
+	UploadBucket       string
+	UploadObjectKey    string
+	MarkdownBucket     string
+	MarkdownObjectKey  string
+	ExtractTables      bool
+	ConversionStrategy string
 }
 
 // ConfirmUploadRequest описывает входные данные подтверждения загрузки.

@@ -25,13 +25,19 @@ func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input mo
 	if input.Path != nil {
 		path = *input.Path
 	}
+	extractTables := false
+	if input.ExtractTables != nil {
+		extractTables = *input.ExtractTables
+	}
 
 	uploadInput := usecase.UploadInput{
-		FileName:      input.FileName,
-		Repository:    input.Repository,
-		Branch:        input.Branch,
-		Path:          path,
-		FileSizeBytes: int64(input.FileSizeBytes),
+		FileName:           input.FileName,
+		Repository:         input.Repository,
+		Branch:             input.Branch,
+		Path:               path,
+		FileSizeBytes:      int64(input.FileSizeBytes),
+		ExtractTables:      extractTables,
+		ConversionStrategy: domainConversionStrategyFromModel(input.ConversionStrategy),
 	}
 
 	result, err := r.DocumentUploader.UploadKnowledgeDocument(ctx, uploadInput)

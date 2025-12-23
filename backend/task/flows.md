@@ -134,10 +134,9 @@ flowchart TD
   - `tables_bucket/key`
   - но это потребует миграции + обновления API ответа.
 
-### 4.2 Gateway-service (опционально)
-- В GraphQL мутацию добавить поля `extractTables`, `conversionStrategy`.
-- Сохранить их в документ (DocumentService.CreateDocument), чтобы router мог использовать.
-- Если менять контракт CreateDocument нежелательно — можно хранить стратегию как часть `path`/`repository` правил на бэкенде (router rules).
+### 4.2 Gateway-service (GraphQL)
+- GraphQL-мутация `uploadKnowledgeDocument` принимает поля `extractTables` и `conversionStrategy`, чтобы клиент мог принудительно включить цепочку Docling → TableExtractor.
+- Значения сохраняются через `DocumentService.CreateDocument` и используются router’ом document-service при выборе стадий.
 
 ### 4.3 Transformer-service (без критичных изменений)
 - Оставить существующий API и очередь.

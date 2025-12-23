@@ -18,7 +18,16 @@ type stubDocumentClient struct {
 func (s *stubDocumentClient) CreateDocument(_ context.Context, req domain.CreateDocumentRequest) (*domain.Document, error) {
 	s.lastRequest = req
 	status := domain.DocumentStatusUploaded
-	return &domain.Document{ID: req.ID, FileName: req.FileName, Repository: req.Repository, Branch: req.Branch, Path: req.Path, Status: status}, nil
+	return &domain.Document{
+		ID:                 req.ID,
+		FileName:           req.FileName,
+		Repository:         req.Repository,
+		Branch:             req.Branch,
+		Path:               req.Path,
+		Status:             status,
+		ExtractTables:      req.ExtractTables,
+		ConversionStrategy: domain.NormalizeConversionStrategy(req.ConversionStrategy),
+	}, nil
 }
 
 func (s *stubDocumentClient) GetDocument(context.Context, string) (*domain.Document, error) {
@@ -68,4 +77,26 @@ func TestUploadKnowledgeDocument_DefaultPathGenerated(t *testing.T) {
 	require.True(t, strings.HasPrefix(docClient.lastRequest.Path, "knowledge/docs/"))
 	require.True(t, strings.HasSuffix(docClient.lastRequest.Path, ".md"))
 	require.Equal(t, docClient.lastRequest.Path, result.Document.Path)
+}
+
+func TestUploadKnowledgeDocument_ForwardsTableOptions(t *testing.T) {
+	docClient := &stubDocumentClient{}
+	storageClient := stubStorageClient{}
+	svc := NewUploadService(docClient, storageClient, UploadConfig{SignedURLTTLSeconds: 60})
+
+	result, err := svc.UploadKnowledgeDocument(context.Background(), UploadInput{
+		FileName:           "report.pdf",
+		Repository:         "org/repo",
+		Branch:             "main",
+		Path:               "docs/report.md",
+		FileSizeBytes:      256,
+		ExtractTables:      true,
+		ConversionStrategy: domain.ConversionStrategyTablesOnly,
+	})
+
+	require.NoError(t, err)
+	require.True(t, docClient.lastRequest.ExtractTables)
+	require.Equal(t, string(domain.ConversionStrategyTablesOnly), docClient.lastRequest.ConversionStrategy)
+	require.True(t, result.Document.ExtractTables)
+	require.Equal(t, domain.ConversionStrategyTablesOnly, result.Document.ConversionStrategy)
 }
