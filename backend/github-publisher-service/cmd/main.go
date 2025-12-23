@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"backend-github-publisher-service/internal/service"
-	"backend-github-publisher-service/internal/worker"
 	githubpublisherv1 "backend-github-publisher-service/proto/backend/githubpublisher/v1"
 	"google.golang.org/grpc"
 )
@@ -59,20 +58,6 @@ func main() {
 		zapSugar.Fatalf("failed to init minio client: %v", err)
 	}
 
-	workerCfg := worker.Config{
-		DSN:          cfg.Processing.DSN,
-		Stage:        cfg.Processing.Stage,
-		PollInterval: cfg.Processing.PollInterval,
-		MaxAttempts:  cfg.Processing.MaxAttempts,
-		Backoff:      cfg.Processing.Backoff,
-	}
-
-	processingWorker, err := worker.New(ctx, workerCfg, baseLogger)
-	if err != nil {
-		zapSugar.Fatalf("failed to init processing worker: %v", err)
-	}
-	defer processingWorker.Close()
-
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		zapSugar.Fatalf("failed to listen: %v", err)
@@ -84,11 +69,6 @@ func main() {
 	publisher := service.NewPublisherServer(cfg, baseLogger, publisherAdapter, minioStorage)
 
 	githubpublisherv1.RegisterGithubPublisherServiceServer(grpcServer, publisher)
-	go func() {
-		zapSugar.Infof("starting processing worker for stage=%s", workerCfg.Stage)
-		processingWorker.Run(ctx)
-	}()
-
 	go func() {
 		<-ctx.Done()
 		grpcServer.GracefulStop()
