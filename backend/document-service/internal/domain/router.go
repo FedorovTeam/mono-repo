@@ -171,7 +171,7 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 }
 
 // ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
-func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32, hasTablesHint bool) bool {
+func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32, _ bool) bool {
 	if doc == nil {
 		return false
 	}
@@ -180,8 +180,7 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 		return false
 	}
 	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
-	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
-	explicitTables := extractTables || doc.ExtractTables || strategy == ConversionStrategyTablesOnly
+	explicitTables := doc.ExtractTables || strategy == ConversionStrategyTablesOnly
 	pages := uniquePages(tablePages)
 	detectedTables := tableCount
 	if detectedTables == 0 && len(pages) > 0 {
@@ -190,7 +189,6 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	detectionSatisfied := detectedTables > 0 && detectedTables >= rules.tableDetectionMinCount
 
 	ext := documentExtension(doc)
-	fallbackDetection := hasTablesHint && ext == "pdf" && rules.forceTableExtraction
 	if !canUseTableExtractor(ext, rules.tableExtractorExt) {
 		return false
 	}
@@ -199,11 +197,11 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 		return true
 	}
 
-	if doclingWithTables {
-		return detectionSatisfied || fallbackDetection
+	if !extractTables {
+		return false
 	}
 
-	return detectionSatisfied || fallbackDetection
+	return detectionSatisfied
 }
 
 func uniquePages(pages []int32) []int32 {

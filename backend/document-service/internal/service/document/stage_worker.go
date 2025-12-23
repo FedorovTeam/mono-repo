@@ -32,9 +32,10 @@ type StageWorker struct {
 	service     *workersvc.WorkerService
 	retryDelay  time.Duration
 	maxAttempts int
+	router      *domain.StageRouter
 }
 
-func NewStageWorker(repo Repository, activities *Activities, stage domain.JobStage, batchSize int, retryDelay time.Duration) *StageWorker {
+func NewStageWorker(repo Repository, activities *Activities, stage domain.JobStage, batchSize int, retryDelay time.Duration, router *domain.StageRouter) *StageWorker {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -62,6 +63,7 @@ func NewStageWorker(repo Repository, activities *Activities, stage domain.JobSta
 		service:     service,
 		retryDelay:  retryDelay,
 		maxAttempts: defaultMaxAttempts,
+		router:      router,
 	}
 }
 
@@ -406,20 +408,23 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		payload.DoclingStatus = status
 	}
 	payload.TableMetadata = payload.TableMetadata.Merge(result.TableMetadata)
-	if result.TableCount > 0 || !result.TableMetadata.IsEmpty() {
-		payload.TableMetadata = result.TableMetadata
-		payload.TableCount = result.TableCount
-	} else {
+	if result.TableCount > 0 || len(result.TablePages) > 0 {
+		payload.TableMetadata = payload.TableMetadata.Merge(domain.TableMetadata{
+			TablesCount: int32(result.TableCount),
+			Pages:       result.TablePages,
+		})
+	}
+	if result.Ready && result.TableCount == 0 && len(result.TablePages) == 0 && result.TableMetadata.IsEmpty() {
 		payload.TableMetadata = domain.TableMetadata{}
+		payload.TablePages = nil
 		payload.TableCount = 0
 	}
 	if len(result.TablePages) > 0 {
 		payload.TablePages = append([]int32(nil), result.TablePages...)
-	} else {
-		payload.TablePages = nil
 	}
 
-	if count, pages := payload.TableInfo(); count > 0 {
+	count, pages := payload.TableInfo()
+	if count > 0 {
 		payload.TableCount = int32(count)
 		payload.TablePages = pages
 	} else {
@@ -432,7 +437,11 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if payload.DoclingMarkdownObjectKey == "" {
 		payload.DoclingMarkdownObjectKey = payload.MarkdownObjectKey
 	}
-	requiresTablesChain := payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyTablesOnly
+	if payload.ConversionStrategy == "" && count > 0 {
+		payload.ExtractTables = true
+	}
+	shouldExtractTables := w.shouldExtractAfterConvert(doc, payload, count, pages)
+	requiresTablesChain := shouldExtractTables
 
 	if !result.Ready {
 		next := time.Now().Add(w.retryDelay)
@@ -783,6 +792,20 @@ func pickRetryAfter(resp *githubpublisherv1.PublishMarkdownResponse) *durationpb
 		return nil
 	}
 	return resp.GetRetryAfter()
+}
+
+func (w *StageWorker) shouldExtractAfterConvert(doc *domain.Document, payload domain.ConvertPayload, tableCount int, tablePages []int32) bool {
+	if doc == nil {
+		return false
+	}
+	if w.router == nil {
+		return payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyTablesOnly
+	}
+	docCopy := *doc
+	if payload.ConversionStrategy != "" {
+		docCopy.ConversionStrategy = payload.ConversionStrategy
+	}
+	return w.router.ShouldExtractTablesAfterConvert(&docCopy, payload.ExtractTables, tableCount, tablePages, payload.HasMarkdownTablesHint())
 }
 
 func (w *StageWorker) jobContext(ctx context.Context, correlationID string) context.Context {

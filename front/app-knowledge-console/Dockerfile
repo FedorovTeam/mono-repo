@@ -42,6 +42,8 @@ COPY . .
 
 # Можно отключить телеметрию Next.js на этапе сборки
 # ENV NEXT_TELEMETRY_DISABLED=1
+# Используем системные TLS-сертификаты для сборки Turbopack
+ENV NEXT_TURBOPACK_EXPERIMENTAL_USE_SYSTEM_TLS_CERTS=1
 
 # Сборка проекта (standalone-режим указывается в next.config или auto-вывод)
 RUN \

@@ -166,11 +166,11 @@ func main() {
 		cfg.StageWorker.GracePeriod,
 	)
 
-	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	preprocessWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, cfg.StageWorker.BatchSize, cfg.StageWorker.PreprocessRetryDelay)
-	extractTablesWorker := docservice.NewStageWorker(repo, activities, domain.JobStageExtractTables, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
-	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.ConvertBatchSize, cfg.StageWorker.RetryDelay)
-	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay)
+	storeWorker := docservice.NewStageWorker(repo, activities, domain.JobStageStoreOriginal, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, router)
+	preprocessWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, cfg.StageWorker.BatchSize, cfg.StageWorker.PreprocessRetryDelay, router)
+	extractTablesWorker := docservice.NewStageWorker(repo, activities, domain.JobStageExtractTables, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, router)
+	convertWorker := docservice.NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, cfg.StageWorker.ConvertBatchSize, cfg.StageWorker.RetryDelay, router)
+	publishWorker := docservice.NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, cfg.StageWorker.BatchSize, cfg.StageWorker.RetryDelay, router)
 
 	publishDefaults := docservice.PublishDefaults{
 		CommitMessage: cfg.Github.CommitMessage,

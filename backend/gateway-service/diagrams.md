@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart LR
-    Client -->|GraphQL + X-API-Key + X-Correlation-ID| Gateway
+    Client -->|GraphQL + Authorization Bearer (+X-API-Key) + X-Correlation-ID| Gateway
     Gateway -->|GenerateUploadURL (gRPC)| StorageService
     Gateway -->|Create/Retry/List/Get (gRPC)| DocumentService
     Gateway -->|workflow trigger| DocumentService
@@ -11,4 +11,3 @@ flowchart LR
 ```
 
 - OTLP-коллектор показан отдельно: при `observability.enabled=false` сервис не создаёт экспортеры и работает с no-op провайдерами/хендлерами.
-

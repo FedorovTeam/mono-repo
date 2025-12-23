@@ -25,7 +25,7 @@ func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 				w.Header().Set("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Credentials", "false")
 				w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-Correlation-ID")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-Correlation-ID, Authorization")
 			}
 
 			// Preflight — отвечаем сразу и дальше не идём

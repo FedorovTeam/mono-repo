@@ -1,6 +1,6 @@
 # backend-gateway-service
 
-Публичный GraphQL-шлюз для загрузки знаниевых документов: выдаёт presigned URL через `storage-service`, создаёт записи в `document-service`, принимает MinIO webhook для подтверждения загрузки и прокидывает `X-API-Key`/`X-Correlation-ID` в downstream gRPC вызовы.
+Публичный GraphQL-шлюз для загрузки знаниевых документов: выдаёт presigned URL через `storage-service`, создаёт записи в `document-service`, принимает MinIO webhook для подтверждения загрузки и прокидывает `Authorization`/`X-API-Key` (если включён)/`X-Correlation-ID` и данные пользователя (`x-user-id`, `x-user-email`, `x-user-groups`) в downstream gRPC вызовы.
 
 ## Назначение и ответственность
 - Обработка GraphQL запросов `knowledgeDocument`/`knowledgeDocuments` и мутации `uploadKnowledgeDocument` на `/query` (Playground — `/playground`) с обязательным заголовком `X-API-Key` для всех методов кроме preflight `OPTIONS`; `CorrelationIDMiddleware` генерирует/пробрасывает `X-Correlation-ID` и возвращает его в ответе. CORS разрешён только для `https://console.fedorov-team.tech` и `http://localhost:3000`.
@@ -23,12 +23,12 @@
 
 ### Пример
 ```bash
-API_KEY=secret
+API_KEY=secret # используется, только если включен security.apiKey.enabled
 ENDPOINT=http://localhost:8080/query
 
 response=$(curl -s -X POST "$ENDPOINT" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "Authorization: Bearer <token>" \
   -H "X-Correlation-ID: demo-corr" \
   -d '{
     "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod requiredHeaders{ name value } document{ id status jobId path repositoryOwner } } }",
@@ -42,14 +42,15 @@ curl -X PUT "$UPLOAD_URL" \
 
 curl -X POST "$ENDPOINT" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "Authorization: Bearer <token>" \
   -d '{"query": "{ knowledgeDocuments(pagination:{limit:5,offset:0}){ nodes { id status fileName repository } totalCount } }"}'
 ```
 
 ## Конфигурация
 Файл `config/config.yaml` обязателен; путь передаётся флагом `-config` (по умолчанию `config/config.yaml`).
 - `server.port` — порт HTTP GraphQL сервера.
-- `security.apiKey` — ожидаемое значение заголовка `X-API-Key` (обязательно).
+- `security.apiKey.enabled` — включает аутентификацию по `X-API-Key` (true по умолчанию); `security.apiKey.value` — ожидаемое значение (обязательно при enabled=true).
+- `security.oidc.jwksUrl`/`issuer`/`audience` — параметры проверки `Authorization: Bearer` токена; по умолчанию настроены на `https://auth.tech.fedorov-team.tech/application/o/console/`.
 - `documentService.address` / `storageService.address` — gRPC адреса (обязательны). Пример по умолчанию: `document-service.document-service.svc.cluster.local:9090`, `storage-service.storage-service.svc.cluster.local:9090`.
 - `documentService.grpc` / `storageService.grpc` — настройки gRPC клиентов: `insecure` (по умолчанию `true`), `dialTimeout` (5s), `minConnectTimeout` (3s), keepalive (`time=5m`, `timeout=10s`, `permitWithoutStream=false`), бэкофф (`baseDelay=1s`, `multiplier=1.6`, `jitter=0.2`, `maxDelay=30s`), `WaitForReady` включён.
 - `uploads.signedUrlTtlSeconds` — TTL presigned ссылок; если не задано или ≤0, используется `900`.
@@ -61,10 +62,10 @@ curl -X POST "$ENDPOINT" \
 - gRPC клиенты storage/document-service получают `otelgrpc` stats handler с propagation; при выключенной телеметрии используются no-op провайдеры без отправки данных.
 
 ## Локальный запуск
-1. Убедиться, что `config/config.yaml` заполнен (минимум `security.apiKey`, адреса gRPC-сервисов; указать `observability.enabled: false`, если нет OTLP collector).
+1. Убедиться, что `config/config.yaml` заполнен (минимум `security.oidc` и/или `security.apiKey`, адреса gRPC-сервисов; указать `observability.enabled: false`, если нет OTLP collector).
 2. Сгенерировать GraphQL код (если схема менялась): `go run github.com/99designs/gqlgen generate`.
 3. Запустить сервер: `go run ./cmd -config config/config.yaml`.
-4. Проверить доступность: `curl -H "X-API-Key: <key>" -d '{"query":"{ __typename }"}' http://localhost:<port>/query`.
+4. Проверить доступность: `curl -H "Authorization: Bearer <token>" -d '{"query":"{ __typename }"}' http://localhost:<port>/query`.
 
 ## Структура
 - `cmd/` — точка входа сервера.

@@ -123,12 +123,11 @@ func paginationParams(p *model.Pagination) (limit int, offset int) {
 	return
 }
 
-func requireAPIKey(ctx context.Context) (string, error) {
-	apiKey := ctxutils.APIKey(ctx)
-	if apiKey == "" {
-		return "", errors.New("missing api key for public mutation")
+func requireAuthentication(ctx context.Context) error {
+	if ctxutils.APIKey(ctx) != "" || ctxutils.UserFromContext(ctx) != nil {
+		return nil
 	}
-	return apiKey, nil
+	return errors.New("missing authentication for public mutation")
 }
 
 func mapHeaders(headers map[string]string) []*model.UploadHeader {

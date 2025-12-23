@@ -279,7 +279,7 @@ func TestHandlePublishWritesCommitEventPayload(t *testing.T) {
 	repo := &publishRepoStub{doc: doc}
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "abc123"}}
 	activities := NewActivities(repo, nil, nil, nil, publisher, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second, nil)
 
 	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: (domain.PublishPayload{
 		CommitMessage: "commit",
@@ -325,7 +325,7 @@ func TestHandlePublishRespectsRetryAfterInFailures(t *testing.T) {
 		RetryAfter:   retryAfter,
 	}}
 	activities := NewActivities(repo, nil, nil, nil, publisher, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 1, time.Second, nil)
 
 	start := time.Now()
 	result, err := worker.handlePublish(context.Background(), domain.ProcessingJob{TaskID: "job-2", DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Payload: (domain.PublishPayload{
@@ -407,7 +407,7 @@ func TestRecoveredJobPickedByStageWorker(t *testing.T) {
 	repo.now = fixed.Add(time.Minute)
 	publisher := &staticPublisher{resp: &githubpublisherv1.PublishMarkdownResponse{Status: githubpublisherv1.PublishResultStatus_PUBLISH_RESULT_STATUS_SUCCESS, CommitSha: "commit-sha"}}
 	activities := NewActivities(repo, nil, nil, nil, publisher, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 2, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePublishToGitHub, 2, time.Second, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runErr := make(chan error, 1)
@@ -450,7 +450,7 @@ func TestHandlePreprocessSubmitSchedulesRetry(t *testing.T) {
 		},
 	}
 	activities := NewActivities(repo, preprocess, nil, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, 500*time.Millisecond)
+	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, 500*time.Millisecond, nil)
 
 	result, err := worker.handlePreprocessToDocx(context.Background(), domain.ProcessingJob{TaskID: "job-pre", DocumentID: doc.ID, Stage: domain.JobStagePreprocessToDocx})
 	if err != nil {
@@ -506,7 +506,7 @@ func TestHandlePreprocessCompletesAfterPoll(t *testing.T) {
 		},
 	}
 	activities := NewActivities(repo, preprocess, nil, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second, nil)
 
 	payload := domain.PreprocessPayload{
 		PreprocessJobID:   "job-pre-2",
@@ -567,7 +567,7 @@ func TestHandlePreprocessFailsOnFailedStatus(t *testing.T) {
 		},
 	}
 	activities := NewActivities(repo, preprocess, nil, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStagePreprocessToDocx, 1, time.Second, nil)
 
 	payload := domain.PreprocessPayload{
 		PreprocessJobID:   "job-pre-3",
@@ -616,7 +616,7 @@ func TestHandleConvertPostponesPendingStatuses(t *testing.T) {
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-1", Status: "pending"}}
 	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-1", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
 	if err != nil {
@@ -658,7 +658,7 @@ func TestHandleConvertOmitsForceOCRFlag(t *testing.T) {
 	repo := &publishRepoStub{doc: doc}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-ocr", Status: "done", MarkdownObjectKey: "path/doc.md"}}
 	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	job := domain.ProcessingJob{TaskID: "job-ocr", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: map[string]any{"force_ocr": true}}
 	result, err := worker.handleConvert(context.Background(), job)
@@ -702,7 +702,7 @@ func TestHandleConvertUsesPreprocessedSourceWhenPresent(t *testing.T) {
 	repo := &publishRepoStub{doc: doc}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-prep", Status: "done", MarkdownObjectKey: "docs/doc.md"}}
 	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	payload := domain.ConvertPayload{
 		PreprocessJobID:       "prep-123",
@@ -780,7 +780,7 @@ func TestHandleConvertKeepsDoclingPayloadWhenTablesDetected(t *testing.T) {
 		MarkdownObjectKey: "docs/doc.md",
 		TableMetadata:     &transformerv1.TableMetadata{TablesCount: 2, Pages: []int32{1, 2}},
 	}}
-	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
 	if err != nil {
@@ -834,7 +834,7 @@ func TestHandleConvertMarksDoclingWithoutDetectedTables(t *testing.T) {
 
 	repo := &publishRepoStub{doc: doc}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-docling", Status: "done", MarkdownObjectKey: "docs/doc.md"}}
-	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
 	if err != nil {
@@ -855,6 +855,58 @@ func TestHandleConvertMarksDoclingWithoutDetectedTables(t *testing.T) {
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+}
+
+func TestHandleConvertClearsStaleTableCountsWhenNoTablesReturned(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-stale-tables",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           "queue-docling",
+		Status:            "done",
+		MarkdownObjectKey: "docs/doc.md",
+	}}
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 2})
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, router)
+
+	jobPayload := (domain.ConvertPayload{
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		TableCount:        3,
+		TablePages:        []int32{1, 2},
+	}).ToMap()
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: jobPayload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document to be marked converted, got %v", repo.statusUpdates)
+	}
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if payload.TableCount != 0 {
+		t.Fatalf("expected table count to be reset, got %d", payload.TableCount)
+	}
+	if len(payload.TablePages) != 0 {
+		t.Fatalf("expected table pages to be cleared, got %v", payload.TablePages)
+	}
+	if payload.ExtractTables {
+		t.Fatalf("expected extract_tables to stay disabled without detected tables")
 	}
 }
 
@@ -883,14 +935,14 @@ func TestHandleConvertEnablesTablesWhenMetadataArrivesWithoutStrategy(t *testing
 		TableCount:        3,
 		TablePages:        []int32{1, 2, 3},
 	}}
-	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-detected", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusConvertedToMarkdown {
-		t.Fatalf("expected document to be marked converted, got %v", repo.statusUpdates)
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected document status to stay unchanged before table extraction, got %v", repo.statusUpdates)
 	}
 	payload := domain.ConvertPayloadFromMap(result.Payload)
 	if payload.TableCount != 3 {
@@ -899,8 +951,8 @@ func TestHandleConvertEnablesTablesWhenMetadataArrivesWithoutStrategy(t *testing
 	if !reflect.DeepEqual(payload.TablePages, []int32{1, 2, 3}) {
 		t.Fatalf("expected table pages propagated, got %v", payload.TablePages)
 	}
-	if payload.ExtractTables {
-		t.Fatalf("expected extract_tables to stay false; router decides based on detection data")
+	if !payload.ExtractTables {
+		t.Fatalf("expected extract_tables to be enabled when tables are detected without strategy")
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
@@ -935,7 +987,7 @@ func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 	}}
 	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-2", Status: "failed"}}
 	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runErr := make(chan error, 1)
@@ -979,7 +1031,7 @@ func TestHandleConvertReschedulesOnResourceExhausted(t *testing.T) {
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.ResourceExhausted, "queue limit reached")}
 	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-exhausted", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: (domain.ConvertPayload{}).ToMap()})
 	if err != nil {
@@ -1027,7 +1079,7 @@ func TestHandleConvertRetriesOnTemporaryGRPCErrors(t *testing.T) {
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
 	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, 200*time.Millisecond)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, 200*time.Millisecond, nil)
 
 	start := time.Now()
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-temp", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Attempts: 1})
@@ -1079,7 +1131,7 @@ func TestHandleConvertHonorsMaxAttemptsForTemporaryErrors(t *testing.T) {
 	repo := &publishRepoStub{doc: doc, now: now}
 	transformer := &errorTransformer{err: status.Error(codes.Unavailable, "transformer unavailable")}
 	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
-	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 1, time.Second, nil)
 	worker.maxAttempts = 1
 
 	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-max", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Attempts: 1, Payload: (domain.ConvertPayload{}).ToMap()})
@@ -1119,7 +1171,7 @@ func TestHandleExtractTablesSubmitsAndPostpones(t *testing.T) {
 			},
 		},
 	}
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, nil), domain.JobStageExtractTables, 1, time.Second)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, nil), domain.JobStageExtractTables, 1, time.Second, nil)
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: map[string]any{}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1186,7 +1238,7 @@ func TestHandleExtractTablesMarksConverted(t *testing.T) {
 		},
 	}
 	payload := (domain.ExtractTablesPayload{QueueID: "queue-1"}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1244,7 +1296,7 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 		DoclingMarkdownBucket:    doc.MarkdownBucket,
 		DoclingMarkdownObjectKey: doc.MarkdownObjectKey,
 	}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
