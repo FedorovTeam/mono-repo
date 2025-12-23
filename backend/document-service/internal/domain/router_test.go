@@ -142,6 +142,12 @@ func TestStageRouterHonorsDetectionThreshold(t *testing.T) {
 	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1, 2}))
 }
 
+func TestStageRouterSkipsWhenNoTablesDetected(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
+	doc := &Document{OriginalObjectKey: "incoming/without-tables.pdf", ConversionStrategy: ConversionStrategyDoclingWithTables}
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil))
+}
+
 func TestStageRouterDetectsTablesForDocx(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.docx"}
