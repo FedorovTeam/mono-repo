@@ -292,7 +292,9 @@ function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
           <TableHead className="w-[40%] min-w-[200px]">Название</TableHead>
           <TableHead className="w-[20%]">Статус</TableHead>
           <TableHead className="w-[20%]">Дата загрузки</TableHead>
-          <TableHead className="w-[20%]" />
+          <TableHead className="w-[20%] text-right">
+            <span className="sr-only">Действия</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
