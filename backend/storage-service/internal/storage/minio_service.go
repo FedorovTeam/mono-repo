@@ -352,7 +352,7 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 }
 
 // GenerateDownloadURL готовит presigned GET ссылку для уже существующего объекта.
-func (s *Service) GenerateDownloadURL(ctx context.Context, bucket, objectKey string, expiresInSeconds int64, correlationID string) (PresignedDownload, error) {
+func (s *Service) GenerateDownloadURL(ctx context.Context, bucket, objectKey string, expiresInSeconds int64) (PresignedDownload, error) {
 	if bucket == "" {
 		return PresignedDownload{}, fmt.Errorf("%w: bucket is required", ErrInvalidArgument)
 	}
@@ -376,13 +376,8 @@ func (s *Service) GenerateDownloadURL(ctx context.Context, bucket, objectKey str
 		return PresignedDownload{}, fmt.Errorf("failed to stat object: %w", err)
 	}
 
-	headers := http.Header{}
-	if correlationID != "" {
-		headers.Set("x-amz-meta-correlation-id", correlationID)
-	}
-
 	expires := time.Duration(expiresInSeconds) * time.Second
-	url, err := s.client.PresignHeader(ctx, http.MethodGet, bucket, objectKey, expires, nil, headers)
+	url, err := s.client.PresignHeader(ctx, http.MethodGet, bucket, objectKey, expires, nil, nil)
 	if err != nil {
 		return PresignedDownload{}, fmt.Errorf("cannot presign download url: %w", err)
 	}

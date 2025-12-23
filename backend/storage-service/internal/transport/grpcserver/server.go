@@ -195,7 +195,7 @@ func (s *Server) GenerateDownloadURL(ctx context.Context, req *storagev1.Generat
 	}
 
 	correlationID := s.correlationID(ctx, req.GetCorrelationId())
-	download, err := s.service.GenerateDownloadURL(ctx, req.GetBucket(), req.GetObjectKey(), req.GetExpiresInSeconds(), correlationID)
+	download, err := s.service.GenerateDownloadURL(ctx, req.GetBucket(), req.GetObjectKey(), req.GetExpiresInSeconds())
 	if err != nil {
 		return nil, s.mapStorageError(err)
 	}

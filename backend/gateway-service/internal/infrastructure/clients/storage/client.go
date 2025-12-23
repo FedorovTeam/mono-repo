@@ -64,7 +64,6 @@ func (c *GRPCClient) GenerateDownloadURL(ctx context.Context, req domain.Generat
 	resp, err := c.StorageServiceClient.GenerateDownloadURL(withMetadata(ctx), &storagepb.GenerateDownloadURLRequest{
 		Bucket:           req.Bucket,
 		ObjectKey:        req.ObjectKey,
-		CorrelationId:    req.CorrelationID,
 		ExpiresInSeconds: req.ExpiresInSeconds,
 	})
 	if err != nil {
