@@ -43,7 +43,7 @@ spec:
             - name: AUTHENTIK_JWKS_URL
               value: "https://auth.tech.fedorov-team.tech/application/o/console/jwks/"
             - name: GATEWAY_URL
-              value: "https://gateway.fedorov-team.tech/query"
+              value: "https://gateway.tech.fedorov-team.tech/query"
             - name: NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL
               value: "https://auth.tech.fedorov-team.tech/application/o/console/end-session/"
             - name: NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT
