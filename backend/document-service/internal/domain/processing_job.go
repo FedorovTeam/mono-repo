@@ -66,6 +66,7 @@ type ConvertPayload struct {
 	MarkdownObjectKey        string
 	DoclingMarkdownBucket    string
 	DoclingMarkdownObjectKey string
+	DoclingStatus            string
 	QueueID                  string
 	Status                   string
 	FilenameExtension        string
@@ -109,6 +110,7 @@ type ExtractTablesPayload struct {
 	MarkdownBucket           string
 	DoclingMarkdownBucket    string
 	DoclingMarkdownObjectKey string
+	DoclingStatus            string
 	ConversionStrategy       ConversionStrategy
 	ExtractTables            bool
 }
@@ -213,6 +215,9 @@ func (p ExtractTablesPayload) ToMap() map[string]any {
 	if p.DoclingMarkdownObjectKey != "" {
 		res["docling_markdown_object_key"] = p.DoclingMarkdownObjectKey
 	}
+	if p.DoclingStatus != "" {
+		res["docling_status"] = p.DoclingStatus
+	}
 	if p.ConversionStrategy != "" {
 		res["conversion_strategy"] = string(p.ConversionStrategy)
 	}
@@ -264,6 +269,9 @@ func (p ConvertPayload) ToMap() map[string]any {
 	if p.DoclingMarkdownObjectKey != "" {
 		res["docling_markdown_object_key"] = p.DoclingMarkdownObjectKey
 	}
+	if p.DoclingStatus != "" {
+		res["docling_status"] = p.DoclingStatus
+	}
 	if p.QueueID != "" {
 		res["queue_id"] = p.QueueID
 	}
@@ -305,6 +313,7 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		MarkdownObjectKey:        stringFromMap(payload, "markdown_object_key"),
 		DoclingMarkdownBucket:    stringFromMap(payload, "docling_markdown_bucket"),
 		DoclingMarkdownObjectKey: stringFromMap(payload, "docling_markdown_object_key"),
+		DoclingStatus:            stringFromMap(payload, "docling_status"),
 		QueueID:                  stringFromMap(payload, "queue_id"),
 		Status:                   stringFromMap(payload, "status"),
 		FilenameExtension:        stringFromMap(payload, "filename_extension"),
@@ -395,6 +404,7 @@ func ExtractTablesPayloadFromMap(payload map[string]any) ExtractTablesPayload {
 		MarkdownBucket:           stringFromMap(payload, "markdown_bucket"),
 		DoclingMarkdownBucket:    stringFromMap(payload, "docling_markdown_bucket"),
 		DoclingMarkdownObjectKey: stringFromMap(payload, "docling_markdown_object_key"),
+		DoclingStatus:            stringFromMap(payload, "docling_status"),
 		ConversionStrategy:       ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
 		ExtractTables:            boolFromMap(payload, "extract_tables"),
 	}

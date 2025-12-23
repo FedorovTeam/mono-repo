@@ -405,12 +405,19 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	}
 	if status := strings.TrimSpace(result.Status); status != "" {
 		payload.Status = status
+		payload.DoclingStatus = status
 	}
 	if result.TableCount > 0 {
 		payload.TableCount = result.TableCount
 	}
 	if len(result.TablePages) > 0 {
 		payload.TablePages = append([]int32(nil), result.TablePages...)
+	}
+	if payload.DoclingMarkdownBucket == "" {
+		payload.DoclingMarkdownBucket = payload.MarkdownBucket
+	}
+	if payload.DoclingMarkdownObjectKey == "" {
+		payload.DoclingMarkdownObjectKey = payload.MarkdownObjectKey
 	}
 
 	if !result.Ready {
@@ -438,6 +445,9 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	}
 	if payload.DoclingMarkdownObjectKey != "" {
 		eventPayload["docling_markdown_object_key"] = payload.DoclingMarkdownObjectKey
+	}
+	if payload.DoclingStatus != "" {
+		eventPayload["docling_status"] = payload.DoclingStatus
 	}
 	if len(eventPayload) == 0 {
 		eventPayload = nil
