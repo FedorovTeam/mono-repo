@@ -23,13 +23,6 @@ minio:
   secret_key: "6x19xWiD9cKCpE3KvJykK8OHxZs8GJwA4ix7oX82"
   secure: true
 
-processing:
-  dsn: "postgres://postgres:3&!tAL5bf38yfx@postgres-postgresql.postgres.svc.cluster.local:5432/document?sslmode=disable"
-  stage: publish_to_github
-  poll_interval: 5s
-  max_attempts: 5
-  backoff: 10s
-
 retry:
   initial_backoff: 5s
   max_backoff: 30s
