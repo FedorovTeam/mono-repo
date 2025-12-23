@@ -103,6 +103,10 @@ func (uc *ConfirmUpload) applyStrategyOverrides(ctx context.Context, doc *domain
 		desiredStrategy = domain.NormalizeConversionStrategy(strategy)
 	}
 
+	if desiredStrategy == domain.ConversionStrategyDoclingWithTables {
+		desiredExtract = true
+	}
+
 	if desiredStrategy == doc.ConversionStrategy && desiredExtract == doc.ExtractTables {
 		return doc, nil
 	}

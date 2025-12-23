@@ -9,14 +9,15 @@ import (
 type ConversionStrategy string
 
 const (
-	ConversionStrategyDefault    ConversionStrategy = ""
-	ConversionStrategyTablesOnly ConversionStrategy = "tables_only"
+	ConversionStrategyDefault           ConversionStrategy = ""
+	ConversionStrategyTablesOnly        ConversionStrategy = "tables_only"
+	ConversionStrategyDoclingWithTables ConversionStrategy = "docling_with_tables"
 )
 
 // ValidateConversionStrategy проверяет допустимость стратегии конвертации.
 func ValidateConversionStrategy(strategy ConversionStrategy) error {
 	switch strings.ToLower(strings.TrimSpace(string(strategy))) {
-	case "", string(ConversionStrategyTablesOnly):
+	case "", string(ConversionStrategyTablesOnly), string(ConversionStrategyDoclingWithTables):
 		return nil
 	default:
 		return ErrInvalidConversionStrategy

@@ -182,9 +182,23 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 			return fmt.Errorf("enqueue convert after preprocess for %s: %w", doc.ID, err)
 		}
 	case domain.JobStageConvertToMarkdown:
+		convertPayload := domain.ConvertPayloadFromMap(job.Payload)
+		if f.shouldExtractTablesAfterConvert(doc, convertPayload) {
+			correlationID := correlationFromDoc(doc)
+			if convertPayload.CorrelationID != "" {
+				correlationID = convertPayload.CorrelationID
+			}
+			payload := f.extractTablesPayloadFromConvert(doc, convertPayload, correlationID).ToMap()
+			event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: extract_tables"}
+			if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
+				return fmt.Errorf("enqueue extract_tables for %s: %w", doc.ID, err)
+			}
+			return nil
+		}
+
 		payload := domain.PublishPayload{
-			MarkdownBucket:     doc.MarkdownBucket,
-			MarkdownObjectKey:  doc.MarkdownObjectKey,
+			MarkdownBucket:     firstNonEmpty(convertPayload.MarkdownBucket, doc.MarkdownBucket),
+			MarkdownObjectKey:  firstNonEmpty(convertPayload.MarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc)),
 			Repository:         fmt.Sprintf("%s/%s", doc.Owner, doc.Repository),
 			Branch:             doc.Branch,
 			BaseBranch:         doc.BaseBranch,
@@ -195,7 +209,7 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 			PRBody:             f.defaults.PRBody,
 			AuthorName:         f.defaults.AuthorName,
 			AuthorEmail:        f.defaults.AuthorEmail,
-			JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: correlationFromDoc(doc)},
+			JobPayloadMetadata: domain.JobPayloadMetadata{CorrelationID: firstNonEmpty(convertPayload.CorrelationID, correlationFromDoc(doc))},
 		}.ToMap()
 		event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: publish"}
 		if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStagePublishToGitHub, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
@@ -279,32 +293,37 @@ func (f *JobFollower) extractTablesPayloadForDocument(doc *domain.Document, corr
 	}
 	artifactsPrefix := tablesArtifactsPrefix(markdownKey)
 	return domain.ExtractTablesPayload{
-		OriginalBucket:          doc.OriginalBucket,
-		OriginalObjectKey:       doc.OriginalObjectKey,
-		ArtifactsBucket:         artifactsBucket,
-		ArtifactsPrefix:         artifactsPrefix,
-		ArtifactsPrefixTemplate: config.ArtifactsPrefixTmpl,
-		MarkdownObjectKey:       markdownKey,
-		ConversionStrategy:      doc.ConversionStrategy,
-		ExtractTables:           doc.ExtractTables,
-		JobPayloadMetadata:      domain.JobPayloadMetadata{CorrelationID: correlationID},
+		OriginalBucket:           doc.OriginalBucket,
+		OriginalObjectKey:        doc.OriginalObjectKey,
+		ArtifactsBucket:          artifactsBucket,
+		ArtifactsPrefix:          artifactsPrefix,
+		ArtifactsPrefixTemplate:  config.ArtifactsPrefixTmpl,
+		MarkdownObjectKey:        markdownKey,
+		MarkdownBucket:           doc.MarkdownBucket,
+		DoclingMarkdownBucket:    doc.MarkdownBucket,
+		DoclingMarkdownObjectKey: markdownKey,
+		ConversionStrategy:       doc.ConversionStrategy,
+		ExtractTables:            doc.ExtractTables || doc.ConversionStrategy == domain.ConversionStrategyDoclingWithTables,
+		JobPayloadMetadata:       domain.JobPayloadMetadata{CorrelationID: correlationID},
 	}
 }
 
 func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides domain.ConvertPayload, correlationID string) domain.ConvertPayload {
 	payload := domain.ConvertPayload{
-		OriginalBucket:        firstNonEmpty(overrides.OriginalBucket, doc.OriginalBucket),
-		OriginalObjectKey:     firstNonEmpty(overrides.OriginalObjectKey, doc.OriginalObjectKey),
-		PreprocessJobID:       overrides.PreprocessJobID,
-		PreprocessedBucket:    overrides.PreprocessedBucket,
-		PreprocessedObjectKey: overrides.PreprocessedObjectKey,
-		TargetObjectKey:       overrides.TargetObjectKey,
-		MarkdownBucket:        firstNonEmpty(overrides.MarkdownBucket, doc.MarkdownBucket),
-		MarkdownObjectKey:     firstNonEmpty(overrides.MarkdownObjectKey, doc.MarkdownObjectKey),
-		FilenameExtension:     overrides.FilenameExtension,
-		JobPayloadMetadata:    domain.JobPayloadMetadata{CorrelationID: correlationID},
-		ConversionStrategy:    doc.ConversionStrategy,
-		ExtractTables:         doc.ExtractTables,
+		OriginalBucket:           firstNonEmpty(overrides.OriginalBucket, doc.OriginalBucket),
+		OriginalObjectKey:        firstNonEmpty(overrides.OriginalObjectKey, doc.OriginalObjectKey),
+		PreprocessJobID:          overrides.PreprocessJobID,
+		PreprocessedBucket:       overrides.PreprocessedBucket,
+		PreprocessedObjectKey:    overrides.PreprocessedObjectKey,
+		TargetObjectKey:          overrides.TargetObjectKey,
+		MarkdownBucket:           firstNonEmpty(overrides.MarkdownBucket, doc.MarkdownBucket),
+		MarkdownObjectKey:        firstNonEmpty(overrides.MarkdownObjectKey, doc.MarkdownObjectKey),
+		DoclingMarkdownBucket:    firstNonEmpty(overrides.DoclingMarkdownBucket, doc.MarkdownBucket),
+		DoclingMarkdownObjectKey: firstNonEmpty(overrides.DoclingMarkdownObjectKey, doc.MarkdownObjectKey),
+		FilenameExtension:        overrides.FilenameExtension,
+		JobPayloadMetadata:       domain.JobPayloadMetadata{CorrelationID: correlationID},
+		ConversionStrategy:       doc.ConversionStrategy,
+		ExtractTables:            doc.ExtractTables || doc.ConversionStrategy == domain.ConversionStrategyDoclingWithTables,
 	}
 
 	if payload.FilenameExtension == "" {
@@ -317,6 +336,35 @@ func (f *JobFollower) convertPayloadForDocument(doc *domain.Document, overrides 
 	}
 
 	return payload
+}
+
+func (f *JobFollower) extractTablesPayloadFromConvert(doc *domain.Document, convertPayload domain.ConvertPayload, correlationID string) domain.ExtractTablesPayload {
+	payload := f.extractTablesPayloadForDocument(doc, correlationID)
+	payload.OriginalBucket = firstNonEmpty(convertPayload.OriginalBucket, payload.OriginalBucket, doc.OriginalBucket)
+	payload.OriginalObjectKey = firstNonEmpty(convertPayload.OriginalObjectKey, payload.OriginalObjectKey, doc.OriginalObjectKey)
+	payload.MarkdownBucket = firstNonEmpty(convertPayload.MarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket)
+	payload.MarkdownObjectKey = firstNonEmpty(convertPayload.MarkdownObjectKey, payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.DoclingMarkdownBucket = firstNonEmpty(convertPayload.DoclingMarkdownBucket, payload.DoclingMarkdownBucket, doc.MarkdownBucket)
+	payload.DoclingMarkdownObjectKey = firstNonEmpty(convertPayload.DoclingMarkdownObjectKey, payload.DoclingMarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.ConversionStrategy = domain.ConversionStrategy(firstNonEmpty(string(convertPayload.ConversionStrategy), string(payload.ConversionStrategy), string(doc.ConversionStrategy)))
+	payload.ExtractTables = convertPayload.ExtractTables || payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables
+	return payload
+}
+
+func (f *JobFollower) shouldExtractTablesAfterConvert(doc *domain.Document, payload domain.ConvertPayload) bool {
+	if f.router == nil || doc == nil {
+		return false
+	}
+	if !f.router.ShouldExtractTablesAfterConvert(doc) {
+		return false
+	}
+
+	strategy := domain.NormalizeConversionStrategy(string(firstNonEmpty(string(payload.ConversionStrategy), string(doc.ConversionStrategy))))
+	if strategy != domain.ConversionStrategyDoclingWithTables {
+		return false
+	}
+
+	return payload.ExtractTables || doc.ExtractTables || strategy == domain.ConversionStrategyDoclingWithTables
 }
 
 func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.ConvertPayload, string) {

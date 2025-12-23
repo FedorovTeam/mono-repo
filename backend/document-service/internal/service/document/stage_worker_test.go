@@ -753,6 +753,54 @@ func TestHandleConvertUsesPreprocessedSourceWhenPresent(t *testing.T) {
 	}
 }
 
+func TestHandleConvertKeepsDoclingPayloadUntilTables(t *testing.T) {
+	doc := &domain.Document{
+		ID:                 "doc-docling",
+		Name:               "Doc.pdf",
+		Owner:              "owner",
+		Repository:         "repo",
+		Branch:             "main",
+		BaseBranch:         "main",
+		Path:               "docs/doc.md",
+		Status:             domain.DocumentStatusStoredOriginal,
+		OriginalBucket:     "orig-bucket",
+		OriginalObjectKey:  "docs/doc.pdf",
+		MarkdownBucket:     "md-bucket",
+		MarkdownObjectKey:  "docs/doc.md",
+		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+		Versions:           []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{QueueId: "queue-docling", Status: "done", MarkdownObjectKey: "docs/doc.md"}}
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected status to remain unchanged until tables are merged, got %v", repo.statusUpdates)
+	}
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if payload.DoclingMarkdownObjectKey != "docs/doc.md" {
+		t.Fatalf("expected docling markdown key in payload, got %s", payload.DoclingMarkdownObjectKey)
+	}
+	if payload.DoclingMarkdownBucket != "md-bucket" {
+		t.Fatalf("expected docling markdown bucket to be kept, got %s", payload.DoclingMarkdownBucket)
+	}
+	if !payload.ExtractTables {
+		t.Fatalf("expected extract_tables flag to be true for docling_with_tables strategy")
+	}
+	if payload.ConversionStrategy != domain.ConversionStrategyDoclingWithTables {
+		t.Fatalf("expected conversion strategy to stay docling_with_tables, got %s", payload.ConversionStrategy)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event without status change, got %+v", result.Event)
+	}
+}
+
 func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-failed-status",

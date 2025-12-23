@@ -108,7 +108,12 @@ func (r *StageRouter) NextStageAfterStore(doc *Document) JobStage {
 	rules := r.effectiveRules(doc)
 	ext := documentExtension(doc)
 	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
-	wantsTables := doc.ExtractTables || strategy == ConversionStrategyTablesOnly
+	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
+	wantsTables := doc.ExtractTables || strategy == ConversionStrategyTablesOnly || doclingWithTables
+
+	if doclingWithTables {
+		return JobStageConvertToMarkdown
+	}
 
 	if wantsTables && rules.tableExtractorEnabled {
 		if ext == "" {
@@ -155,6 +160,29 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 	ext := documentExtension(doc)
 	if ext == "" {
 		return rules.tableExtractorEnabled
+	}
+	_, ok := rules.tableExtractorExt[ext]
+	return ok
+}
+
+// ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
+func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document) bool {
+	if doc == nil {
+		return false
+	}
+	rules := r.effectiveRules(doc)
+	if !rules.tableExtractorEnabled {
+		return false
+	}
+
+	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
+	if strategy != ConversionStrategyDoclingWithTables {
+		return false
+	}
+
+	ext := documentExtension(doc)
+	if ext == "" {
+		return true
 	}
 	_, ok := rules.tableExtractorExt[ext]
 	return ok

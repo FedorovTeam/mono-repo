@@ -56,19 +56,21 @@ type StoreOriginalPayload struct {
 // ConvertPayload описывает данные для шага конвертации в Markdown.
 type ConvertPayload struct {
 	JobPayloadMetadata
-	OriginalBucket        string
-	OriginalObjectKey     string
-	PreprocessJobID       string
-	PreprocessedBucket    string
-	PreprocessedObjectKey string
-	TargetObjectKey       string
-	MarkdownBucket        string
-	MarkdownObjectKey     string
-	QueueID               string
-	Status                string
-	FilenameExtension     string
-	ConversionStrategy    ConversionStrategy
-	ExtractTables         bool
+	OriginalBucket           string
+	OriginalObjectKey        string
+	PreprocessJobID          string
+	PreprocessedBucket       string
+	PreprocessedObjectKey    string
+	TargetObjectKey          string
+	MarkdownBucket           string
+	MarkdownObjectKey        string
+	DoclingMarkdownBucket    string
+	DoclingMarkdownObjectKey string
+	QueueID                  string
+	Status                   string
+	FilenameExtension        string
+	ConversionStrategy       ConversionStrategy
+	ExtractTables            bool
 }
 
 // PreprocessPayload описывает данные для шага преобразования в DOCX.
@@ -91,19 +93,22 @@ type PreprocessPayload struct {
 // ExtractTablesPayload описывает данные для извлечения таблиц из PDF.
 type ExtractTablesPayload struct {
 	JobPayloadMetadata
-	OriginalBucket          string
-	OriginalObjectKey       string
-	ArtifactsBucket         string
-	ArtifactsPrefix         string
-	ArtifactsPrefixTemplate string
-	QueueID                 string
-	TableQueueID            string
-	Status                  string
-	StatusReason            string
-	PollAttempts            int
-	MarkdownObjectKey       string
-	ConversionStrategy      ConversionStrategy
-	ExtractTables           bool
+	OriginalBucket           string
+	OriginalObjectKey        string
+	ArtifactsBucket          string
+	ArtifactsPrefix          string
+	ArtifactsPrefixTemplate  string
+	QueueID                  string
+	TableQueueID             string
+	Status                   string
+	StatusReason             string
+	PollAttempts             int
+	MarkdownObjectKey        string
+	MarkdownBucket           string
+	DoclingMarkdownBucket    string
+	DoclingMarkdownObjectKey string
+	ConversionStrategy       ConversionStrategy
+	ExtractTables            bool
 }
 
 // PublishPayload описывает данные для шага публикации в GitHub.
@@ -197,6 +202,15 @@ func (p ExtractTablesPayload) ToMap() map[string]any {
 	if p.MarkdownObjectKey != "" {
 		res["markdown_object_key"] = p.MarkdownObjectKey
 	}
+	if p.MarkdownBucket != "" {
+		res["markdown_bucket"] = p.MarkdownBucket
+	}
+	if p.DoclingMarkdownBucket != "" {
+		res["docling_markdown_bucket"] = p.DoclingMarkdownBucket
+	}
+	if p.DoclingMarkdownObjectKey != "" {
+		res["docling_markdown_object_key"] = p.DoclingMarkdownObjectKey
+	}
 	if p.ConversionStrategy != "" {
 		res["conversion_strategy"] = string(p.ConversionStrategy)
 	}
@@ -242,6 +256,12 @@ func (p ConvertPayload) ToMap() map[string]any {
 	if p.MarkdownObjectKey != "" {
 		res["markdown_object_key"] = p.MarkdownObjectKey
 	}
+	if p.DoclingMarkdownBucket != "" {
+		res["docling_markdown_bucket"] = p.DoclingMarkdownBucket
+	}
+	if p.DoclingMarkdownObjectKey != "" {
+		res["docling_markdown_object_key"] = p.DoclingMarkdownObjectKey
+	}
 	if p.QueueID != "" {
 		res["queue_id"] = p.QueueID
 	}
@@ -262,20 +282,22 @@ func (p ConvertPayload) ToMap() map[string]any {
 // ConvertPayloadFromMap восстанавливает структуру из map.
 func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 	return ConvertPayload{
-		JobPayloadMetadata:    metadataFromMap(payload),
-		OriginalBucket:        stringFromMap(payload, "original_bucket"),
-		OriginalObjectKey:     stringFromMap(payload, "original_object_key"),
-		PreprocessJobID:       stringFromMap(payload, "preprocess_job_id"),
-		PreprocessedBucket:    stringFromMap(payload, "preprocessed_bucket"),
-		PreprocessedObjectKey: stringFromMap(payload, "preprocessed_object_key"),
-		TargetObjectKey:       stringFromMap(payload, "target_object_key"),
-		MarkdownBucket:        stringFromMap(payload, "markdown_bucket"),
-		MarkdownObjectKey:     stringFromMap(payload, "markdown_object_key"),
-		QueueID:               stringFromMap(payload, "queue_id"),
-		Status:                stringFromMap(payload, "status"),
-		FilenameExtension:     stringFromMap(payload, "filename_extension"),
-		ConversionStrategy:    ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
-		ExtractTables:         boolFromMap(payload, "extract_tables"),
+		JobPayloadMetadata:       metadataFromMap(payload),
+		OriginalBucket:           stringFromMap(payload, "original_bucket"),
+		OriginalObjectKey:        stringFromMap(payload, "original_object_key"),
+		PreprocessJobID:          stringFromMap(payload, "preprocess_job_id"),
+		PreprocessedBucket:       stringFromMap(payload, "preprocessed_bucket"),
+		PreprocessedObjectKey:    stringFromMap(payload, "preprocessed_object_key"),
+		TargetObjectKey:          stringFromMap(payload, "target_object_key"),
+		MarkdownBucket:           stringFromMap(payload, "markdown_bucket"),
+		MarkdownObjectKey:        stringFromMap(payload, "markdown_object_key"),
+		DoclingMarkdownBucket:    stringFromMap(payload, "docling_markdown_bucket"),
+		DoclingMarkdownObjectKey: stringFromMap(payload, "docling_markdown_object_key"),
+		QueueID:                  stringFromMap(payload, "queue_id"),
+		Status:                   stringFromMap(payload, "status"),
+		FilenameExtension:        stringFromMap(payload, "filename_extension"),
+		ConversionStrategy:       ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
+		ExtractTables:            boolFromMap(payload, "extract_tables"),
 	}
 }
 
@@ -344,20 +366,23 @@ func PreprocessPayloadFromMap(payload map[string]any) PreprocessPayload {
 // ExtractTablesPayloadFromMap восстанавливает ExtractTablesPayload из map.
 func ExtractTablesPayloadFromMap(payload map[string]any) ExtractTablesPayload {
 	result := ExtractTablesPayload{
-		JobPayloadMetadata:      metadataFromMap(payload),
-		OriginalBucket:          stringFromMap(payload, "original_bucket"),
-		OriginalObjectKey:       stringFromMap(payload, "original_object_key"),
-		ArtifactsBucket:         stringFromMap(payload, "artifacts_bucket"),
-		ArtifactsPrefix:         stringFromMap(payload, "artifacts_prefix"),
-		ArtifactsPrefixTemplate: stringFromMap(payload, "artifacts_prefix_template"),
-		QueueID:                 stringFromMap(payload, "queue_id"),
-		TableQueueID:            stringFromMap(payload, "table_queue_id"),
-		Status:                  stringFromMap(payload, "status"),
-		StatusReason:            stringFromMap(payload, "status_reason"),
-		PollAttempts:            intFromMap(payload, "poll_attempts"),
-		MarkdownObjectKey:       stringFromMap(payload, "markdown_object_key"),
-		ConversionStrategy:      ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
-		ExtractTables:           boolFromMap(payload, "extract_tables"),
+		JobPayloadMetadata:       metadataFromMap(payload),
+		OriginalBucket:           stringFromMap(payload, "original_bucket"),
+		OriginalObjectKey:        stringFromMap(payload, "original_object_key"),
+		ArtifactsBucket:          stringFromMap(payload, "artifacts_bucket"),
+		ArtifactsPrefix:          stringFromMap(payload, "artifacts_prefix"),
+		ArtifactsPrefixTemplate:  stringFromMap(payload, "artifacts_prefix_template"),
+		QueueID:                  stringFromMap(payload, "queue_id"),
+		TableQueueID:             stringFromMap(payload, "table_queue_id"),
+		Status:                   stringFromMap(payload, "status"),
+		StatusReason:             stringFromMap(payload, "status_reason"),
+		PollAttempts:             intFromMap(payload, "poll_attempts"),
+		MarkdownObjectKey:        stringFromMap(payload, "markdown_object_key"),
+		MarkdownBucket:           stringFromMap(payload, "markdown_bucket"),
+		DoclingMarkdownBucket:    stringFromMap(payload, "docling_markdown_bucket"),
+		DoclingMarkdownObjectKey: stringFromMap(payload, "docling_markdown_object_key"),
+		ConversionStrategy:       ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
+		ExtractTables:            boolFromMap(payload, "extract_tables"),
 	}
 	if result.TableQueueID == "" {
 		result.TableQueueID = result.QueueID
