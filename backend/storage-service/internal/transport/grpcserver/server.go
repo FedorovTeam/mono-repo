@@ -165,6 +165,7 @@ func (s *Server) GenerateUploadURL(ctx context.Context, req *storagev1.GenerateU
 		ContentLength:    req.GetContentLength(),
 		CorrelationID:    correlationID,
 		ExpiresInSeconds: req.GetExpiresInSeconds(),
+		UserMetadata:     req.GetUserMetadata(),
 	})
 	if err != nil {
 		return nil, s.mapStorageError(err)

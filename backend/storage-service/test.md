@@ -21,13 +21,14 @@
    ```
 7. Запросить presigned ссылку с корреляцией:
    ```bash
-   grpcurl -H 'x-correlation-id: demo-corr' -d '{"document_id":"123","file_name":"demo.docx","content_length":2048,"correlation_id":"demo-corr","expires_in_seconds":600}' localhost:50052 backend.storage.v1.StorageService/GenerateUploadURL
+   grpcurl -H 'x-correlation-id: demo-corr' -d '{"document_id":"123","file_name":"demo.docx","content_length":2048,"correlation_id":"demo-corr","expires_in_seconds":600,"user_metadata":{"x-amz-meta-source":"cli-demo"}}' localhost:50052 backend.storage.v1.StorageService/GenerateUploadURL
    ```
-   В ответе ожидаются `uploadUrl`, `bucket`, `objectKey`, `expiresInSeconds`, `markdownBucket`, `markdownObjectKey` и карта `requiredHeaders` (минимум `x-amz-meta-correlation-id=demo-corr`). Заголовки из `requiredHeaders` нужно обязательно передавать в PUT запросе, иначе MinIO вернёт ошибку подписи.
+   В ответе ожидаются `uploadUrl`, `bucket`, `objectKey`, `expiresInSeconds`, `markdownBucket`, `markdownObjectKey` и карта `requiredHeaders` (минимум `x-amz-meta-correlation-id=demo-corr` и переданные `x-amz-meta-*`), которые также попадут в `X-Amz-SignedHeaders`. Заголовки из `requiredHeaders` нужно обязательно передавать в PUT запросе, иначе MinIO вернёт ошибку подписи.
 8. Выполнить загрузку по ссылке с обязательным заголовком:
    ```bash
    curl -X PUT "<uploadUrl из ответа>" \
      -H "x-amz-meta-correlation-id: demo-corr" \
+     -H "x-amz-meta-source: cli-demo" \
      --data-binary @demo.docx
    ```
 

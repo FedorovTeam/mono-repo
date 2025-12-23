@@ -74,6 +74,8 @@ message GenerateUploadURLRequest {
   int64 content_length = 3;
   string correlation_id = 4;
   int64 expires_in_seconds = 5;
+  // user_metadata позволяет передать дополнительные заголовки x-amz-meta-*, которые попадут в подпись PresignHeader.
+  map<string, string> user_metadata = 6;
 }
 
 message GenerateUploadURLResponse {

@@ -94,6 +94,10 @@ var (
 	ErrInvalidArgument = errors.New("invalid argument")
 )
 
+var reservedMetadataKeys = map[string]struct{}{
+	"x-amz-meta-correlation-id": {},
+}
+
 // UploadValidationConfig задает ограничения на выдачу presigned URL.
 type UploadValidationConfig struct {
 	AllowedExtensions map[string]struct{}
@@ -110,6 +114,7 @@ type GenerateUploadURLParams struct {
 	ContentLength    int64
 	CorrelationID    string
 	ExpiresInSeconds int64
+	UserMetadata     map[string]string
 }
 
 // PresignedUpload содержит ссылку и ключ объекта для загрузки.
@@ -306,6 +311,11 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 		return PresignedUpload{}, err
 	}
 
+	userMetadata, err := s.validateUserMetadata(params.UserMetadata)
+	if err != nil {
+		return PresignedUpload{}, err
+	}
+
 	key, err := s.keyGenerator.BuildKey(params.OrgSlug, params.ProjectSlug, params.DocumentID, extension)
 	if err != nil {
 		return PresignedUpload{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
@@ -318,6 +328,10 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 	if params.CorrelationID != "" {
 		headers.Set("x-amz-meta-correlation-id", params.CorrelationID)
 		requiredHeaders["x-amz-meta-correlation-id"] = params.CorrelationID
+	}
+	for key, value := range userMetadata {
+		headers.Set(key, value)
+		requiredHeaders[key] = value
 	}
 
 	expires := time.Duration(expiresInSeconds) * time.Second
@@ -390,6 +404,30 @@ func (s *Service) ensureBucket(ctx context.Context, bucket string) error {
 	}
 
 	return nil
+}
+
+func (s *Service) validateUserMetadata(userMetadata map[string]string) (map[string]string, error) {
+	if len(userMetadata) == 0 {
+		return nil, nil
+	}
+
+	normalized := make(map[string]string, len(userMetadata))
+	for key, value := range userMetadata {
+		trimmedKey := strings.TrimSpace(strings.ToLower(key))
+		if trimmedKey == "" {
+			return nil, fmt.Errorf("%w: user metadata key must not be empty", ErrInvalidArgument)
+		}
+		if !strings.HasPrefix(trimmedKey, "x-amz-meta-") {
+			return nil, fmt.Errorf("%w: user metadata key %s must start with x-amz-meta-", ErrInvalidArgument, trimmedKey)
+		}
+		if _, reserved := reservedMetadataKeys[trimmedKey]; reserved {
+			return nil, fmt.Errorf("%w: user metadata key %s is reserved", ErrInvalidArgument, trimmedKey)
+		}
+
+		normalized[trimmedKey] = value
+	}
+
+	return normalized, nil
 }
 
 func detectContentType(extension string) string {
