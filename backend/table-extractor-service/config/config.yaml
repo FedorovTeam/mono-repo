@@ -36,9 +36,9 @@ extractor:
   mode: layout
   detect_voting_tables: true
   pages: all
-  pdfinfo_timeout: 10s
-  pdftotext_timeout: 20s
-  pdftoppm_timeout: 30s
+  pdfinfo_timeout: 5m
+  pdftotext_timeout: 5m
+  pdftoppm_timeout: 5m
   pdftoppm_dpi: 200
   max_parallel_commands: 1
   temp_dir: ""
