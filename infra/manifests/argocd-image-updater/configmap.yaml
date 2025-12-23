@@ -1,3 +1,4 @@
+# infra/manifests/argocd-image-updater/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,4 +10,4 @@ data:
       - name: harbor
         api_url: https://harbor.tech.fedorov-team.tech
         prefix: harbor.tech.fedorov-team.tech
-        credentials: secret_ref:secret:argocd/argocd-image-updater-registry-creds#harbor-creds
+        credentials: secret:argocd/argocd-image-updater-registry-creds#harbor-creds
