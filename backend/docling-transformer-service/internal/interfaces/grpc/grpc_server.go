@@ -89,6 +89,7 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 	markdownBucket := result.MarkdownBucket
 	markdownKey := result.MarkdownObjectKey
 	tableCount, tablePages := extractTableMetadata(task.TableMetadata)
+	tableMetadata := toProtoTableMetadata(task.TableMetadata)
 
 	if req.GetWaitForResult() {
 		task, err = s.usecase.WaitForResult(ctx, task.ID)
@@ -97,6 +98,7 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		}
 		markdownBucket, markdownKey = usecase.ResolveOutput(task, markdownBucket, markdownKey)
 		tableCount, tablePages = extractTableMetadata(task.TableMetadata)
+		tableMetadata = toProtoTableMetadata(task.TableMetadata)
 	}
 
 	return &transformerv1.ConvertDocumentToMarkdownResponse{
@@ -105,6 +107,7 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		CorrelationId:     correlationID,
+		TableMetadata:     tableMetadata,
 		TableCount:        tableCount,
 		TablePages:        tablePages,
 	}, nil
@@ -173,6 +176,16 @@ func extractTableMetadata(meta *domain.TableMetadata) (int32, []int32) {
 	}
 	pages := append([]int32(nil), meta.Pages...)
 	return int32(meta.TablesCount), pages
+}
+
+func toProtoTableMetadata(meta *domain.TableMetadata) *transformerv1.TableMetadata {
+	if meta == nil {
+		return nil
+	}
+	return &transformerv1.TableMetadata{
+		TablesCount: int32(meta.TablesCount),
+		Pages:       append([]int32(nil), meta.Pages...),
+	}
 }
 
 func Run(ctx context.Context, logger *zap.Logger, uc TransformerUseCase, port int) error {

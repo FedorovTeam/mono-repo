@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mono-repo/docling-transformer-service/db/migrations"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/stretchr/testify/require"
@@ -221,6 +222,42 @@ func TestQueueRepositoryPersistsDoclingIdentifiers(t *testing.T) {
 	require.Nil(t, task.NextPollAt)
 	require.Equal(t, "md", task.MarkdownBucket)
 	require.Equal(t, "dest/other.md", task.MarkdownObjectKey)
+}
+
+func TestQueueRepositoryStoresTableMetadata(t *testing.T) {
+	ctx, pool := startPostgresContainer(t)
+
+	repo := NewQueueRepository(pool)
+	queueID, err := repo.Enqueue(ctx, transformations.EnqueueParams{
+		DocumentID:        "doc-id",
+		OriginalBucket:    "orig",
+		OriginalObjectKey: "path/file.docx",
+		MarkdownBucket:    "md",
+		MarkdownObjectKey: "dest/file.md",
+		FilenameExtension: "docx",
+		CorrelationID:     "corr-123",
+	})
+	require.NoError(t, err)
+
+	meta := &domain.TableMetadata{TablesCount: 3, Pages: []int32{1, 2, 2, 3}}
+	require.NoError(t, repo.MarkDone(ctx, queueID, "md", "dest/with_tables.md", meta))
+
+	task, err := repo.GetByID(ctx, queueID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Equal(t, 3, task.TableCount)
+	require.ElementsMatch(t, []int32{1, 2, 3}, task.TablePages)
+	require.NotNil(t, task.TableMetadata)
+	require.Equal(t, 3, task.TableMetadata.TablesCount)
+	require.ElementsMatch(t, []int32{1, 2, 3}, task.TableMetadata.Pages)
+
+	var storedCount sql.NullInt32
+	var storedPages []int32
+	require.NoError(t, pool.QueryRow(ctx, `SELECT table_count, table_pages FROM transformations_queue WHERE id = $1`, queueID).
+		Scan(&storedCount, &storedPages))
+	require.True(t, storedCount.Valid)
+	require.EqualValues(t, 3, storedCount.Int32)
+	require.ElementsMatch(t, []int32{1, 2, 3}, storedPages)
 }
 
 func TestRestoreProcessingMovesTasksToPendingOnStartup(t *testing.T) {

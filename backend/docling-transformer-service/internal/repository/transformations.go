@@ -37,6 +37,8 @@ type TransformationDTO struct {
 	FinishedAt *time.Time
 	Error      *string
 
+	TableCount    int
+	TablePages    []int32
 	TableMetadata *domain.TableMetadata
 }
 
@@ -69,6 +71,8 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		FinishedAt: dto.FinishedAt,
 		Error:      dto.Error,
 
+		TableCount:    dto.TableCount,
+		TablePages:    append([]int32(nil), dto.TablePages...),
 		TableMetadata: dto.TableMetadata,
 	}
 }

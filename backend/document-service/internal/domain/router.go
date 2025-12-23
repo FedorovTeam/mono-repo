@@ -2,6 +2,7 @@ package domain
 
 import (
 	"path"
+	"sort"
 	"strings"
 )
 
@@ -174,7 +175,6 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 
 // ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
 func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32) bool {
-	_ = tablePages
 	if doc == nil {
 		return false
 	}
@@ -182,16 +182,21 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	if !rules.tableExtractorEnabled {
 		return false
 	}
+	pages := uniquePages(tablePages)
+	detectedTables := tableCount
+	if detectedTables == 0 && len(pages) > 0 {
+		detectedTables = len(pages)
+	}
 
 	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
 	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
 	wantsTables := extractTables || doc.ExtractTables || doclingWithTables
 
-	if !wantsTables && tableCount < rules.tableDetectionMinCount {
+	if !wantsTables && detectedTables < rules.tableDetectionMinCount {
 		return false
 	}
 
-	if doclingWithTables || tableCount >= rules.tableDetectionMinCount {
+	if doclingWithTables || detectedTables >= rules.tableDetectionMinCount {
 		return true
 	}
 
@@ -201,6 +206,23 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	}
 	_, ok := rules.tableExtractorExt[ext]
 	return ok
+}
+
+func uniquePages(pages []int32) []int32 {
+	if len(pages) == 0 {
+		return nil
+	}
+	seen := make(map[int32]struct{}, len(pages))
+	result := make([]int32, 0, len(pages))
+	for _, page := range pages {
+		if _, exists := seen[page]; exists {
+			continue
+		}
+		seen[page] = struct{}{}
+		result = append(result, page)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {

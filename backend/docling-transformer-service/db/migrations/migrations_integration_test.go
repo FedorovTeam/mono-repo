@@ -78,6 +78,8 @@ func TestRunMigrationsWithPostgres(t *testing.T) {
 		{"transformations_queue", "docling_poll_count"},
 		{"transformations_queue", "next_poll_at"},
 		{"transformations_queue", "table_metadata"},
+		{"transformations_queue", "table_count"},
+		{"transformations_queue", "table_pages"},
 	}
 	for _, c := range columns {
 		assertColumnExists(t, ctx, db, c.table, c.column)

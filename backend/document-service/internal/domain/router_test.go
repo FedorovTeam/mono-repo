@@ -155,4 +155,12 @@ func TestStageRouterDetectsTablesForDocx(t *testing.T) {
 	}
 }
 
+func TestStageRouterUsesPagesWhenCountMissing(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
+	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
+	if !router.ShouldExtractTablesAfterConvert(doc, false, 0, []int32{3, 3}) {
+		t.Fatalf("expected router to use detected pages when count is missing")
+	}
+}
+
 func boolPtr(val bool) *bool { return &val }

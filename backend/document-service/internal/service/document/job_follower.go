@@ -363,7 +363,8 @@ func (f *JobFollower) shouldExtractTablesAfterConvert(doc *domain.Document, payl
 		docCopy.ConversionStrategy = payload.ConversionStrategy
 	}
 
-	return f.router.ShouldExtractTablesAfterConvert(&docCopy, payload.ExtractTables, int(payload.TableCount), payload.TablePages)
+	count, pages := payload.TableInfo()
+	return f.router.ShouldExtractTablesAfterConvert(&docCopy, payload.ExtractTables, count, pages)
 }
 
 func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.ConvertPayload, string) {
