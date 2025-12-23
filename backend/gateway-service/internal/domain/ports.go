@@ -37,6 +37,20 @@ type GenerateUploadURLRequest struct {
 	ExpiresInSeconds int64
 }
 
+// GenerateDownloadURLRequest описывает параметры подготовки ссылки на скачивание.
+type GenerateDownloadURLRequest struct {
+	Bucket           string
+	ObjectKey        string
+	CorrelationID    string
+	ExpiresInSeconds int64
+}
+
+// DownloadURL содержит данные для скачивания файла.
+type DownloadURL struct {
+	DownloadURL      string
+	ExpiresInSeconds int64
+}
+
 // UploadURL содержит данные для загрузки файла.
 type UploadURL struct {
 	URL               string
@@ -58,5 +72,6 @@ type DocumentClient interface {
 // StorageClient описывает порт для работы со storage-service.
 type StorageClient interface {
 	GenerateUploadURL(ctx context.Context, req GenerateUploadURLRequest) (*UploadURL, error)
+	GenerateDownloadURL(ctx context.Context, req GenerateDownloadURLRequest) (*DownloadURL, error)
 	Close() error
 }

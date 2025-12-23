@@ -27,18 +27,21 @@ const (
 
 // Document представляет доменную модель документа.
 type Document struct {
-	ID                 string
-	FileName           string
-	Repository         string
-	RepositoryOwner    *string
-	Branch             string
-	Path               string
-	CreatedAt          time.Time
-	Status             DocumentStatus
-	JobID              *string
-	Error              *string
-	ExtractTables      bool
-	ConversionStrategy ConversionStrategy
+	ID                  string
+	FileName            string
+	Repository          string
+	RepositoryOwner     *string
+	Branch              string
+	Path                string
+	CreatedAt           time.Time
+	Status              DocumentStatus
+	JobID               *string
+	Error               *string
+	ExtractTables       bool
+	ConversionStrategy  ConversionStrategy
+	UploadBucket        string
+	UploadObjectKey     string
+	OriginalDownloadURL *string
 }
 
 // DocumentFilter задает параметры фильтрации документов.

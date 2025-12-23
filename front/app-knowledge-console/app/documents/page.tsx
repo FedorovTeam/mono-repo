@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import React, { useCallback, useEffect, useState } from 'react';
 
 type KnowledgeDocumentStatus =
@@ -76,15 +77,6 @@ const getDocumentName = (document: KnowledgeDocument) => {
   }
   const parts = document.path.split('/').filter(Boolean);
   return parts[parts.length - 1] || document.path;
-};
-
-const getDocumentLink = (document: KnowledgeDocument) => {
-  if (!document.repository || !document.path) {
-    return null;
-  }
-
-  const normalizedPath = document.path.replace(/^\//, '');
-  return `https://github.com/${document.repository}/tree/${document.branch}/${normalizedPath}`;
 };
 
 export default function DocumentsPage() {
@@ -339,7 +331,6 @@ function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
 }
 
 function DocumentCard({ document }: { document: KnowledgeDocument }) {
-  const openUrl = getDocumentLink(document);
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -369,29 +360,23 @@ function DocumentCard({ document }: { document: KnowledgeDocument }) {
       )}
 
       <div className="mt-3 flex justify-end">
-        <OpenButton document={document} fullWidth={!openUrl} />
+        <OpenButton document={document} />
       </div>
     </div>
   );
 }
 
-function OpenButton({ document, fullWidth }: { document: KnowledgeDocument; fullWidth?: boolean }) {
-  const url = getDocumentLink(document);
-
+function OpenButton({ document }: { document: KnowledgeDocument }) {
   return (
-    <a
-      href={url ?? '#'}
-      target="_blank"
-      rel="noreferrer"
-      aria-disabled={!url}
+    <Link
+      href={`/documents/${document.id}`}
       className={cn(
         'inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400',
-        !url && 'pointer-events-none opacity-60',
-        fullWidth ? 'w-full' : 'min-w-[120px]',
+        'min-w-[120px]',
       )}
     >
       Открыть
-    </a>
+    </Link>
   );
 }
 

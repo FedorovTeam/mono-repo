@@ -38,6 +38,8 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
+  """Подписанная ссылка для скачивания оригинального файла."""
+  originalDownloadUrl: String
   """Принудительно включено ли извлечение таблиц для документа."""
   extractTables: Boolean!
   """Стратегия конвертации Docling/TableExtractor."""

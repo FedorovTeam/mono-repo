@@ -74,7 +74,7 @@ func New(cfg config.Config) (*Server, error) {
 	uploadUseCase := usecase.NewUploadService(docClient, storageClient, usecase.UploadConfig{
 		SignedURLTTLSeconds: cfg.Uploads.SignedURLTTLSecond,
 	})
-	docUseCase := usecase.NewDocumentService(docClient)
+	docUseCase := usecase.NewDocumentService(docClient, storageClient)
 	webhookParser := webhook.NewMinIOWebhookParser()
 	uploadConfirmationUseCase := usecase.NewUploadConfirmationService(webhookParser, docClient)
 

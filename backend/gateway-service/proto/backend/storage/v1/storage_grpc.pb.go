@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v3.21.12
-// source: backend/storage/v1/storage.proto
+// source: proto/backend/storage/v1/storage.proto
 
 package storagepb
 
@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	StorageService_GenerateUploadURL_FullMethodName = "/backend.storage.v1.StorageService/GenerateUploadURL"
+	StorageService_GenerateUploadURL_FullMethodName   = "/backend.storage.v1.StorageService/GenerateUploadURL"
+	StorageService_GenerateDownloadURL_FullMethodName = "/backend.storage.v1.StorageService/GenerateDownloadURL"
 )
 
 // StorageServiceClient is the client API for StorageService service.
@@ -28,6 +29,8 @@ const (
 type StorageServiceClient interface {
 	// GenerateUploadURL возвращает подписанную ссылку для прямой загрузки файла в приватный бакет.
 	GenerateUploadURL(ctx context.Context, in *GenerateUploadURLRequest, opts ...grpc.CallOption) (*GenerateUploadURLResponse, error)
+	// GenerateDownloadURL возвращает подписанную ссылку для скачивания объекта из приватного бакета.
+	GenerateDownloadURL(ctx context.Context, in *GenerateDownloadURLRequest, opts ...grpc.CallOption) (*GenerateDownloadURLResponse, error)
 }
 
 type storageServiceClient struct {
@@ -47,12 +50,23 @@ func (c *storageServiceClient) GenerateUploadURL(ctx context.Context, in *Genera
 	return out, nil
 }
 
+func (c *storageServiceClient) GenerateDownloadURL(ctx context.Context, in *GenerateDownloadURLRequest, opts ...grpc.CallOption) (*GenerateDownloadURLResponse, error) {
+	out := new(GenerateDownloadURLResponse)
+	err := c.cc.Invoke(ctx, StorageService_GenerateDownloadURL_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StorageServiceServer is the server API for StorageService service.
 // All implementations must embed UnimplementedStorageServiceServer
 // for forward compatibility
 type StorageServiceServer interface {
 	// GenerateUploadURL возвращает подписанную ссылку для прямой загрузки файла в приватный бакет.
 	GenerateUploadURL(context.Context, *GenerateUploadURLRequest) (*GenerateUploadURLResponse, error)
+	// GenerateDownloadURL возвращает подписанную ссылку для скачивания объекта из приватного бакета.
+	GenerateDownloadURL(context.Context, *GenerateDownloadURLRequest) (*GenerateDownloadURLResponse, error)
 	mustEmbedUnimplementedStorageServiceServer()
 }
 
@@ -62,6 +76,9 @@ type UnimplementedStorageServiceServer struct {
 
 func (UnimplementedStorageServiceServer) GenerateUploadURL(context.Context, *GenerateUploadURLRequest) (*GenerateUploadURLResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GenerateUploadURL not implemented")
+}
+func (UnimplementedStorageServiceServer) GenerateDownloadURL(context.Context, *GenerateDownloadURLRequest) (*GenerateDownloadURLResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GenerateDownloadURL not implemented")
 }
 func (UnimplementedStorageServiceServer) mustEmbedUnimplementedStorageServiceServer() {}
 
@@ -94,6 +111,24 @@ func _StorageService_GenerateUploadURL_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StorageService_GenerateDownloadURL_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GenerateDownloadURLRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StorageServiceServer).GenerateDownloadURL(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StorageService_GenerateDownloadURL_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StorageServiceServer).GenerateDownloadURL(ctx, req.(*GenerateDownloadURLRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StorageService_ServiceDesc is the grpc.ServiceDesc for StorageService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -105,7 +140,11 @@ var StorageService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GenerateUploadURL",
 			Handler:    _StorageService_GenerateUploadURL_Handler,
 		},
+		{
+			MethodName: "GenerateDownloadURL",
+			Handler:    _StorageService_GenerateDownloadURL_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "backend/storage/v1/storage.proto",
+	Metadata: "proto/backend/storage/v1/storage.proto",
 }

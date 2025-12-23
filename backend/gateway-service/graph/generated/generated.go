@@ -48,18 +48,19 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	KnowledgeDocument struct {
-		Branch             func(childComplexity int) int
-		ConversionStrategy func(childComplexity int) int
-		CreatedAt          func(childComplexity int) int
-		Error              func(childComplexity int) int
-		ExtractTables      func(childComplexity int) int
-		FileName           func(childComplexity int) int
-		ID                 func(childComplexity int) int
-		JobID              func(childComplexity int) int
-		Path               func(childComplexity int) int
-		Repository         func(childComplexity int) int
-		RepositoryOwner    func(childComplexity int) int
-		Status             func(childComplexity int) int
+		Branch              func(childComplexity int) int
+		ConversionStrategy  func(childComplexity int) int
+		CreatedAt           func(childComplexity int) int
+		Error               func(childComplexity int) int
+		ExtractTables       func(childComplexity int) int
+		FileName            func(childComplexity int) int
+		ID                  func(childComplexity int) int
+		JobID               func(childComplexity int) int
+		OriginalDownloadURL func(childComplexity int) int
+		Path                func(childComplexity int) int
+		Repository          func(childComplexity int) int
+		RepositoryOwner     func(childComplexity int) int
+		Status              func(childComplexity int) int
 	}
 
 	KnowledgeDocumentConnection struct {
@@ -158,6 +159,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.JobID(childComplexity), true
+	case "KnowledgeDocument.originalDownloadUrl":
+		if e.complexity.KnowledgeDocument.OriginalDownloadURL == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.OriginalDownloadURL(childComplexity), true
 	case "KnowledgeDocument.path":
 		if e.complexity.KnowledgeDocument.Path == nil {
 			break
@@ -398,6 +405,8 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
+  """Подписанная ссылка для скачивания оригинального файла."""
+  originalDownloadUrl: String
   """Принудительно включено ли извлечение таблиц для документа."""
   extractTables: Boolean!
   """Стратегия конвертации Docling/TableExtractor."""
@@ -839,6 +848,35 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_error(_ context.Conte
 	return fc, nil
 }
 
+func (ec *executionContext) _KnowledgeDocument_originalDownloadUrl(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_KnowledgeDocument_originalDownloadUrl,
+		func(ctx context.Context) (any, error) {
+			return obj.OriginalDownloadURL, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeDocument_originalDownloadUrl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeDocument",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _KnowledgeDocument_extractTables(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -941,6 +979,8 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "originalDownloadUrl":
+				return ec.fieldContext_KnowledgeDocument_originalDownloadUrl(ctx, field)
 			case "extractTables":
 				return ec.fieldContext_KnowledgeDocument_extractTables(ctx, field)
 			case "conversionStrategy":
@@ -1075,6 +1115,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "originalDownloadUrl":
+				return ec.fieldContext_KnowledgeDocument_originalDownloadUrl(ctx, field)
 			case "extractTables":
 				return ec.fieldContext_KnowledgeDocument_extractTables(ctx, field)
 			case "conversionStrategy":
@@ -1296,6 +1338,8 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "originalDownloadUrl":
+				return ec.fieldContext_KnowledgeDocument_originalDownloadUrl(ctx, field)
 			case "extractTables":
 				return ec.fieldContext_KnowledgeDocument_extractTables(ctx, field)
 			case "conversionStrategy":
@@ -3015,6 +3059,8 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			out.Values[i] = ec._KnowledgeDocument_jobId(ctx, field, obj)
 		case "error":
 			out.Values[i] = ec._KnowledgeDocument_error(ctx, field, obj)
+		case "originalDownloadUrl":
+			out.Values[i] = ec._KnowledgeDocument_originalDownloadUrl(ctx, field, obj)
 		case "extractTables":
 			out.Values[i] = ec._KnowledgeDocument_extractTables(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
