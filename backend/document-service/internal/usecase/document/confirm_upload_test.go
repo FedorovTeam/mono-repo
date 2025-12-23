@@ -107,11 +107,12 @@ func TestConfirmUploadFailsWhenETagIsEmpty(t *testing.T) {
 func TestConfirmUploadAppliesRouterDefaults(t *testing.T) {
 	repo := &confirmUploadRepositoryStub{
 		doc: &domain.Document{
-			ID:                "00000000-0000-0000-0000-000000000002",
-			OriginalBucket:    "bucket",
-			OriginalObjectKey: "incoming/report.pdf",
-			MarkdownBucket:    "md",
-			Path:              "reports/report.md",
+			ID:                 "00000000-0000-0000-0000-000000000002",
+			OriginalBucket:     "bucket",
+			OriginalObjectKey:  "incoming/report.pdf",
+			MarkdownBucket:     "md",
+			Path:               "reports/report.md",
+			ConversionStrategy: domain.ConversionStrategyTablesOnly,
 		},
 	}
 	router := domain.NewStageRouter(domain.RouterRules{

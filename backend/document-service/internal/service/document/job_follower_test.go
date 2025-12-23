@@ -327,7 +327,7 @@ func TestScheduleNextUsesOriginalETag(t *testing.T) {
 		ID:                "doc-id",
 		Status:            domain.DocumentStatusStoredOriginal,
 		OriginalBucket:    "bucket",
-		OriginalObjectKey: "file.pdf",
+		OriginalObjectKey: "file.doc",
 		Versions:          []domain.DocumentVersion{{Version: 1, OriginalETag: "etag-1"}},
 	}
 	repo := &followerRepo{document: doc}
@@ -352,7 +352,7 @@ func TestScheduleNextFailsWithoutOriginalETag(t *testing.T) {
 		ID:                "doc-id",
 		Status:            domain.DocumentStatusStoredOriginal,
 		OriginalBucket:    "bucket",
-		OriginalObjectKey: "file.pdf",
+		OriginalObjectKey: "file.doc",
 	}
 	repo := &followerRepo{document: doc}
 	follower := NewJobFollower(repo, 1, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{PreprocessEnabled: true}))
@@ -375,7 +375,7 @@ func TestScheduleNextFallsBackToJobPayloadETag(t *testing.T) {
 		ID:                "doc-id",
 		Status:            domain.DocumentStatusStoredOriginal,
 		OriginalBucket:    "bucket",
-		OriginalObjectKey: "file.pdf",
+		OriginalObjectKey: "file.doc",
 	}
 	repo := &followerRepo{document: doc}
 	follower := NewJobFollower(repo, 1, time.Minute, PublishDefaults{}, domain.NewStageRouter(domain.RouterRules{PreprocessEnabled: true}))
