@@ -17,11 +17,11 @@ sequenceDiagram
     TR->>TR: markdown_bucket по умолчанию из конфигурации (ошибка, если пустой)
     TR->>TR: NormalizeExtension(filename_extension | original_object_key) + ResolveContentTypeByExtension
     TR->>TR: markdown_object_key по умолчанию через BuildMarkdownKey(original_object_key)
-    TR->>TR: проверка лимита очереди (CountByStatus)
     TR->>PG: GetLatestByDocument(document_id)
     alt найдена неfailed задача
-        TR-->>GW: reuse queue_id/status + ResolveOutput(markdown_bucket/object_key) с учётом сохранённых значений
+        TR-->>GW: reuse queue_id/status + ResolveOutput(markdown_bucket/object_key) + TableMetadata/TableCount/TablePages
     else новая задача
+        TR->>TR: проверка лимита очереди (CountByStatus) только для новой задачи
         TR->>PG: Enqueue(status=pending, markdown_bucket/object_key,<br/>source_bucket/object_key или source_url, correlation_id)
         TR-->>GW: queue_id, status=pending, markdown_bucket/object_key, correlation_id
     end
@@ -29,7 +29,7 @@ sequenceDiagram
         loop WaitForResult (backoff из status_backoff + task.next_poll_at)
             TR->>PG: GetByID(queue_id)
             alt status in [done, failed]
-                TR-->>GW: финальный status + ResolveOutput(markdown_bucket/object_key)
+                TR-->>GW: финальный status + ResolveOutput(markdown_bucket/object_key) + TableMetadata/TableCount/TablePages
             else
                 TR-->>TR: ожидание до next_poll_at или backoff
             end
@@ -38,13 +38,13 @@ sequenceDiagram
     end
 
     loop workerLoop (MaxWorkers)
-        WK->>PG: AcquireBatch(BatchSize) // waiting_docling с наступившим next_poll_at → первыми при наличии любых waiting_docling pending блокируются
+        WK->>PG: AcquireBatch(BatchSize) // waiting_docling с наступившим next_poll_at → первыми;<br/>pending с future next_poll_at пропускаются, pending блокируются при наличии любых waiting_docling
         alt задача с docling_task_id/job_id
             WK->>DL: GET /v1/status/poll/{task_or_job_id} (X-Correlation-Id)
             WK->>PG: UpdateDoclingInfo(docling_task_id/job_id, docling_poll_count++)
             alt status/result готов
                 WK->>MN: PUT markdown_object_key в markdown_bucket с media_type
-                WK->>PG: MarkDone(status=done, finished_at)
+                WK->>PG: MarkDone(status=done, table_metadata/table_count/table_pages, finished_at)
             else статус pending/временная ошибка
                 alt превышен лимит рестартов
                     WK->>PG: MarkFailed(status=failed, error=docling restarts exceeded)
@@ -60,7 +60,7 @@ sequenceDiagram
             alt submit_lock занят
                 WK->>PG: ReschedulePending(status=pending, next_poll_at=submit_lock_delay)
             else
-                alt useSourceAsync (mode=source_async, source_url пуст,<br/>использует source_bucket/object_key либо original_bucket/object_key)
+                alt useSourceAsync (mode=source_async, source_url пуст,<br/>использует source_bucket/object_key либо original_bucket/object_key)<br/>ошибка, если итоговые bucket/object key не заданы
                     WK-->>DL: POST /v1/convert/source/async (JSON: source_bucket|original_bucket,<br/>target markdown_bucket/object_key, to_formats/from_formats)
                 else синхронная загрузка
                     alt источник URL
