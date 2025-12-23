@@ -58,6 +58,7 @@ router:
   artifacts_bucket: "knowledge-md"
   artifacts_prefix_template: "tables/{{ .DocumentID }}/{{ .QueueID }}/"
   table_detection_min_count: 1
+  force_table_extraction_for_pdf: false
   repositories:
     - owner: "FedorovTeam"
       repository: "knowledge-base"

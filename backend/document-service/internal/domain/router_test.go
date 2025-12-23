@@ -69,11 +69,11 @@ func TestStageRouterUsesDoclingWithTablesStrategy(t *testing.T) {
 	if stage := router.NextStageAfterStore(doc); stage != JobStageConvertToMarkdown {
 		t.Fatalf("expected convert_to_markdown for docling_with_tables strategy, got %s", stage)
 	}
-	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil))
-	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1, 2}))
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, false))
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1, 2}, false))
 
 	docDocx := &Document{OriginalObjectKey: "incoming/meeting.docx", ConversionStrategy: ConversionStrategyDoclingWithTables}
-	require.True(t, router.ShouldExtractTablesAfterConvert(docDocx, false, 3, []int32{1}))
+	require.True(t, router.ShouldExtractTablesAfterConvert(docDocx, false, 3, []int32{1}, false))
 }
 
 func TestStageRouterPathPrefixOverrides(t *testing.T) {
@@ -132,32 +132,44 @@ func TestDefaultExtractTablesPrefersConfiguredExtensions(t *testing.T) {
 func TestStageRouterUsesDetectedTablesWhenEnabled(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
-	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}))
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}, false))
 }
 
 func TestStageRouterHonorsDetectionThreshold(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 2})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
-	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 1, []int32{1}))
-	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1, 2}))
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 1, []int32{1}, false))
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1, 2}, false))
 }
 
 func TestStageRouterSkipsWhenNoTablesDetected(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/without-tables.pdf", ConversionStrategy: ConversionStrategyDoclingWithTables}
-	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil))
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, false))
 }
 
 func TestStageRouterDetectsTablesForDocx(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.docx"}
-	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 3, []int32{1}))
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 3, []int32{1}, false))
 }
 
 func TestStageRouterUsesPagesWhenCountMissing(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
 	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
-	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, []int32{3, 3}))
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, []int32{3, 3}, false))
+}
+
+func TestStageRouterUsesFallbackHintForPdf(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, ForceTableExtractionPDF: true})
+	doc := &Document{OriginalObjectKey: "incoming/hints/report.pdf"}
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, true))
+}
+
+func TestStageRouterIgnoresFallbackWhenNotPdf(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, ForceTableExtractionPDF: true})
+	doc := &Document{OriginalObjectKey: "incoming/hints/report.docx"}
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, true))
 }
 
 func boolPtr(val bool) *bool { return &val }

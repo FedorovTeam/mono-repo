@@ -41,3 +41,22 @@ func TestConvertPayloadTableInfoUsesPagesWhenCountMissing(t *testing.T) {
 	require.Equal(t, 2, count)
 	require.Equal(t, []int32{2, 5}, pages)
 }
+
+func TestConvertPayloadHasMarkdownTablesHint(t *testing.T) {
+	payload := ConvertPayload{
+		MarkdownObjectKey:        "reports/tables.md",
+		DoclingMarkdownObjectKey: "reports/alt.md",
+	}
+	require.True(t, payload.HasMarkdownTablesHint())
+
+	payload = ConvertPayload{
+		TableCount: 0,
+		TablePages: nil,
+		TableMetadata: TableMetadata{
+			TablesCount: 0,
+			Pages:       nil,
+		},
+		MarkdownObjectKey: "reports/readme.md",
+	}
+	require.False(t, payload.HasMarkdownTablesHint())
+}

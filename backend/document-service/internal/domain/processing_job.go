@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -403,6 +404,26 @@ func (p ConvertPayload) TableInfo() (int, []int32) {
 		count = len(pages)
 	}
 	return count, pages
+}
+
+// HasMarkdownTablesHint пытается определить наличие таблиц в Markdown по payload.
+// Используется как fallback, когда Docling не вернул table_count/pages.
+func (p ConvertPayload) HasMarkdownTablesHint() bool {
+	if count, pages := p.TableInfo(); count > 0 || len(pages) > 0 {
+		return true
+	}
+
+	for _, key := range []string{p.MarkdownObjectKey, p.DoclingMarkdownObjectKey} {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		base := strings.ToLower(path.Base(key))
+		if base == "tables.md" || (strings.HasSuffix(base, ".md") && strings.Contains(base, "table")) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ToMap преобразует PreprocessPayload в map для хранения в БД.
