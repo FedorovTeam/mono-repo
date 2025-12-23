@@ -4,19 +4,19 @@
 
 ## Назначение и ответственность
 - Обработка GraphQL запросов `knowledgeDocument`/`knowledgeDocuments` и мутации `uploadKnowledgeDocument` на `/query` (Playground — `/playground`) с обязательным заголовком `X-API-Key` для всех методов кроме preflight `OPTIONS`; `CorrelationIDMiddleware` генерирует/пробрасывает `X-Correlation-ID` и возвращает его в ответе. CORS разрешён только для `https://console.fedorov-team.tech` и `http://localhost:3000`.
-- Выдача signed URL: `uploadKnowledgeDocument` валидирует, что `fileName`/`repository`/`branch` непустые и `fileSizeBytes > 0`, генерирует `documentId` (UUID), триммит `path` и при пустом значении подставляет `knowledge/docs/<documentId>.md`, вызывает `storage-service.GenerateUploadURL` с TTL из конфигурации и передаёт ответные bucket/object ключи в `document-service.CreateDocument`.
+- Выдача signed URL: `uploadKnowledgeDocument` валидирует, что `fileName`/`repository`/`branch` непустые и `fileSizeBytes > 0`, генерирует `documentId` (UUID), триммит `path` и при пустом значении подставляет `knowledge/docs/<documentId>.md`, вызывает `storage-service.GenerateUploadURL` с TTL из конфигурации и передаёт ответные bucket/object ключи в `document-service.CreateDocument`. Ответ содержит список `requiredHeaders` (минимум `x-amz-meta-correlation-id`), которые обязательно передавать в PUT запросе — без них MinIO/ S3 вернёт ошибку подписи.
 - Проксирование gRPC вызовов: `X-API-Key` и `x-correlation-id` из контекста передаются в metadata клиентов document/storage-service; для webhook ConfirmUpload используется только correlation-id.
 - Приём вебхука `/internal/storage/uploaded` от MinIO: парсинг `s3:ObjectCreated:*`, `PathUnescape` objectKey, извлечение `documentId` из basename и корреляции из `x-amz-meta-correlation-id` (userMetadata/responseElements, case-insensitive) с генерацией нового идентификатора при отсутствии; подтверждение загрузки через `document-service.ConfirmUpload` и ответ `202 Accepted`, либо `400 Bad Request`, если нет обработанных записей или payload невалиден.
 - Наблюдаемость: HTTP- и gRPC-клиенты обёрнуты OTLP-инструментацией; при выключенной телеметрии используются no-op провайдеры.
 
 ## Внешние зависимости
 - **document-service** — gRPC API: `CreateDocument`, `GetDocument`, `ListDocuments`, `ConfirmUpload`.
-- **storage-service** — gRPC API: `GenerateUploadURL` (ожидает `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds`; возвращает PUT `uploadUrl`, `bucket/objectKey`, `markdownBucket/markdownObjectKey`).
+- **storage-service** — gRPC API: `GenerateUploadURL` (ожидает `document_id`, `file_name`, `content_length`, `correlation_id`, `expires_in_seconds`; возвращает PUT `uploadUrl`, `bucket/objectKey`, `markdownBucket/markdownObjectKey`, `requiredHeaders` — подписанные заголовки для PUT).
 - **MinIO** — источник уведомлений `s3:ObjectCreated:*` (через webhook).
 - **OTLP collector** — при `observability.enabled=true` для отправки трейсов и метрик по gRPC.
 
 ## GraphQL API
-- `mutation uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!` — возвращает `uploadUrl`, `uploadMethod="PUT"` и созданный документ (статус из document-service, `repositoryOwner` — если пришёл из gRPC, `jobId` выбирается по приоритету `job_id` → `workflow_id` → `id`, `error` при наличии). Gateway не разбирает владельца репозитория: строка `repository` передается как есть.
+- `mutation uploadKnowledgeDocument(input: UploadKnowledgeDocumentInput!): UploadKnowledgeDocumentPayload!` — возвращает `uploadUrl`, `uploadMethod="PUT"`, `requiredHeaders` и созданный документ (статус из document-service, `repositoryOwner` — если пришёл из gRPC, `jobId` выбирается по приоритету `job_id` → `workflow_id` → `id`, `error` при наличии). Gateway не разбирает владельца репозитория: строка `repository` передается как есть.
 - `query knowledgeDocument(id: ID!): KnowledgeDocument` — возвращает документ по идентификатору.
 - `query knowledgeDocuments(filter, pagination): KnowledgeDocumentConnection!` — постраничный список (`limit`/`offset`, по умолчанию `10/0`) с фильтрами по статусу и `repository`.
 - Статусы: `UPLOADED`, `STORED_ORIGINAL`, `CONVERTED_TO_MARKDOWN`, `PUBLISHED_TO_GITHUB`, `FAILED`.
@@ -26,14 +26,19 @@
 API_KEY=secret
 ENDPOINT=http://localhost:8080/query
 
-curl -X POST "$ENDPOINT" \
+response=$(curl -s -X POST "$ENDPOINT" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $API_KEY" \
   -H "X-Correlation-ID: demo-corr" \
   -d '{
-    "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document{ id status jobId path repositoryOwner } } }",
+    "query": "mutation($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod requiredHeaders{ name value } document{ id status jobId path repositoryOwner } } }",
     "variables": {"input": {"fileName":"demo.docx","fileSizeBytes":1024,"repository":"org/repo","branch":"main","path":"docs/demo.md"}}
-  }'
+  }')
+UPLOAD_URL=$(echo "$response" | jq -r '.data.uploadKnowledgeDocument.uploadUrl')
+CORR_HEADER=$(echo "$response" | jq -r '.data.uploadKnowledgeDocument.requiredHeaders[] | select(.name=="x-amz-meta-correlation-id") | .value')
+curl -X PUT "$UPLOAD_URL" \
+  -H "x-amz-meta-correlation-id: $CORR_HEADER" \
+  --data-binary @demo.docx
 
 curl -X POST "$ENDPOINT" \
   -H "Content-Type: application/json" \

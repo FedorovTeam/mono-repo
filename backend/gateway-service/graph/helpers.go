@@ -4,6 +4,7 @@ import (
 	"backend-gateway-service/pkg/ctxutils"
 	"context"
 	"errors"
+	"sort"
 
 	"backend-gateway-service/graph/model"
 	"backend-gateway-service/internal/domain"
@@ -128,4 +129,22 @@ func requireAPIKey(ctx context.Context) (string, error) {
 		return "", errors.New("missing api key for public mutation")
 	}
 	return apiKey, nil
+}
+
+func mapHeaders(headers map[string]string) []*model.UploadHeader {
+	if len(headers) == 0 {
+		return []*model.UploadHeader{}
+	}
+
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	result := make([]*model.UploadHeader, 0, len(headers))
+	for _, key := range keys {
+		result = append(result, &model.UploadHeader{Name: key, Value: headers[key]})
+	}
+	return result
 }

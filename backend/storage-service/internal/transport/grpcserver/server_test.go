@@ -56,6 +56,9 @@ func TestGenerateUploadURLBuildsKeyAndTTL(t *testing.T) {
 	if client.lastObject != resp.ObjectKey {
 		t.Fatalf("object key not passed to minio: %s", client.lastObject)
 	}
+	if len(resp.RequiredHeaders) != 1 || resp.RequiredHeaders["x-amz-meta-correlation-id"] != "corr-1" {
+		t.Fatalf("required headers missing: %+v", resp.RequiredHeaders)
+	}
 }
 
 func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
@@ -79,6 +82,9 @@ func TestGenerateUploadURLUsesMetadataCorrelationID(t *testing.T) {
 	}
 	if got := client.lastHeaders.Get("x-amz-meta-correlation-id"); got != "corr-meta" {
 		t.Fatalf("metadata correlation id not propagated: %s", got)
+	}
+	if resp.RequiredHeaders["x-amz-meta-correlation-id"] != "corr-meta" {
+		t.Fatalf("required headers not returned: %+v", resp.RequiredHeaders)
 	}
 }
 

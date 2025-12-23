@@ -43,4 +43,24 @@ func TestPaginationParams(t *testing.T) {
 	}
 }
 
+func TestMapHeaders(t *testing.T) {
+	if headers := mapHeaders(nil); len(headers) != 0 {
+		t.Fatalf("expected empty slice for empty headers")
+	}
+
+	result := mapHeaders(map[string]string{
+		"b-header": "2",
+		"a-header": "1",
+	})
+	if len(result) != 2 {
+		t.Fatalf("unexpected length: %d", len(result))
+	}
+	if result[0].Name != "a-header" || result[0].Value != "1" {
+		t.Fatalf("headers not sorted/mapped: %+v", result[0])
+	}
+	if result[1].Name != "b-header" || result[1].Value != "2" {
+		t.Fatalf("headers not sorted/mapped: %+v", result[1])
+	}
+}
+
 func intPointer(v int) *int { return &v }

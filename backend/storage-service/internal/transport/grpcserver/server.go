@@ -179,6 +179,7 @@ func (s *Server) GenerateUploadURL(ctx context.Context, req *storagev1.GenerateU
 		ExpiresInSeconds:  upload.ExpiresInSeconds,
 		MarkdownBucket:    upload.MarkdownBucket,
 		MarkdownObjectKey: upload.MarkdownObjectKey,
+		RequiredHeaders:   upload.RequiredHeaders,
 	}, nil
 }
 

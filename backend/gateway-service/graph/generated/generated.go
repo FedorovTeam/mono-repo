@@ -77,10 +77,16 @@ type ComplexityRoot struct {
 		KnowledgeDocuments func(childComplexity int, filter *model.KnowledgeDocumentFilter, pagination *model.Pagination) int
 	}
 
+	UploadHeader struct {
+		Name  func(childComplexity int) int
+		Value func(childComplexity int) int
+	}
+
 	UploadKnowledgeDocumentPayload struct {
-		Document     func(childComplexity int) int
-		UploadMethod func(childComplexity int) int
-		UploadURL    func(childComplexity int) int
+		Document        func(childComplexity int) int
+		RequiredHeaders func(childComplexity int) int
+		UploadMethod    func(childComplexity int) int
+		UploadURL       func(childComplexity int) int
 	}
 }
 
@@ -238,12 +244,31 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Query.KnowledgeDocuments(childComplexity, args["filter"].(*model.KnowledgeDocumentFilter), args["pagination"].(*model.Pagination)), true
 
+	case "UploadHeader.name":
+		if e.complexity.UploadHeader.Name == nil {
+			break
+		}
+
+		return e.complexity.UploadHeader.Name(childComplexity), true
+	case "UploadHeader.value":
+		if e.complexity.UploadHeader.Value == nil {
+			break
+		}
+
+		return e.complexity.UploadHeader.Value(childComplexity), true
+
 	case "UploadKnowledgeDocumentPayload.document":
 		if e.complexity.UploadKnowledgeDocumentPayload.Document == nil {
 			break
 		}
 
 		return e.complexity.UploadKnowledgeDocumentPayload.Document(childComplexity), true
+	case "UploadKnowledgeDocumentPayload.requiredHeaders":
+		if e.complexity.UploadKnowledgeDocumentPayload.RequiredHeaders == nil {
+			break
+		}
+
+		return e.complexity.UploadKnowledgeDocumentPayload.RequiredHeaders(childComplexity), true
 	case "UploadKnowledgeDocumentPayload.uploadMethod":
 		if e.complexity.UploadKnowledgeDocumentPayload.UploadMethod == nil {
 			break
@@ -385,6 +410,8 @@ type UploadKnowledgeDocumentPayload {
   document: KnowledgeDocument!
   uploadUrl: String!
   uploadMethod: String!
+  """Обязательные заголовки, которые нужно передать в PUT запросе."""
+  requiredHeaders: [UploadHeader!]!
 }
 
 type KnowledgeDocumentConnection {
@@ -411,6 +438,11 @@ type KnowledgeDocument {
   extractTables: Boolean!
   """Стратегия конвертации Docling/TableExtractor."""
   conversionStrategy: ConversionStrategy
+}
+
+type UploadHeader {
+  name: String!
+  value: String!
 }
 
 enum KnowledgeDocumentStatus {
@@ -1052,6 +1084,8 @@ func (ec *executionContext) fieldContext_Mutation_uploadKnowledgeDocument(ctx co
 				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadUrl(ctx, field)
 			case "uploadMethod":
 				return ec.fieldContext_UploadKnowledgeDocumentPayload_uploadMethod(ctx, field)
+			case "requiredHeaders":
+				return ec.fieldContext_UploadKnowledgeDocumentPayload_requiredHeaders(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type UploadKnowledgeDocumentPayload", field.Name)
 		},
@@ -1294,6 +1328,64 @@ func (ec *executionContext) fieldContext_Query___schema(_ context.Context, field
 	return fc, nil
 }
 
+func (ec *executionContext) _UploadHeader_name(ctx context.Context, field graphql.CollectedField, obj *model.UploadHeader) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_UploadHeader_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_UploadHeader_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UploadHeader",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _UploadHeader_value(ctx context.Context, field graphql.CollectedField, obj *model.UploadHeader) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_UploadHeader_value,
+		func(ctx context.Context) (any, error) {
+			return obj.Value, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_UploadHeader_value(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UploadHeader",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _UploadKnowledgeDocumentPayload_document(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -1404,6 +1496,41 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_uploadMe
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _UploadKnowledgeDocumentPayload_requiredHeaders(ctx context.Context, field graphql.CollectedField, obj *model.UploadKnowledgeDocumentPayload) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_UploadKnowledgeDocumentPayload_requiredHeaders,
+		func(ctx context.Context) (any, error) {
+			return obj.RequiredHeaders, nil
+		},
+		nil,
+		ec.marshalNUploadHeader2ᚕᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadHeaderᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_requiredHeaders(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UploadKnowledgeDocumentPayload",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "name":
+				return ec.fieldContext_UploadHeader_name(ctx, field)
+			case "value":
+				return ec.fieldContext_UploadHeader_value(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type UploadHeader", field.Name)
 		},
 	}
 	return fc, nil
@@ -3275,6 +3402,50 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 	return out
 }
 
+var uploadHeaderImplementors = []string{"UploadHeader"}
+
+func (ec *executionContext) _UploadHeader(ctx context.Context, sel ast.SelectionSet, obj *model.UploadHeader) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, uploadHeaderImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("UploadHeader")
+		case "name":
+			out.Values[i] = ec._UploadHeader_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "value":
+			out.Values[i] = ec._UploadHeader_value(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var uploadKnowledgeDocumentPayloadImplementors = []string{"UploadKnowledgeDocumentPayload"}
 
 func (ec *executionContext) _UploadKnowledgeDocumentPayload(ctx context.Context, sel ast.SelectionSet, obj *model.UploadKnowledgeDocumentPayload) graphql.Marshaler {
@@ -3298,6 +3469,11 @@ func (ec *executionContext) _UploadKnowledgeDocumentPayload(ctx context.Context,
 			}
 		case "uploadMethod":
 			out.Values[i] = ec._UploadKnowledgeDocumentPayload_uploadMethod(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "requiredHeaders":
+			out.Values[i] = ec._UploadKnowledgeDocumentPayload_requiredHeaders(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -3808,6 +3984,60 @@ func (ec *executionContext) unmarshalNTimestamp2timeᚐTime(ctx context.Context,
 
 func (ec *executionContext) marshalNTimestamp2timeᚐTime(ctx context.Context, sel ast.SelectionSet, v time.Time) graphql.Marshaler {
 	return ec._Timestamp(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNUploadHeader2ᚕᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadHeaderᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.UploadHeader) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNUploadHeader2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadHeader(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNUploadHeader2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadHeader(ctx context.Context, sel ast.SelectionSet, v *model.UploadHeader) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._UploadHeader(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNUploadKnowledgeDocumentInput2backendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadKnowledgeDocumentInput(ctx context.Context, v any) (model.UploadKnowledgeDocumentInput, error) {

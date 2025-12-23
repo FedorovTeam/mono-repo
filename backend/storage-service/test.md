@@ -23,7 +23,13 @@
    ```bash
    grpcurl -H 'x-correlation-id: demo-corr' -d '{"document_id":"123","file_name":"demo.docx","content_length":2048,"correlation_id":"demo-corr","expires_in_seconds":600}' localhost:50052 backend.storage.v1.StorageService/GenerateUploadURL
    ```
-   В ответе ожидаются `uploadUrl`, `bucket`, `objectKey` и `expiresInSeconds`; заголовок `x-amz-meta-correlation-id=demo-corr` будет частью подписанных параметров.
+   В ответе ожидаются `uploadUrl`, `bucket`, `objectKey`, `expiresInSeconds`, `markdownBucket`, `markdownObjectKey` и карта `requiredHeaders` (минимум `x-amz-meta-correlation-id=demo-corr`). Заголовки из `requiredHeaders` нужно обязательно передавать в PUT запросе, иначе MinIO вернёт ошибку подписи.
+8. Выполнить загрузку по ссылке с обязательным заголовком:
+   ```bash
+   curl -X PUT "<uploadUrl из ответа>" \
+     -H "x-amz-meta-correlation-id: demo-corr" \
+     --data-binary @demo.docx
+   ```
 
 ## Проверка приватности
 - В MinIO убедитесь, что политики бакетов `knowledge-original` и `knowledge-md` не допускают публичного доступа.
