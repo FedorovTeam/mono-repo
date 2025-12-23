@@ -40,6 +40,9 @@ func mapDocument(doc *domain.Document) *model.KnowledgeDocument {
 		result.Error = doc.Error
 	}
 	result.ExtractTables = doc.ExtractTables
+	if doc.OriginalDownloadURL != nil {
+		result.OriginalDownloadURL = doc.OriginalDownloadURL
+	}
 	if strategy := modelConversionStrategyFromDomain(doc.ConversionStrategy); strategy != nil {
 		result.ConversionStrategy = strategy
 	}

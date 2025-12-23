@@ -205,6 +205,28 @@ func TestGetObjectReturnsStoredData(t *testing.T) {
 	require.NotNil(t, resp.GetUpdatedAt())
 }
 
+func TestGenerateDownloadURLReturnsPresignedLink(t *testing.T) {
+	client := newMockClient("knowledge-original", "knowledge-md")
+	client.storedData["knowledge-original"] = map[string][]byte{"doc-key": []byte("content")}
+
+	generator := storage.NewObjectKeyGenerator(time.Now)
+	service := storage.NewService(client, generator, "knowledge-original", "knowledge-md", validationConfig())
+	server := New(client, generator, "knowledge-original", "knowledge-md", service)
+
+	resp, err := server.GenerateDownloadURL(context.Background(), &storagev1.GenerateDownloadURLRequest{
+		Bucket:           "knowledge-original",
+		ObjectKey:        "doc-key",
+		CorrelationId:    "corr-download",
+		ExpiresInSeconds: 180,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "http://example.com/presigned", resp.GetDownloadUrl())
+	require.Equal(t, int64(180), resp.GetExpiresInSeconds())
+	require.Equal(t, http.MethodGet, client.lastPresign.method)
+	require.Equal(t, 180*time.Second, client.lastPresign.expires)
+	require.Equal(t, "corr-download", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
+}
+
 func validationConfig() storage.UploadValidationConfig {
 	return storage.UploadValidationConfig{
 		AllowedExtensions: map[string]struct{}{
@@ -219,6 +241,7 @@ func validationConfig() storage.UploadValidationConfig {
 
 type mockPresignClient struct {
 	bucketExists bool
+	lastMethod   string
 	lastExpires  time.Duration
 	lastHeaders  http.Header
 	lastObject   string
@@ -241,11 +264,19 @@ func (m *mockPresignClient) GetObject(context.Context, string, string) (io.ReadC
 	return nil, errors.New("not implemented")
 }
 
-func (m *mockPresignClient) StatObject(context.Context, string, string, minio.StatObjectOptions) (minio.ObjectInfo, error) {
-	return minio.ObjectInfo{}, errors.New("not implemented")
+func (m *mockPresignClient) StatObject(_ context.Context, bucket, object string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	bucketData, ok := m.storedData[bucket]
+	if !ok {
+		return minio.ObjectInfo{}, minio.ErrorResponse{Code: "NoSuchBucket"}
+	}
+	if _, exists := bucketData[object]; !exists {
+		return minio.ObjectInfo{}, minio.ErrorResponse{Code: "NoSuchKey"}
+	}
+	return minio.ObjectInfo{}, nil
 }
 
 func (m *mockPresignClient) PresignHeader(_ context.Context, method, bucketName, objectName string, expires time.Duration, _ url.Values, headers http.Header) (*url.URL, error) {
+	m.lastMethod = method
 	m.lastExpires = expires
 	m.lastHeaders = headers
 	m.lastObject = objectName
@@ -277,8 +308,15 @@ func assertObjectKey(t *testing.T, key, prefix, filename string) {
 }
 
 type mockClient struct {
-	buckets    map[string]bool
-	storedData map[string]map[string][]byte
+	buckets     map[string]bool
+	storedData  map[string]map[string][]byte
+	lastPresign struct {
+		method  string
+		bucket  string
+		object  string
+		expires time.Duration
+		headers http.Header
+	}
 }
 
 func newMockClient(buckets ...string) *mockClient {
@@ -353,8 +391,14 @@ func (m *mockClient) StatObject(_ context.Context, bucketName, objectName string
 	return minio.ObjectInfo{ETag: "etag-" + objectName, Size: int64(len(data)), LastModified: time.Now().UTC()}, nil
 }
 
-func (m *mockClient) PresignHeader(_ context.Context, _ string, _ string, _ string, _ time.Duration, _ url.Values, _ http.Header) (*url.URL, error) {
-	return nil, errors.New("not implemented")
+func (m *mockClient) PresignHeader(_ context.Context, method, bucketName, objectName string, expires time.Duration, _ url.Values, headers http.Header) (*url.URL, error) {
+	m.lastPresign.method = method
+	m.lastPresign.bucket = bucketName
+	m.lastPresign.object = objectName
+	m.lastPresign.expires = expires
+	m.lastPresign.headers = headers
+
+	return url.Parse("http://example.com/presigned")
 }
 
 type headerCapturingStream struct {

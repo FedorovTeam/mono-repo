@@ -122,6 +122,12 @@ type PresignedUpload struct {
 	MarkdownObjectKey string
 }
 
+// PresignedDownload содержит ссылку на скачивание объекта.
+type PresignedDownload struct {
+	DownloadURL      *url.URL
+	ExpiresInSeconds int64
+}
+
 // ObjectLocation описывает размещение объекта в хранилище.
 type ObjectLocation struct {
 	Bucket string
@@ -324,6 +330,48 @@ func (s *Service) GenerateUploadURL(ctx context.Context, bucket string, params G
 		MarkdownBucket:    s.markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		ExpiresInSeconds:  expiresInSeconds,
+	}, nil
+}
+
+// GenerateDownloadURL готовит presigned GET ссылку для уже существующего объекта.
+func (s *Service) GenerateDownloadURL(ctx context.Context, bucket, objectKey string, expiresInSeconds int64, correlationID string) (PresignedDownload, error) {
+	if bucket == "" {
+		return PresignedDownload{}, fmt.Errorf("%w: bucket is required", ErrInvalidArgument)
+	}
+
+	if objectKey == "" {
+		return PresignedDownload{}, fmt.Errorf("%w: object_key is required", ErrInvalidArgument)
+	}
+
+	if expiresInSeconds <= 0 {
+		expiresInSeconds = s.defaultUploadTTL
+	}
+
+	if expiresInSeconds <= 0 {
+		return PresignedDownload{}, fmt.Errorf("%w: expires_in_seconds must be greater than zero", ErrInvalidArgument)
+	}
+
+	if err := s.ensureBucket(ctx, bucket); err != nil {
+		return PresignedDownload{}, err
+	}
+	if _, err := s.client.StatObject(ctx, bucket, objectKey, minio.StatObjectOptions{}); err != nil {
+		return PresignedDownload{}, fmt.Errorf("failed to stat object: %w", err)
+	}
+
+	headers := http.Header{}
+	if correlationID != "" {
+		headers.Set("x-amz-meta-correlation-id", correlationID)
+	}
+
+	expires := time.Duration(expiresInSeconds) * time.Second
+	url, err := s.client.PresignHeader(ctx, http.MethodGet, bucket, objectKey, expires, nil, headers)
+	if err != nil {
+		return PresignedDownload{}, fmt.Errorf("cannot presign download url: %w", err)
+	}
+
+	return PresignedDownload{
+		DownloadURL:      url,
+		ExpiresInSeconds: expiresInSeconds,
 	}, nil
 }
 

@@ -182,6 +182,30 @@ func (s *Server) GenerateUploadURL(ctx context.Context, req *storagev1.GenerateU
 	}, nil
 }
 
+// GenerateDownloadURL возвращает presigned GET ссылку для существующего объекта.
+func (s *Server) GenerateDownloadURL(ctx context.Context, req *storagev1.GenerateDownloadURLRequest) (*storagev1.GenerateDownloadURLResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+
+	if req.GetBucket() == "" || req.GetObjectKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "bucket и object_key должны быть заполнены")
+	}
+
+	correlationID := s.correlationID(ctx, req.GetCorrelationId())
+	download, err := s.service.GenerateDownloadURL(ctx, req.GetBucket(), req.GetObjectKey(), req.GetExpiresInSeconds(), correlationID)
+	if err != nil {
+		return nil, s.mapStorageError(err)
+	}
+
+	s.attachResponseMetadata(ctx, correlationID, s.orgSlug, s.projectSlug)
+
+	return &storagev1.GenerateDownloadURLResponse{
+		DownloadUrl:      download.DownloadURL.String(),
+		ExpiresInSeconds: download.ExpiresInSeconds,
+	}, nil
+}
+
 func (s *Server) ensureBucket(ctx context.Context, bucket string) error {
 	exists, err := s.client.BucketExists(ctx, bucket)
 	if err != nil {

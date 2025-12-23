@@ -233,3 +233,30 @@ func TestGenerateUploadURL_ValidatesInput(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrInvalidArgument)
 }
+
+func TestGenerateDownloadURL_ValidatesAndPresigns(t *testing.T) {
+	client := newMockClient("knowledge-original", "knowledge-md")
+	client.storedData["knowledge-original"] = map[string][]byte{
+		"doc-key": []byte("payload"),
+	}
+
+	generator := NewObjectKeyGenerator(time.Now)
+	svc := NewService(client, generator, "knowledge-original", "knowledge-md", UploadValidationConfig{SignedURLTTL: 300})
+
+	resp, err := svc.GenerateDownloadURL(context.Background(), "knowledge-original", "doc-key", 0, "corr-dl")
+	require.NoError(t, err)
+	require.Equal(t, "http://example.com/presigned", resp.DownloadURL.String())
+	require.Equal(t, int64(300), resp.ExpiresInSeconds)
+	require.Equal(t, http.MethodGet, client.lastPresign.method)
+	require.Equal(t, 300*time.Second, client.lastPresign.expires)
+	require.Equal(t, "corr-dl", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
+
+	_, err = svc.GenerateDownloadURL(context.Background(), "", "doc-key", 0, "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.GenerateDownloadURL(context.Background(), "knowledge-original", "", 0, "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+
+	_, err = svc.GenerateDownloadURL(context.Background(), "knowledge-original", "missing", 0, "")
+	require.Error(t, err)
+}

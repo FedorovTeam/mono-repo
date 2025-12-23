@@ -23,6 +23,8 @@ type KnowledgeDocument struct {
 	Status          KnowledgeDocumentStatus `json:"status"`
 	JobID           *string                 `json:"jobId,omitempty"`
 	Error           *string                 `json:"error,omitempty"`
+	// Подписанная ссылка для скачивания оригинального файла.
+	OriginalDownloadURL *string `json:"originalDownloadUrl,omitempty"`
 	// Принудительно включено ли извлечение таблиц для документа.
 	ExtractTables bool `json:"extractTables"`
 	// Стратегия конвертации Docling/TableExtractor.

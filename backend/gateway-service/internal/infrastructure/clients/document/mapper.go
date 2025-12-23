@@ -19,6 +19,8 @@ func mapDocument(doc *pb.Document) *domain.Document {
 		Status:             domainStatusFromProto(doc.GetStatus()),
 		ExtractTables:      doc.GetExtractTables(),
 		ConversionStrategy: domain.NormalizeConversionStrategy(doc.GetConversionStrategy()),
+		UploadBucket:       doc.GetUploadBucket(),
+		UploadObjectKey:    doc.GetUploadObjectKey(),
 	}
 
 	if ts := doc.GetCreatedAt(); ts != nil {

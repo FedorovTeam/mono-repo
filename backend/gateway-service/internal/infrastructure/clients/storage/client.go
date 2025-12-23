@@ -57,6 +57,24 @@ func (c *GRPCClient) GenerateUploadURL(ctx context.Context, req domain.GenerateU
 	}, nil
 }
 
+// GenerateDownloadURL запрашивает presigned ссылку для скачивания файла.
+func (c *GRPCClient) GenerateDownloadURL(ctx context.Context, req domain.GenerateDownloadURLRequest) (*domain.DownloadURL, error) {
+	resp, err := c.StorageServiceClient.GenerateDownloadURL(withMetadata(ctx), &storagepb.GenerateDownloadURLRequest{
+		Bucket:           req.Bucket,
+		ObjectKey:        req.ObjectKey,
+		CorrelationId:    req.CorrelationID,
+		ExpiresInSeconds: req.ExpiresInSeconds,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &domain.DownloadURL{
+		DownloadURL:      resp.GetDownloadUrl(),
+		ExpiresInSeconds: resp.GetExpiresInSeconds(),
+	}, nil
+}
+
 func withMetadata(ctx context.Context) context.Context {
 	correlationID := ctxutils.CorrelationID(ctx)
 	if correlationID != "" {

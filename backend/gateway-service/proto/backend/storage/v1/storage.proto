@@ -8,6 +8,9 @@ option go_package = "backend-gateway-service/proto/backend/storage/v1;storagepb"
 service StorageService {
   // GenerateUploadURL возвращает подписанную ссылку для прямой загрузки файла в приватный бакет.
   rpc GenerateUploadURL(GenerateUploadURLRequest) returns (GenerateUploadURLResponse);
+
+  // GenerateDownloadURL возвращает подписанную ссылку для скачивания объекта из приватного бакета.
+  rpc GenerateDownloadURL(GenerateDownloadURLRequest) returns (GenerateDownloadURLResponse);
 }
 
 message GenerateUploadURLRequest {
@@ -25,4 +28,16 @@ message GenerateUploadURLResponse {
   int64 expires_in_seconds = 4;
   string markdown_bucket = 5;
   string markdown_object_key = 6;
+}
+
+message GenerateDownloadURLRequest {
+  string bucket = 1;
+  string object_key = 2;
+  string correlation_id = 3;
+  int64 expires_in_seconds = 4;
+}
+
+message GenerateDownloadURLResponse {
+  string download_url = 1;
+  int64 expires_in_seconds = 2;
 }

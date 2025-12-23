@@ -56,6 +56,10 @@ func (stubStorageClient) GenerateUploadURL(context.Context, domain.GenerateUploa
 	}, nil
 }
 
+func (stubStorageClient) GenerateDownloadURL(context.Context, domain.GenerateDownloadURLRequest) (*domain.DownloadURL, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (stubStorageClient) Close() error { return nil }
 
 func TestUploadKnowledgeDocument_DefaultPathGenerated(t *testing.T) {
