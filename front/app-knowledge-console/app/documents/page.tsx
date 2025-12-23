@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { signIn } from 'next-auth/react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
+import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -80,11 +82,13 @@ export default function DocumentsPage() {
   const [documentsTotal, setDocumentsTotal] = useState<number | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
+  const [manualLoginRequired, setManualLoginRequired] = useState(false);
 
   const fetchDocuments = useCallback(async () => {
     try {
       setIsListLoading(true);
       setListError(null);
+      setManualLoginRequired(false);
       const correlationId = generateCorrelationId();
 
       const query = `
@@ -106,7 +110,7 @@ export default function DocumentsPage() {
         }
       `;
 
-      const res = await fetch('/api/graphql', {
+      const res = await fetchWithAuth('/api/graphql', {
         method: 'POST',
         cache: 'no-store',
         headers: {
@@ -118,10 +122,6 @@ export default function DocumentsPage() {
           variables: { pagination: { limit: 20, offset: 0 } },
         }),
       });
-
-      if (res.status === 401) {
-        throw new Error('Сессия недействительна, войдите заново.');
-      }
 
       if (!res.ok) {
         throw new Error(`Ошибка загрузки списка документов: ${res.status} ${res.statusText}`);
@@ -141,6 +141,14 @@ export default function DocumentsPage() {
       setDocuments(payload.nodes);
       setDocumentsTotal(payload.totalCount);
     } catch (err) {
+      if (err instanceof SilentSignInError) {
+        setManualLoginRequired(true);
+        const friendlyMessage = err.interactionRequired
+          ? 'Сессия истекла. Войдите вручную, чтобы продолжить.'
+          : err.message;
+        setListError(friendlyMessage);
+        return;
+      }
       const messageText = err instanceof Error ? err.message : 'Не удалось загрузить список документов';
       console.error(messageText);
       setListError(messageText);
@@ -169,7 +177,7 @@ export default function DocumentsPage() {
           }
         `;
 
-        const res = await fetch('/api/graphql', {
+        const res = await fetchWithAuth('/api/graphql', {
           method: 'POST',
           cache: 'no-store',
           headers: {
@@ -195,6 +203,11 @@ export default function DocumentsPage() {
 
         setDocuments((prev) => prev.map((item) => (item.id === doc.id ? { ...item, ...doc } : item)));
       } catch (err) {
+        if (err instanceof SilentSignInError) {
+          setManualLoginRequired(true);
+          console.warn('Polling остановлен: требуется ручной вход');
+          return;
+        }
         console.error(err);
       }
     },
@@ -229,6 +242,20 @@ export default function DocumentsPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Документы</h2>
+            {manualLoginRequired && (
+              <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+                <button
+                  type="button"
+                  onClick={() => signIn('authentik', { callbackUrl: window.location.href })}
+                  className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+                >
+                  Войти вручную
+                </button>
+                <p className="text-xs text-slate-600">
+                  Silent sign-in потребовал взаимодействие. Авторизуйтесь вручную и повторите запрос.
+                </p>
+              </div>
+            )}
             <button
               type="button"
               onClick={fetchDocuments}
