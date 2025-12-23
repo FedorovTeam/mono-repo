@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
-import OAuthProvider from "next-auth/providers/oauth";
+import type { OAuthConfig } from "next-auth/providers/oauth";
+import type { JWT } from "next-auth/jwt";
 
 const authentikIssuer = process.env.AUTHENTIK_ISSUER;
 const authentikClientId = process.env.AUTHENTIK_CLIENT_ID;
@@ -26,58 +27,78 @@ if (!authentikRedirectUri) {
   throw new Error("AUTHENTIK_REDIRECT_URI или NEXTAUTH_URL должны быть заданы для корректного redirect_uri");
 }
 
-const authorizationParams: Record<string, string> = { scope: "openid email profile" };
-if (authentikRedirectUri) {
-  authorizationParams.redirect_uri = authentikRedirectUri;
-}
+const authorizationParams: Record<string, string> = authentikRedirectUri
+  ? { scope: "openid email profile", redirect_uri: authentikRedirectUri }
+  : { scope: "openid email profile" };
+
+const authentikProvider: OAuthConfig<Record<string, unknown>> = {
+  id: "authentik",
+  name: "Authentik",
+  type: "oauth",
+  issuer: authentikIssuer,
+  wellKnown: process.env.AUTHENTIK_WELL_KNOWN ?? `${authentikIssuer}/.well-known/openid-configuration`,
+  jwks_endpoint: process.env.AUTHENTIK_JWKS_URL,
+  clientId: authentikClientId,
+  clientSecret: authentikClientSecret,
+  authorization: { params: authorizationParams },
+  idToken: true,
+  checks: ["pkce", "state"],
+  profile(profile) {
+    const profileData = profile as Record<string, unknown>;
+    const profileName = profileData.name ?? profileData.preferred_username ?? profileData.email;
+
+    return {
+      id:
+        typeof profileData.sub === "string"
+          ? profileData.sub
+          : typeof profileData.email === "string"
+            ? profileData.email
+            : "authentik-user",
+      name: typeof profileName === "string" ? profileName : undefined,
+      email: typeof profileData.email === "string" ? profileData.email : null,
+    };
+  },
+};
+
+type ExtendedJWT = JWT & {
+  accessToken?: string;
+  idToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  profile?: Record<string, unknown> | null;
+};
 
 export const authOptions: NextAuthOptions = {
   secret: nextAuthSecret,
-  providers: [
-    OAuthProvider({
-      id: "authentik",
-      name: "Authentik",
-      type: "oidc",
-      issuer: authentikIssuer,
-      wellKnown: process.env.AUTHENTIK_WELL_KNOWN ?? `${authentikIssuer}/.well-known/openid-configuration`,
-      jwks_endpoint: process.env.AUTHENTIK_JWKS_URL,
-      clientId: authentikClientId,
-      clientSecret: authentikClientSecret,
-      authorization: {
-        params: authorizationParams,
-      },
-      idToken: true,
-      checks: ["pkce", "state"],
-      profile(profile) {
-        return {
-          id: profile.sub ?? profile.email ?? "authentik-user",
-          name: profile.name ?? profile.preferred_username ?? profile.email,
-          email: profile.email ?? null,
-        };
-      },
-    }),
-  ],
+  providers: [authentikProvider],
   session: {
     strategy: "jwt",
   },
   callbacks: {
     async jwt({ token, account, profile }) {
+      const extendedToken = token as ExtendedJWT;
+      const profileData =
+        profile && typeof profile === "object" ? (profile as Record<string, unknown>) : null;
+
       if (account) {
-        token.accessToken = account.access_token;
-        token.idToken = account.id_token;
-        token.refreshToken = account.refresh_token;
-        token.expiresAt = account.expires_at ? account.expires_at * 1000 : undefined;
-        token.profile = profile ?? token.profile;
+        extendedToken.accessToken = account.access_token;
+        extendedToken.idToken = account.id_token;
+        extendedToken.refreshToken = account.refresh_token;
+        extendedToken.expiresAt = account.expires_at ? account.expires_at * 1000 : undefined;
+        extendedToken.profile = profileData ?? extendedToken.profile ?? null;
       }
 
-      return token;
+      return extendedToken;
     },
     async session({ session, token }) {
-      session.accessToken = typeof token.accessToken === "string" ? token.accessToken : undefined;
-      session.idToken = typeof token.idToken === "string" ? token.idToken : undefined;
+      const extendedToken = token as ExtendedJWT;
+
+      session.accessToken = typeof extendedToken.accessToken === "string" ? extendedToken.accessToken : undefined;
+      session.idToken = typeof extendedToken.idToken === "string" ? extendedToken.idToken : undefined;
 
       if (session.user) {
-        const profile = token.profile && typeof token.profile === "object" ? token.profile : null;
+        const profile =
+          extendedToken.profile && typeof extendedToken.profile === "object" ? extendedToken.profile : null;
         const profileName = profile ? (profile as Record<string, unknown>).name : undefined;
         const profileEmail = profile ? (profile as Record<string, unknown>).email : undefined;
 
