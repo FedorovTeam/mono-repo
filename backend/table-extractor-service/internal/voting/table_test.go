@@ -1,6 +1,7 @@
 package voting
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,26 @@ func TestExtractColumnsFailsWithoutKeywords(t *testing.T) {
 	_, _, _, err = ExtractColumns(page)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Присутствует")
+}
+
+func TestToMarkdownOmitsHeaderText(t *testing.T) {
+	doc := Document{
+		HeaderText: "Интро",
+		Columns:    []Column{{Key: ColPresent, Title: "Присутствует"}},
+		Rows: []Row{{
+			Number: 1,
+			Name:   "Иванов И.И.",
+			Marks:  map[ColumnKey]bool{ColPresent: true},
+		}},
+	}
+
+	md := ToMarkdown(doc)
+
+	require.NotContains(t, md, "Интро")
+	require.Equal(t, 1, strings.Count(md, "<!-- tables:start -->"))
+	require.Equal(t, 1, strings.Count(md, "<!-- tables:end -->"))
+	require.Contains(t, md, "| № | Ф.И.О. | Присутствует |")
+	require.Contains(t, md, "Иванов И.И.")
 }
 
 func sampleVotingBBox() string {

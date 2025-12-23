@@ -7,10 +7,8 @@ import (
 // ToMarkdown renders a Document to a Markdown string.
 func ToMarkdown(doc Document) string {
 	var b strings.Builder
-	if doc.HeaderText != "" {
-		b.WriteString(doc.HeaderText)
-		b.WriteString("\n\n")
-	}
+
+	b.WriteString("<!-- tables:start -->\n")
 
 	// Table header.
 	b.WriteString("| № | Ф.И.О. |")
@@ -42,6 +40,8 @@ func ToMarkdown(doc Document) string {
 		}
 		b.WriteString("\n")
 	}
+
+	b.WriteString("<!-- tables:end -->")
 
 	return b.String()
 }
