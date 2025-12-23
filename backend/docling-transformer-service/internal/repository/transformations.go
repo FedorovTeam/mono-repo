@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	"github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 )
 
@@ -35,6 +36,8 @@ type TransformationDTO struct {
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 	Error      *string
+
+	TableMetadata *domain.TableMetadata
 }
 
 func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
@@ -65,5 +68,7 @@ func (dto TransformationDTO) ToDomain() *transformations.TransformationTask {
 		StartedAt:  dto.StartedAt,
 		FinishedAt: dto.FinishedAt,
 		Error:      dto.Error,
+
+		TableMetadata: dto.TableMetadata,
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	"github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 )
 
@@ -21,7 +22,7 @@ type QueueRepository interface {
 	GetLatestByDocument(ctx context.Context, documentID string) (*transformations.TransformationTask, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*transformations.TransformationTask, error)
 
-	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error
+	MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string, tableMetadata *domain.TableMetadata) error
 	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
 
 	UpdateDoclingInfo(ctx context.Context, id uuid.UUID, taskID, jobID string, pollCount int) error

@@ -14,6 +14,8 @@ import (
 	"net/textproto"
 	"net/url"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1128,6 +1130,7 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 	// безопаснее отдавать/сохранять как utf-8, иначе клиенты могут неправильно
 	// интерпретировать скачиваемый файл.
 	charset := "utf-8"
+	tableMeta := extractTableMetadata(doc.JsonContent)
 
 	markdown := c.selectMarkdown(doc)
 	if markdown != "" {
@@ -1137,7 +1140,7 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 				zap.String("filename", doc.Filename),
 			)
 		}
-		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/markdown", Charset: charset}, nil
+		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/markdown", Charset: charset, Tables: tableMeta}, nil
 	}
 
 	if html := strings.TrimSpace(firstNonEmpty(doc.HtmlContent)); html != "" {
@@ -1147,7 +1150,7 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 				zap.String("filename", doc.Filename),
 			)
 		}
-		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/html", Charset: charset}, nil
+		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/html", Charset: charset, Tables: tableMeta}, nil
 	}
 
 	if text := strings.TrimSpace(firstNonEmpty(doc.TextContent)); text != "" {
@@ -1157,7 +1160,7 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 				zap.String("filename", doc.Filename),
 			)
 		}
-		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/plain", Charset: charset}, nil
+		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/plain", Charset: charset, Tables: tableMeta}, nil
 	}
 
 	return domain.ConvertResult{}, errors.New("docling response has empty content")
@@ -1168,7 +1171,106 @@ func (c *DoclingConverter) selectMarkdown(doc exportDocumentResponse) string {
 	if mdContent != "" {
 		return mdContent
 	}
+	if content, ok := doc.JsonContent.(map[string]any); ok {
+		if md, ok := content["markdown_md"].(string); ok && strings.TrimSpace(md) != "" {
+			return md
+		}
+	}
 	return ""
+}
+
+func extractTableMetadata(jsonContent any) *domain.TableMetadata {
+	root, ok := jsonContent.(map[string]any)
+	if !ok || len(root) == 0 {
+		return nil
+	}
+
+	meta := &domain.TableMetadata{}
+	pageSet := make(map[int32]struct{})
+
+	tablesCount, tablePages := parseTablesArray(root["tables"])
+	for _, page := range tablePages {
+		pageSet[page] = struct{}{}
+	}
+
+	if pagesMap, ok := root["pages"].(map[string]any); ok {
+		for pageKey, raw := range pagesMap {
+			pageNumber, err := strconv.Atoi(strings.TrimSpace(pageKey))
+			if err != nil {
+				continue
+			}
+			page := int32(pageNumber)
+
+			pageTables := 0
+			if pageData, ok := raw.(map[string]any); ok {
+				pageTables, _ = parseTablesArray(pageData["tables"])
+			}
+			if pageTables > 0 {
+				pageSet[page] = struct{}{}
+			}
+			if tablesCount == 0 {
+				tablesCount += pageTables
+			}
+		}
+	}
+
+	if tablesCount == 0 {
+		return nil
+	}
+
+	meta.TablesCount = tablesCount
+	for _, page := range tablePages {
+		pageSet[page] = struct{}{}
+	}
+	for page := range pageSet {
+		meta.Pages = append(meta.Pages, page)
+	}
+	sort.Slice(meta.Pages, func(i, j int) bool { return meta.Pages[i] < meta.Pages[j] })
+	return meta
+}
+
+func parseTablesArray(value any) (int, []int32) {
+	items, ok := value.([]any)
+	if !ok {
+		return 0, nil
+	}
+
+	pages := make([]int32, 0)
+	for _, item := range items {
+		if page, ok := extractPageFromTable(item); ok {
+			pages = append(pages, page)
+		}
+	}
+
+	return len(items), pages
+}
+
+func extractPageFromTable(value any) (int32, bool) {
+	data, ok := value.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+
+	for _, key := range []string{"page", "page_idx", "page_number", "page_no"} {
+		if pageVal, exists := data[key]; exists {
+			switch v := pageVal.(type) {
+			case float64:
+				return int32(v), true
+			case int:
+				return int32(v), true
+			case int32:
+				return v, true
+			case int64:
+				return int32(v), true
+			case string:
+				if num, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					return int32(num), true
+				}
+			}
+		}
+	}
+
+	return 0, false
 }
 
 func firstNonEmpty(values ...*string) string {

@@ -355,16 +355,13 @@ func (f *JobFollower) shouldExtractTablesAfterConvert(doc *domain.Document, payl
 	if f.router == nil || doc == nil {
 		return false
 	}
-	if !f.router.ShouldExtractTablesAfterConvert(doc) {
-		return false
+
+	docCopy := *doc
+	if payload.ConversionStrategy != "" {
+		docCopy.ConversionStrategy = payload.ConversionStrategy
 	}
 
-	strategy := domain.NormalizeConversionStrategy(string(firstNonEmpty(string(payload.ConversionStrategy), string(doc.ConversionStrategy))))
-	if strategy != domain.ConversionStrategyDoclingWithTables {
-		return false
-	}
-
-	return payload.ExtractTables || doc.ExtractTables || strategy == domain.ConversionStrategyDoclingWithTables
+	return f.router.ShouldExtractTablesAfterConvert(&docCopy, payload.ExtractTables, int(payload.TableCount), payload.TablePages)
 }
 
 func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.ConvertPayload, string) {

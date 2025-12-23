@@ -108,6 +108,7 @@ type Router struct {
 	ArtifactsBucket          string                 `yaml:"artifacts_bucket"`
 	ArtifactsPrefixTemplate  string                 `yaml:"artifacts_prefix_template"`
 	RepositoryRules          []RepositoryRouterRule `yaml:"repositories"`
+	TableDetectionMinCount   int                    `yaml:"table_detection_min_count"`
 }
 
 type RepositoryRouterRule struct {
@@ -210,6 +211,9 @@ func (r *Router) normalize() {
 	}
 	if strings.TrimSpace(r.ArtifactsPrefixTemplate) == "" {
 		r.ArtifactsPrefixTemplate = "tables/{{ .DocumentID }}/{{ .QueueID }}/"
+	}
+	if r.TableDetectionMinCount <= 0 {
+		r.TableDetectionMinCount = 1
 	}
 	for i := range r.RepositoryRules {
 		r.RepositoryRules[i].PreprocessExtensions = normalizeExtensions(r.RepositoryRules[i].PreprocessExtensions)

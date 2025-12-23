@@ -17,6 +17,7 @@ type ConvertResult struct {
 	Content   []byte
 	MediaType string
 	Charset   string
+	Tables    *TableMetadata
 }
 
 type StatusCheckResult struct {
@@ -27,6 +28,15 @@ type StatusCheckResult struct {
 type DoclingIdentifiers struct {
 	TaskID string
 	JobID  string
+}
+
+type TableMetadata struct {
+	TablesCount int     `json:"tables_count"`
+	Pages       []int32 `json:"pages,omitempty"`
+}
+
+func (m *TableMetadata) HasTables() bool {
+	return m != nil && m.TablesCount > 0
 }
 
 func (d DoclingIdentifiers) PrimaryID() string {

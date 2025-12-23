@@ -224,6 +224,7 @@ func newStageRouter(cfg config.Router) *domain.StageRouter {
 		TableExtractorExtensions: cfg.TableExtractorExtensions,
 		ArtifactsBucket:          cfg.ArtifactsBucket,
 		ArtifactsPrefixTemplate:  cfg.ArtifactsPrefixTemplate,
+		TableDetectionMinCount:   cfg.TableDetectionMinCount,
 	}
 	for _, rule := range cfg.RepositoryRules {
 		rules.RepositoryRules = append(rules.RepositoryRules, domain.RepositoryRouterRule{

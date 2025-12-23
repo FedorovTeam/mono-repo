@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 )
@@ -85,6 +88,7 @@ var baseSelectFields = strings.Join([]string{
 	"finished_at",
 	"error",
 	"correlation_id",
+	"table_metadata",
 }, ",\n")
 
 func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
@@ -348,14 +352,23 @@ func (r *PostgresQueueRepository) markProcessing(ctx context.Context, tx pgx.Tx,
 	return nil
 }
 
-func (r *PostgresQueueRepository) MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string) error {
+func (r *PostgresQueueRepository) MarkDone(ctx context.Context, id uuid.UUID, markdownBucket, markdownObjectKey string, tableMetadata *domain.TableMetadata) error {
 	const query = `
 UPDATE transformations_queue
 SET status = 'done', markdown_bucket = $1, markdown_object_key = $2,
-    next_poll_at = NULL, finished_at = NOW(), error = NULL
-WHERE id = $3`
+    table_metadata = $3, next_poll_at = NULL, finished_at = NOW(), error = NULL
+WHERE id = $4`
 
-	if _, err := r.pool.Exec(ctx, query, markdownBucket, markdownObjectKey, id); err != nil {
+	var meta any
+	if tableMetadata != nil {
+		encoded, err := json.Marshal(tableMetadata)
+		if err != nil {
+			return fmt.Errorf("encode table metadata: %w", err)
+		}
+		meta = string(encoded)
+	}
+
+	if _, err := r.pool.Exec(ctx, query, markdownBucket, markdownObjectKey, meta, id); err != nil {
 		return fmt.Errorf("mark done: %w", err)
 	}
 	return nil
@@ -646,6 +659,7 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		sourceBucket    string
 		sourceObjectKey string
 		sourceURL       string
+		tableMetadata   []byte
 	)
 
 	if err := row.Scan(
@@ -670,6 +684,7 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&dto.FinishedAt,
 		&dto.Error,
 		&dto.CorrelationID,
+		&tableMetadata,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, pgx.ErrNoRows
@@ -682,6 +697,11 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	dto.SourceBucket = sourceBucket
 	dto.SourceObjectKey = sourceObjectKey
 	dto.SourceURL = sourceURL
+	if len(tableMetadata) > 0 && string(bytes.TrimSpace(tableMetadata)) != "null" {
+		if err := json.Unmarshal(tableMetadata, &dto.TableMetadata); err != nil {
+			return nil, fmt.Errorf("parse table metadata: %w", err)
+		}
+	}
 
 	return dto.ToDomain(), nil
 }

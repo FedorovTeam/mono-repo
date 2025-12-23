@@ -58,7 +58,7 @@ func (p *pollingRepoStub) GetLatestByDocument(context.Context, string) (*transfo
 func (p *pollingRepoStub) GetByID(context.Context, uuid.UUID) (*transformations.TransformationTask, error) {
 	return nil, nil
 }
-func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string) error {
+func (p *pollingRepoStub) MarkDone(context.Context, uuid.UUID, string, string, *domain.TableMetadata) error {
 	p.markDoneCalls++
 	return nil
 }

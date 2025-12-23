@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 )
 
 type TransformationStatus string
@@ -64,6 +65,8 @@ type TransformationTask struct {
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 	Error      *string
+
+	TableMetadata *domain.TableMetadata
 }
 
 type EnqueueParams struct {
@@ -80,4 +83,6 @@ type EnqueueParams struct {
 	FilenameExtension string
 
 	CorrelationID string
+
+	TableMetadata *domain.TableMetadata
 }

@@ -88,6 +88,7 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 
 	markdownBucket := result.MarkdownBucket
 	markdownKey := result.MarkdownObjectKey
+	tableCount, tablePages := extractTableMetadata(task.TableMetadata)
 
 	if req.GetWaitForResult() {
 		task, err = s.usecase.WaitForResult(ctx, task.ID)
@@ -95,6 +96,7 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 			return nil, s.handleError(err)
 		}
 		markdownBucket, markdownKey = usecase.ResolveOutput(task, markdownBucket, markdownKey)
+		tableCount, tablePages = extractTableMetadata(task.TableMetadata)
 	}
 
 	return &transformerv1.ConvertDocumentToMarkdownResponse{
@@ -103,6 +105,8 @@ func (s *TransformerAPI) ConvertDocumentToMarkdown(ctx context.Context, req *tra
 		MarkdownBucket:    markdownBucket,
 		MarkdownObjectKey: markdownKey,
 		CorrelationId:     correlationID,
+		TableCount:        tableCount,
+		TablePages:        tablePages,
 	}, nil
 }
 
@@ -161,6 +165,14 @@ func (s *TransformerAPI) handleError(err error) error {
 	default:
 		return status.Error(codes.Internal, err.Error())
 	}
+}
+
+func extractTableMetadata(meta *domain.TableMetadata) (int32, []int32) {
+	if meta == nil {
+		return 0, nil
+	}
+	pages := append([]int32(nil), meta.Pages...)
+	return int32(meta.TablesCount), pages
 }
 
 func Run(ctx context.Context, logger *zap.Logger, uc TransformerUseCase, port int) error {
