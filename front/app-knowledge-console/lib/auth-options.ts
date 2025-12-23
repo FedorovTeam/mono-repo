@@ -2,10 +2,11 @@ import type { NextAuthOptions } from "next-auth";
 import type { OAuthConfig } from "next-auth/providers/oauth";
 import type { JWT } from "next-auth/jwt";
 
-const authentikIssuer = process.env.AUTHENTIK_ISSUER;
+const authentikIssuer = process.env.AUTHENTIK_ISSUER?.replace(/\/$/, "");
 const authentikClientId = process.env.AUTHENTIK_CLIENT_ID;
 const authentikClientSecret = process.env.AUTHENTIK_CLIENT_SECRET;
 const nextAuthSecret = process.env.NEXTAUTH_SECRET;
+const authentikTokenUrl = process.env.AUTHENTIK_TOKEN_URL ?? (authentikIssuer ? `${authentikIssuer}/token/` : undefined);
 const authentikRedirectUri =
   process.env.AUTHENTIK_REDIRECT_URI ??
   (process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL}/api/auth/callback/authentik` : undefined);
@@ -25,6 +26,10 @@ if (missingEnv.length > 0) {
 
 if (!authentikRedirectUri) {
   throw new Error("AUTHENTIK_REDIRECT_URI или NEXTAUTH_URL должны быть заданы для корректного redirect_uri");
+}
+
+if (!authentikTokenUrl) {
+  throw new Error("Не удалось определить URL token endpoint для Authentik");
 }
 
 const authorizationParams: Record<string, string> = authentikRedirectUri
@@ -68,6 +73,68 @@ type ExtendedJWT = JWT & {
   profile?: Record<string, unknown> | null;
 };
 
+type AuthentikTokenResponse = {
+  access_token?: string;
+  id_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+};
+
+const refreshLeewayMs = 2 * 60 * 1000;
+
+const clearSession = (token: ExtendedJWT) => {
+  token.accessToken = undefined;
+  token.idToken = undefined;
+  token.refreshToken = undefined;
+  token.expiresAt = undefined;
+
+  return token;
+};
+
+const refreshAccessToken = async (token: ExtendedJWT) => {
+  if (!token.refreshToken || !token.expiresAt) {
+    return token;
+  }
+
+  if (token.expiresAt - refreshLeewayMs > Date.now()) {
+    return token;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: token.refreshToken,
+      client_id: authentikClientId ?? "",
+      client_secret: authentikClientSecret ?? "",
+      scope: "openid email profile",
+    });
+
+    const response = await fetch(authentikTokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to refresh token: ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as AuthentikTokenResponse;
+    const updatedToken = token;
+    updatedToken.accessToken = data.access_token ?? token.accessToken;
+    updatedToken.idToken = data.id_token ?? token.idToken;
+    updatedToken.refreshToken = data.refresh_token ?? token.refreshToken;
+    updatedToken.expiresAt = data.expires_in ? Date.now() + data.expires_in * 1000 : token.expiresAt;
+
+    return updatedToken;
+  } catch (error) {
+    console.error("Ошибка при обновлении токена Authentik", error);
+    return clearSession(token);
+  }
+};
+
 export const authOptions: NextAuthOptions = {
   secret: nextAuthSecret,
   providers: [authentikProvider],
@@ -91,13 +158,14 @@ export const authOptions: NextAuthOptions = {
         extendedToken.profile = profileData ?? extendedToken.profile ?? null;
       }
 
-      return extendedToken;
+      return await refreshAccessToken(extendedToken);
     },
     async session({ session, token }) {
       const extendedToken = token as ExtendedJWT;
 
       session.accessToken = typeof extendedToken.accessToken === "string" ? extendedToken.accessToken : undefined;
       session.idToken = typeof extendedToken.idToken === "string" ? extendedToken.idToken : undefined;
+      session.expiresAt = extendedToken.expiresAt;
 
       if (session.user) {
         const profile =
