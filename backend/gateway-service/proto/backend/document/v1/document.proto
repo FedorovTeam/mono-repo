@@ -36,6 +36,8 @@ message Document {
   string base_branch = 16;
   bool create_pr = 17;
   string job_id = 18;
+  string conversion_strategy = 21;
+  bool extract_tables = 22;
   // Бывшее поле actual_status больше не используется, номер и имя зарезервированы для обратной совместимости.
   reserved 19;
   reserved 20;
@@ -58,6 +60,8 @@ message CreateDocumentRequest {
   string owner = 12;
   string base_branch = 13;
   bool create_pr = 14;
+  bool extract_tables = 17;
+  string conversion_strategy = 18;
 
   reserved 16;
   reserved 15;
@@ -87,6 +91,8 @@ message ConfirmUploadRequest {
   string bucket = 2;
   string object_key = 3;
   string correlation_id = 4;
+  bool extract_tables = 5;
+  string conversion_strategy = 6;
 }
 
 service DocumentService {

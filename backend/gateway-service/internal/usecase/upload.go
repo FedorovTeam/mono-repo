@@ -15,11 +15,13 @@ import (
 
 // UploadInput описывает входные данные загрузки документа.
 type UploadInput struct {
-	FileName      string
-	Repository    string
-	Branch        string
-	Path          string
-	FileSizeBytes int64
+	FileName           string
+	Repository         string
+	Branch             string
+	Path               string
+	FileSizeBytes      int64
+	ExtractTables      bool
+	ConversionStrategy domain.ConversionStrategy
 }
 
 // UploadResult описывает результат сценария загрузки документа.
@@ -64,6 +66,8 @@ func (s *UploadService) UploadKnowledgeDocument(ctx context.Context, input Uploa
 		path = defaultDocumentPath(documentID)
 	}
 
+	conversionStrategy := domain.NormalizeConversionStrategy(string(input.ConversionStrategy))
+
 	uploadURL, err := s.storage.GenerateUploadURL(ctx, domain.GenerateUploadURLRequest{
 		DocumentID:       documentID,
 		FileName:         input.FileName,
@@ -80,17 +84,19 @@ func (s *UploadService) UploadKnowledgeDocument(ctx context.Context, input Uploa
 	}
 
 	created, err := s.documents.CreateDocument(ctx, domain.CreateDocumentRequest{
-		ID:                documentID,
-		FileName:          input.FileName,
-		Repository:        input.Repository,
-		Branch:            input.Branch,
-		Path:              path,
-		CorrelationID:     correlationID,
-		ContentLength:     input.FileSizeBytes,
-		UploadBucket:      uploadURL.Bucket,
-		UploadObjectKey:   uploadURL.ObjectKey,
-		MarkdownBucket:    uploadURL.MarkdownBucket,
-		MarkdownObjectKey: uploadURL.MarkdownObjectKey,
+		ID:                 documentID,
+		FileName:           input.FileName,
+		Repository:         input.Repository,
+		Branch:             input.Branch,
+		Path:               path,
+		CorrelationID:      correlationID,
+		ContentLength:      input.FileSizeBytes,
+		UploadBucket:       uploadURL.Bucket,
+		UploadObjectKey:    uploadURL.ObjectKey,
+		MarkdownBucket:     uploadURL.MarkdownBucket,
+		MarkdownObjectKey:  uploadURL.MarkdownObjectKey,
+		ExtractTables:      input.ExtractTables,
+		ConversionStrategy: string(conversionStrategy),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("cannot create document: %w", err)
@@ -118,6 +124,13 @@ func validateUploadInput(input UploadInput) error {
 	if input.FileSizeBytes <= 0 {
 		return errors.New("fileSizeBytes must be positive")
 	}
+
+	switch domain.NormalizeConversionStrategy(string(input.ConversionStrategy)) {
+	case domain.ConversionStrategyDefault, domain.ConversionStrategyTablesOnly, domain.ConversionStrategyDoclingWithTables:
+	default:
+		return errors.New("conversionStrategy is invalid")
+	}
+
 	return nil
 }
 

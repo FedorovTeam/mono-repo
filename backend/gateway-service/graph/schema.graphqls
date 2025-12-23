@@ -35,6 +35,10 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
+  """Принудительно включено ли извлечение таблиц для документа."""
+  extractTables: Boolean!
+  """Стратегия конвертации Docling/TableExtractor."""
+  conversionStrategy: ConversionStrategy
 }
 
 enum KnowledgeDocumentStatus {
@@ -52,6 +56,10 @@ input UploadKnowledgeDocumentInput {
   repository: String!
   branch: String!
   path: String
+  """Принудительно включить извлечение таблиц в цепочке обработки."""
+  extractTables: Boolean
+  """Стратегия Docling: `DEFAULT`, `TABLES_ONLY` или `DOCLING_WITH_TABLES`."""
+  conversionStrategy: ConversionStrategy
 }
 
 input KnowledgeDocumentFilter {
@@ -62,4 +70,10 @@ input KnowledgeDocumentFilter {
 input Pagination {
   limit: Int = 10
   offset: Int = 0
+}
+
+enum ConversionStrategy {
+  DEFAULT
+  TABLES_ONLY
+  DOCLING_WITH_TABLES
 }

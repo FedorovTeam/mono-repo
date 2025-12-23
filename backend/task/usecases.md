@@ -51,6 +51,7 @@
 - `X-API-Key` обязателен.
 - `fileName`, `repository`, `branch`, `fileSizeBytes>0` обязательны.
 - `path` может быть пустым/whitespace → подставить `knowledge/docs/<documentId>.md`.
+- Опционально прокидываются флаги стратегии: `extractTables` (bool) и `conversionStrategy` (`DEFAULT|TABLES_ONLY|DOCLING_WITH_TABLES`), которые сохраняются в document-service и позволяют принудительно включить Docling → TableExtractor.
 
 **Результат:**
 - `uploadUrl`, `uploadMethod=PUT`, `document` (status=UPLOADED), `X-Correlation-ID` в ответе.

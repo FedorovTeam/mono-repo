@@ -21,6 +21,10 @@ type KnowledgeDocument struct {
 	Status          KnowledgeDocumentStatus `json:"status"`
 	JobID           *string                 `json:"jobId,omitempty"`
 	Error           *string                 `json:"error,omitempty"`
+	// Принудительно включено ли извлечение таблиц для документа.
+	ExtractTables bool `json:"extractTables"`
+	// Стратегия конвертации Docling/TableExtractor.
+	ConversionStrategy *ConversionStrategy `json:"conversionStrategy,omitempty"`
 }
 
 type KnowledgeDocumentConnection struct {
@@ -53,12 +57,73 @@ type UploadKnowledgeDocumentInput struct {
 	Repository string  `json:"repository"`
 	Branch     string  `json:"branch"`
 	Path       *string `json:"path,omitempty"`
+	// Принудительно включить извлечение таблиц в цепочке обработки.
+	ExtractTables *bool `json:"extractTables,omitempty"`
+	// Стратегия Docling: `DEFAULT`, `TABLES_ONLY` или `DOCLING_WITH_TABLES`.
+	ConversionStrategy *ConversionStrategy `json:"conversionStrategy,omitempty"`
 }
 
 type UploadKnowledgeDocumentPayload struct {
 	Document     *KnowledgeDocument `json:"document"`
 	UploadURL    string             `json:"uploadUrl"`
 	UploadMethod string             `json:"uploadMethod"`
+}
+
+type ConversionStrategy string
+
+const (
+	ConversionStrategyDefault           ConversionStrategy = "DEFAULT"
+	ConversionStrategyTablesOnly        ConversionStrategy = "TABLES_ONLY"
+	ConversionStrategyDoclingWithTables ConversionStrategy = "DOCLING_WITH_TABLES"
+)
+
+var AllConversionStrategy = []ConversionStrategy{
+	ConversionStrategyDefault,
+	ConversionStrategyTablesOnly,
+	ConversionStrategyDoclingWithTables,
+}
+
+func (e ConversionStrategy) IsValid() bool {
+	switch e {
+	case ConversionStrategyDefault, ConversionStrategyTablesOnly, ConversionStrategyDoclingWithTables:
+		return true
+	}
+	return false
+}
+
+func (e ConversionStrategy) String() string {
+	return string(e)
+}
+
+func (e *ConversionStrategy) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ConversionStrategy(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ConversionStrategy", str)
+	}
+	return nil
+}
+
+func (e ConversionStrategy) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ConversionStrategy) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ConversionStrategy) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }
 
 type KnowledgeDocumentStatus string

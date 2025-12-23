@@ -47,15 +47,17 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	KnowledgeDocument struct {
-		Branch          func(childComplexity int) int
-		Error           func(childComplexity int) int
-		FileName        func(childComplexity int) int
-		ID              func(childComplexity int) int
-		JobID           func(childComplexity int) int
-		Path            func(childComplexity int) int
-		Repository      func(childComplexity int) int
-		RepositoryOwner func(childComplexity int) int
-		Status          func(childComplexity int) int
+		Branch             func(childComplexity int) int
+		ConversionStrategy func(childComplexity int) int
+		Error              func(childComplexity int) int
+		ExtractTables      func(childComplexity int) int
+		FileName           func(childComplexity int) int
+		ID                 func(childComplexity int) int
+		JobID              func(childComplexity int) int
+		Path               func(childComplexity int) int
+		Repository         func(childComplexity int) int
+		RepositoryOwner    func(childComplexity int) int
+		Status             func(childComplexity int) int
 	}
 
 	KnowledgeDocumentConnection struct {
@@ -112,12 +114,24 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.Branch(childComplexity), true
+	case "KnowledgeDocument.conversionStrategy":
+		if e.complexity.KnowledgeDocument.ConversionStrategy == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.ConversionStrategy(childComplexity), true
 	case "KnowledgeDocument.error":
 		if e.complexity.KnowledgeDocument.Error == nil {
 			break
 		}
 
 		return e.complexity.KnowledgeDocument.Error(childComplexity), true
+	case "KnowledgeDocument.extractTables":
+		if e.complexity.KnowledgeDocument.ExtractTables == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.ExtractTables(childComplexity), true
 	case "KnowledgeDocument.fileName":
 		if e.complexity.KnowledgeDocument.FileName == nil {
 			break
@@ -373,6 +387,10 @@ type KnowledgeDocument {
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
+  """Принудительно включено ли извлечение таблиц для документа."""
+  extractTables: Boolean!
+  """Стратегия конвертации Docling/TableExtractor."""
+  conversionStrategy: ConversionStrategy
 }
 
 enum KnowledgeDocumentStatus {
@@ -390,6 +408,10 @@ input UploadKnowledgeDocumentInput {
   repository: String!
   branch: String!
   path: String
+  """Принудительно включить извлечение таблиц в цепочке обработки."""
+  extractTables: Boolean
+  """Стратегия Docling: ` + "`" + `DEFAULT` + "`" + `, ` + "`" + `TABLES_ONLY` + "`" + ` или ` + "`" + `DOCLING_WITH_TABLES` + "`" + `."""
+  conversionStrategy: ConversionStrategy
 }
 
 input KnowledgeDocumentFilter {
@@ -400,6 +422,12 @@ input KnowledgeDocumentFilter {
 input Pagination {
   limit: Int = 10
   offset: Int = 0
+}
+
+enum ConversionStrategy {
+  DEFAULT
+  TABLES_ONLY
+  DOCLING_WITH_TABLES
 }
 `, BuiltIn: false},
 }
@@ -771,6 +799,64 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_error(_ context.Conte
 	return fc, nil
 }
 
+func (ec *executionContext) _KnowledgeDocument_extractTables(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_KnowledgeDocument_extractTables,
+		func(ctx context.Context) (any, error) {
+			return obj.ExtractTables, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeDocument_extractTables(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeDocument",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _KnowledgeDocument_conversionStrategy(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_KnowledgeDocument_conversionStrategy,
+		func(ctx context.Context) (any, error) {
+			return obj.ConversionStrategy, nil
+		},
+		nil,
+		ec.marshalOConversionStrategy2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐConversionStrategy,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeDocument_conversionStrategy(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeDocument",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ConversionStrategy does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _KnowledgeDocumentConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocumentConnection) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -813,6 +899,10 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "extractTables":
+				return ec.fieldContext_KnowledgeDocument_extractTables(ctx, field)
+			case "conversionStrategy":
+				return ec.fieldContext_KnowledgeDocument_conversionStrategy(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -941,6 +1031,10 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "extractTables":
+				return ec.fieldContext_KnowledgeDocument_extractTables(ctx, field)
+			case "conversionStrategy":
+				return ec.fieldContext_KnowledgeDocument_conversionStrategy(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -1156,6 +1250,10 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_jobId(ctx, field)
 			case "error":
 				return ec.fieldContext_KnowledgeDocument_error(ctx, field)
+			case "extractTables":
+				return ec.fieldContext_KnowledgeDocument_extractTables(ctx, field)
+			case "conversionStrategy":
+				return ec.fieldContext_KnowledgeDocument_conversionStrategy(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type KnowledgeDocument", field.Name)
 		},
@@ -2749,7 +2847,7 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"fileName", "fileSizeBytes", "repository", "branch", "path"}
+	fieldsInOrder := [...]string{"fileName", "fileSizeBytes", "repository", "branch", "path", "extractTables", "conversionStrategy"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -2791,6 +2889,20 @@ func (ec *executionContext) unmarshalInputUploadKnowledgeDocumentInput(ctx conte
 				return it, err
 			}
 			it.Path = data
+		case "extractTables":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("extractTables"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ExtractTables = data
+		case "conversionStrategy":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("conversionStrategy"))
+			data, err := ec.unmarshalOConversionStrategy2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐConversionStrategy(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ConversionStrategy = data
 		}
 	}
 
@@ -2852,6 +2964,13 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			out.Values[i] = ec._KnowledgeDocument_jobId(ctx, field, obj)
 		case "error":
 			out.Values[i] = ec._KnowledgeDocument_error(ctx, field, obj)
+		case "extractTables":
+			out.Values[i] = ec._KnowledgeDocument_extractTables(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "conversionStrategy":
+			out.Values[i] = ec._KnowledgeDocument_conversionStrategy(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -3885,6 +4004,22 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	_ = ctx
 	res := graphql.MarshalBoolean(*v)
 	return res
+}
+
+func (ec *executionContext) unmarshalOConversionStrategy2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐConversionStrategy(ctx context.Context, v any) (*model.ConversionStrategy, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(model.ConversionStrategy)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOConversionStrategy2ᚖbackendᚑgatewayᚑserviceᚋgraphᚋmodelᚐConversionStrategy(ctx context.Context, sel ast.SelectionSet, v *model.ConversionStrategy) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
 }
 
 func (ec *executionContext) unmarshalOInt2ᚖint(ctx context.Context, v any) (*int, error) {

@@ -38,6 +38,10 @@ func mapDocument(doc *domain.Document) *model.KnowledgeDocument {
 	if doc.Error != nil {
 		result.Error = doc.Error
 	}
+	result.ExtractTables = doc.ExtractTables
+	if strategy := modelConversionStrategyFromDomain(doc.ConversionStrategy); strategy != nil {
+		result.ConversionStrategy = strategy
+	}
 
 	return result
 }
@@ -69,6 +73,35 @@ func domainStatusFromModel(status model.KnowledgeDocumentStatus) domain.Document
 		return domain.DocumentStatusFailed
 	default:
 		return domain.DocumentStatusUploaded
+	}
+}
+
+func modelConversionStrategyFromDomain(strategy domain.ConversionStrategy) *model.ConversionStrategy {
+	switch strategy {
+	case domain.ConversionStrategyTablesOnly:
+		val := model.ConversionStrategyTablesOnly
+		return &val
+	case domain.ConversionStrategyDoclingWithTables:
+		val := model.ConversionStrategyDoclingWithTables
+		return &val
+	default:
+		val := model.ConversionStrategyDefault
+		return &val
+	}
+}
+
+func domainConversionStrategyFromModel(strategy *model.ConversionStrategy) domain.ConversionStrategy {
+	if strategy == nil {
+		return domain.ConversionStrategyDefault
+	}
+
+	switch *strategy {
+	case model.ConversionStrategyTablesOnly:
+		return domain.ConversionStrategyTablesOnly
+	case model.ConversionStrategyDoclingWithTables:
+		return domain.ConversionStrategyDoclingWithTables
+	default:
+		return domain.ConversionStrategyDefault
 	}
 }
 

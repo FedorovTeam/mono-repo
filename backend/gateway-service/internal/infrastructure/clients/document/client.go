@@ -38,18 +38,20 @@ func (c *GRPCClient) Close() error {
 // CreateDocument создает документ в document-service.
 func (c *GRPCClient) CreateDocument(ctx context.Context, req domain.CreateDocumentRequest) (*domain.Document, error) {
 	resp, err := c.DocumentServiceClient.CreateDocument(withMetadata(ctx), &pb.CreateDocumentRequest{
-		Id:                req.ID,
-		FileName:          req.FileName,
-		Repository:        req.Repository,
-		Branch:            req.Branch,
-		Path:              req.Path,
-		CorrelationId:     req.CorrelationID,
-		ContentLength:     req.ContentLength,
-		UploadBucket:      req.UploadBucket,
-		UploadObjectKey:   req.UploadObjectKey,
-		MarkdownBucket:    req.MarkdownBucket,
-		MarkdownObjectKey: req.MarkdownObjectKey,
-		Owner:             valueOrEmpty(req.RepositoryOwner),
+		Id:                 req.ID,
+		FileName:           req.FileName,
+		Repository:         req.Repository,
+		Branch:             req.Branch,
+		Path:               req.Path,
+		CorrelationId:      req.CorrelationID,
+		ContentLength:      req.ContentLength,
+		UploadBucket:       req.UploadBucket,
+		UploadObjectKey:    req.UploadObjectKey,
+		MarkdownBucket:     req.MarkdownBucket,
+		MarkdownObjectKey:  req.MarkdownObjectKey,
+		Owner:              valueOrEmpty(req.RepositoryOwner),
+		ExtractTables:      req.ExtractTables,
+		ConversionStrategy: req.ConversionStrategy,
 	})
 	if err != nil {
 		return nil, err
