@@ -25,6 +25,27 @@ spec:
         mono-repo: backend
       annotations:
         argocd.argoproj.io/compare-options: IgnoreExtraneous
+
+        # --- Argo CD Image Updater ---
+        # Следим за образом в Harbor: harbor.../backend/<service>
+        argocd-image-updater.argoproj.io/image-list: >-
+          svc=harbor.tech.fedorov-team.tech/backend/{{ $parts := splitList "/" .path.path }}{{ $service := index $parts 1 | lower | replace "_" "-" }}{{ $service }}
+
+        # Берём самый новый тег среди разрешённых
+        argocd-image-updater.argoproj.io/svc.update-strategy: newest-build
+
+        # Разрешаем только SHA-теги (7..40 hex), чтобы не прыгать на latest
+        argocd-image-updater.argoproj.io/svc.allow-tags: regexp:^[0-9a-f]{7,40}$
+
+        # Куда писать тег в Helm values
+        argocd-image-updater.argoproj.io/svc.helm.image-tag: image.tag
+
+        # Пишем обратно прямо в Argo CD Application (без коммитов в Git)
+        argocd-image-updater.argoproj.io/write-back-method: argocd
+
+        # (опционально) принудительно обновлять состояние приложения
+        argocd-image-updater.argoproj.io/refresh: hard
+
     spec:
       project: default
       source:
