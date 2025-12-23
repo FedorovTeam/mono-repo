@@ -115,6 +115,13 @@ func (e *ConversionExecutor) pollDocling(ctx context.Context, task *transformati
 		return StateProcessing, fmt.Errorf("mark done: %w", err)
 	}
 	task.TableMetadata = result.Tables
+	if result.Tables != nil {
+		task.TableCount = result.Tables.TablesCount
+		task.TablePages = append([]int32(nil), result.Tables.Pages...)
+	} else {
+		task.TableCount = 0
+		task.TablePages = nil
+	}
 	return StateCompleted, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -89,6 +90,8 @@ var baseSelectFields = strings.Join([]string{
 	"error",
 	"correlation_id",
 	"table_metadata",
+	"table_count",
+	"table_pages",
 }, ",\n")
 
 func (r *PostgresQueueRepository) GetLatestByDocument(ctx context.Context, documentID string) (*TransformationTask, error) {
@@ -356,19 +359,27 @@ func (r *PostgresQueueRepository) MarkDone(ctx context.Context, id uuid.UUID, ma
 	const query = `
 UPDATE transformations_queue
 SET status = 'done', markdown_bucket = $1, markdown_object_key = $2,
-    table_metadata = $3, next_poll_at = NULL, finished_at = NOW(), error = NULL
-WHERE id = $4`
+    table_metadata = $3, table_count = $4, table_pages = $5,
+    next_poll_at = NULL, finished_at = NOW(), error = NULL
+WHERE id = $6`
 
+	tableMetadata = normalizeTableMetadata(tableMetadata)
 	var meta any
+	var tableCount any
+	var tablePages any
 	if tableMetadata != nil {
 		encoded, err := json.Marshal(tableMetadata)
 		if err != nil {
 			return fmt.Errorf("encode table metadata: %w", err)
 		}
 		meta = string(encoded)
+		tableCount = tableMetadata.TablesCount
+		if len(tableMetadata.Pages) > 0 {
+			tablePages = append([]int32(nil), tableMetadata.Pages...)
+		}
 	}
 
-	if _, err := r.pool.Exec(ctx, query, markdownBucket, markdownObjectKey, meta, id); err != nil {
+	if _, err := r.pool.Exec(ctx, query, markdownBucket, markdownObjectKey, meta, tableCount, tablePages, id); err != nil {
 		return fmt.Errorf("mark done: %w", err)
 	}
 	return nil
@@ -651,6 +662,38 @@ func countRows(rows pgx.Rows) (int, error) {
 	return count, nil
 }
 
+func normalizePages(pages []int32) []int32 {
+	if len(pages) == 0 {
+		return nil
+	}
+	seen := make(map[int32]struct{}, len(pages))
+	result := make([]int32, 0, len(pages))
+	for _, page := range pages {
+		if _, ok := seen[page]; ok {
+			continue
+		}
+		seen[page] = struct{}{}
+		result = append(result, page)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
+}
+
+func normalizeTableMetadata(meta *domain.TableMetadata) *domain.TableMetadata {
+	if meta == nil {
+		return nil
+	}
+	result := &domain.TableMetadata{TablesCount: meta.TablesCount}
+	result.Pages = normalizePages(meta.Pages)
+	if result.TablesCount == 0 && len(result.Pages) > 0 {
+		result.TablesCount = len(result.Pages)
+	}
+	if result.TablesCount == 0 && len(result.Pages) == 0 {
+		return nil
+	}
+	return result
+}
+
 func scanTask(row pgx.Row) (*TransformationTask, error) {
 	var (
 		dto             repo.TransformationDTO
@@ -660,6 +703,8 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		sourceObjectKey string
 		sourceURL       string
 		tableMetadata   []byte
+		tableCount      *int32
+		tablePages      []int32
 	)
 
 	if err := row.Scan(
@@ -685,6 +730,8 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 		&dto.Error,
 		&dto.CorrelationID,
 		&tableMetadata,
+		&tableCount,
+		&tablePages,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, pgx.ErrNoRows
@@ -697,9 +744,38 @@ func scanTask(row pgx.Row) (*TransformationTask, error) {
 	dto.SourceBucket = sourceBucket
 	dto.SourceObjectKey = sourceObjectKey
 	dto.SourceURL = sourceURL
+	dto.TablePages = normalizePages(tablePages)
 	if len(tableMetadata) > 0 && string(bytes.TrimSpace(tableMetadata)) != "null" {
 		if err := json.Unmarshal(tableMetadata, &dto.TableMetadata); err != nil {
 			return nil, fmt.Errorf("parse table metadata: %w", err)
+		}
+	}
+	if tableCount != nil {
+		dto.TableCount = int(*tableCount)
+	}
+	if dto.TableMetadata != nil {
+		if dto.TableMetadata.TablesCount == 0 && dto.TableCount > 0 {
+			dto.TableMetadata.TablesCount = dto.TableCount
+		}
+		if len(dto.TableMetadata.Pages) == 0 && len(dto.TablePages) > 0 {
+			dto.TableMetadata.Pages = append([]int32(nil), dto.TablePages...)
+		}
+	}
+	if dto.TableMetadata == nil && (dto.TableCount > 0 || len(dto.TablePages) > 0) {
+		dto.TableMetadata = &domain.TableMetadata{
+			TablesCount: dto.TableCount,
+			Pages:       append([]int32(nil), dto.TablePages...),
+		}
+	}
+	dto.TableMetadata = normalizeTableMetadata(dto.TableMetadata)
+	if dto.TableMetadata == nil {
+		dto.TableCount = 0
+		dto.TablePages = nil
+	} else {
+		dto.TableCount = dto.TableMetadata.TablesCount
+		dto.TablePages = normalizePages(append(dto.TablePages, dto.TableMetadata.Pages...))
+		if dto.TableCount == 0 && len(dto.TablePages) > 0 {
+			dto.TableCount = len(dto.TablePages)
 		}
 	}
 

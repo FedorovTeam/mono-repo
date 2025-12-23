@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"sort"
 	"strings"
 	"time"
 )
@@ -30,6 +31,67 @@ type JobEvent struct {
 	// Payload события фиксирует входные/выходные ссылки шагов (например, object_key, queue_id или commit_sha) без размещения контента.
 	Payload   map[string]any
 	CreatedAt time.Time
+}
+
+// TableMetadata описывает метаданные таблиц, полученные от Docling.
+type TableMetadata struct {
+	TablesCount int32
+	Pages       []int32
+}
+
+func (m TableMetadata) ToMap() map[string]any {
+	res := map[string]any{}
+	if m.TablesCount > 0 {
+		res["tables_count"] = m.TablesCount
+	}
+	if pages := mergePages(m.Pages); len(pages) > 0 {
+		res["pages"] = pages
+	}
+	if len(res) == 0 {
+		return nil
+	}
+	return res
+}
+
+func (m TableMetadata) IsEmpty() bool {
+	return m.TablesCount == 0 && len(m.Pages) == 0
+}
+
+func (m TableMetadata) Merge(other TableMetadata) TableMetadata {
+	result := m
+	if other.TablesCount > result.TablesCount {
+		result.TablesCount = other.TablesCount
+	}
+	if len(other.Pages) > 0 {
+		result.Pages = mergePages(result.Pages, other.Pages)
+	}
+	if result.TablesCount == 0 && len(result.Pages) > 0 {
+		result.TablesCount = int32(len(result.Pages))
+	}
+	return result
+}
+
+func tableMetadataFromPayload(payload map[string]any, key string) TableMetadata {
+	if payload == nil {
+		return TableMetadata{}
+	}
+	raw, ok := payload[key]
+	if !ok {
+		return TableMetadata{}
+	}
+	data, ok := raw.(map[string]any)
+	if !ok {
+		return TableMetadata{}
+	}
+	meta := TableMetadata{
+		TablesCount: int32(intFromMap(data, "tables_count")),
+		Pages:       int32SliceFromMap(data, "pages"),
+	}
+	meta.Pages = mergePages(meta.Pages)
+	if meta.TablesCount == 0 && len(meta.Pages) > 0 {
+		meta.TablesCount = int32(len(meta.Pages))
+	}
+	return meta
 }
 
 // MarkStatus меняет статус задачи и обновляет временные метки.
@@ -72,6 +134,7 @@ type ConvertPayload struct {
 	FilenameExtension        string
 	ConversionStrategy       ConversionStrategy
 	ExtractTables            bool
+	TableMetadata            TableMetadata
 	TableCount               int32
 	TablePages               []int32
 }
@@ -285,6 +348,9 @@ func (p ConvertPayload) ToMap() map[string]any {
 		res["conversion_strategy"] = string(p.ConversionStrategy)
 	}
 	res["extract_tables"] = p.ExtractTables
+	if meta := p.TableMetadata.ToMap(); len(meta) > 0 {
+		res["table_metadata"] = meta
+	}
 	if p.TableCount > 0 {
 		res["table_count"] = p.TableCount
 	}
@@ -319,9 +385,24 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		FilenameExtension:        stringFromMap(payload, "filename_extension"),
 		ConversionStrategy:       ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
 		ExtractTables:            boolFromMap(payload, "extract_tables"),
+		TableMetadata:            tableMetadataFromPayload(payload, "table_metadata"),
 		TableCount:               int32(intFromMap(payload, "table_count")),
 		TablePages:               int32SliceFromMap(payload, "table_pages"),
 	}
+}
+
+// TableInfo возвращает агрегированные данные о таблицах из всех источников payload.
+func (p ConvertPayload) TableInfo() (int, []int32) {
+	meta := p.TableMetadata
+	pages := mergePages(p.TablePages, meta.Pages)
+	count := int(p.TableCount)
+	if meta.TablesCount > int32(count) {
+		count = int(meta.TablesCount)
+	}
+	if count == 0 && len(pages) > 0 {
+		count = len(pages)
+	}
+	return count, pages
 }
 
 // ToMap преобразует PreprocessPayload в map для хранения в БД.
@@ -517,6 +598,28 @@ func intFromMap(payload map[string]any, key string) int {
 	default:
 		return 0
 	}
+}
+
+func mergePages(sets ...[]int32) []int32 {
+	if len(sets) == 0 {
+		return nil
+	}
+	seen := make(map[int32]struct{})
+	result := make([]int32, 0)
+	for _, pages := range sets {
+		for _, page := range pages {
+			if _, ok := seen[page]; ok {
+				continue
+			}
+			seen[page] = struct{}{}
+			result = append(result, page)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func boolFromMap(payload map[string]any, key string) bool {

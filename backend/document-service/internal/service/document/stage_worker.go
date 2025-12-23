@@ -408,11 +408,20 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		payload.Status = status
 		payload.DoclingStatus = status
 	}
+	payload.TableMetadata = payload.TableMetadata.Merge(result.TableMetadata)
 	if result.TableCount > 0 {
 		payload.TableCount = result.TableCount
 	}
 	if len(result.TablePages) > 0 {
 		payload.TablePages = append([]int32(nil), result.TablePages...)
+	}
+	if count, pages := payload.TableInfo(); count > 0 || len(pages) > 0 {
+		if count > 0 {
+			payload.TableCount = int32(count)
+		}
+		if len(pages) > 0 {
+			payload.TablePages = pages
+		}
 	}
 	if payload.DoclingMarkdownBucket == "" {
 		payload.DoclingMarkdownBucket = payload.MarkdownBucket

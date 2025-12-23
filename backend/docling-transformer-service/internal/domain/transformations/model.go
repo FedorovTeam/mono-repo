@@ -66,6 +66,8 @@ type TransformationTask struct {
 	FinishedAt *time.Time
 	Error      *string
 
+	TableCount    int
+	TablePages    []int32
 	TableMetadata *domain.TableMetadata
 }
 

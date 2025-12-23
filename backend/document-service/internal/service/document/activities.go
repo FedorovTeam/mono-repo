@@ -110,13 +110,14 @@ type publishInput struct {
 }
 
 type convertResult struct {
-	MarkdownKey string
-	QueueID     string
-	Status      string
-	Version     int32
-	Ready       bool
-	TableCount  int32
-	TablePages  []int32
+	MarkdownKey   string
+	QueueID       string
+	Status        string
+	Version       int32
+	Ready         bool
+	TableCount    int32
+	TablePages    []int32
+	TableMetadata domain.TableMetadata
 }
 
 type Activities struct {
@@ -396,15 +397,31 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 	}
 
 	ready := strings.EqualFold(statusVal, "done") || strings.EqualFold(statusVal, string(domain.DocumentStatusConvertedToMarkdown))
+	meta := domain.TableMetadata{}
+	if resp.GetTableMetadata() != nil {
+		meta = domain.TableMetadata{
+			TablesCount: resp.GetTableMetadata().GetTablesCount(),
+			Pages:       resp.GetTableMetadata().GetPages(),
+		}
+	}
+	tableCount := resp.GetTableCount()
+	tablePages := resp.GetTablePages()
+	if meta.TablesCount > tableCount {
+		tableCount = meta.TablesCount
+	}
+	if len(tablePages) == 0 && len(meta.Pages) > 0 {
+		tablePages = append([]int32(nil), meta.Pages...)
+	}
 
 	return convertResult{
-		MarkdownKey: markdownKey,
-		QueueID:     resp.GetQueueId(),
-		Status:      statusVal,
-		Version:     version,
-		Ready:       ready,
-		TableCount:  resp.GetTableCount(),
-		TablePages:  resp.GetTablePages(),
+		MarkdownKey:   markdownKey,
+		QueueID:       resp.GetQueueId(),
+		Status:        statusVal,
+		Version:       version,
+		Ready:         ready,
+		TableCount:    tableCount,
+		TablePages:    tablePages,
+		TableMetadata: meta,
 	}, nil
 }
 
