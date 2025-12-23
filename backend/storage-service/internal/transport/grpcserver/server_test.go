@@ -258,7 +258,6 @@ func TestGenerateDownloadURLReturnsPresignedLink(t *testing.T) {
 	resp, err := server.GenerateDownloadURL(context.Background(), &storagev1.GenerateDownloadURLRequest{
 		Bucket:           "knowledge-original",
 		ObjectKey:        "doc-key",
-		CorrelationId:    "corr-download",
 		ExpiresInSeconds: 180,
 	})
 	require.NoError(t, err)
@@ -268,8 +267,8 @@ func TestGenerateDownloadURLReturnsPresignedLink(t *testing.T) {
 	require.Equal(t, int64(180), resp.GetExpiresInSeconds())
 	require.Equal(t, http.MethodGet, client.lastPresign.method)
 	require.Equal(t, 180*time.Second, client.lastPresign.expires)
-	require.Equal(t, "corr-download", client.lastPresign.headers.Get("x-amz-meta-correlation-id"))
-	require.Contains(t, downloadURL.Query().Get("X-Amz-SignedHeaders"), "x-amz-meta-correlation-id")
+	require.Empty(t, client.lastPresign.headers)
+	require.Empty(t, downloadURL.Query().Get("X-Amz-SignedHeaders"))
 }
 
 func validationConfig() storage.UploadValidationConfig {

@@ -62,9 +62,8 @@ func (s *DocumentService) attachOriginalDownloadURL(ctx context.Context, doc *do
 	}
 
 	resp, err := s.storage.GenerateDownloadURL(ctx, domain.GenerateDownloadURLRequest{
-		Bucket:        doc.UploadBucket,
-		ObjectKey:     doc.UploadObjectKey,
-		CorrelationID: ctxutils.CorrelationID(ctx),
+		Bucket:    doc.UploadBucket,
+		ObjectKey: doc.UploadObjectKey,
 	})
 	if err != nil {
 		return err
