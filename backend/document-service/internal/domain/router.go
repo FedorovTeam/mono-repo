@@ -17,6 +17,7 @@ type RepositoryRouterRule struct {
 	TableExtractorExtensions []string
 	ArtifactsBucket          string
 	ArtifactsPrefixTemplate  string
+	ForceTableExtractionPDF  *bool
 }
 
 // RouterRules описывает глобальные и репозиторные правила выбора стадий обработки.
@@ -29,6 +30,7 @@ type RouterRules struct {
 	ArtifactsPrefixTemplate  string
 	RepositoryRules          []RepositoryRouterRule
 	TableDetectionMinCount   int
+	ForceTableExtractionPDF  bool
 }
 
 type repositoryRule struct {
@@ -41,6 +43,7 @@ type repositoryRule struct {
 	tableExtractorExt     map[string]struct{}
 	artifactsBucket       string
 	artifactsPrefixTmpl   string
+	forceTableExtraction  *bool
 }
 
 type effectiveRoutingRules struct {
@@ -51,6 +54,7 @@ type effectiveRoutingRules struct {
 	artifactsBucket        string
 	artifactsPrefixTmpl    string
 	tableDetectionMinCount int
+	forceTableExtraction   bool
 }
 
 // StageRouter выбирает следующую стадию обработки документа на основе расширения и конфигурации.
@@ -63,6 +67,7 @@ type StageRouter struct {
 	artifactsPrefixTmpl    string
 	repoRules              []repositoryRule
 	tableDetectionMinCount int
+	forceTableExtraction   bool
 }
 
 // NewStageRouter создаёт StageRouter с нормализованными правилами.
@@ -75,6 +80,7 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 		artifactsBucket:        strings.TrimSpace(rules.ArtifactsBucket),
 		artifactsPrefixTmpl:    strings.TrimSpace(rules.ArtifactsPrefixTemplate),
 		tableDetectionMinCount: rules.TableDetectionMinCount,
+		forceTableExtraction:   rules.ForceTableExtractionPDF,
 	}
 	if len(router.preprocessExt) == 0 {
 		router.preprocessExt = defaultPreprocessExtensions()
@@ -98,6 +104,7 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 			tableExtractorExt:     normalizeExtensions(rule.TableExtractorExtensions),
 			artifactsBucket:       strings.TrimSpace(rule.ArtifactsBucket),
 			artifactsPrefixTmpl:   strings.TrimSpace(rule.ArtifactsPrefixTemplate),
+			forceTableExtraction:  rule.ForceTableExtractionPDF,
 		})
 	}
 
@@ -164,7 +171,7 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 }
 
 // ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
-func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32) bool {
+func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32, hasTablesHint bool) bool {
 	if doc == nil {
 		return false
 	}
@@ -183,6 +190,7 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	detectionSatisfied := detectedTables > 0 && detectedTables >= rules.tableDetectionMinCount
 
 	ext := documentExtension(doc)
+	fallbackDetection := hasTablesHint && ext == "pdf" && rules.forceTableExtraction
 	if !canUseTableExtractor(ext, rules.tableExtractorExt) {
 		return false
 	}
@@ -192,10 +200,10 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	}
 
 	if doclingWithTables {
-		return detectionSatisfied
+		return detectionSatisfied || fallbackDetection
 	}
 
-	return detectionSatisfied
+	return detectionSatisfied || fallbackDetection
 }
 
 func uniquePages(pages []int32) []int32 {
@@ -225,6 +233,7 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 			artifactsBucket:        r.artifactsBucket,
 			artifactsPrefixTmpl:    r.artifactsPrefixTmpl,
 			tableDetectionMinCount: r.tableDetectionMinCount,
+			forceTableExtraction:   r.forceTableExtraction,
 		}
 	}
 
@@ -234,6 +243,7 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 	tableExtractorExt := r.tableExtractorExt
 	artifactsBucket := r.artifactsBucket
 	artifactsPrefix := r.artifactsPrefixTmpl
+	forceTableExtraction := r.forceTableExtraction
 
 	for _, rule := range r.repoRules {
 		if rule.matches(doc) {
@@ -255,6 +265,9 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 			if strings.TrimSpace(rule.artifactsPrefixTmpl) != "" {
 				artifactsPrefix = rule.artifactsPrefixTmpl
 			}
+			if rule.forceTableExtraction != nil {
+				forceTableExtraction = *rule.forceTableExtraction
+			}
 			break
 		}
 	}
@@ -274,6 +287,7 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 		artifactsBucket:        artifactsBucket,
 		artifactsPrefixTmpl:    artifactsPrefix,
 		tableDetectionMinCount: r.tableDetectionMinCount,
+		forceTableExtraction:   forceTableExtraction,
 	}
 }
 

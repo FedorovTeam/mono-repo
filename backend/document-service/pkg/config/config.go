@@ -109,6 +109,7 @@ type Router struct {
 	ArtifactsPrefixTemplate  string                 `yaml:"artifacts_prefix_template"`
 	RepositoryRules          []RepositoryRouterRule `yaml:"repositories"`
 	TableDetectionMinCount   int                    `yaml:"table_detection_min_count"`
+	ForceTableExtractionPDF  bool                   `yaml:"force_table_extraction_for_pdf"`
 }
 
 type RepositoryRouterRule struct {
@@ -121,6 +122,7 @@ type RepositoryRouterRule struct {
 	TableExtractorExtensions []string `yaml:"table_extractor_extensions"`
 	ArtifactsBucket          string   `yaml:"artifacts_bucket"`
 	ArtifactsPrefixTemplate  string   `yaml:"artifacts_prefix_template"`
+	ForceTableExtractionPDF  *bool    `yaml:"force_table_extraction_for_pdf"`
 }
 
 func Load(path string) (*Config, error) {

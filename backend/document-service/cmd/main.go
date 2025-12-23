@@ -226,6 +226,7 @@ func newStageRouter(cfg config.Router) *domain.StageRouter {
 		ArtifactsBucket:          cfg.ArtifactsBucket,
 		ArtifactsPrefixTemplate:  cfg.ArtifactsPrefixTemplate,
 		TableDetectionMinCount:   cfg.TableDetectionMinCount,
+		ForceTableExtractionPDF:  cfg.ForceTableExtractionPDF,
 	}
 	for _, rule := range cfg.RepositoryRules {
 		rules.RepositoryRules = append(rules.RepositoryRules, domain.RepositoryRouterRule{
@@ -238,6 +239,7 @@ func newStageRouter(cfg config.Router) *domain.StageRouter {
 			TableExtractorExtensions: rule.TableExtractorExtensions,
 			ArtifactsBucket:          rule.ArtifactsBucket,
 			ArtifactsPrefixTemplate:  rule.ArtifactsPrefixTemplate,
+			ForceTableExtractionPDF:  rule.ForceTableExtractionPDF,
 		})
 	}
 	return domain.NewStageRouter(rules)

@@ -188,7 +188,9 @@ func (f *JobFollower) scheduleNext(ctx context.Context, job domain.ProcessingJob
 			if convertPayload.CorrelationID != "" {
 				correlationID = convertPayload.CorrelationID
 			}
-			payload := f.extractTablesPayloadFromConvert(doc, convertPayload, correlationID).ToMap()
+			extractPayload := f.extractTablesPayloadFromConvert(doc, convertPayload, correlationID)
+			extractPayload.ExtractTables = true
+			payload := extractPayload.ToMap()
 			event := &domain.JobEvent{EventType: "scheduled", Message: "next stage: extract_tables"}
 			if _, err := f.repo.CreateProcessingJob(ctx, &domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Status: domain.JobStatusPending, Payload: payload}, event); err != nil {
 				return fmt.Errorf("enqueue extract_tables for %s: %w", doc.ID, err)
@@ -369,7 +371,7 @@ func (f *JobFollower) shouldExtractTablesAfterConvert(doc *domain.Document, payl
 	}
 
 	count, pages := payload.TableInfo()
-	return f.router.ShouldExtractTablesAfterConvert(&docCopy, payload.ExtractTables, count, pages)
+	return f.router.ShouldExtractTablesAfterConvert(&docCopy, payload.ExtractTables, count, pages, payload.HasMarkdownTablesHint())
 }
 
 func preprocessConversion(payload map[string]any, doc *domain.Document) (domain.ConvertPayload, string) {
