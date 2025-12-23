@@ -292,14 +292,15 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 	jobCtx := w.jobContext(ctx, payload.CorrelationID)
 	if payload.TableQueueID == "" {
 		result, submitErr := w.activities.ExtractTables(jobCtx, tableExtractionInput{
-			DocumentID:        job.DocumentID,
-			OriginalBucket:    payload.OriginalBucket,
-			OriginalObjectKey: payload.OriginalObjectKey,
-			ArtifactsBucket:   payload.ArtifactsBucket,
-			ArtifactsPrefix:   payload.ArtifactsPrefix,
-			MarkdownBucket:    payload.MarkdownBucket,
-			MarkdownObjectKey: payload.MarkdownObjectKey,
-			CorrelationID:     payload.CorrelationID,
+			DocumentID:              job.DocumentID,
+			OriginalBucket:          payload.OriginalBucket,
+			OriginalObjectKey:       payload.OriginalObjectKey,
+			ArtifactsBucket:         payload.ArtifactsBucket,
+			ArtifactsPrefix:         payload.ArtifactsPrefix,
+			ArtifactsPrefixTemplate: payload.ArtifactsPrefixTemplate,
+			MarkdownBucket:          payload.MarkdownBucket,
+			MarkdownObjectKey:       payload.MarkdownObjectKey,
+			CorrelationID:           payload.CorrelationID,
 		})
 		if submitErr != nil {
 			if isTemporaryGRPCError(submitErr) {

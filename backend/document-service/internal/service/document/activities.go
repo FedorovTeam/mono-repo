@@ -66,14 +66,15 @@ type convertInput struct {
 }
 
 type tableExtractionInput struct {
-	DocumentID        string
-	OriginalBucket    string
-	OriginalObjectKey string
-	ArtifactsBucket   string
-	ArtifactsPrefix   string
-	MarkdownBucket    string
-	MarkdownObjectKey string
-	CorrelationID     string
+	DocumentID              string
+	OriginalBucket          string
+	OriginalObjectKey       string
+	ArtifactsBucket         string
+	ArtifactsPrefix         string
+	ArtifactsPrefixTemplate string
+	MarkdownBucket          string
+	MarkdownObjectKey       string
+	CorrelationID           string
 }
 
 type tableExtractionResult struct {
@@ -251,8 +252,35 @@ func (a *Activities) ExtractTables(ctx context.Context, input tableExtractionInp
 	if a.tableExtractor == nil {
 		return tableExtractionResult{}, fmt.Errorf("table extractor client is not configured")
 	}
+	if strings.TrimSpace(input.DocumentID) == "" {
+		return tableExtractionResult{}, fmt.Errorf("document_id is required for table extraction")
+	}
+	doc, err := a.repo.GetDocument(ctx, input.DocumentID)
+	if err != nil {
+		return tableExtractionResult{}, fmt.Errorf("load document: %w", err)
+	}
+	if doc == nil {
+		return tableExtractionResult{}, fmt.Errorf("document %s not found", input.DocumentID)
+	}
+	if strings.TrimSpace(input.OriginalBucket) == "" || strings.TrimSpace(input.OriginalObjectKey) == "" {
+		input.OriginalBucket = firstNonEmpty(input.OriginalBucket, doc.OriginalBucket)
+		input.OriginalObjectKey = firstNonEmpty(input.OriginalObjectKey, doc.OriginalObjectKey)
+	}
 	if strings.TrimSpace(input.OriginalBucket) == "" || strings.TrimSpace(input.OriginalObjectKey) == "" {
 		return tableExtractionResult{}, fmt.Errorf("original bucket and key are required for table extraction")
+	}
+	if strings.TrimSpace(input.ArtifactsBucket) == "" {
+		input.ArtifactsBucket = firstNonEmpty(input.ArtifactsBucket, doc.MarkdownBucket)
+	}
+	input.MarkdownBucket = firstNonEmpty(input.MarkdownBucket, doc.MarkdownBucket)
+	input.MarkdownObjectKey = firstNonEmpty(input.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	prefix, err := resolveArtifactsPrefix(input.ArtifactsPrefixTemplate, input.DocumentID, "", input.ArtifactsPrefix, input.MarkdownObjectKey)
+	if err != nil {
+		return tableExtractionResult{}, fmt.Errorf("resolve artifacts prefix: %w", err)
+	}
+	input.ArtifactsPrefix = prefix
+	if strings.TrimSpace(input.MarkdownBucket) == "" || strings.TrimSpace(input.MarkdownObjectKey) == "" {
+		return tableExtractionResult{}, fmt.Errorf("markdown bucket and key are required for table extraction")
 	}
 	if strings.TrimSpace(input.ArtifactsBucket) == "" {
 		return tableExtractionResult{}, fmt.Errorf("artifacts bucket is required for table extraction")
@@ -443,7 +471,11 @@ func (a *Activities) MergeTables(ctx context.Context, input mergeTablesInput) (s
 		return "", fmt.Errorf("upload merged markdown: %w", err)
 	}
 
-	return firstNonEmpty(strings.TrimSpace(targetKey), strings.TrimSpace(uploadResp.GetObjectKey())), nil
+	uploadedKey := strings.TrimSpace(uploadResp.GetObjectKey())
+	if uploadedKey == "" {
+		uploadedKey = strings.TrimSpace(targetKey)
+	}
+	return uploadedKey, nil
 }
 
 func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, sourceObjectKey, queueID string, version int32) error {

@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -1034,6 +1035,18 @@ func TestHandleExtractTablesSubmitsAndPostpones(t *testing.T) {
 	if payload.MarkdownObjectKey == "" {
 		t.Fatal("expected markdown object key to be filled")
 	}
+	if tableExtractor.lastSubmit == nil {
+		t.Fatal("expected extract tables request to be sent")
+	}
+	if tableExtractor.lastSubmit.GetMarkdownBucket() != doc.MarkdownBucket {
+		t.Fatalf("expected markdown bucket in request, got %s", tableExtractor.lastSubmit.GetMarkdownBucket())
+	}
+	if tableExtractor.lastSubmit.GetMarkdownObjectKey() != doc.MarkdownObjectKey {
+		t.Fatalf("expected markdown key in request, got %s", tableExtractor.lastSubmit.GetMarkdownObjectKey())
+	}
+	if prefix := strings.TrimSpace(tableExtractor.lastSubmit.GetArtifactsPrefix()); prefix == "" || prefix != tablesArtifactsPrefix(doc.MarkdownObjectKey) {
+		t.Fatalf("expected artifacts prefix from markdown key, got %q", prefix)
+	}
 }
 
 func TestHandleExtractTablesMarksConverted(t *testing.T) {
@@ -1081,6 +1094,72 @@ func TestHandleExtractTablesMarksConverted(t *testing.T) {
 	}
 	if repo.lastVersion == nil || repo.lastVersion.MarkdownObjectKey != doc.MarkdownObjectKey {
 		t.Fatalf("expected markdown key propagated, got %+v", repo.lastVersion)
+	}
+}
+
+func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-merge",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/input.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/output.md",
+		Versions:          []domain.DocumentVersion{{Version: 1}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	baseMarkdown := "# Docling\n\n<!-- tables:start -->\nold\n<!-- tables:end -->"
+	tablesMarkdown := "|t|"
+	tableExtractor := &tableExtractorStub{
+		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-merge",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "artifacts-bucket", ObjectKey: "tables/doc-merge/tables.md"},
+				},
+			},
+		},
+	}
+	storage := &stubStorageClient{
+		objects: map[string]map[string][]byte{
+			"md-bucket": {
+				"docs/output.md": []byte(baseMarkdown),
+			},
+			"artifacts-bucket": {
+				"tables/doc-merge/tables.md": []byte(tablesMarkdown),
+			},
+		},
+	}
+	payload := (domain.ExtractTablesPayload{
+		TableQueueID:             "queue-merge",
+		ArtifactsBucket:          "artifacts-bucket",
+		MarkdownBucket:           doc.MarkdownBucket,
+		MarkdownObjectKey:        doc.MarkdownObjectKey,
+		DoclingMarkdownBucket:    doc.MarkdownBucket,
+		DoclingMarkdownObjectKey: doc.MarkdownObjectKey,
+	}).ToMap()
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+	if repo.doc.Status != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document converted status, got %s", repo.doc.Status)
+	}
+	if repo.lastVersion == nil || repo.lastVersion.MarkdownObjectKey == "" {
+		t.Fatalf("expected markdown version to be recorded, got %+v", repo.lastVersion)
+	}
+	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
+	expectedMerged := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	if string(uploaded) != expectedMerged {
+		t.Fatalf("expected merged markdown to be uploaded, got %q", string(uploaded))
+	}
+	if repo.doc.MarkdownObjectKey != repo.lastVersion.MarkdownObjectKey {
+		t.Fatalf("expected document to store final markdown key, got %s vs %s", repo.doc.MarkdownObjectKey, repo.lastVersion.MarkdownObjectKey)
 	}
 }
 
