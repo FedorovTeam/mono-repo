@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
 const BENEFITS = [
@@ -13,6 +13,7 @@ const BENEFITS = [
 
 function SignInContent() {
   const searchParams = useSearchParams();
+  const { status } = useSession();
   const [isManualLoading, setIsManualLoading] = useState(false);
 
   const callbackUrl = useMemo(() => {
@@ -43,13 +44,21 @@ function SignInContent() {
   const nextUrl = callbackUrl === "/" ? "главную страницу" : `страницу ${callbackUrl}`;
   const errorMessage = searchParams?.get("error");
   const isLoginRequiredError = errorMessage === "login_required";
-  const isAutoLoginAttempting = !errorMessage && !autoLoginDisabled;
+  const isAutoLoginAttempting =
+    status === "loading" || (!errorMessage && !autoLoginDisabled && status !== "authenticated");
   const isLoading = isManualLoading || isAutoLoginAttempting;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    if (errorMessage) {
+    if (status === "loading") return;
+
+    if (status === "authenticated") {
+      sessionStorage.removeItem("authAutoLoginDisabled");
+      return;
+    }
+
+    if (status === "unauthenticated" && errorMessage) {
       sessionStorage.setItem("authAutoLoginDisabled", "true");
       return;
     }
@@ -71,7 +80,7 @@ function SignInContent() {
     };
 
     void attemptAutoLogin();
-  }, [callbackUrl, errorMessage]);
+  }, [callbackUrl, errorMessage, status]);
 
   const friendlyErrorMessage = useMemo(() => {
     if (!errorMessage) return null;
@@ -129,7 +138,9 @@ function SignInContent() {
             <div className="space-y-3">
               <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
                 {isAutoLoginAttempting
-                  ? "Пробуем выполнить автоматический вход…"
+                  ? status === "loading"
+                    ? "Проверяем сессию..."
+                    : "Пробуем выполнить автоматический вход…"
                   : isLoginRequiredError
                     ? "Бесшумный вход недоступен (требуется интерактивная авторизация). Попробуйте войти вручную."
                     : "Автоматический вход недоступен. Вы можете продолжить вручную."}
