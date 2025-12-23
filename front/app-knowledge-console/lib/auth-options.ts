@@ -35,7 +35,6 @@ if (!authentikTokenUrl) {
 const authorizationParams: Record<string, string> = {
   scope: "openid email profile offline_access",
   access_type: "offline",
-  prompt: "consent",
   ...(authentikRedirectUri ? { redirect_uri: authentikRedirectUri } : {}),
 };
 
