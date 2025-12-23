@@ -7,9 +7,24 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: git@github.com:FedorovTeam/mono-repo.git
-    targetRevision: main
-    path: infra/manifests/argocd-image-updater
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argocd-image-updater
+    targetRevision: 1.0.3
+    helm:
+      releaseName: argocd-image-updater
+      values: |
+        config:
+          interval: 2m
+          registries:
+            - name: harbor
+              api_url: https://harbor.tech.fedorov-team.tech
+              prefix: harbor.tech.fedorov-team.tech
+              credentials: secret_ref:secret:argocd/argocd-image-updater-registry-creds#harbor-creds
+        rbac:
+          enabled: true
+        serviceAccount:
+          create: true
+          name: argocd-image-updater
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

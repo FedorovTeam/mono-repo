@@ -1,2 +1,3 @@
+# infra/manifests/argocd-image-updater/kustomization.yaml
 resources:
   - secret-harbor.yaml
