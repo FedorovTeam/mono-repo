@@ -20,10 +20,22 @@ function SignInContent() {
     if (!requested) return "/";
     try {
       const decoded = decodeURIComponent(requested);
-      return decoded.startsWith("/") ? decoded : "/";
+      if (decoded.startsWith("/")) return decoded;
+
+      try {
+        const parsed = new URL(decoded);
+        const currentOrigin = typeof window !== "undefined" ? window.location.origin : undefined;
+        if (currentOrigin && parsed.origin === currentOrigin) {
+          const pathWithQuery = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+          return pathWithQuery || "/";
+        }
+      } catch {
+        // ignore and fallback below
+      }
     } catch {
-      return "/";
+      // ignore and fallback below
     }
+    return "/";
   }, [searchParams]);
 
   const nextUrl = callbackUrl === "/" ? "главную страницу" : `страницу ${callbackUrl}`;
