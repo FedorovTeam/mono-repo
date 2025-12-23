@@ -2,7 +2,7 @@
 
 `table-extractor-service` извлекает таблицы из PDF (в первую очередь “таблицы голосования/протоколы”) с помощью poppler (pdfinfo/pdftotext или твой текущий пайплайн), нормализует структуру и сохраняет артефакты в MinIO.
 
-Сервис асинхронный: gRPC-метод ставит задачу в очередь (PostgreSQL), воркеры обрабатывают задачи, клиент опрашивает статус. Опционально поддерживается `wait_for_result=true` (polling внутри gRPC метода).
+Сервис асинхронный: gRPC-метод ставит задачу в очередь (PostgreSQL), воркеры обрабатывают задачи, клиент опрашивает статус. Поле `wait_for_result` принимается, но метод сейчас всегда возвращает сразу после постановки в очередь.
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## Статусы очереди
 
-- `pending` — ждёт обработки (может иметь `next_poll_at` для отложенного старта).
+- `pending` — ждёт обработки (может иметь `next_run_at` для отложенного старта).
 - `processing` — воркер взял job и выполняет извлечение.
 - `done` — артефакты записаны в MinIO.
 - `failed` — необратимая ошибка (битый PDF, пароль, неподдерживаемый формат, превышены лимиты ретраев).
@@ -46,28 +46,24 @@
 
 ### Валидация
 - `document_id` обязателен.
-- `original_bucket` и `original_object_key` обязательны.
-- Расширение должно быть `pdf` (либо `filename_extension=pdf`, либо вычисляется из `original_object_key`). Иначе `InvalidArgument`.
-- `artifacts_bucket` берётся из запроса или из конфигурации; если оба пустые — `InvalidArgument`.
-- `markdown_bucket/markdown_object_key` разрешены только вместе и приоритетнее дефолтного пути.
-- `source_bucket/source_object_key` (если присутствуют) заполняются только вместе.
-- `source_url` взаимоисключён с `source_bucket/source_object_key`.
+- Источник PDF должен быть указан как пара `original_bucket` + `original_object_key` **или** как `source_url` (HTTP(S)/file). Для внутренних сценариев есть `local_path`, но его нет в публичном gRPC-контракте.
+- Расширение вычисляется из пути (`original_object_key`/`source_url`/`local_path`) и должно быть `pdf`, иначе `InvalidArgument`.
+- `artifacts_bucket` берётся из запроса или из конфигурации; если в запросе и конфиге пусто — `InvalidArgument`.
+- `markdown_bucket/markdown_object_key` задаются только вместе; если оба пустые — `tables.md` пишется в тот же bucket/prefix, что и остальные артефакты.
 - При превышении лимита очереди (`pending`/`processing` >= `service.queue_limit`, если задан) — `ResourceExhausted`.
 
 ### Поведение / идемпотентность
-- Если для `document_id` уже есть **последняя** задача не в статусе `failed` (или `failed_retryable`, если он включён), она возвращается как результат вызова без создания новой записи.
-- Выходные `artifacts_bucket/prefix` берутся из найденной задачи или из запроса/конфига.
+- Если для `document_id` уже есть активная задача в статусе `pending` или `processing`, она возвращается как результат вызова без создания новой записи (параметры запроса не переопределяются).
+- Новая запись создаётся, если предыдущая задача завершена (`done/failed/failed_retryable`).
+- Итоговые `artifacts_bucket/prefix` берутся из найденной активной задачи либо рассчитываются из запроса/конфига с учётом `minio.artifacts_prefix_template` или дефолтного `minio.default_artifacts_prefix/<document_id>/<queue_id>`.
 
 ### Шаги
-1. Принять gRPC `ExtractTablesFromPdf(document_id, original_bucket, original_object_key, artifacts_bucket?, artifacts_prefix?, markdown_bucket/object_key?, options?, wait_for_result?)`.  
-   `x-correlation-id` читается из metadata или генерируется.
-2. Нормализовать `filename_extension` (если передано) или вычислить из ключа; проверить `pdf`.
-3. Вычислить `artifacts_prefix`, если не передан:
-    - рекомендуемый шаблон: `tables/<document_id>/<queue_id>/` или `minio.artifacts_prefix_template`
-4. Создать запись в `table_extraction_queue` со статусом `pending`, путями original и artifacts (включая переопределённый `markdown_bucket/object_key`, если задан), опциями извлечения, `correlation_id`.
-5. Вернуть `queue_id`, `status`, `correlation_id`, фактические `artifacts_bucket` и `artifacts_prefix` + итоговые пути артефактов.
-6. Если `wait_for_result=true`, сервис опрашивает `GetJob(queue_id)` с backoff (учитывая `next_poll_at`) до `done/failed`.  
-   При тайм-ауте/исчерпании попыток — `DeadlineExceeded` с текстом `table extraction result not ready`.
+1. Принять gRPC `ExtractTablesFromPdf(document_id, original_bucket/object_key?, source_url?, artifacts_bucket?, artifacts_prefix?, markdown_bucket/object_key?, wait_for_result?)`.  
+   `x-correlation-id` читается из metadata; если пуст — генерируется и возвращается в ответе.
+2. Проверить, что источник указан (bucket+key или `source_url`) и что расширение пути — `pdf`.
+3. Рассчитать `artifacts_prefix`: если не передан — применить `minio.artifacts_prefix_template` или `minio.default_artifacts_prefix/<document_id>/<queue_id>`.
+4. Создать запись в `table_extraction_queue` со статусом `pending`, путями источника и артефактов (включая переопределённый `markdown_bucket/object_key`, если задан), `correlation_id`.
+5. Вернуть `queue_id`, `status=pending`, `correlation_id`, фактические `artifacts_bucket/prefix` и рассчитанные пути артефактов. Поле `wait_for_result` пока игнорируется: метод всегда отвечает сразу после постановки задачи.
 
 ---
 
@@ -83,9 +79,9 @@
 1. Принять `GetTableExtractionJob(queue_id)`.
 2. Прочитать запись из БД.
 3. Вернуть:
-    - `status`, `attempt`, `locked_at/locked_by` (если нужно), `last_error`
-    - `artifacts_bucket`, `artifacts_prefix`
-    - список артефактов (если `done`): `tables.md`, `tables.normalized.json`, `manifest.json`, `debug/*` (опционально).
+    - `status`, `status_reason`, `created_at`, `updated_at`
+    - `artifacts` с путями `tables.raw.json`, `tables.normalized.json`, `tables.md`, `manifest.json`, `debug/*`
+    - `correlation_id` (пробрасывается в gRPC-headers и тело ответа).
 
 ### Сценарий 2.1 — Polling статуса
 
@@ -108,40 +104,34 @@
     - `maintenanceLoop` (периодические процедуры восстановления/очистки)
 
 ### Шаги workerLoop
-1. Забрать job из очереди:
-    - `SELECT ... FOR UPDATE SKIP LOCKED`
-    - берём `pending` где `next_poll_at <= now()` (если поле используется)
-2. Перевести job в `processing`, увеличить `attempt`, записать `locked_at/locked_by`.
+1. Забрать job из очереди (в Postgres — `SELECT ... FOR UPDATE SKIP LOCKED`) с фильтром `status=pending` и `next_run_at <= now()`.
+2. Перевести job в `processing`, увеличить `attempts`, обнулить `next_run_at`.
 3. Определить источник PDF:
-    - по умолчанию `original_bucket/original_object_key`
-    - если задан `source_bucket/source_object_key` → использовать его
-    - если задан `source_url` → скачать по HTTP (без кредов; быстрый тайм-аут)
-4. Скачать PDF во временный файл (если источник MinIO/URL).
+    - по умолчанию `original_bucket/original_object_key`;
+    - если задан `source_url` → загрузить HTTP(S)/file (без аутентификации, короткий таймаут);
+    - если в записи указан `local_path` (внутренний сценарий) → использовать его.
+4. Скачать PDF во временный файл (MinIO/HTTP(S)/файловая система) через `filecache`.
 5. Быстрые проверки:
-    - `pdfinfo` (валидность/кол-во страниц/защищён ли паролем)
+    - `pdfinfo` (валидность/кол-во страниц/защищён ли паролем).
 6. Извлечь таблицы:
-    - poppler (например `pdftotext -layout` + твой парсер табличных блоков)
-    - поддержать режимы из options: `pages`, `layout_mode`, `y_tolerance`, `merge_cells`, `detect_voting_table`, etc.
-7. Нормализовать структуру:
-    - выравнивание колонок, склейка строк, trim/cleanup пробелов
-    - детект “таблица голосования” (если включён) и отдельный рендер
-8. Сохранить артефакты в MinIO в `artifacts_bucket/artifacts_prefix`:
+    - poppler: `pdftotext` в режиме `-layout` или `-bbox` (если включён `extractor.detect_voting_tables`), при необходимости `pdftoppm` для рендера галочек;
+    - парсер нормализует таблицы и строит Markdown.
+7. Сохранить артефакты в MinIO в `artifacts_bucket/artifacts_prefix` (Markdown может складываться в отдельный bucket/object при переопределении):
     - `tables.raw.json`
     - `tables.normalized.json`
     - `tables.md`
-    - `manifest.json` (версия алгоритма, poppler version, страницы, метрики качества)
-    - (опционально) `debug/page-*.txt`
-9. Обновить job: `status=done`, `finished_at`, `result_meta` (кол-во таблиц/страниц).
-10. При ошибке:
-- если ошибка формата/пароль/битый PDF → `failed` (final)
-- если временная (MinIO/network/IO) → `failed_retryable` или вернуть в `pending` с `next_poll_at=now()+backoff`
-- записать `last_error`, `error_code`.
+    - `manifest.json`
+    - (опционально) `debug/*`.
+8. Обновить job: `status=done`, `finished_at`, `updated_at`.
+9. При ошибках:
+    - проблема источника/формата (битый PDF, неверное расширение, ошибка скачивания) → `failed` без повторов;
+    - ошибки загрузки артефактов в MinIO → `failed_retryable` (maintenance вернёт в `pending` с бэк-оффом);
+    - в статусе фиксируются `status_reason/error_code/error_message`.
 
 ### Сценарий 3.1 — Метрики и наблюдаемость воркера
 
 - Логировать `queue_id`, `document_id`, `correlation_id`, длительность загрузки/извлечения/записи.
-- Считать gauge по статусам очереди (`CountByStatus`) и счётчики `tasks_completed/tasks_failed`.
-- Опционально экспортировать гистограммы времени обработки и размера документов (через OTEL metric SDK).
+- Трассировка gRPC включается через `observability.tracing.enabled`; дополнительная телеметрия может быть добавлена при необходимости.
 
 ---
 
@@ -151,16 +141,15 @@
 - воркер `internal/maintenance`.
 
 ### Шаги (периодически)
-1. Метрики очереди: `CountByStatus`.
-2. `RestoreStuckProcessing(processing_timeout)`:
-    - `processing` старше таймаута:
-        - если `attempt >= scheduler.max_processing_retries` → `failed`
-        - иначе → `pending` (+ `next_poll_at` backoff)
-3. `RetryFailed(olderThan=now-failed_retry_delay, max_failed_retries)`:
-    - `failed_retryable` или “failed с retry-флагом” возвращать в `pending`.
-4. `CleanupFinished(retention)`:
-    - удалять/архивировать `done/failed` старше `cleanup_retention` (по желанию).
-    - артефакты в MinIO можно не удалять автоматически (или удалять отдельным джобом).
+1. `RestoreStuckProcessing(processing_timeout, max_attempts, backoff)`:
+    - ищет задачи `processing`, обновлённые раньше `now-processing_timeout`;
+    - если `attempts >= max_attempts` → помечает `failed` с `finished_at`;
+    - иначе переводит в `pending` с `next_run_at=now()+backoff`.
+2. `RetryFailed(max_attempts, retry_delay)`:
+    - берёт `failed` и `failed_retryable` с `attempts < max_attempts`;
+    - переводит их в `pending`, выставляя `next_run_at=now()+retry_delay`.
+3. `CleanupFinished(retention)`:
+    - удаляет записи в статусах `done/failed` старше `cleanup_retention` (артефакты в MinIO остаются).
 
 ### Сценарий 4.1 — Проверка лимитов и идемпотентности
 
