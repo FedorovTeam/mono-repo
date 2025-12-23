@@ -754,9 +754,65 @@ func TestHandleConvertUsesPreprocessedSourceWhenPresent(t *testing.T) {
 	}
 }
 
-func TestHandleConvertKeepsDoclingPayloadUntilTables(t *testing.T) {
+func TestHandleConvertKeepsDoclingPayloadWhenTablesDetected(t *testing.T) {
 	doc := &domain.Document{
 		ID:                 "doc-docling",
+		Name:               "Doc.pdf",
+		Owner:              "owner",
+		Repository:         "repo",
+		Branch:             "main",
+		BaseBranch:         "main",
+		Path:               "docs/doc.md",
+		Status:             domain.DocumentStatusStoredOriginal,
+		OriginalBucket:     "orig-bucket",
+		OriginalObjectKey:  "docs/doc.pdf",
+		MarkdownBucket:     "md-bucket",
+		MarkdownObjectKey:  "docs/doc.md",
+		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+		Versions:           []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           "queue-docling",
+		Status:            "done",
+		MarkdownObjectKey: "docs/doc.md",
+		TableMetadata:     &transformerv1.TableMetadata{TablesCount: 2, Pages: []int32{1, 2}},
+	}}
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected status to remain unchanged until tables are merged, got %v", repo.statusUpdates)
+	}
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if payload.DoclingMarkdownObjectKey != "docs/doc.md" {
+		t.Fatalf("expected docling markdown key in payload, got %s", payload.DoclingMarkdownObjectKey)
+	}
+	if payload.DoclingMarkdownBucket != "md-bucket" {
+		t.Fatalf("expected docling markdown bucket to be kept, got %s", payload.DoclingMarkdownBucket)
+	}
+	if !payload.ExtractTables {
+		t.Fatalf("expected extract_tables flag to be true when tables are detected")
+	}
+	if payload.TableCount != 2 {
+		t.Fatalf("expected table count propagated, got %d", payload.TableCount)
+	}
+	if payload.ConversionStrategy != domain.ConversionStrategyDoclingWithTables {
+		t.Fatalf("expected conversion strategy to stay docling_with_tables, got %s", payload.ConversionStrategy)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event without status change, got %+v", result.Event)
+	}
+}
+
+func TestHandleConvertMarksDoclingWithoutDetectedTables(t *testing.T) {
+	doc := &domain.Document{
+		ID:                 "doc-docling-no-tables",
 		Name:               "Doc.pdf",
 		Owner:              "owner",
 		Repository:         "repo",
@@ -780,25 +836,61 @@ func TestHandleConvertKeepsDoclingPayloadUntilTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if len(repo.statusUpdates) != 0 {
-		t.Fatalf("expected status to remain unchanged until tables are merged, got %v", repo.statusUpdates)
+	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document to be marked converted, got %v", repo.statusUpdates)
 	}
 	payload := domain.ConvertPayloadFromMap(result.Payload)
-	if payload.DoclingMarkdownObjectKey != "docs/doc.md" {
-		t.Fatalf("expected docling markdown key in payload, got %s", payload.DoclingMarkdownObjectKey)
-	}
-	if payload.DoclingMarkdownBucket != "md-bucket" {
-		t.Fatalf("expected docling markdown bucket to be kept, got %s", payload.DoclingMarkdownBucket)
-	}
-	if !payload.ExtractTables {
-		t.Fatalf("expected extract_tables flag to be true for docling_with_tables strategy")
-	}
-	if payload.ConversionStrategy != domain.ConversionStrategyDoclingWithTables {
-		t.Fatalf("expected conversion strategy to stay docling_with_tables, got %s", payload.ConversionStrategy)
+	if payload.ExtractTables {
+		t.Fatalf("expected extract_tables to remain false without detected tables")
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
-		t.Fatalf("expected completed event without status change, got %+v", result.Event)
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+}
+
+func TestHandleConvertEnablesTablesWhenMetadataArrivesWithoutStrategy(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-detected",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           "queue-detected",
+		Status:            "done",
+		MarkdownObjectKey: "docs/doc.md",
+		TableCount:        3,
+		TablePages:        []int32{1, 2, 3},
+	}}
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second)
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-detected", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected document status to remain unchanged until tables are merged, got %v", repo.statusUpdates)
+	}
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if !payload.ExtractTables {
+		t.Fatalf("expected extract_tables to be enabled based on detected tables")
+	}
+	if payload.TableCount != 3 {
+		t.Fatalf("expected table count propagated, got %d", payload.TableCount)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
 	}
 }
 

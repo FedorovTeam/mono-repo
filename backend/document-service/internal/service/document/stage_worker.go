@@ -360,10 +360,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	} else {
 		payload.ConversionStrategy = domain.NormalizeConversionStrategy(string(payload.ConversionStrategy))
 	}
-	requiresTablesChain := payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables
-	if payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables {
-		payload.ExtractTables = true
-	}
+	payload.ExtractTables = payload.ExtractTables || doc.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyTablesOnly
 	if payload.CorrelationID == "" {
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
@@ -415,7 +412,9 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if len(result.TablePages) > 0 {
 		payload.TablePages = append([]int32(nil), result.TablePages...)
 	}
+	hasDetectedTables := false
 	if count, pages := payload.TableInfo(); count > 0 || len(pages) > 0 {
+		hasDetectedTables = true
 		if count > 0 {
 			payload.TableCount = int32(count)
 		}
@@ -423,12 +422,16 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 			payload.TablePages = pages
 		}
 	}
+	if hasDetectedTables && (payload.ConversionStrategy == "" || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables || payload.ConversionStrategy == domain.ConversionStrategyTablesOnly) {
+		payload.ExtractTables = true
+	}
 	if payload.DoclingMarkdownBucket == "" {
 		payload.DoclingMarkdownBucket = payload.MarkdownBucket
 	}
 	if payload.DoclingMarkdownObjectKey == "" {
 		payload.DoclingMarkdownObjectKey = payload.MarkdownObjectKey
 	}
+	requiresTablesChain := payload.ExtractTables || (payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables && hasDetectedTables)
 
 	if !result.Ready {
 		next := time.Now().Add(w.retryDelay)
@@ -554,9 +557,10 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	targetBucket := firstNonEmpty(doc.MarkdownBucket, payload.MarkdownBucket)
 	targetKey := resolvedMarkdownKey(doc)
 	finalMarkdownKey := tableMarkdownKey
-	if targetBucket != "" && targetKey != "" && w.activities != nil {
-		baseBucket := firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket)
-		baseKey := firstNonEmpty(payload.DoclingMarkdownObjectKey, targetKey)
+	baseBucket := strings.TrimSpace(firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket))
+	baseKey := strings.TrimSpace(payload.DoclingMarkdownObjectKey)
+	hasBaseMarkdown := baseBucket != "" && baseKey != ""
+	if targetBucket != "" && targetKey != "" && w.activities != nil && hasBaseMarkdown {
 		mergedKey, mergeErr := w.activities.MergeTables(ctx, mergeTablesInput{
 			Doc:             doc,
 			BaseBucket:      baseBucket,
@@ -573,6 +577,9 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 		}
 		finalMarkdownKey = mergedKey
 		payload.MarkdownObjectKey = mergedKey
+	}
+	if !hasBaseMarkdown {
+		payload.MarkdownObjectKey = tableMarkdownKey
 	}
 
 	version := latestVersion(doc).Version + 1
