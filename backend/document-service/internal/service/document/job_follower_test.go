@@ -317,7 +317,7 @@ func TestJobFollowerSchedulesExtractAfterDetectionWithoutStrategy(t *testing.T) 
 	require.True(t, payload.ExtractTables)
 }
 
-func TestJobFollowerSchedulesExtractWithFallbackHint(t *testing.T) {
+func TestJobFollowerSkipsExtractWhenOnlyTablesHint(t *testing.T) {
 	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, ForceTableExtractionPDF: true})
 	repo := &followerRepo{
 		jobs: []domain.ProcessingJob{
@@ -348,9 +348,9 @@ func TestJobFollowerSchedulesExtractWithFallbackHint(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, repo.createdJobs, 1)
-	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
-	payload := domain.ExtractTablesPayloadFromMap(repo.createdJobs[0].Payload)
-	require.True(t, payload.ExtractTables)
+	require.Equal(t, domain.JobStagePublishToGitHub, repo.createdJobs[0].Stage)
+	payload := domain.PublishPayloadFromMap(repo.createdJobs[0].Payload)
+	require.Equal(t, "md-bucket", payload.MarkdownBucket)
 	require.Equal(t, "tables.md", payload.MarkdownObjectKey)
 }
 

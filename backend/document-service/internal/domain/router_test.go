@@ -160,16 +160,29 @@ func TestStageRouterUsesPagesWhenCountMissing(t *testing.T) {
 	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, []int32{3, 3}, false))
 }
 
-func TestStageRouterUsesFallbackHintForPdf(t *testing.T) {
+func TestStageRouterIgnoresTablesHintWithoutDetection(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, ForceTableExtractionPDF: true})
 	doc := &Document{OriginalObjectKey: "incoming/hints/report.pdf"}
-	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, true))
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, true))
 }
 
-func TestStageRouterIgnoresFallbackWhenNotPdf(t *testing.T) {
+func TestStageRouterIgnoresHintWhenNotPdf(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, ForceTableExtractionPDF: true})
 	doc := &Document{OriginalObjectKey: "incoming/hints/report.docx"}
 	require.False(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, true))
+}
+
+func TestStageRouterRequiresDetectionForExtractTablesFlag(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 2})
+	doc := &Document{OriginalObjectKey: "incoming/tables/report.pdf"}
+	require.False(t, router.ShouldExtractTablesAfterConvert(doc, true, 1, []int32{1}, false))
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, true, 3, []int32{1, 2, 3}, false))
+}
+
+func TestStageRouterHonorsExplicitDocumentFlag(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true})
+	doc := &Document{OriginalObjectKey: "incoming/manual/report.pdf", ExtractTables: true}
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, false))
 }
 
 func boolPtr(val bool) *bool { return &val }
