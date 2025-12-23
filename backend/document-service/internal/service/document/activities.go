@@ -11,6 +11,7 @@ import (
 	"backend-document-service/internal/domain"
 	githubpublisherv1 "backend-document-service/proto/backend/githubpublisher/v1"
 	preprocessv1 "backend-document-service/proto/backend/preprocess/v1"
+	storagev1 "backend-document-service/proto/backend/storage/v1"
 	tableextractorv1 "backend-document-service/proto/backend/tableextractor/v1"
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 	"github.com/google/uuid"
@@ -70,6 +71,8 @@ type tableExtractionInput struct {
 	OriginalObjectKey string
 	ArtifactsBucket   string
 	ArtifactsPrefix   string
+	MarkdownBucket    string
+	MarkdownObjectKey string
 	CorrelationID     string
 }
 
@@ -79,6 +82,7 @@ type tableExtractionResult struct {
 	StatusReason      string
 	ArtifactsBucket   string
 	ArtifactsPrefix   string
+	MarkdownBucket    string
 	MarkdownObjectKey string
 	CorrelationID     string
 }
@@ -116,6 +120,7 @@ type convertResult struct {
 
 type Activities struct {
 	repo           Repository
+	storage        storagev1.StorageServiceClient
 	statuses       *StatusApplication
 	preprocess     preprocessv1.PreprocessServiceClient
 	tableExtractor tableextractorv1.TableExtractorServiceClient
@@ -123,9 +128,10 @@ type Activities struct {
 	publisher      githubpublisherv1.GithubPublisherServiceClient
 }
 
-func NewActivities(repo Repository, preprocessClient preprocessv1.PreprocessServiceClient, transformerClient transformerv1.TransformerServiceClient, tableExtractorClient tableextractorv1.TableExtractorServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient) *Activities {
+func NewActivities(repo Repository, preprocessClient preprocessv1.PreprocessServiceClient, transformerClient transformerv1.TransformerServiceClient, tableExtractorClient tableextractorv1.TableExtractorServiceClient, publisherClient githubpublisherv1.GithubPublisherServiceClient, storageClient storagev1.StorageServiceClient) *Activities {
 	return &Activities{
 		repo:           repo,
+		storage:        storageClient,
 		statuses:       NewStatusApplication(repo),
 		preprocess:     preprocessClient,
 		tableExtractor: tableExtractorClient,
@@ -259,6 +265,8 @@ func (a *Activities) ExtractTables(ctx context.Context, input tableExtractionInp
 		OriginalObjectKey: input.OriginalObjectKey,
 		ArtifactsBucket:   input.ArtifactsBucket,
 		ArtifactsPrefix:   input.ArtifactsPrefix,
+		MarkdownBucket:    input.MarkdownBucket,
+		MarkdownObjectKey: input.MarkdownObjectKey,
 		WaitForResult:     false,
 		CorrelationId:     correlationIDFromContext(ctx),
 	}
@@ -370,6 +378,72 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 		TableCount:  resp.GetTableCount(),
 		TablePages:  resp.GetTablePages(),
 	}, nil
+}
+
+type mergeTablesInput struct {
+	Doc             *domain.Document
+	BaseBucket      string
+	BaseObjectKey   string
+	TablesBucket    string
+	TablesObjectKey string
+	TargetBucket    string
+	TargetObjectKey string
+	CorrelationID   string
+}
+
+func (a *Activities) MergeTables(ctx context.Context, input mergeTablesInput) (string, error) {
+	ctx = a.withCorrelationID(ctx, input.CorrelationID)
+	if input.Doc == nil {
+		return "", fmt.Errorf("document is required for merge")
+	}
+	if a.storage == nil {
+		return "", fmt.Errorf("storage client is not configured")
+	}
+	baseBucket := strings.TrimSpace(input.BaseBucket)
+	baseKey := strings.TrimSpace(input.BaseObjectKey)
+	tablesBucket := strings.TrimSpace(input.TablesBucket)
+	tablesKey := strings.TrimSpace(input.TablesObjectKey)
+	targetBucket := strings.TrimSpace(input.TargetBucket)
+	targetKey := strings.TrimSpace(input.TargetObjectKey)
+
+	if tablesBucket == "" || tablesKey == "" {
+		return "", fmt.Errorf("tables location is required for merge")
+	}
+	if targetBucket == "" {
+		targetBucket = input.Doc.MarkdownBucket
+	}
+	if targetKey == "" {
+		targetKey = resolvedMarkdownKey(input.Doc)
+	}
+	if targetBucket == "" || targetKey == "" {
+		return "", fmt.Errorf("target markdown location is required for merge")
+	}
+
+	tablesResp, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: tablesBucket, ObjectKey: tablesKey})
+	if err != nil {
+		return "", fmt.Errorf("download tables markdown: %w", err)
+	}
+	baseContent := ""
+	if baseBucket != "" && baseKey != "" {
+		baseResp, baseErr := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: baseBucket, ObjectKey: baseKey})
+		if baseErr != nil {
+			return "", fmt.Errorf("download base markdown: %w", baseErr)
+		}
+		baseContent = string(baseResp.GetContent())
+	}
+
+	merged := mergeMarkdownWithTables(baseContent, string(tablesResp.GetContent()))
+	uploadResp, err := a.storage.UploadMarkdown(ctx, &storagev1.UploadMarkdownRequest{
+		OrgSlug:     input.Doc.Owner,
+		ProjectSlug: input.Doc.Repository,
+		DocumentId:  input.Doc.ID,
+		Content:     []byte(merged),
+	})
+	if err != nil {
+		return "", fmt.Errorf("upload merged markdown: %w", err)
+	}
+
+	return firstNonEmpty(strings.TrimSpace(targetKey), strings.TrimSpace(uploadResp.GetObjectKey())), nil
 }
 
 func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, sourceObjectKey, queueID string, version int32) error {
@@ -596,6 +670,7 @@ func mapTableJob(job *tableextractorv1.TableExtractionJob, correlationID, fallba
 		StatusReason:      job.GetStatusReason(),
 		ArtifactsBucket:   bucket,
 		ArtifactsPrefix:   prefix,
+		MarkdownBucket:    bucket,
 		MarkdownObjectKey: markdownKey,
 		CorrelationID:     firstNonEmpty(job.GetCorrelationId(), correlationID),
 	}
@@ -642,6 +717,30 @@ func correlationIDFromContext(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) string {
+	if strings.TrimSpace(tablesMarkdown) == "" {
+		return baseMarkdown
+	}
+	const (
+		tablesStart = "<!-- tables:start -->"
+		tablesEnd   = "<!-- tables:end -->"
+	)
+
+	if start := strings.Index(baseMarkdown, tablesStart); start != -1 {
+		if end := strings.Index(baseMarkdown, tablesEnd); end != -1 && end >= start {
+			prefix := baseMarkdown[:start+len(tablesStart)]
+			suffix := baseMarkdown[end:]
+			return fmt.Sprintf("%s\n\n%s\n%s", prefix, strings.TrimSpace(tablesMarkdown), suffix)
+		}
+	}
+
+	if strings.TrimSpace(baseMarkdown) == "" {
+		return strings.TrimSpace(tablesMarkdown)
+	}
+
+	return fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), strings.TrimSpace(tablesMarkdown))
 }
 
 func isTransformerFailureStatus(val string) bool {

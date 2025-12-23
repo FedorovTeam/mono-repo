@@ -297,6 +297,8 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 			OriginalObjectKey: payload.OriginalObjectKey,
 			ArtifactsBucket:   payload.ArtifactsBucket,
 			ArtifactsPrefix:   payload.ArtifactsPrefix,
+			MarkdownBucket:    payload.MarkdownBucket,
+			MarkdownObjectKey: payload.MarkdownObjectKey,
 			CorrelationID:     payload.CorrelationID,
 		})
 		if submitErr != nil {
@@ -465,7 +467,7 @@ func (w *StageWorker) processTableExtractionResult(ctx context.Context, job doma
 	}
 	payload.ArtifactsPrefix = prefix
 	payload.MarkdownObjectKey = firstNonEmpty(result.MarkdownObjectKey, payload.MarkdownObjectKey, tablesMarkdownKey(payload.ArtifactsPrefix))
-	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, doc.MarkdownBucket)
+	payload.MarkdownBucket = firstNonEmpty(result.MarkdownBucket, payload.MarkdownBucket, payload.ArtifactsBucket, doc.MarkdownBucket)
 	payload.CorrelationID = firstNonEmpty(result.CorrelationID, payload.CorrelationID)
 	if payload.ConversionStrategy == "" {
 		payload.ConversionStrategy = doc.ConversionStrategy
@@ -529,9 +531,28 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
 
+	targetBucket := firstNonEmpty(doc.MarkdownBucket, payload.MarkdownBucket)
+	targetKey := resolvedMarkdownKey(doc)
 	finalMarkdownKey := tableMarkdownKey
-	if payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables && payload.DoclingMarkdownObjectKey != "" {
-		finalMarkdownKey = payload.DoclingMarkdownObjectKey
+	if targetBucket != "" && targetKey != "" && w.activities != nil {
+		baseBucket := firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket)
+		baseKey := firstNonEmpty(payload.DoclingMarkdownObjectKey, targetKey)
+		mergedKey, mergeErr := w.activities.MergeTables(ctx, mergeTablesInput{
+			Doc:             doc,
+			BaseBucket:      baseBucket,
+			BaseObjectKey:   baseKey,
+			TablesBucket:    firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, targetBucket),
+			TablesObjectKey: tableMarkdownKey,
+			TargetBucket:    targetBucket,
+			TargetObjectKey: targetKey,
+			CorrelationID:   payload.CorrelationID,
+		})
+		if mergeErr != nil {
+			payload.LastError = mergeErr.Error()
+			return workersvc.JobResult{Payload: payload.ToMap()}, mergeErr
+		}
+		finalMarkdownKey = mergedKey
+		payload.MarkdownObjectKey = mergedKey
 	}
 
 	version := latestVersion(doc).Version + 1
