@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -786,8 +787,8 @@ func TestHandleConvertKeepsDoclingPayloadWhenTablesDetected(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(repo.statusUpdates) != 0 {
-		t.Fatalf("expected status to remain unchanged until tables are merged, got %v", repo.statusUpdates)
+	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document to be marked converted, got %v", repo.statusUpdates)
 	}
 	payload := domain.ConvertPayloadFromMap(result.Payload)
 	if payload.DoclingMarkdownObjectKey != "docs/doc.md" {
@@ -796,11 +797,14 @@ func TestHandleConvertKeepsDoclingPayloadWhenTablesDetected(t *testing.T) {
 	if payload.DoclingMarkdownBucket != "md-bucket" {
 		t.Fatalf("expected docling markdown bucket to be kept, got %s", payload.DoclingMarkdownBucket)
 	}
-	if !payload.ExtractTables {
-		t.Fatalf("expected extract_tables flag to be true when tables are detected")
-	}
 	if payload.TableCount != 2 {
 		t.Fatalf("expected table count propagated, got %d", payload.TableCount)
+	}
+	if !reflect.DeepEqual(payload.TablePages, []int32{1, 2}) {
+		t.Fatalf("expected table pages propagated, got %v", payload.TablePages)
+	}
+	if payload.ExtractTables {
+		t.Fatalf("expected extract_tables to stay false; router decides based on detection data")
 	}
 	if payload.ConversionStrategy != domain.ConversionStrategyDoclingWithTables {
 		t.Fatalf("expected conversion strategy to stay docling_with_tables, got %s", payload.ConversionStrategy)
@@ -843,6 +847,12 @@ func TestHandleConvertMarksDoclingWithoutDetectedTables(t *testing.T) {
 	if payload.ExtractTables {
 		t.Fatalf("expected extract_tables to remain false without detected tables")
 	}
+	if payload.TableCount != 0 {
+		t.Fatalf("expected table count to stay zero when none are detected, got %d", payload.TableCount)
+	}
+	if len(payload.TablePages) != 0 {
+		t.Fatalf("expected no table pages when none are detected, got %v", payload.TablePages)
+	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
 	}
@@ -879,15 +889,18 @@ func TestHandleConvertEnablesTablesWhenMetadataArrivesWithoutStrategy(t *testing
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(repo.statusUpdates) != 0 {
-		t.Fatalf("expected document status to remain unchanged until tables are merged, got %v", repo.statusUpdates)
+	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document to be marked converted, got %v", repo.statusUpdates)
 	}
 	payload := domain.ConvertPayloadFromMap(result.Payload)
-	if !payload.ExtractTables {
-		t.Fatalf("expected extract_tables to be enabled based on detected tables")
-	}
 	if payload.TableCount != 3 {
 		t.Fatalf("expected table count propagated, got %d", payload.TableCount)
+	}
+	if !reflect.DeepEqual(payload.TablePages, []int32{1, 2, 3}) {
+		t.Fatalf("expected table pages propagated, got %v", payload.TablePages)
+	}
+	if payload.ExtractTables {
+		t.Fatalf("expected extract_tables to stay false; router decides based on detection data")
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)

@@ -406,24 +406,25 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 		payload.DoclingStatus = status
 	}
 	payload.TableMetadata = payload.TableMetadata.Merge(result.TableMetadata)
-	if result.TableCount > 0 {
+	if result.TableCount > 0 || !result.TableMetadata.IsEmpty() {
+		payload.TableMetadata = result.TableMetadata
 		payload.TableCount = result.TableCount
+	} else {
+		payload.TableMetadata = domain.TableMetadata{}
+		payload.TableCount = 0
 	}
 	if len(result.TablePages) > 0 {
 		payload.TablePages = append([]int32(nil), result.TablePages...)
+	} else {
+		payload.TablePages = nil
 	}
-	hasDetectedTables := false
-	if count, pages := payload.TableInfo(); count > 0 || len(pages) > 0 {
-		hasDetectedTables = true
-		if count > 0 {
-			payload.TableCount = int32(count)
-		}
-		if len(pages) > 0 {
-			payload.TablePages = pages
-		}
-	}
-	if hasDetectedTables && (payload.ConversionStrategy == "" || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables || payload.ConversionStrategy == domain.ConversionStrategyTablesOnly) {
-		payload.ExtractTables = true
+
+	if count, pages := payload.TableInfo(); count > 0 {
+		payload.TableCount = int32(count)
+		payload.TablePages = pages
+	} else {
+		payload.TableCount = 0
+		payload.TablePages = nil
 	}
 	if payload.DoclingMarkdownBucket == "" {
 		payload.DoclingMarkdownBucket = payload.MarkdownBucket
@@ -431,7 +432,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if payload.DoclingMarkdownObjectKey == "" {
 		payload.DoclingMarkdownObjectKey = payload.MarkdownObjectKey
 	}
-	requiresTablesChain := payload.ExtractTables || (payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables && hasDetectedTables)
+	requiresTablesChain := payload.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyTablesOnly
 
 	if !result.Ready {
 		next := time.Now().Add(w.retryDelay)
