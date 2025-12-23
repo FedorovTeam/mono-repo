@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 )
 
 type KnowledgeDocument struct {
@@ -18,6 +19,7 @@ type KnowledgeDocument struct {
 	RepositoryOwner *string                 `json:"repositoryOwner,omitempty"`
 	Branch          string                  `json:"branch"`
 	Path            string                  `json:"path"`
+	CreatedAt       time.Time               `json:"createdAt"`
 	Status          KnowledgeDocumentStatus `json:"status"`
 	JobID           *string                 `json:"jobId,omitempty"`
 	Error           *string                 `json:"error,omitempty"`

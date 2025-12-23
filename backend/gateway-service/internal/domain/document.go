@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // DocumentStatus описывает статус документа.
 type DocumentStatus string
@@ -30,6 +33,7 @@ type Document struct {
 	RepositoryOwner    *string
 	Branch             string
 	Path               string
+	CreatedAt          time.Time
 	Status             DocumentStatus
 	JobID              *string
 	Error              *string

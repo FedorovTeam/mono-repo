@@ -25,6 +25,7 @@ func mapDocument(doc *domain.Document) *model.KnowledgeDocument {
 		Repository: doc.Repository,
 		Branch:     doc.Branch,
 		Path:       doc.Path,
+		CreatedAt:  doc.CreatedAt,
 		Status:     modelStatusFromDomain(doc.Status),
 	}
 

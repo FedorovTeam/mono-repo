@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
@@ -49,6 +50,7 @@ type ComplexityRoot struct {
 	KnowledgeDocument struct {
 		Branch             func(childComplexity int) int
 		ConversionStrategy func(childComplexity int) int
+		CreatedAt          func(childComplexity int) int
 		Error              func(childComplexity int) int
 		ExtractTables      func(childComplexity int) int
 		FileName           func(childComplexity int) int
@@ -120,6 +122,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.KnowledgeDocument.ConversionStrategy(childComplexity), true
+	case "KnowledgeDocument.createdAt":
+		if e.complexity.KnowledgeDocument.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.KnowledgeDocument.CreatedAt(childComplexity), true
 	case "KnowledgeDocument.error":
 		if e.complexity.KnowledgeDocument.Error == nil {
 			break
@@ -350,7 +358,9 @@ func (ec *executionContext) introspectType(name string) (*introspection.Type, er
 }
 
 var sources = []*ast.Source{
-	{Name: "../schema.graphqls", Input: `"""Запросы статуса и списка документов знаний."""
+	{Name: "../schema.graphqls", Input: `scalar Timestamp
+
+"""Запросы статуса и списка документов знаний."""
 type Query {
   """Возвращает документ и его текущий статус по идентификатору Temporal/БД."""
   knowledgeDocument(id: ID!): KnowledgeDocument
@@ -384,6 +394,7 @@ type KnowledgeDocument {
   repositoryOwner: String
   branch: String!
   path: String!
+  createdAt: Timestamp!
   status: KnowledgeDocumentStatus!
   jobId: String
   error: String
@@ -712,6 +723,35 @@ func (ec *executionContext) fieldContext_KnowledgeDocument_path(_ context.Contex
 	return fc, nil
 }
 
+func (ec *executionContext) _KnowledgeDocument_createdAt(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_KnowledgeDocument_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTimestamp2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_KnowledgeDocument_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "KnowledgeDocument",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Timestamp does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _KnowledgeDocument_status(ctx context.Context, field graphql.CollectedField, obj *model.KnowledgeDocument) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -893,6 +933,8 @@ func (ec *executionContext) fieldContext_KnowledgeDocumentConnection_nodes(_ con
 				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
 			case "path":
 				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_KnowledgeDocument_createdAt(ctx, field)
 			case "status":
 				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
 			case "jobId":
@@ -1025,6 +1067,8 @@ func (ec *executionContext) fieldContext_Query_knowledgeDocument(ctx context.Con
 				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
 			case "path":
 				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_KnowledgeDocument_createdAt(ctx, field)
 			case "status":
 				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
 			case "jobId":
@@ -1244,6 +1288,8 @@ func (ec *executionContext) fieldContext_UploadKnowledgeDocumentPayload_document
 				return ec.fieldContext_KnowledgeDocument_branch(ctx, field)
 			case "path":
 				return ec.fieldContext_KnowledgeDocument_path(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_KnowledgeDocument_createdAt(ctx, field)
 			case "status":
 				return ec.fieldContext_KnowledgeDocument_status(ctx, field)
 			case "jobId":
@@ -2955,6 +3001,11 @@ func (ec *executionContext) _KnowledgeDocument(ctx context.Context, sel ast.Sele
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "createdAt":
+			out.Values[i] = ec._KnowledgeDocument_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "status":
 			out.Values[i] = ec._KnowledgeDocument_status(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -3702,6 +3753,15 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNTimestamp2timeᚐTime(ctx context.Context, v any) (time.Time, error) {
+	res, err := ec.unmarshalInputTimestamp(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNTimestamp2timeᚐTime(ctx context.Context, sel ast.SelectionSet, v time.Time) graphql.Marshaler {
+	return ec._Timestamp(ctx, sel, &v)
 }
 
 func (ec *executionContext) unmarshalNUploadKnowledgeDocumentInput2backendᚑgatewayᚑserviceᚋgraphᚋmodelᚐUploadKnowledgeDocumentInput(ctx context.Context, v any) (model.UploadKnowledgeDocumentInput, error) {
