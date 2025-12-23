@@ -10,6 +10,14 @@ type correlationKey struct{}
 
 type correlationLogKey struct{}
 type apiKey struct{}
+type userKey struct{}
+
+// User описывает извлечённые из токена данные.
+type User struct {
+	ID     string
+	Email  string
+	Groups []string
+}
 
 // WithCorrelationID сохраняет correlation-id в контексте.
 func WithCorrelationID(ctx context.Context, id string) context.Context {
@@ -58,4 +66,17 @@ func APIKey(ctx context.Context) string {
 		return value
 	}
 	return ""
+}
+
+// WithUser сохраняет данные пользователя в контекст.
+func WithUser(ctx context.Context, user User) context.Context {
+	return context.WithValue(ctx, userKey{}, user)
+}
+
+// UserFromContext возвращает данные пользователя, если они есть.
+func UserFromContext(ctx context.Context) *User {
+	if value, ok := ctx.Value(userKey{}).(User); ok {
+		return &value
+	}
+	return nil
 }

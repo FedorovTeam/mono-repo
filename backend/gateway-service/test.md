@@ -7,19 +7,19 @@
 
 ## Готовые переменные
 ```
-API_KEY=secret
+API_KEY=secret # используется, если включён security.apiKey.enabled
 HOST=http://localhost:8080/query
 DOC_ID=<заполнить после загрузки>
 ```
 
-Все GraphQL запросы и мутации требуют заголовок `X-API-Key`. Необязательный `X-Correlation-ID` будет возвращён в ответе и попадёт в gRPC-метаданные downstream-сервисов.
+Все GraphQL запросы и мутации требуют заголовок `Authorization: Bearer <jwt>` (issuer `https://auth.tech.fedorov-team.tech/application/o/console/`, audience `L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF`). При включённом API-ключе допускается `X-API-Key`. Необязательный `X-Correlation-ID` будет возвращён в ответе и попадёт в gRPC-метаданные downstream-сервисов.
 
 ## Запросы GraphQL (curl)
 ### Загрузка документа и получение signed URL
 ```
 curl -X POST "$HOST" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "Authorization: Bearer <token>" \
   -H "X-Correlation-ID: demo-corr-id" \
   -d '{
     "query": "mutation Upload($input: UploadKnowledgeDocumentInput!){ uploadKnowledgeDocument(input:$input){ uploadUrl uploadMethod document { id status jobId } } }",
@@ -49,7 +49,7 @@ storage-service возвращает `bucket`, `objectKey` и `expiresInSeconds`
 ```
 curl -X POST "$HOST" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "Authorization: Bearer <token>" \
   -d '{"query": "{ knowledgeDocument(id: \"'$DOC_ID'\"){ id status } }"}'
 ```
 
@@ -57,7 +57,7 @@ curl -X POST "$HOST" \
 ```
 curl -X POST "$HOST" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
+  -H "Authorization: Bearer <token>" \
   -d '{"query": "{ knowledgeDocuments(pagination:{limit:10,offset:0}){ nodes { id status fileName } totalCount } }"}'
 ```
 
@@ -81,4 +81,3 @@ curl -X POST "http://localhost:8080/internal/storage/uploaded" \
     }]
   }'
 ```
-

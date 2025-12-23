@@ -38,6 +38,7 @@ type Server struct {
 	uploadConfirmationUC usecase.UploadConfirmationHandler
 	otelProviders        observability.Providers
 	shutdownOTEL         func(context.Context) error
+	oidcValidator        *middleware.OIDCValidator
 }
 
 // New создаёт сервер и подключает клиентов.
@@ -78,6 +79,15 @@ func New(cfg config.Config) (*Server, error) {
 	webhookParser := webhook.NewMinIOWebhookParser()
 	uploadConfirmationUseCase := usecase.NewUploadConfirmationService(webhookParser, docClient)
 
+	oidcValidator, err := middleware.NewOIDCValidator(context.Background(), middleware.OIDCConfig{
+		JWKSURL:  cfg.Security.OIDC.JWKSURL,
+		Issuer:   cfg.Security.OIDC.Issuer,
+		Audience: cfg.Security.OIDC.Audience,
+	}, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init oidc validator: %w", err)
+	}
+
 	return &Server{
 		cfg:                  cfg,
 		logger:               logger,
@@ -88,6 +98,7 @@ func New(cfg config.Config) (*Server, error) {
 		uploadConfirmationUC: uploadConfirmationUseCase,
 		otelProviders:        providers,
 		shutdownOTEL:         shutdown,
+		oidcValidator:        oidcValidator,
 	}, nil
 }
 
@@ -116,7 +127,12 @@ func (s *Server) Run(ctx context.Context) error {
 	gqlMux.Handle("/query", instrumentedHandler)
 	gqlMux.Handle("/playground", playground.Handler("GraphQL playground", "/query"))
 
-	protectedGraphQL := middleware.APIKeyMiddleware(s.cfg.Security.APIKey, s.logger)(gqlMux)
+	protectedGraphQL := middleware.AuthenticationMiddleware(
+		s.oidcValidator,
+		s.cfg.Security.APIKey.Value,
+		s.cfg.Security.APIKey.EnabledOrDefault(),
+		s.logger,
+	)(gqlMux)
 
 	mux := http.NewServeMux()
 	mux.Handle("/query", protectedGraphQL)

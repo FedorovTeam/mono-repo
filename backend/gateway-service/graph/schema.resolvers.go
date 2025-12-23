@@ -16,7 +16,7 @@ import (
 
 // UploadKnowledgeDocument is the resolver for the uploadKnowledgeDocument field.
 func (r *mutationResolver) UploadKnowledgeDocument(ctx context.Context, input model.UploadKnowledgeDocumentInput) (*model.UploadKnowledgeDocumentPayload, error) {
-	if _, err := requireAPIKey(ctx); err != nil {
+	if err := requireAuthentication(ctx); err != nil {
 		return nil, err
 	}
 
