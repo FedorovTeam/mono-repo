@@ -33,21 +33,21 @@ spec:
             - name: NEXTAUTH_SECRET
               value: "change-me"
             - name: AUTHENTIK_ISSUER
-              value: "https://authentik.fedorov-team.tech/application/o/knowledge/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/console/"
             - name: AUTHENTIK_CLIENT_ID
-              value: "knowledge-console"
+              value: "L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF"
             - name: AUTHENTIK_CLIENT_SECRET
-              value: "secret"
+              value: "lGhLYG9Usi845ndGd7R8yEVuauxMKZQYhbBVmcuaPAbewC9pUvQPH5uhSiuSGKWq8nYydBoUDNnbngr38nxiecE1qgeoO7e4nrh3carhwG89a3xoHXENDa1XIfh3sUfP"
             - name: AUTHENTIK_REDIRECT_URI
-              value: "https://console.fedorov-team.tech/api/auth/callback/authentik"
+              value: "https://gateway.tech.fedorov-team.tech/auth/sso/authentik"
             - name: AUTHENTIK_JWKS_URL
-              value: "https://authentik.fedorov-team.tech/application/o/knowledge/jwks/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/console/jwks/"
             - name: GATEWAY_URL
               value: "https://gateway.fedorov-team.tech/query"
             - name: NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL
-              value: "https://authentik.fedorov-team.tech/application/o/knowledge/end-session/"
+              value: "https://auth.tech.fedorov-team.tech/application/o/console/end-session/"
             - name: NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT
-              value: "https://console.fedorov-team.tech"
+              value: "https://gateway.tech.fedorov-team.tech/auth/sso/authentik"
             - name: NEXT_PUBLIC_DEFAULT_REPOSITORY
               value: "docs"
             - name: NEXT_PUBLIC_DEFAULT_BRANCH
