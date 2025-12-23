@@ -1,7 +1,8 @@
-import NavigationBar from "@/components/navigation-bar";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import NavigationBar from "@/components/navigation-bar";
+import AppSessionProvider from "@/components/session-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,8 +29,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white text-slate-900`}
       >
-        <NavigationBar />
-        <div className="min-h-screen pt-20">{children}</div>
+        <AppSessionProvider>
+          <NavigationBar />
+          <div className="min-h-screen pt-20">{children}</div>
+        </AppSessionProvider>
       </body>
     </html>
   );

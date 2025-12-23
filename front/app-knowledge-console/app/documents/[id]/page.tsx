@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { generateCorrelationId } from '@/lib/correlation';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -43,11 +44,6 @@ const STATUS_FLOW: KnowledgeDocumentStatus[] = [
   'CONVERTED_TO_MARKDOWN',
   'PUBLISHED_TO_GITHUB',
 ];
-
-const generateCorrelationId = () =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `corr-${Date.now()}`;
 
 const formatUploadDate = (value: string) => {
   const date = new Date(value);
@@ -99,18 +95,9 @@ export default function DocumentDetailsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL;
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY;
-
   const fetchDocument = useCallback(async () => {
     if (!documentId) {
       setError('Идентификатор документа не указан.');
-      setIsLoading(false);
-      return;
-    }
-
-    if (!gatewayUrl || !apiKey) {
-      setError('NEXT_PUBLIC_GATEWAY_URL или NEXT_PUBLIC_API_KEY не заданы.');
       setIsLoading(false);
       return;
     }
@@ -137,15 +124,19 @@ export default function DocumentDetailsPage() {
         }
       `;
 
-      const res = await fetch(gatewayUrl, {
+      const res = await fetch('/api/graphql', {
         method: 'POST',
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
           'X-Correlation-ID': generateCorrelationId(),
         },
         body: JSON.stringify({ query, variables: { id: documentId } }),
       });
+
+      if (res.status === 401) {
+        throw new Error('Сессия недействительна, войдите заново.');
+      }
 
       if (!res.ok) {
         throw new Error(`Ошибка загрузки документа: ${res.status} ${res.statusText}`);
@@ -170,7 +161,7 @@ export default function DocumentDetailsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiKey, documentId, gatewayUrl]);
+  }, [documentId]);
 
   useEffect(() => {
     fetchDocument();

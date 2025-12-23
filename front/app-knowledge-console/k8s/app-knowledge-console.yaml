@@ -28,12 +28,26 @@ spec:
             - name: http
               containerPort: 3000
           env:
-            # URL до gateway, который доступен из браузера
-            - name: NEXT_PUBLIC_GATEWAY_URL
-              value: "https://gateway.fedorov-team.tech/query"
-            # API-ключ, который gateway ждёт в X-API-Key
-            - name: NEXT_PUBLIC_API_KEY
+            - name: NEXTAUTH_URL
+              value: "https://console.fedorov-team.tech"
+            - name: NEXTAUTH_SECRET
+              value: "change-me"
+            - name: AUTHENTIK_ISSUER
+              value: "https://authentik.fedorov-team.tech/application/o/knowledge/"
+            - name: AUTHENTIK_CLIENT_ID
+              value: "knowledge-console"
+            - name: AUTHENTIK_CLIENT_SECRET
               value: "secret"
+            - name: AUTHENTIK_REDIRECT_URI
+              value: "https://console.fedorov-team.tech/api/auth/callback/authentik"
+            - name: AUTHENTIK_JWKS_URL
+              value: "https://authentik.fedorov-team.tech/application/o/knowledge/jwks/"
+            - name: GATEWAY_URL
+              value: "https://gateway.fedorov-team.tech/query"
+            - name: NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL
+              value: "https://authentik.fedorov-team.tech/application/o/knowledge/end-session/"
+            - name: NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT
+              value: "https://console.fedorov-team.tech"
             - name: NEXT_PUBLIC_DEFAULT_REPOSITORY
               value: "docs"
             - name: NEXT_PUBLIC_DEFAULT_BRANCH
