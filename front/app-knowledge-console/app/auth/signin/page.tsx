@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 
 const BENEFITS = [
   "Доступ к загрузке и просмотру документов",
@@ -11,7 +11,7 @@ const BENEFITS = [
   "Единый вход через Authentik",
 ];
 
-export default function SignInPage() {
+function SignInContent() {
   const searchParams = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
 
@@ -94,5 +94,21 @@ export default function SignInPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
+          <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
+            <p className="text-sm font-medium text-slate-800">Загружаем форму входа…</p>
+          </div>
+        </main>
+      }
+    >
+      <SignInContent />
+    </Suspense>
   );
 }

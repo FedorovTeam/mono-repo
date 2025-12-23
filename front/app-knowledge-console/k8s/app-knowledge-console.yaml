@@ -39,7 +39,7 @@ spec:
             - name: AUTHENTIK_CLIENT_SECRET
               value: "lGhLYG9Usi845ndGd7R8yEVuauxMKZQYhbBVmcuaPAbewC9pUvQPH5uhSiuSGKWq8nYydBoUDNnbngr38nxiecE1qgeoO7e4nrh3carhwG89a3xoHXENDa1XIfh3sUfP"
             - name: AUTHENTIK_REDIRECT_URI
-              value: "https://gateway.tech.fedorov-team.tech/auth/sso/authentik"
+              value: "https://console.fedorov-team.tech/api/auth/callback/authentik"
             - name: AUTHENTIK_JWKS_URL
               value: "https://auth.tech.fedorov-team.tech/application/o/console/jwks/"
             - name: GATEWAY_URL
@@ -47,7 +47,7 @@ spec:
             - name: NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL
               value: "https://auth.tech.fedorov-team.tech/application/o/console/end-session/"
             - name: NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT
-              value: "https://gateway.tech.fedorov-team.tech/auth/sso/authentik"
+              value: "https://console.fedorov-team.tech"
             - name: NEXT_PUBLIC_DEFAULT_REPOSITORY
               value: "docs"
             - name: NEXT_PUBLIC_DEFAULT_BRANCH
