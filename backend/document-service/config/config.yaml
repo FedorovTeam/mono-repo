@@ -53,7 +53,7 @@ router:
   preprocess_enabled: true
   preprocess_extensions:
     - doc
-  table_extractor_enabled: false
+  table_extractor_enabled: true
   table_extractor_extensions: []
   artifacts_bucket: "knowledge-md"
   artifacts_prefix_template: "tables/{{ .DocumentID }}/{{ .QueueID }}/"
