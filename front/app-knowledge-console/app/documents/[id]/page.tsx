@@ -1,9 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { signIn } from 'next-auth/react';
 import { useParams } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
+import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -94,6 +96,7 @@ export default function DocumentDetailsPage() {
   const [document, setDocument] = useState<KnowledgeDocument | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [manualLoginRequired, setManualLoginRequired] = useState(false);
 
   const fetchDocument = useCallback(async () => {
     if (!documentId) {
@@ -105,6 +108,7 @@ export default function DocumentDetailsPage() {
     try {
       setIsLoading(true);
       setError(null);
+      setManualLoginRequired(false);
 
       const query = `
         query KnowledgeDocument($id: ID!) {
@@ -124,7 +128,7 @@ export default function DocumentDetailsPage() {
         }
       `;
 
-      const res = await fetch('/api/graphql', {
+      const res = await fetchWithAuth('/api/graphql', {
         method: 'POST',
         cache: 'no-store',
         headers: {
@@ -133,10 +137,6 @@ export default function DocumentDetailsPage() {
         },
         body: JSON.stringify({ query, variables: { id: documentId } }),
       });
-
-      if (res.status === 401) {
-        throw new Error('Сессия недействительна, войдите заново.');
-      }
 
       if (!res.ok) {
         throw new Error(`Ошибка загрузки документа: ${res.status} ${res.statusText}`);
@@ -156,6 +156,14 @@ export default function DocumentDetailsPage() {
 
       setDocument(doc);
     } catch (err) {
+      if (err instanceof SilentSignInError) {
+        setManualLoginRequired(true);
+        const friendlyMessage = err.interactionRequired
+          ? 'Сессия истекла. Войдите вручную, чтобы продолжить.'
+          : err.message;
+        setError(friendlyMessage);
+        return;
+      }
       console.error(err);
       setError('Не удалось загрузить данные документа. Попробуйте обновить страницу.');
     } finally {
@@ -192,6 +200,21 @@ export default function DocumentDetailsPage() {
 
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
+        )}
+
+        {manualLoginRequired && (
+          <div className="flex flex-col gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+            <p>Silent sign-in потребовал взаимодействие. Войдите вручную, чтобы продолжить.</p>
+            <div>
+              <button
+                type="button"
+                onClick={() => signIn('authentik', { callbackUrl: window.location.href })}
+                className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100"
+              >
+                Войти вручную
+              </button>
+            </div>
+          </div>
         )}
 
         <div className="grid gap-4 lg:grid-cols-3">

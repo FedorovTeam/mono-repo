@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { signIn } from 'next-auth/react';
 import { generateCorrelationId } from '@/lib/correlation';
+import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
 
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -70,6 +72,7 @@ export default function HomePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [manualLoginRequired, setManualLoginRequired] = useState(false);
 
   const repository = process.env.NEXT_PUBLIC_DEFAULT_REPOSITORY ?? 'docs';
   const branch = process.env.NEXT_PUBLIC_DEFAULT_BRANCH ?? 'main';
@@ -144,6 +147,7 @@ export default function HomePage() {
     e.preventDefault();
     setMessage(null);
     setValidationError(null);
+    setManualLoginRequired(false);
 
     if (!file) {
       setMessage('Выберите файл');
@@ -185,7 +189,7 @@ export default function HomePage() {
         },
       };
 
-      const gqlResp = await fetch('/api/graphql', {
+      const gqlResp = await fetchWithAuth('/api/graphql', {
         method: 'POST',
         cache: 'no-store',
         headers: {
@@ -195,9 +199,6 @@ export default function HomePage() {
         body: JSON.stringify({ query: mutation, variables }),
       });
 
-      if (gqlResp.status === 401) {
-        throw new Error('Сессия недействительна, войдите заново.');
-      }
       if (!gqlResp.ok) {
         throw new Error(`Ошибка gateway: ${gqlResp.status} ${gqlResp.statusText}`);
       }
@@ -245,6 +246,15 @@ export default function HomePage() {
       setMessage(`Файл загружен. Document ID: ${document.id}, статус: ${document.status}`);
     } catch (err: unknown) {
       console.error(err);
+      if (err instanceof SilentSignInError) {
+        setManualLoginRequired(err.interactionRequired);
+        const friendlyMessage = err.interactionRequired
+          ? 'Сессия истекла. Войдите вручную, чтобы продолжить загрузку.'
+          : err.message;
+        setStatus('error');
+        setMessage(friendlyMessage);
+        return;
+      }
       setStatus('error');
       const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
       setMessage(errorMessage);
@@ -394,6 +404,21 @@ export default function HomePage() {
               }`}
             >
               {message}
+            </div>
+          )}
+
+          {manualLoginRequired && (
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => signIn('authentik', { callbackUrl: window.location.href })}
+                className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100"
+              >
+                Войти вручную
+              </button>
+              <p className="text-xs text-slate-600">
+                Silent sign-in потребовал взаимодействие. Нажмите, чтобы открыть форму входа.
+              </p>
             </div>
           )}
 
