@@ -49,6 +49,10 @@ func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTable
 		zap.String("source_url", req.GetSourceUrl()),
 		zap.String("original_bucket", req.GetOriginalBucket()),
 		zap.String("original_object_key", req.GetOriginalObjectKey()),
+		zap.String("artifacts_bucket", req.GetArtifactsBucket()),
+		zap.String("artifacts_prefix", req.GetArtifactsPrefix()),
+		zap.String("markdown_bucket", req.GetMarkdownBucket()),
+		zap.String("markdown_object_key", req.GetMarkdownObjectKey()),
 		zap.Int("request_size", proto.Size(req)),
 	}
 	h.logger.Debug("incoming gRPC request", fields...)
@@ -60,6 +64,8 @@ func (h *Handler) ExtractTablesFromPdf(ctx context.Context, req *pb.ExtractTable
 		SourceURL:         req.GetSourceUrl(),
 		ArtifactsBucket:   req.GetArtifactsBucket(),
 		ArtifactsPrefix:   req.GetArtifactsPrefix(),
+		MarkdownBucket:    req.GetMarkdownBucket(),
+		MarkdownObjectKey: req.GetMarkdownObjectKey(),
 		WaitForResult:     req.GetWaitForResult(),
 		CorrelationID:     correlationID,
 	})

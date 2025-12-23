@@ -15,7 +15,7 @@ sequenceDiagram
     participant MN as MinIO
     participant PP as Poppler (pdfinfo/pdftotext)
 
-    CL->>TE: ExtractTablesFromPdf(document_id, original_bucket, original_object_key,<br/>artifacts_bucket?, artifacts_prefix?, options?, wait_for_result?)
+    CL->>TE: ExtractTablesFromPdf(document_id, original_bucket, original_object_key,<br/>artifacts_bucket?, artifacts_prefix?, markdown_bucket/object_key?, options?, wait_for_result?)
     TE-->>TE: correlation_id из gRPC metadata или EnsureCorrelationID()
     TE-->>TE: Validate(document_id, original_*, extension=pdf, artifacts_bucket resolved, queue_limit)
     TE->>PG: GetLatestByDocument(document_id)
@@ -51,7 +51,7 @@ sequenceDiagram
                 WK-->>WK: ParseTables + Normalize + Render (JSON/MD) + Manifest
                 WK->>MN: PUT artifacts_prefix/tables.raw.json
                 WK->>MN: PUT artifacts_prefix/tables.normalized.json
-                WK->>MN: PUT artifacts_prefix/tables.md
+                WK->>MN: PUT markdown_bucket/object_key (или artifacts_prefix/tables.md)
                 WK->>MN: PUT artifacts_prefix/manifest.json
                 WK->>PG: MarkDone(status=done, finished_at, result_meta)
             end

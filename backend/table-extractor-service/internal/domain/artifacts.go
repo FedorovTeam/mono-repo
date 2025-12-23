@@ -3,6 +3,19 @@ package domain
 import "path"
 
 func BuildArtifacts(bucket, prefix string) TableArtifacts {
+	return BuildArtifactsWithMarkdown(bucket, prefix, ArtifactLocation{})
+}
+
+func BuildArtifactsWithMarkdown(bucket, prefix string, markdown ArtifactLocation) TableArtifacts {
+	markdownBucket := markdown.Bucket
+	if markdownBucket == "" {
+		markdownBucket = bucket
+	}
+	markdownKey := markdown.ObjectKey
+	if markdownKey == "" {
+		markdownKey = path.Join(prefix, "tables.md")
+	}
+
 	return TableArtifacts{
 		RawJSON: ArtifactLocation{
 			Bucket:    bucket,
@@ -13,8 +26,8 @@ func BuildArtifacts(bucket, prefix string) TableArtifacts {
 			ObjectKey: path.Join(prefix, "tables.normalized.json"),
 		},
 		Markdown: ArtifactLocation{
-			Bucket:    bucket,
-			ObjectKey: path.Join(prefix, "tables.md"),
+			Bucket:    markdownBucket,
+			ObjectKey: markdownKey,
 		},
 		Manifest: ArtifactLocation{
 			Bucket:    bucket,

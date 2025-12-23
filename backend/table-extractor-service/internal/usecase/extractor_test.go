@@ -58,6 +58,52 @@ func TestSubmitExtractionIdempotencyByDocument(t *testing.T) {
 	require.Equal(t, job.CorrelationID, secondJob.CorrelationID, "keeps original correlation id")
 }
 
+func TestSubmitExtractionUsesPrefixTemplateAndMarkdownOverride(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	fixedID := uuid.MustParse("00000000-0000-0000-0000-00000000aaaa")
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue:       repo,
+		IDGenerator: fixedIDGenerator{id: fixedID},
+	}, Config{
+		QueueLimit:              10,
+		DefaultArtifactsBucket:  "artifacts",
+		DefaultArtifactsPrefix:  "tables",
+		ArtifactsPrefixTemplate: "{{ .DefaultPrefix }}/{{ .DocumentID }}/custom/{{ .QueueID }}",
+	}, nil)
+
+	job, err := uc.SubmitExtraction(context.Background(), SubmitExtractionRequest{
+		DocumentID:        "doc-template",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "path/to.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "custom/path.md",
+		CorrelationID:     "corr-template",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "tables/doc-template/custom/"+fixedID.String(), job.ArtifactsPrefix)
+	require.Equal(t, "md-bucket", job.Artifacts.Markdown.Bucket)
+	require.Equal(t, "custom/path.md", job.Artifacts.Markdown.ObjectKey)
+}
+
+func TestSubmitExtractionValidatesMarkdownOverride(t *testing.T) {
+	repo := memory.NewInMemoryRepository()
+	uc := NewTableExtractorUseCase(Dependencies{
+		Queue: repo,
+	}, Config{
+		DefaultArtifactsBucket: "artifacts",
+		DefaultArtifactsPrefix: "tables",
+	}, nil)
+
+	_, err := uc.SubmitExtraction(context.Background(), SubmitExtractionRequest{
+		DocumentID:        "doc-markdown",
+		OriginalBucket:    "bucket",
+		OriginalObjectKey: "path/to.pdf",
+		MarkdownBucket:    "md-only",
+		CorrelationID:     "corr-invalid-md",
+	})
+	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
 func TestSubmitExtractionValidatesPdfExtension(t *testing.T) {
 	repo := memory.NewInMemoryRepository()
 	uc := NewTableExtractorUseCase(Dependencies{

@@ -4,7 +4,7 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 
 ## Возможности
 
-- gRPC метод `ExtractTablesFromPdf` (контракт `proto/backend/tableextractor/v1/table_extractor.proto`) принимает `document_id` и путь к исходному PDF (`original_bucket`/`original_object_key`), ставит задачу в очередь `table_extraction_queue` и возвращает `queue_id`, `status=pending`, путь артефактов и `correlation_id`.
+- gRPC метод `ExtractTablesFromPdf` (контракт `proto/backend/tableextractor/v1/table_extractor.proto`) принимает `document_id` и путь к исходному PDF (`original_bucket`/`original_object_key`), ставит задачу в очередь `table_extraction_queue` и возвращает `queue_id`, `status=pending`, путь артефактов и `correlation_id`. Для Markdown можно передать отдельный bucket/key (`markdown_bucket`/`markdown_object_key`), чтобы складывать итоговые таблицы отдельно от остальных артефактов.
 - Идемпотентность по `document_id`: повторный вызов возвращает существующую **последнюю** задачу не в статусе `failed` без создания дублей и возвращает исходный `correlation_id`.
 - Проверка переполнения очереди (`service.queue_limit`): `ResourceExhausted`, если `pending/processing` достигли лимита; `service.max_workers` ограничивает только параллелизм фоновых воркеров.
 - Воркер в фоне:
@@ -43,7 +43,7 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 - `service.processing_timeout` — TTL обработки одной задачи (используется maintenance-циклом).
 - `service.retry.*` — политика повторов (кол-во попыток, `backoff_interval`, `max_backoff`).
 - `service.cleanup_retention` — TTL для `done/failed` записей (удаление/архив).
-- `minio.*` — endpoint/creds для MinIO + `artifacts_bucket` и `default_artifacts_prefix` по умолчанию.
+- `minio.*` — endpoint/creds для MinIO + `artifacts_bucket`, `default_artifacts_prefix` по умолчанию и `artifacts_prefix_template` (`{{ .DefaultPrefix }}/{{ .DocumentID }}/{{ .QueueID }}` по умолчанию).
 - `database.driver` / `database.dsn` — `postgres` или `sqlite`, DSN строки и параметры пула.
 - `storage.*` — таймауты HTTP-клиента к MinIO (`dial_timeout`, `read_write_timeout`, `operation_timeout`).
 - `extractor.mode` — режим извлечения для poppler (`layout` / `bbox`); от него зависит аргумент `pdftotext` (`-layout` или `-bbox`). `extractor.detect_voting_tables` — включает детектор протоколов и принудительно переводит `pdftotext` в `-bbox`, чтобы собрать координаты колонок/галочек.
@@ -64,8 +64,8 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 
 - **ExtractTablesFromPdf** — постановка задачи в очередь.
   - Обязательные поля: `document_id`, `original_bucket`, `original_object_key` (или `source_url` вместо пары bucket/object).
-  - Опциональные поля: `artifacts_bucket` (по умолчанию `minio.artifacts_bucket`), `artifacts_prefix` (по умолчанию `minio.default_artifacts_prefix/<document_id>/<queue_id>`), `correlation_id` (перезаписывает сгенерированный), `wait_for_result` (пока не используется — метод всегда возвращает сразу после enqueue).
-  - Ответ: `job.queue_id`, `status` (`pending|processing|done|failed|failed_retryable`), итоговые bucket/prefix, `correlation_id`.
+  - Опциональные поля: `artifacts_bucket` (по умолчанию `minio.artifacts_bucket`), `artifacts_prefix` (по умолчанию генерируется из `minio.artifacts_prefix_template` или `minio.default_artifacts_prefix/<document_id>/<queue_id>`), `markdown_bucket`/`markdown_object_key` (для сохранения `tables.md` в отдельное место), `correlation_id` (перезаписывает сгенерированный), `wait_for_result` (пока не используется — метод всегда возвращает сразу после enqueue).
+  - Ответ: `job.queue_id`, `status` (`pending|processing|done|failed|failed_retryable`), итоговые bucket/prefix, `artifacts` (с учётом кастомного пути для Markdown), `correlation_id`.
 - **GetTableExtractionJob** — получение статуса по `queue_id`.
   - Возвращает статус, `attempts`, `status_reason/error_code`, `artifacts` с готовыми путями, `created_at/updated_at`, `correlation_id`.
 
@@ -75,6 +75,7 @@ Table Extractor Service — gRPC-сервис для **детерминиров�
 
 - Основная таблица: `table_extraction_queue` (PostgreSQL/SQLite), миграции лежат в `db/migrations`.
 - Статусы: `pending → processing → done/failed/failed_retryable`.
+- Поля: `queue_id` (PK), `document_id`, `original_bucket/key`, `artifacts_bucket/prefix`, `markdown_bucket/object_key` (опционально), `status`, `attempts`, `error`, `status_reason`, `next_run_at`, `created_at/updated_at/finished_at`, `correlation_id`.
 - Контроль нагрузки:
   - `service.queue_limit` — верхняя граница активных задач (`pending/processing`); при превышении вернётся `ResourceExhausted`.
   - `service.batch_size` — размер выборки задач за проход воркера, `service.max_workers` — параллелизм.

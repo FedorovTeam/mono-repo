@@ -29,7 +29,7 @@ type TableExtractionJobAggregate struct {
 
 func NewTableExtractionJobAggregate(job TableExtractionJob) TableExtractionJobAggregate {
 	if job.Artifacts == (TableArtifacts{}) {
-		job.Artifacts = BuildArtifacts(job.ArtifactsBucket, job.ArtifactsPrefix)
+		job.Artifacts = BuildArtifactsWithMarkdown(job.ArtifactsBucket, job.ArtifactsPrefix, job.MarkdownLocation)
 	}
 	return TableExtractionJobAggregate{job: job}
 }

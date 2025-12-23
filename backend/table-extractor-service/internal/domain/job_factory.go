@@ -19,8 +19,9 @@ type NewTableExtractionJobParams struct {
 	LocalPath  string
 	Original   ArtifactLocation
 
-	ArtifactsBucket string
-	ArtifactsPrefix string
+	ArtifactsBucket  string
+	ArtifactsPrefix  string
+	MarkdownLocation ArtifactLocation
 
 	CorrelationID string
 	CreatedAt     time.Time
@@ -49,12 +50,23 @@ func NewTableExtractionJob(params NewTableExtractionJobParams) (TableExtractionJ
 		Original:        params.Original,
 		ArtifactsBucket: artifactsBucket,
 		ArtifactsPrefix: artifactsPrefix,
-		Artifacts:       BuildArtifacts(artifactsBucket, artifactsPrefix),
-		Status:          StatusPending,
-		Attempts:        0,
-		CorrelationID:   strings.TrimSpace(params.CorrelationID),
-		CreatedAt:       createdAt,
-		UpdatedAt:       createdAt,
+		MarkdownLocation: ArtifactLocation{
+			Bucket:    strings.TrimSpace(params.MarkdownLocation.Bucket),
+			ObjectKey: strings.TrimSpace(params.MarkdownLocation.ObjectKey),
+		},
+		Artifacts: BuildArtifactsWithMarkdown(
+			artifactsBucket,
+			artifactsPrefix,
+			ArtifactLocation{
+				Bucket:    strings.TrimSpace(params.MarkdownLocation.Bucket),
+				ObjectKey: strings.TrimSpace(params.MarkdownLocation.ObjectKey),
+			},
+		),
+		Status:        StatusPending,
+		Attempts:      0,
+		CorrelationID: strings.TrimSpace(params.CorrelationID),
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
 	}
 
 	if err := job.Validate(); err != nil {
@@ -86,6 +98,9 @@ func (j TableExtractionJob) Validate() error {
 	}
 	if strings.TrimSpace(j.ArtifactsPrefix) == "" {
 		return fmt.Errorf("%w: artifacts_prefix is required", ErrInvalidJob)
+	}
+	if (j.MarkdownLocation.Bucket == "") != (j.MarkdownLocation.ObjectKey == "") {
+		return fmt.Errorf("%w: markdown_bucket and markdown_object_key must be set together", ErrInvalidJob)
 	}
 	if j.Artifacts == (TableArtifacts{}) {
 		return fmt.Errorf("%w: artifacts must be initialized", ErrInvalidJob)

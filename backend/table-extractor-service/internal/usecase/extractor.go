@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,8 @@ type SubmitExtractionRequest struct {
 	LocalPath         string
 	ArtifactsBucket   string
 	ArtifactsPrefix   string
+	MarkdownBucket    string
+	MarkdownObjectKey string
 	WaitForResult     bool
 	CorrelationID     string
 }
@@ -42,10 +45,11 @@ type SubmitExtractionRequest struct {
 type ExtractTablesRequest = SubmitExtractionRequest
 
 type Config struct {
-	QueueLimit             int
-	DefaultArtifactsBucket string
-	DefaultArtifactsPrefix string
-	AcquireBatchSize       int
+	QueueLimit              int
+	DefaultArtifactsBucket  string
+	DefaultArtifactsPrefix  string
+	ArtifactsPrefixTemplate string
+	AcquireBatchSize        int
 }
 
 type TableExtractorUseCase struct {
@@ -109,6 +113,9 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 	if err := uc.validateSources(req); err != nil {
 		return domain.TableExtractionJob{}, err
 	}
+	if err := uc.validateMarkdownLocation(req); err != nil {
+		return domain.TableExtractionJob{}, err
+	}
 	if !uc.isPDF(req) {
 		return domain.TableExtractionJob{}, fmt.Errorf("%w: only PDF documents are supported", ErrInvalidArgument)
 	}
@@ -133,9 +140,9 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 	}
 
 	jobID := uc.idGen.New()
-	prefix := req.ArtifactsPrefix
-	if prefix == "" {
-		prefix = path.Join(uc.cfg.DefaultArtifactsPrefix, req.DocumentID, jobID.String())
+	prefix, err := uc.resolveArtifactsPrefix(req, jobID)
+	if err != nil {
+		return domain.TableExtractionJob{}, err
 	}
 
 	job, err := domain.NewTableExtractionJob(domain.NewTableExtractionJobParams{
@@ -146,8 +153,12 @@ func (uc *TableExtractorUseCase) SubmitExtraction(ctx context.Context, req Submi
 		Original:        domain.ArtifactLocation{Bucket: req.OriginalBucket, ObjectKey: req.OriginalObjectKey},
 		ArtifactsBucket: artifactsBucket,
 		ArtifactsPrefix: prefix,
-		CorrelationID:   correlationID,
-		CreatedAt:       now,
+		MarkdownLocation: domain.ArtifactLocation{
+			Bucket:    strings.TrimSpace(req.MarkdownBucket),
+			ObjectKey: strings.TrimSpace(req.MarkdownObjectKey),
+		},
+		CorrelationID: correlationID,
+		CreatedAt:     now,
 	})
 	if err != nil {
 		return domain.TableExtractionJob{}, fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
@@ -460,6 +471,17 @@ func (uc *TableExtractorUseCase) validateSources(req SubmitExtractionRequest) er
 	return nil
 }
 
+func (uc *TableExtractorUseCase) validateMarkdownLocation(req SubmitExtractionRequest) error {
+	hasBucket := strings.TrimSpace(req.MarkdownBucket) != ""
+	hasKey := strings.TrimSpace(req.MarkdownObjectKey) != ""
+
+	if hasBucket != hasKey {
+		return fmt.Errorf("%w: provide both markdown_bucket and markdown_object_key", ErrInvalidArgument)
+	}
+
+	return nil
+}
+
 func (uc *TableExtractorUseCase) isPDF(req SubmitExtractionRequest) bool {
 	ext := extractExtension(req.OriginalObjectKey)
 	if ext == "" && req.SourceURL != "" {
@@ -485,6 +507,55 @@ func extractExtension(value string) string {
 		clean = clean[:idx]
 	}
 	return strings.ToLower(strings.TrimPrefix(path.Ext(clean), "."))
+}
+
+func (uc *TableExtractorUseCase) resolveArtifactsPrefix(req SubmitExtractionRequest, jobID uuid.UUID) (string, error) {
+	prefix := strings.TrimSpace(req.ArtifactsPrefix)
+	if prefix != "" {
+		return prefix, nil
+	}
+
+	if strings.TrimSpace(uc.cfg.ArtifactsPrefixTemplate) != "" {
+		rendered, err := renderPrefixTemplate(uc.cfg.ArtifactsPrefixTemplate, prefixTemplateData{
+			DocumentID:    req.DocumentID,
+			QueueID:       jobID.String(),
+			DefaultPrefix: uc.cfg.DefaultArtifactsPrefix,
+		})
+		if err != nil {
+			return "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+		}
+		prefix = rendered
+	}
+
+	if prefix == "" {
+		prefix = path.Join(uc.cfg.DefaultArtifactsPrefix, req.DocumentID, jobID.String())
+	}
+	return prefix, nil
+}
+
+type prefixTemplateData struct {
+	DocumentID    string
+	QueueID       string
+	DefaultPrefix string
+}
+
+func renderPrefixTemplate(tpl string, data prefixTemplateData) (string, error) {
+	parsed, err := template.New("artifacts_prefix").Parse(tpl)
+	if err != nil {
+		return "", fmt.Errorf("parse artifacts_prefix_template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := parsed.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute artifacts_prefix_template: %w", err)
+	}
+
+	prefix := strings.TrimSpace(buf.String())
+	if prefix == "" {
+		return "", errors.New("artifacts_prefix_template produced empty prefix")
+	}
+
+	return prefix, nil
 }
 
 func (uc *TableExtractorUseCase) RestoreStuckProcessing(ctx context.Context, processingTimeout time.Duration, maxAttempts int, backoffInterval, maxBackoff time.Duration) ([]domain.TableExtractionJob, []domain.TableExtractionJob, error) {
