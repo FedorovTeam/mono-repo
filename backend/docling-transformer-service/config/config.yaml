@@ -4,7 +4,7 @@ service:
   max_workers: 1
   queue_limit: 0
   processing_timeout: 30m
-  io_timeout: 15s
+  io_timeout: 30s
 
 scheduler:
   poll_interval: 5s
