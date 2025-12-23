@@ -858,6 +858,58 @@ func TestHandleConvertMarksDoclingWithoutDetectedTables(t *testing.T) {
 	}
 }
 
+func TestHandleConvertClearsStaleTableCountsWhenNoTablesReturned(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-stale-tables",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{
+		QueueId:           "queue-docling",
+		Status:            "done",
+		MarkdownObjectKey: "docs/doc.md",
+	}}
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 2})
+	worker := NewStageWorker(repo, NewActivities(repo, nil, transformer, nil, nil, nil), domain.JobStageConvertToMarkdown, 1, time.Second, router)
+
+	jobPayload := (domain.ConvertPayload{
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		TableCount:        3,
+		TablePages:        []int32{1, 2},
+	}).ToMap()
+
+	result, err := worker.handleConvert(context.Background(), domain.ProcessingJob{TaskID: "job-docling", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Payload: jobPayload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.statusUpdates) == 0 || repo.statusUpdates[len(repo.statusUpdates)-1] != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document to be marked converted, got %v", repo.statusUpdates)
+	}
+	payload := domain.ConvertPayloadFromMap(result.Payload)
+	if payload.TableCount != 0 {
+		t.Fatalf("expected table count to be reset, got %d", payload.TableCount)
+	}
+	if len(payload.TablePages) != 0 {
+		t.Fatalf("expected table pages to be cleared, got %v", payload.TablePages)
+	}
+	if payload.ExtractTables {
+		t.Fatalf("expected extract_tables to stay disabled without detected tables")
+	}
+}
+
 func TestHandleConvertEnablesTablesWhenMetadataArrivesWithoutStrategy(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-detected",
