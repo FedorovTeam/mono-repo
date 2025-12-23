@@ -36,18 +36,18 @@ func NewMinioStorage(client *minio.Client, timeouts config.StorageConfig, logger
 
 func (s *MinioStorage) Download(ctx context.Context, bucket, objectKey string) (io.ReadCloser, error) {
 	opCtx, cancel := s.withTimeout(ctx)
-	defer cancel()
 
 	fields := s.baseFields(ctx, bucket, objectKey)
 	s.logger.Debug("start downloading object", fields...)
 	reader, err := s.client.GetObject(opCtx, bucket, objectKey, minio.GetObjectOptions{})
 	if err != nil {
+		cancel()
 		s.logger.Error("failed to download object", append(fields, zap.Error(err))...)
 		return nil, err
 	}
 
 	s.logger.Debug("object download initiated", fields...)
-	return reader, nil
+	return &cancelOnCloseReader{ReadCloser: reader, cancel: cancel}, nil
 }
 
 func (s *MinioStorage) Upload(ctx context.Context, bucket, objectKey, contentType string, content io.Reader, size int64) error {
@@ -80,4 +80,14 @@ func (s *MinioStorage) baseFields(ctx context.Context, bucket, objectKey string)
 		zap.String("object_key", objectKey),
 		zap.String("correlation_id", telemetry.CorrelationIDFromContext(ctx)),
 	}
+}
+
+type cancelOnCloseReader struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (r *cancelOnCloseReader) Close() error {
+	defer r.cancel()
+	return r.ReadCloser.Close()
 }
