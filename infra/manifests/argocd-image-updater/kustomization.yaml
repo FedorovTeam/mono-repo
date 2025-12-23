@@ -1,3 +1,6 @@
 # infra/manifests/argocd-image-updater/kustomization.yaml
 resources:
+  - rbac.yaml
+  - configmap.yaml
+  - deployment.yaml
   - secret-harbor.yaml
