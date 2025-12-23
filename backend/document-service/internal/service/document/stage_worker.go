@@ -417,6 +417,7 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if result.Ready && result.TableCount == 0 && len(result.TablePages) == 0 && result.TableMetadata.IsEmpty() {
 		payload.TableMetadata = domain.TableMetadata{}
 		payload.TablePages = nil
+		payload.TableCount = 0
 	}
 	if len(result.TablePages) > 0 {
 		payload.TablePages = append([]int32(nil), result.TablePages...)

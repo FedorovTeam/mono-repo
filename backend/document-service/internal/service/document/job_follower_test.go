@@ -248,6 +248,7 @@ func TestJobFollowerSchedulesExtractAfterDoclingTableDetection(t *testing.T) {
 					DoclingMarkdownBucket:    "docling-bucket",
 					DoclingMarkdownObjectKey: "docling/key.md",
 					ConversionStrategy:       domain.ConversionStrategyDoclingWithTables,
+					ExtractTables:            true,
 					TableCount:               2,
 					TablePages:               []int32{1, 3},
 				}).ToMap(),
@@ -291,6 +292,7 @@ func TestJobFollowerSchedulesExtractAfterDetectionWithoutStrategy(t *testing.T) 
 				Payload: (domain.ConvertPayload{
 					MarkdownBucket:    "md-bucket",
 					MarkdownObjectKey: "markdown/key.md",
+					ExtractTables:     true,
 					TableCount:        1,
 					TablePages:        []int32{2},
 				}).ToMap(),

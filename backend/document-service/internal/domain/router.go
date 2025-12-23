@@ -197,8 +197,8 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 		return true
 	}
 
-	if extractTables && detectionSatisfied {
-		return true
+	if !extractTables {
+		return false
 	}
 
 	return detectionSatisfied
