@@ -277,6 +277,16 @@ func (p ConvertPayload) ToMap() map[string]any {
 		res["conversion_strategy"] = string(p.ConversionStrategy)
 	}
 	res["extract_tables"] = p.ExtractTables
+	if p.TableCount > 0 {
+		res["table_count"] = p.TableCount
+	}
+	if len(p.TablePages) > 0 {
+		resultPages := make([]int32, 0, len(p.TablePages))
+		for _, page := range p.TablePages {
+			resultPages = append(resultPages, page)
+		}
+		res["table_pages"] = resultPages
+	}
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }

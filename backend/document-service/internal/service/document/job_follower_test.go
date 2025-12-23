@@ -237,6 +237,52 @@ func TestJobFollowerSchedulesExtractAfterConvertForDoclingStrategy(t *testing.T)
 	require.True(t, payload.ExtractTables)
 }
 
+func TestJobFollowerSchedulesExtractAfterDoclingTableDetection(t *testing.T) {
+	router := domain.NewStageRouter(domain.RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
+	repo := &followerRepo{
+		jobs: []domain.ProcessingJob{
+			{
+				TaskID:     "job-convert",
+				DocumentID: "doc-1",
+				Stage:      domain.JobStageConvertToMarkdown,
+				Status:     domain.JobStatusCompleted,
+				Payload: (domain.ConvertPayload{
+					MarkdownBucket:           "md-bucket",
+					MarkdownObjectKey:        "markdown/key.md",
+					DoclingMarkdownBucket:    "docling-bucket",
+					DoclingMarkdownObjectKey: "docling/key.md",
+					ConversionStrategy:       domain.ConversionStrategyDoclingWithTables,
+					TableCount:               2,
+					TablePages:               []int32{1, 3},
+				}).ToMap(),
+			},
+		},
+		document: &domain.Document{
+			ID:                 "doc-1",
+			Status:             domain.DocumentStatusStoredOriginal,
+			OriginalBucket:     "orig-bucket",
+			OriginalObjectKey:  "incoming/file.docx",
+			MarkdownBucket:     "md-bucket",
+			MarkdownObjectKey:  "markdown/key.md",
+			ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+		},
+	}
+
+	follower := NewJobFollower(repo, 5, time.Minute, PublishDefaults{}, router)
+
+	err := follower.reconcile(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, repo.createdJobs, 1)
+	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
+	payload := domain.ExtractTablesPayloadFromMap(repo.createdJobs[0].Payload)
+	require.Equal(t, "docling-bucket", payload.DoclingMarkdownBucket)
+	require.Equal(t, "docling/key.md", payload.DoclingMarkdownObjectKey)
+	require.Equal(t, "orig-bucket", payload.OriginalBucket)
+	require.Equal(t, "incoming/file.docx", payload.OriginalObjectKey)
+	require.True(t, payload.ExtractTables)
+}
+
 func TestPreprocessConversionForcesDocxExtension(t *testing.T) {
 	repo := &followerRepo{
 		jobs: []domain.ProcessingJob{

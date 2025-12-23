@@ -184,10 +184,15 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	}
 
 	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
-	wantsTables := extractTables || doc.ExtractTables || strategy == ConversionStrategyDoclingWithTables
+	doclingWithTables := strategy == ConversionStrategyDoclingWithTables
+	wantsTables := extractTables || doc.ExtractTables || doclingWithTables
 
 	if !wantsTables && tableCount < rules.tableDetectionMinCount {
 		return false
+	}
+
+	if doclingWithTables || tableCount >= rules.tableDetectionMinCount {
+		return true
 	}
 
 	ext := documentExtension(doc)
