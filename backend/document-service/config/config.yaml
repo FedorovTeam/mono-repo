@@ -58,6 +58,7 @@ router:
     - pdf
   artifacts_bucket: "knowledge-md"
   artifacts_prefix_template: "tables/{{ .DocumentID }}/{{ .QueueID }}/"
+  table_detection_min_count: 1
   repositories:
     - owner: "FedorovTeam"
       repository: "knowledge-base"

@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	docOutputDirPath     = "./result/"
+	docOutputDirPath     = "DOC_OUTPUT_DIR"
 	docOutputDirFlagName = "doc_output_dir"
+	docOutputDirDefault  = "./result/"
 )
 
 var (
@@ -62,7 +63,12 @@ func resolveDocOutputDir(t *testing.T) string {
 		return dir
 	}
 
-	if dir := strings.TrimSpace(docOutputDirPath); dir != "" {
+	if dir := strings.TrimSpace(os.Getenv(docOutputDirPath)); dir != "" {
+		ensureDirExists(t, dir)
+		return dir
+	}
+
+	if dir := strings.TrimSpace(docOutputDirDefault); dir != "" {
 		ensureDirExists(t, dir)
 		return dir
 	}

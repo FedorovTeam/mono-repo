@@ -404,6 +404,12 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if status := strings.TrimSpace(result.Status); status != "" {
 		payload.Status = status
 	}
+	if result.TableCount > 0 {
+		payload.TableCount = result.TableCount
+	}
+	if len(result.TablePages) > 0 {
+		payload.TablePages = append([]int32(nil), result.TablePages...)
+	}
 
 	if !result.Ready {
 		next := time.Now().Add(w.retryDelay)

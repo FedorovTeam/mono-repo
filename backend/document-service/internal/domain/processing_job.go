@@ -71,6 +71,8 @@ type ConvertPayload struct {
 	FilenameExtension        string
 	ConversionStrategy       ConversionStrategy
 	ExtractTables            bool
+	TableCount               int32
+	TablePages               []int32
 }
 
 // PreprocessPayload описывает данные для шага преобразования в DOCX.
@@ -298,6 +300,8 @@ func ConvertPayloadFromMap(payload map[string]any) ConvertPayload {
 		FilenameExtension:        stringFromMap(payload, "filename_extension"),
 		ConversionStrategy:       ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
 		ExtractTables:            boolFromMap(payload, "extract_tables"),
+		TableCount:               int32(intFromMap(payload, "table_count")),
+		TablePages:               int32SliceFromMap(payload, "table_pages"),
 	}
 }
 
@@ -510,5 +514,43 @@ func boolFromMap(payload map[string]any, key string) bool {
 		return strings.EqualFold(strings.TrimSpace(v), "true")
 	default:
 		return false
+	}
+}
+
+func int32SliceFromMap(payload map[string]any, key string) []int32 {
+	if payload == nil {
+		return nil
+	}
+	val, ok := payload[key]
+	if !ok {
+		return nil
+	}
+
+	switch v := val.(type) {
+	case []int32:
+		return append([]int32(nil), v...)
+	case []int:
+		result := make([]int32, 0, len(v))
+		for _, item := range v {
+			result = append(result, int32(item))
+		}
+		return result
+	case []any:
+		result := make([]int32, 0, len(v))
+		for _, item := range v {
+			switch cast := item.(type) {
+			case int:
+				result = append(result, int32(cast))
+			case int32:
+				result = append(result, cast)
+			case int64:
+				result = append(result, int32(cast))
+			case float64:
+				result = append(result, int32(cast))
+			}
+		}
+		return result
+	default:
+		return nil
 	}
 }

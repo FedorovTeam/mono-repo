@@ -111,9 +111,10 @@ func (e *ConversionExecutor) pollDocling(ctx context.Context, task *transformati
 	if err := e.storage.Upload(uploadCtx, task.MarkdownBucket, task.MarkdownObjectKey, mediaType, result.Content); err != nil {
 		return StateProcessing, fmt.Errorf("upload markdown: %w", err)
 	}
-	if err := e.repo.MarkDone(ctx, task.ID, task.MarkdownBucket, task.MarkdownObjectKey); err != nil {
+	if err := e.repo.MarkDone(ctx, task.ID, task.MarkdownBucket, task.MarkdownObjectKey, result.Tables); err != nil {
 		return StateProcessing, fmt.Errorf("mark done: %w", err)
 	}
+	task.TableMetadata = result.Tables
 	return StateCompleted, nil
 }
 

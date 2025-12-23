@@ -212,7 +212,7 @@ func TestQueueRepositoryPersistsDoclingIdentifiers(t *testing.T) {
 	require.NotNil(t, task.NextPollAt)
 	require.WithinDuration(t, nextPoll, *task.NextPollAt, time.Second)
 
-	require.NoError(t, repo.MarkDone(ctx, queueID, "md", "dest/other.md"))
+	require.NoError(t, repo.MarkDone(ctx, queueID, "md", "dest/other.md", nil))
 
 	task, err = repo.GetByID(ctx, queueID)
 	require.NoError(t, err)

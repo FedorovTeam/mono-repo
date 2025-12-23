@@ -65,12 +65,12 @@ func TestStageRouterUsesDoclingWithTablesStrategy(t *testing.T) {
 	if stage := router.NextStageAfterStore(doc); stage != JobStageConvertToMarkdown {
 		t.Fatalf("expected convert_to_markdown for docling_with_tables strategy, got %s", stage)
 	}
-	if !router.ShouldExtractTablesAfterConvert(doc) {
+	if !router.ShouldExtractTablesAfterConvert(doc, false, 0, nil) {
 		t.Fatalf("expected extract_tables after convert for docling_with_tables strategy")
 	}
 
 	docDocx := &Document{OriginalObjectKey: "incoming/meeting.docx", ConversionStrategy: ConversionStrategyDoclingWithTables}
-	if router.ShouldExtractTablesAfterConvert(docDocx) {
+	if router.ShouldExtractTablesAfterConvert(docDocx, false, 0, nil) {
 		t.Fatalf("expected docx to skip table extraction after convert")
 	}
 }
@@ -125,6 +125,25 @@ func TestDefaultExtractTablesPrefersConfiguredExtensions(t *testing.T) {
 	docx := &Document{OriginalObjectKey: "incoming/report.docx"}
 	if router.DefaultExtractTables(docx) {
 		t.Fatalf("expected docx not to use table extraction by default")
+	}
+}
+
+func TestStageRouterUsesDetectedTablesWhenEnabled(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 1})
+	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
+	if !router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}) {
+		t.Fatalf("expected router to schedule table extraction when tables detected")
+	}
+}
+
+func TestStageRouterHonorsDetectionThreshold(t *testing.T) {
+	router := NewStageRouter(RouterRules{TableExtractorEnabled: true, TableDetectionMinCount: 2})
+	doc := &Document{OriginalObjectKey: "incoming/with-tables.pdf"}
+	if router.ShouldExtractTablesAfterConvert(doc, false, 1, []int32{1}) {
+		t.Fatalf("expected router to skip extraction when below threshold")
+	}
+	if !router.ShouldExtractTablesAfterConvert(doc, false, 2, []int32{1}) {
+		t.Fatalf("expected router to extract when threshold met")
 	}
 }
 

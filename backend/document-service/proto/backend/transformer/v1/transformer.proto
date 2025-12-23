@@ -31,6 +31,8 @@ message ConvertDocumentToMarkdownResponse {
   string markdown_bucket = 3;
   string markdown_object_key = 4;
   string correlation_id = 5;
+  int32 table_count = 22;
+  repeated int32 table_pages = 23;
 }
 
 message ConvertDocxToMarkdownRequest {

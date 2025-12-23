@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mono-repo/docling-transformer-service/internal/domain"
 	transformations "github.com/mono-repo/docling-transformer-service/internal/domain/transformations"
 	repo "github.com/mono-repo/docling-transformer-service/internal/repository"
 	"github.com/stretchr/testify/require"
@@ -70,7 +71,7 @@ func (f *fakeQueueRepository) GetByID(context.Context, uuid.UUID) (*transformati
 	return nil, errors.New("not implemented")
 }
 
-func (f *fakeQueueRepository) MarkDone(context.Context, uuid.UUID, string, string) error {
+func (f *fakeQueueRepository) MarkDone(context.Context, uuid.UUID, string, string, *domain.TableMetadata) error {
 	return nil
 }
 

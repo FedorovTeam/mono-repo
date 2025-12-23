@@ -27,6 +27,7 @@ type RouterRules struct {
 	ArtifactsBucket          string
 	ArtifactsPrefixTemplate  string
 	RepositoryRules          []RepositoryRouterRule
+	TableDetectionMinCount   int
 }
 
 type repositoryRule struct {
@@ -42,40 +43,46 @@ type repositoryRule struct {
 }
 
 type effectiveRoutingRules struct {
-	preprocessEnabled     bool
-	preprocessExt         map[string]struct{}
-	tableExtractorEnabled bool
-	tableExtractorExt     map[string]struct{}
-	artifactsBucket       string
-	artifactsPrefixTmpl   string
+	preprocessEnabled      bool
+	preprocessExt          map[string]struct{}
+	tableExtractorEnabled  bool
+	tableExtractorExt      map[string]struct{}
+	artifactsBucket        string
+	artifactsPrefixTmpl    string
+	tableDetectionMinCount int
 }
 
 // StageRouter выбирает следующую стадию обработки документа на основе расширения и конфигурации.
 type StageRouter struct {
-	preprocessEnabled     bool
-	preprocessExt         map[string]struct{}
-	tableExtractorEnabled bool
-	tableExtractorExt     map[string]struct{}
-	artifactsBucket       string
-	artifactsPrefixTmpl   string
-	repoRules             []repositoryRule
+	preprocessEnabled      bool
+	preprocessExt          map[string]struct{}
+	tableExtractorEnabled  bool
+	tableExtractorExt      map[string]struct{}
+	artifactsBucket        string
+	artifactsPrefixTmpl    string
+	repoRules              []repositoryRule
+	tableDetectionMinCount int
 }
 
 // NewStageRouter создаёт StageRouter с нормализованными правилами.
 func NewStageRouter(rules RouterRules) *StageRouter {
 	router := &StageRouter{
-		preprocessEnabled:     rules.PreprocessEnabled,
-		preprocessExt:         normalizeExtensions(rules.PreprocessExtensions),
-		tableExtractorEnabled: rules.TableExtractorEnabled,
-		tableExtractorExt:     normalizeExtensions(rules.TableExtractorExtensions),
-		artifactsBucket:       strings.TrimSpace(rules.ArtifactsBucket),
-		artifactsPrefixTmpl:   strings.TrimSpace(rules.ArtifactsPrefixTemplate),
+		preprocessEnabled:      rules.PreprocessEnabled,
+		preprocessExt:          normalizeExtensions(rules.PreprocessExtensions),
+		tableExtractorEnabled:  rules.TableExtractorEnabled,
+		tableExtractorExt:      normalizeExtensions(rules.TableExtractorExtensions),
+		artifactsBucket:        strings.TrimSpace(rules.ArtifactsBucket),
+		artifactsPrefixTmpl:    strings.TrimSpace(rules.ArtifactsPrefixTemplate),
+		tableDetectionMinCount: rules.TableDetectionMinCount,
 	}
 	if len(router.preprocessExt) == 0 {
 		router.preprocessExt = defaultPreprocessExtensions()
 	}
 	if len(router.tableExtractorExt) == 0 {
 		router.tableExtractorExt = defaultTableExtractorExtensions()
+	}
+	if router.tableDetectionMinCount <= 0 {
+		router.tableDetectionMinCount = 1
 	}
 
 	for _, rule := range rules.RepositoryRules {
@@ -166,7 +173,8 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 }
 
 // ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
-func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document) bool {
+func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32) bool {
+	_ = tablePages
 	if doc == nil {
 		return false
 	}
@@ -176,7 +184,9 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document) bool {
 	}
 
 	strategy := NormalizeConversionStrategy(string(doc.ConversionStrategy))
-	if strategy != ConversionStrategyDoclingWithTables {
+	wantsTables := extractTables || doc.ExtractTables || strategy == ConversionStrategyDoclingWithTables
+
+	if !wantsTables && tableCount < rules.tableDetectionMinCount {
 		return false
 	}
 
@@ -191,12 +201,13 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document) bool {
 func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 	if doc == nil {
 		return effectiveRoutingRules{
-			preprocessEnabled:     r.preprocessEnabled,
-			preprocessExt:         cloneExtensions(r.preprocessExt),
-			tableExtractorEnabled: r.tableExtractorEnabled,
-			tableExtractorExt:     cloneExtensions(r.tableExtractorExt),
-			artifactsBucket:       r.artifactsBucket,
-			artifactsPrefixTmpl:   r.artifactsPrefixTmpl,
+			preprocessEnabled:      r.preprocessEnabled,
+			preprocessExt:          cloneExtensions(r.preprocessExt),
+			tableExtractorEnabled:  r.tableExtractorEnabled,
+			tableExtractorExt:      cloneExtensions(r.tableExtractorExt),
+			artifactsBucket:        r.artifactsBucket,
+			artifactsPrefixTmpl:    r.artifactsPrefixTmpl,
+			tableDetectionMinCount: r.tableDetectionMinCount,
 		}
 	}
 
@@ -242,12 +253,13 @@ func (r *StageRouter) effectiveRules(doc *Document) effectiveRoutingRules {
 	}
 
 	return effectiveRoutingRules{
-		preprocessEnabled:     enabled,
-		preprocessExt:         cloneExtensions(extensions),
-		tableExtractorEnabled: tableExtractorEnabled,
-		tableExtractorExt:     cloneExtensions(tableExtractorExt),
-		artifactsBucket:       artifactsBucket,
-		artifactsPrefixTmpl:   artifactsPrefix,
+		preprocessEnabled:      enabled,
+		preprocessExt:          cloneExtensions(extensions),
+		tableExtractorEnabled:  tableExtractorEnabled,
+		tableExtractorExt:      cloneExtensions(tableExtractorExt),
+		artifactsBucket:        artifactsBucket,
+		artifactsPrefixTmpl:    artifactsPrefix,
+		tableDetectionMinCount: r.tableDetectionMinCount,
 	}
 }
 

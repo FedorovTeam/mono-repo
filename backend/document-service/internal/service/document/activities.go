@@ -110,6 +110,8 @@ type convertResult struct {
 	Status      string
 	Version     int32
 	Ready       bool
+	TableCount  int32
+	TablePages  []int32
 }
 
 type Activities struct {
@@ -359,7 +361,15 @@ func (a *Activities) ConvertToMarkdown(ctx context.Context, input convertInput) 
 
 	ready := strings.EqualFold(statusVal, "done") || strings.EqualFold(statusVal, string(domain.DocumentStatusConvertedToMarkdown))
 
-	return convertResult{MarkdownKey: markdownKey, QueueID: resp.GetQueueId(), Status: statusVal, Version: version, Ready: ready}, nil
+	return convertResult{
+		MarkdownKey: markdownKey,
+		QueueID:     resp.GetQueueId(),
+		Status:      statusVal,
+		Version:     version,
+		Ready:       ready,
+		TableCount:  resp.GetTableCount(),
+		TablePages:  resp.GetTablePages(),
+	}, nil
 }
 
 func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, sourceObjectKey, queueID string, version int32) error {
