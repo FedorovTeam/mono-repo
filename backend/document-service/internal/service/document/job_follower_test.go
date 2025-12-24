@@ -192,7 +192,10 @@ func TestJobFollowerSchedulesExtractTablesForTablesOnlyStrategy(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, repo.createdJobs, 1)
-	require.Equal(t, domain.JobStageExtractTables, repo.createdJobs[0].Stage)
+	require.Equal(t, domain.JobStageConvertToMarkdown, repo.createdJobs[0].Stage)
+	convertPayload := domain.ConvertPayloadFromMap(repo.createdJobs[0].Payload)
+	require.True(t, convertPayload.ExtractTables)
+	require.Equal(t, domain.ConversionStrategyTablesOnly, convertPayload.ConversionStrategy)
 }
 
 func TestJobFollowerSkipsExtractAfterConvertWhenNoTablesDetected(t *testing.T) {
