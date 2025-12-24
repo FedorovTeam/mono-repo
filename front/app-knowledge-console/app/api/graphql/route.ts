@@ -15,6 +15,13 @@ function parseRequestBody(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
 
+  if (session?.reauthRequired) {
+    return NextResponse.json(
+      { error: "Требуется повторный вход", code: "reauth_required" },
+      { status: 440 },
+    );
+  }
+
   if (!session || !session.accessToken) {
     return NextResponse.json({ error: "Необходима активная сессия" }, { status: 401 });
   }
