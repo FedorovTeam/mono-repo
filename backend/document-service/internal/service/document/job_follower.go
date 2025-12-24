@@ -357,6 +357,11 @@ func (f *JobFollower) extractTablesPayloadFromConvert(doc *domain.Document, conv
 			payload.ExtractTables = true
 		}
 	}
+	payload.TableMetadata = convertPayload.TableMetadata
+	if count, pages := convertPayload.TableInfo(); count > 0 || len(pages) > 0 {
+		payload.TableCount = int32(count)
+		payload.TablePages = pages
+	}
 	return payload
 }
 
