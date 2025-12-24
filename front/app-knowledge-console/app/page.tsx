@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
+import { useSessionRestorationState } from '@/lib/session-restoration-store';
 
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -74,6 +75,8 @@ export default function HomePage() {
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [manualLoginRequired, setManualLoginRequired] = useState(false);
+  const [reauthInProgress, setReauthInProgress] = useState(false);
+  const restoringSession = useSessionRestorationState();
   const router = useRouter();
 
   const repository = process.env.NEXT_PUBLIC_DEFAULT_REPOSITORY ?? 'docs';
@@ -137,6 +140,19 @@ export default function HomePage() {
     }
   }, [resolvePath.path]);
 
+  useEffect(() => {
+    if (restoringSession) {
+      setReauthInProgress(true);
+      return;
+    }
+
+    setReauthInProgress(false);
+
+    if (typeof window !== 'undefined' && !manualLoginRequired) {
+      sessionStorage.removeItem('authAutoLoginDisabled');
+    }
+  }, [manualLoginRequired, restoringSession]);
+
   const updatePlenaryFields = (fields: Partial<PlenaryFields>) => {
     setPlenaryFields((prev) => ({ ...prev, ...fields }));
   };
@@ -153,10 +169,12 @@ export default function HomePage() {
 
     if (!file) {
       setMessage('Выберите файл');
+      setReauthInProgress(false);
       return;
     }
     if (!resolvePath.path) {
       setValidationError(resolvePath.error ?? 'Заполните необходимые поля для пути');
+      setReauthInProgress(false);
       return;
     }
 
@@ -250,24 +268,34 @@ export default function HomePage() {
     } catch (err: unknown) {
       console.error(err);
       if (err instanceof SilentSignInError) {
-        setManualLoginRequired(err.interactionRequired);
-        const friendlyMessage = err.interactionRequired
-          ? 'Сессия истекла. Войдите вручную, чтобы продолжить загрузку.'
-          : err.message;
-        setStatus('error');
-        setMessage(friendlyMessage);
+        if (err.interactionRequired) {
+          setManualLoginRequired(true);
+          setStatus('error');
+          setMessage('Сессия истекла. Войдите вручную, чтобы продолжить загрузку.');
+        }
+        setReauthInProgress(false);
         return;
       }
       setStatus('error');
       const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
       setMessage(errorMessage);
     }
+    setReauthInProgress(false);
   };
 
   return (
     <main className="px-4 pb-12">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          {(reauthInProgress || restoringSession) && (
+            <div className="mb-4 flex items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+              <span
+                className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-r-transparent"
+                aria-hidden
+              />
+              <span>Восстанавливаем сессию…</span>
+            </div>
+          )}
           <div className="flex flex-col gap-2">
             <h1 className="text-2xl font-semibold">Загрузка DOC/DOCX/PDF</h1>
             <p className="text-sm text-slate-600">

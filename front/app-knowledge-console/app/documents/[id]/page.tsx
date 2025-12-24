@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
+import { useSessionRestorationState } from '@/lib/session-restoration-store';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -97,7 +98,23 @@ export default function DocumentDetailsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [manualLoginRequired, setManualLoginRequired] = useState(false);
+  const [reauthInProgress, setReauthInProgress] = useState(false);
   const router = useRouter();
+  const restoringSession = useSessionRestorationState();
+  const showRestoringOverlay = restoringSession || reauthInProgress;
+
+  useEffect(() => {
+    if (restoringSession) {
+      setReauthInProgress(true);
+      return;
+    }
+
+    setReauthInProgress(false);
+
+    if (typeof window !== 'undefined' && !manualLoginRequired) {
+      sessionStorage.removeItem('authAutoLoginDisabled');
+    }
+  }, [manualLoginRequired, restoringSession]);
 
   const fetchDocument = useCallback(async () => {
     if (!documentId) {
@@ -153,25 +170,32 @@ export default function DocumentDetailsPage() {
       if (!doc) {
         setDocument(null);
         setError('Документ не найден.');
+        setReauthInProgress(false);
         return;
       }
 
       setDocument(doc);
+      if (!restoringSession) {
+        setReauthInProgress(false);
+      }
     } catch (err) {
       if (err instanceof SilentSignInError) {
-        setManualLoginRequired(true);
-        const friendlyMessage = err.interactionRequired
-          ? 'Сессия истекла. Войдите вручную, чтобы продолжить.'
-          : err.message;
-        setError(friendlyMessage);
+        if (err.interactionRequired) {
+          setManualLoginRequired(true);
+          setError('Сессия истекла. Войдите вручную, чтобы продолжить.');
+          setReauthInProgress(false);
+        }
         return;
       }
       console.error(err);
       setError('Не удалось загрузить данные документа. Попробуйте обновить страницу.');
     } finally {
       setIsLoading(false);
+      if (!restoringSession) {
+        setReauthInProgress(false);
+      }
     }
-  }, [documentId, router]);
+  }, [documentId, restoringSession, router]);
 
   useEffect(() => {
     fetchDocument();
@@ -199,6 +223,18 @@ export default function DocumentDetailsPage() {
             Здесь отображаются статусы прохождения документа по цепочке и ссылка для скачивания оригинального файла.
           </p>
         </div>
+
+        {showRestoringOverlay && (
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+            <div className="flex items-center gap-3">
+              <span
+                className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-r-transparent"
+                aria-hidden
+              />
+              <span>Восстанавливаем сессию…</span>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
