@@ -700,6 +700,15 @@ function TableHead({ children, className }: { children: React.ReactNode; classNa
   );
 }
 
-function TableCell({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn('p-4 align-top text-sm text-slate-900', className)}>{children}</td>;
+type TableCellProps = React.TdHTMLAttributes<HTMLTableCellElement> & {
+  children: React.ReactNode;
+  className?: string;
+};
+
+function TableCell({ children, className, ...props }: TableCellProps) {
+  return (
+    <td {...props} className={cn('p-4 align-top text-sm text-slate-900', className)}>
+      {children}
+    </td>
+  );
 }
