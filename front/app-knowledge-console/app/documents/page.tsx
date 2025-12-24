@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { signIn } from 'next-auth/react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
+import { handleAuthError } from '@/lib/handle-auth-error';
 import { useSessionRestorationState } from '@/lib/session-restoration-store';
 
 type KnowledgeDocumentStatus =
@@ -87,8 +87,8 @@ export default function DocumentsPage() {
   const [documentsTotal, setDocumentsTotal] = useState<number | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
-  const [manualLoginRequired, setManualLoginRequired] = useState(false);
   const [reauthInProgress, setReauthInProgress] = useState(false);
+  const [redirectingToSignIn, setRedirectingToSignIn] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const pollingIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
@@ -111,16 +111,13 @@ export default function DocumentsPage() {
     }
 
     setReauthInProgress(false);
-
-    if (typeof window !== 'undefined' && !manualLoginRequired) {
-      sessionStorage.removeItem('authAutoLoginDisabled');
-    }
-  }, [manualLoginRequired, restoringSession]);
+  }, [restoringSession]);
 
   const fetchDocuments = useCallback(async () => {
     try {
       setIsListLoading(true);
       setListError(null);
+      setRedirectingToSignIn(false);
       const correlationId = generateCorrelationId();
       const offset = (page - 1) * limit;
 
@@ -175,17 +172,18 @@ export default function DocumentsPage() {
       const uniqueDocuments = Array.from(new Map(payload.nodes.map((doc) => [doc.id, doc])).values());
       setDocuments(uniqueDocuments);
       setDocumentsTotal(payload.totalCount);
-      setManualLoginRequired(false);
       if (!restoringSession) {
         setReauthInProgress(false);
       }
     } catch (err) {
-      if (err instanceof SilentSignInError) {
-        if (err.interactionRequired) {
-          setManualLoginRequired(true);
-          setListError('Сессия истекла. Войдите вручную, чтобы продолжить.');
-          setReauthInProgress(false);
-        }
+      const authHandled = handleAuthError(err, {
+        onInteractionStart: () => {
+          setRedirectingToSignIn(true);
+          setListError('Требуется авторизация, перенаправляем на страницу входа…');
+        },
+      });
+      if (authHandled || err instanceof SilentSignInError) {
+        setReauthInProgress(false);
         return;
       }
       const messageText = err instanceof Error ? err.message : 'Не удалось загрузить список документов';
@@ -252,11 +250,13 @@ export default function DocumentsPage() {
         pollErrorAttempts.current.delete(id);
         setDocuments((prev) => prev.map((item) => (item.id === doc.id ? { ...item, ...doc } : item)));
       } catch (err) {
-        if (err instanceof SilentSignInError) {
-          if (err.interactionRequired) {
-            setManualLoginRequired(true);
-            console.warn('Polling остановлен: требуется ручной вход');
-          }
+        const authHandled = handleAuthError(err, {
+          onInteractionStart: () => {
+            setRedirectingToSignIn(true);
+            console.warn('Polling остановлен: требуется интерактивный вход');
+          },
+        });
+        if (authHandled || err instanceof SilentSignInError) {
           return;
         }
         const nextAttempts = errorCount + 1;
@@ -278,7 +278,7 @@ export default function DocumentsPage() {
   useEffect(() => {
     stopPolling();
 
-    if (manualLoginRequired) {
+    if (redirectingToSignIn) {
       return undefined;
     }
 
@@ -295,7 +295,7 @@ export default function DocumentsPage() {
     }, 5000);
 
     return stopPolling;
-  }, [documents, manualLoginRequired, pollDocument, stopPolling]);
+  }, [documents, pollDocument, redirectingToSignIn, stopPolling]);
 
   useEffect(() => stopPolling, [stopPolling]);
 
@@ -329,22 +329,17 @@ export default function DocumentsPage() {
               <span>Восстанавливаем сессию…</span>
             </div>
           )}
+          {redirectingToSignIn && (
+            <div className="mb-4 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span
+                className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-amber-600 border-r-transparent"
+                aria-hidden
+              />
+              <span>Требуется вход. Перенаправляем на страницу авторизации…</span>
+            </div>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Документы</h2>
-            {manualLoginRequired && (
-              <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
-                <button
-                  type="button"
-                  onClick={() => signIn('authentik', { callbackUrl: window.location.href })}
-                  className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
-                >
-                  Войти вручную
-                </button>
-                <p className="text-xs text-slate-600">
-                  Silent sign-in потребовал взаимодействие. Авторизуйтесь вручную и повторите запрос.
-                </p>
-              </div>
-            )}
             <button
               type="button"
               onClick={fetchDocuments}
