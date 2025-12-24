@@ -67,7 +67,11 @@ export const fetchWithAuth = async (
   try {
     await waitForRestoration('fetchWithAuth', router);
     console.info('Silent sign-in выполнен успешно, повторяем запрос.');
-    const session = await getSession();
+
+    const refreshedSessionResponse = await fetch('/api/auth/session');
+    const session = (refreshedSessionResponse.ok
+      ? await refreshedSessionResponse.json()
+      : await getSession()) as Awaited<ReturnType<typeof getSession>>;
 
     if (!session?.accessToken) {
       throw new SilentSignInError('Сессия не была восстановлена.', {
