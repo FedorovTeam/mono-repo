@@ -1,0 +1,21 @@
+{
+  "source": "/tmp/table-extractor-2836077030.pdf",
+  "generated_at": "2025-12-24T02:23:00.12117705Z",
+  "detect_voting_tables": true,
+  "pages": "all",
+  "table_count": 1,
+  "processing": {
+    "pdfinfo_ms": 23,
+    "pdftotext_ms": 24,
+    "pdftoppm_ms": 1012,
+    "parse_ms": 380
+  },
+  "pdfinfo": {
+    "pages": 2,
+    "raw": "Title:           Ил Тумэн\nCreator:         Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36\nProducer:        macOS Версия 15.5 (Выпуск 24F74) Quartz PDFContext, AppendMode 1.1\nCreationDate:    Wed Dec 17 08:45:29 2025 UTC\nModDate:         Fri Dec 19 10:35:19 2025 UTC\nCustom Metadata: no\nMetadata Stream: no\nTagged:          yes\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           2\nEncrypted:       no\nPage size:       594.96 x 841.92 pts (A4)\nPage rot:        0\nFile size:       121172 bytes\nOptimized:       no\nPDF version:     1.4\n",
+    "producer": "macOS Версия 15.5 (Выпуск 24F74) Quartz PDFContext, AppendMode 1.1",
+    "pdf_version": "1.4",
+    "title": "Ил Тумэн",
+    "creation_date": "Wed Dec 17 08:45:29 2025 UTC"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "source": "/tmp/table-extractor-739509500.pdf",
+  "generated_at": "2025-12-24T02:26:46.876935749Z",
+  "detect_voting_tables": true,
+  "pages": "all",
+  "table_count": 305,
+  "processing": {
+    "pdfinfo_ms": 25,
+    "pdftotext_ms": 840,
+    "pdftoppm_ms": 119415,
+    "parse_ms": 290
+  },
+  "pdfinfo": {
+    "pages": 179,
+    "raw": "Creator:         Microsoft® Word LTSC\nProducer:        ABBYY FineReader PDF\nCreationDate:    Wed Oct 15 00:52:39 2025 UTC\nModDate:         Wed Oct 15 01:17:19 2025 UTC\nCustom Metadata: no\nMetadata Stream: yes\nTagged:          yes\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           179\nEncrypted:       no\nPage size:       595.32 x 841.92 pts (A4)\nPage rot:        0\nFile size:       810927 bytes\nOptimized:       no\nPDF version:     1.7\n",
+    "producer": "ABBYY FineReader PDF",
+    "pdf_version": "1.7",
+    "creation_date": "Wed Oct 15 00:52:39 2025 UTC"
+  }
+}
