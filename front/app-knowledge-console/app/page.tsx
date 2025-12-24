@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
 import { handleAuthError } from '@/lib/handle-auth-error';
@@ -77,7 +76,6 @@ export default function HomePage() {
   const [reauthInProgress, setReauthInProgress] = useState(false);
   const [redirectingToSignIn, setRedirectingToSignIn] = useState(false);
   const restoringSession = useSessionRestorationState();
-  const router = useRouter();
 
   const repository = process.env.NEXT_PUBLIC_DEFAULT_REPOSITORY ?? 'docs';
   const branch = process.env.NEXT_PUBLIC_DEFAULT_BRANCH ?? 'main';
@@ -213,7 +211,6 @@ export default function HomePage() {
           'X-Correlation-ID': correlationId,
         },
         body: JSON.stringify({ query: mutation, variables }),
-        router,
       });
 
       if (!gqlResp.ok) {
