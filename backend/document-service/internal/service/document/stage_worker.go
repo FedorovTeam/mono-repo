@@ -570,37 +570,41 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	targetBucket := firstNonEmpty(doc.MarkdownBucket, payload.MarkdownBucket)
 	targetKey := resolvedMarkdownKey(doc)
 	finalMarkdownKey := tableMarkdownKey
-	baseBucket := strings.TrimSpace(firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket))
-	baseKey := strings.TrimSpace(payload.DoclingMarkdownObjectKey)
-	hasBaseMarkdown := baseBucket != "" && baseKey != ""
+	baseBucket := strings.TrimSpace(firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket))
+	baseKey := strings.TrimSpace(firstNonEmpty(payload.DoclingMarkdownObjectKey, resolvedMarkdownKey(doc)))
 
-	conversionStrategy := domain.NormalizeConversionStrategy(string(payload.ConversionStrategy))
-	if conversionStrategy == domain.ConversionStrategyDoclingWithTables && !hasBaseMarkdown {
-		err := errors.New("docling markdown is required to merge tables for docling_with_tables strategy")
+	if baseBucket == "" || baseKey == "" {
+		err := errors.New("base markdown is required to merge extracted tables")
 		payload.LastError = err.Error()
 		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
-	if targetBucket != "" && targetKey != "" && w.activities != nil && hasBaseMarkdown {
-		mergedKey, mergeErr := w.activities.MergeTables(ctx, mergeTablesInput{
-			Doc:             doc,
-			BaseBucket:      baseBucket,
-			BaseObjectKey:   baseKey,
-			TablesBucket:    firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, targetBucket),
-			TablesObjectKey: tableMarkdownKey,
-			TargetBucket:    targetBucket,
-			TargetObjectKey: targetKey,
-			CorrelationID:   payload.CorrelationID,
-		})
-		if mergeErr != nil {
-			payload.LastError = mergeErr.Error()
-			return workersvc.JobResult{Payload: payload.ToMap()}, mergeErr
-		}
-		finalMarkdownKey = mergedKey
-		payload.MarkdownObjectKey = mergedKey
+	if targetBucket == "" || targetKey == "" {
+		err := errors.New("target markdown location is required to merge extracted tables")
+		payload.LastError = err.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
-	if !hasBaseMarkdown {
-		payload.MarkdownObjectKey = tableMarkdownKey
+	if w.activities == nil {
+		err := errors.New("activities not configured")
+		payload.LastError = err.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
+
+	mergedKey, mergeErr := w.activities.MergeTables(ctx, mergeTablesInput{
+		Doc:             doc,
+		BaseBucket:      baseBucket,
+		BaseObjectKey:   baseKey,
+		TablesBucket:    firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, targetBucket),
+		TablesObjectKey: tableMarkdownKey,
+		TargetBucket:    targetBucket,
+		TargetObjectKey: targetKey,
+		CorrelationID:   payload.CorrelationID,
+	})
+	if mergeErr != nil {
+		payload.LastError = mergeErr.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, mergeErr
+	}
+	finalMarkdownKey = mergedKey
+	payload.MarkdownObjectKey = mergedKey
 
 	version := latestVersion(doc).Version + 1
 	if err := w.activities.MarkConverted(ctx, doc, finalMarkdownKey, payload.OriginalObjectKey, payload.TableQueueID, version); err != nil {

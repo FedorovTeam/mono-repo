@@ -1493,6 +1493,114 @@ func TestHandleExtractTablesRestoresDoclingKeyWhenMissing(t *testing.T) {
 	}
 }
 
+func TestHandleExtractTablesUsesLatestMarkdownWhenDoclingKeyMissing(t *testing.T) {
+	doc := &domain.Document{
+		ID:                 "doc-merge-latest-version",
+		Status:             domain.DocumentStatusStoredOriginal,
+		OriginalBucket:     "orig-bucket",
+		OriginalObjectKey:  "docs/input.pdf",
+		MarkdownBucket:     "md-bucket",
+		MarkdownObjectKey:  "",
+		Versions:           []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "versions/old.md"}, {Version: 2, MarkdownObjectKey: "versions/latest.md"}},
+		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+	}
+	repo := &publishRepoStub{doc: doc}
+	baseMarkdown := "# Docling\n\nВведение\n\n## Таблицы\n\n<!-- tables:start -->\nстарые таблицы\n<!-- tables:end -->\n\nЗавершение"
+	tablesMarkdown := "## Таблицы\n\n<!-- tables:start -->\n| новая | таблица |\n<!-- tables:end -->"
+	tableExtractor := &tableExtractorStub{
+		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-merge-latest-version",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "artifacts-bucket", ObjectKey: "tables/doc-merge-latest-version/tables.md"},
+				},
+			},
+		},
+	}
+	storage := &stubStorageClient{
+		objects: map[string]map[string][]byte{
+			"md-bucket": {
+				"versions/latest.md": []byte(baseMarkdown),
+			},
+			"artifacts-bucket": {
+				"tables/doc-merge-latest-version/tables.md": []byte(tablesMarkdown),
+			},
+		},
+	}
+	payload := (domain.ExtractTablesPayload{
+		TableQueueID:       "queue-merge-latest-version",
+		ArtifactsBucket:    "artifacts-bucket",
+		MarkdownBucket:     doc.MarkdownBucket,
+		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+	}).ToMap()
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
+	uploadedStr := string(uploaded)
+	expectedMerged := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	if uploadedStr != expectedMerged {
+		t.Fatalf("expected merged markdown to be uploaded, got %q", uploadedStr)
+	}
+	if strings.Count(uploadedStr, "Введение") != 1 {
+		t.Fatalf("expected intro text to appear once, got %d", strings.Count(uploadedStr, "Введение"))
+	}
+	if repo.doc.MarkdownObjectKey != repo.lastVersion.MarkdownObjectKey {
+		t.Fatalf("expected document to store final markdown key, got %s vs %s", repo.doc.MarkdownObjectKey, repo.lastVersion.MarkdownObjectKey)
+	}
+}
+
+func TestHandleExtractTablesFailsWithoutBaseMarkdown(t *testing.T) {
+	doc := &domain.Document{
+		ID:                 "doc-merge-no-base",
+		Status:             domain.DocumentStatusStoredOriginal,
+		OriginalBucket:     "orig-bucket",
+		OriginalObjectKey:  "docs/input.pdf",
+		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+	}
+	repo := &publishRepoStub{doc: doc}
+	tableExtractor := &tableExtractorStub{
+		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-merge-no-base",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "artifacts-bucket", ObjectKey: "tables/doc-merge-no-base/tables.md"},
+				},
+			},
+		},
+	}
+	storage := &stubStorageClient{
+		objects: map[string]map[string][]byte{
+			"artifacts-bucket": {
+				"tables/doc-merge-no-base/tables.md": []byte("## Таблицы\n\n<!-- tables:start -->\n| t |\n<!-- tables:end -->"),
+			},
+		},
+	}
+	payload := (domain.ExtractTablesPayload{TableQueueID: "queue-merge-no-base", ArtifactsBucket: "artifacts-bucket"}).ToMap()
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
+	if err == nil {
+		t.Fatal("expected error due to missing base markdown")
+	}
+	if result.Event != nil {
+		t.Fatalf("expected no completion event, got %+v", result.Event)
+	}
+	updatedPayload := domain.ExtractTablesPayloadFromMap(result.Payload)
+	if strings.TrimSpace(updatedPayload.LastError) == "" {
+		t.Fatalf("expected last error recorded, got %+v", updatedPayload)
+	}
+	if len(repo.statusUpdates) != 0 {
+		t.Fatalf("expected no status updates, got %v", repo.statusUpdates)
+	}
+}
+
 func TestHandleExtractTablesSkipsHeaderTextFromTablesArtifact(t *testing.T) {
 	doc := &domain.Document{
 		ID:                "doc-merge-header",
