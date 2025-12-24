@@ -2,24 +2,49 @@
 
 import { signIn } from 'next-auth/react';
 
-const interactionErrorCodes = ['interaction_required', 'interactionrequiredautherror'];
+const interactionErrorCodes = [
+  'interaction_required',
+  'interactionrequiredautherror',
+  'consent_required',
+];
+const retryableErrorCodes = ['login_required', 'session_expired'];
 const SILENT_SIGN_IN_TIMEOUT_MS = 15_000;
 const MAX_SILENT_SIGN_IN_FAILURES = 3;
 
 export class SilentSignInError extends Error {
   interactionRequired: boolean;
+  retryable: boolean;
+  code?: string | null;
 
-  constructor(message: string, interactionRequired = false) {
+  constructor(
+    message: string,
+    {
+      interactionRequired = false,
+      retryable = false,
+      code,
+    }: { interactionRequired?: boolean; retryable?: boolean; code?: string | null } = {},
+  ) {
     super(message);
     this.name = 'SilentSignInError';
     this.interactionRequired = interactionRequired;
+    this.retryable = retryable;
+    this.code = code;
   }
 }
 
-const isInteractionRequired = (error?: string | null) => {
-  if (!error) return false;
-  const normalized = error.toLowerCase();
-  return interactionErrorCodes.some((code) => normalized.includes(code));
+const normalizeErrorCode = (error?: string | null) => {
+  if (!error) return null;
+  return error.toLowerCase();
+};
+
+export const mapAuthError = (error?: string | null) => {
+  const normalized = normalizeErrorCode(error);
+
+  return {
+    code: normalized,
+    interactionRequired: normalized ? interactionErrorCodes.includes(normalized) : false,
+    retryable: normalized ? retryableErrorCodes.includes(normalized) : false,
+  };
 };
 
 let activeAttempt: Promise<void> | null = null;
@@ -43,20 +68,38 @@ const createSilentSignInAttempt = (context: string): Promise<void> => {
         clearTimer();
 
         if (signInResult?.error) {
-          if (isInteractionRequired(signInResult.error)) {
-            console.warn('[auth-flow] Требуется ручной вход после silent sign-in.', {
-              context,
-              error: signInResult.error,
-            });
-            reject(new SilentSignInError('Для продолжения войдите вручную.', true));
+          const mappedError = mapAuthError(signInResult.error);
+          console.warn('[auth-flow] Ошибка silent sign-in Authentik.', {
+            context,
+            error: signInResult.error,
+            code: mappedError.code,
+          });
+
+          if (mappedError.interactionRequired) {
+            reject(
+              new SilentSignInError('Для продолжения войдите вручную.', {
+                interactionRequired: true,
+                code: mappedError.code,
+              }),
+            );
             return;
           }
 
-          console.error('[auth-flow] Ошибка silent sign-in Authentik.', {
-            context,
-            error: signInResult.error,
-          });
-          reject(new SilentSignInError('Не удалось автоматически восстановить сессию.'));
+          if (mappedError.retryable) {
+            reject(
+              new SilentSignInError('Сессия требует повторного входа.', {
+                retryable: true,
+                code: mappedError.code,
+              }),
+            );
+            return;
+          }
+
+          reject(
+            new SilentSignInError('Не удалось автоматически восстановить сессию.', {
+              code: mappedError.code,
+            }),
+          );
           return;
         }
 
@@ -76,14 +119,6 @@ export const performSilentSignIn = async (context: string): Promise<void> => {
     throw new SilentSignInError('Silent sign-in доступен только в браузере.');
   }
 
-  if (failedAttempts >= MAX_SILENT_SIGN_IN_FAILURES) {
-    console.error('[auth-flow] Лимит попыток silent sign-in превышен.', {
-      context,
-      failedAttempts,
-    });
-    throw new SilentSignInError('Превышено число попыток восстановления сессии.', true);
-  }
-
   if (activeAttempt) {
     console.info('[auth-flow] Обнаружена активная попытка silent sign-in, ожидаем.', { context });
     return activeAttempt;
@@ -91,13 +126,54 @@ export const performSilentSignIn = async (context: string): Promise<void> => {
 
   console.info('[auth-flow] Запускаем silent sign-in.', { context });
 
-  const attempt = createSilentSignInAttempt(context)
-    .then(() => {
-      failedAttempts = 0;
-    })
+  const attempt = (async () => {
+    let attemptNumber = 0;
+
+    while (attemptNumber < MAX_SILENT_SIGN_IN_FAILURES) {
+      attemptNumber += 1;
+
+      try {
+        await createSilentSignInAttempt(context);
+        failedAttempts = 0;
+        return;
+      } catch (error) {
+        failedAttempts += 1;
+
+        if (error instanceof SilentSignInError) {
+          console.warn('[auth-flow] Попытка silent sign-in не удалась.', {
+            context,
+            attemptNumber,
+            failedAttempts,
+            code: error.code,
+            interactionRequired: error.interactionRequired,
+            retryable: error.retryable,
+          });
+
+          if (error.interactionRequired) {
+            throw error;
+          }
+
+          if (error.retryable && failedAttempts < MAX_SILENT_SIGN_IN_FAILURES) {
+            continue;
+          }
+        }
+
+        throw new SilentSignInError('Не удалось автоматически восстановить сессию.', {
+          interactionRequired: failedAttempts >= MAX_SILENT_SIGN_IN_FAILURES,
+        });
+      }
+    }
+
+    throw new SilentSignInError('Превышено число попыток восстановления сессии.', {
+      interactionRequired: true,
+    });
+  })()
     .catch((error) => {
-      failedAttempts += 1;
-      throw error;
+      if (error instanceof SilentSignInError) {
+        throw error;
+      }
+
+      throw new SilentSignInError('Не удалось автоматически восстановить сессию.');
     })
     .finally(() => {
       activeAttempt = null;

@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { signIn, useSession } from "next-auth/react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
+import { mapAuthError } from "@/lib/auth-flow";
+
 const BENEFITS = [
   "Доступ к загрузке и просмотру документов",
   "Сохранение контекста перехода после входа",
@@ -43,9 +45,9 @@ function SignInContent() {
     typeof window !== "undefined" && sessionStorage.getItem("authAutoLoginDisabled") === "true";
   const nextUrl = callbackUrl === "/" ? "главную страницу" : `страницу ${callbackUrl}`;
   const errorMessage = searchParams?.get("error");
-  const isLoginRequiredError = errorMessage === "login_required";
-  const isAutoLoginAttempting =
-    status === "loading" || (!errorMessage && !autoLoginDisabled && status !== "authenticated");
+  const mappedError = mapAuthError(errorMessage);
+  const canRetrySilently = !autoLoginDisabled && (!errorMessage || mappedError.retryable);
+  const isAutoLoginAttempting = status === "loading" || (canRetrySilently && status !== "authenticated");
   const isLoading = isManualLoading || isAutoLoginAttempting;
 
   useEffect(() => {
@@ -59,8 +61,10 @@ function SignInContent() {
     }
 
     if (status === "unauthenticated" && errorMessage) {
-      sessionStorage.setItem("authAutoLoginDisabled", "true");
-      return;
+      if (!mappedError.retryable) {
+        sessionStorage.setItem("authAutoLoginDisabled", "true");
+        return;
+      }
     }
 
     const isAutoLoginBlocked = sessionStorage.getItem("authAutoLoginDisabled") === "true";
@@ -74,26 +78,30 @@ function SignInContent() {
       try {
         await signIn("authentik", { callbackUrl, redirect: true, prompt: "none" });
       } catch (error) {
-        console.error("Авто-вход Authentik завершился ошибкой", error);
+        console.error("Авто-вход Authentik завершился ошибкой", { error, errorMessage });
         sessionStorage.setItem("authAutoLoginDisabled", "true");
       }
     };
 
     void attemptAutoLogin();
-  }, [callbackUrl, errorMessage, status]);
+  }, [callbackUrl, errorMessage, mappedError.retryable, status]);
 
   const friendlyErrorMessage = useMemo(() => {
     if (!errorMessage) return null;
-    if (isLoginRequiredError) {
-      return "Не удалось выполнить бесшумный вход. Пожалуйста, войдите вручную.";
+    if (mappedError.interactionRequired) {
+      return "Чтобы продолжить, подтвердите вход вручную через Authentik.";
     }
 
     if (errorMessage === "AccessDenied") {
       return "Доступ запрещён. Обратитесь к администратору.";
     }
 
-    return errorMessage;
-  }, [errorMessage, isLoginRequiredError]);
+    if (!mappedError.retryable) {
+      return errorMessage;
+    }
+
+    return null;
+  }, [errorMessage, mappedError.interactionRequired, mappedError.retryable]);
 
   const handleSignIn = () => {
     setIsManualLoading(true);
@@ -135,16 +143,18 @@ function SignInContent() {
               <p className="text-sm text-slate-600">Используйте корпоративную учётную запись Authentik.</p>
             </div>
 
-            <div className="space-y-3">
-              <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
-                {isAutoLoginAttempting
-                  ? status === "loading"
+              <div className="space-y-3">
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
+                  {isAutoLoginAttempting
+                    ? status === "loading"
                     ? "Проверяем сессию..."
-                    : "Пробуем выполнить автоматический вход…"
-                  : isLoginRequiredError
-                    ? "Бесшумный вход недоступен (требуется интерактивная авторизация). Попробуйте войти вручную."
+                    : mappedError.retryable && errorMessage
+                      ? "Сессия истекла, пробуем восстановить доступ автоматически…"
+                      : "Пробуем выполнить автоматический вход…"
+                  : mappedError.interactionRequired
+                    ? "Бесшумный вход недоступен. Пожалуйста, авторизуйтесь вручную."
                     : "Автоматический вход недоступен. Вы можете продолжить вручную."}
-              </div>
+                </div>
 
               {friendlyErrorMessage && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
