@@ -110,6 +110,12 @@ type Router struct {
 	RepositoryRules          []RepositoryRouterRule `yaml:"repositories"`
 	TableDetectionMinCount   int                    `yaml:"table_detection_min_count"`
 	ForceTableExtractionPDF  bool                   `yaml:"force_table_extraction_for_pdf"`
+	Merge                    MergeSettings          `yaml:"merge"`
+}
+
+type MergeSettings struct {
+	MaxTablesShare float64 `yaml:"max_tables_share"`
+	LogMode        string  `yaml:"log_mode"`
 }
 
 type RepositoryRouterRule struct {
@@ -217,6 +223,13 @@ func (r *Router) normalize() {
 	if r.TableDetectionMinCount <= 0 {
 		r.TableDetectionMinCount = 1
 	}
+	r.Merge.LogMode = strings.ToLower(strings.TrimSpace(r.Merge.LogMode))
+	if r.Merge.LogMode == "" {
+		r.Merge.LogMode = "decision"
+	}
+	if r.Merge.MaxTablesShare <= 0 {
+		r.Merge.MaxTablesShare = 0.9
+	}
 	for i := range r.RepositoryRules {
 		r.RepositoryRules[i].PreprocessExtensions = normalizeExtensions(r.RepositoryRules[i].PreprocessExtensions)
 		r.RepositoryRules[i].TableExtractorExtensions = normalizeExtensions(r.RepositoryRules[i].TableExtractorExtensions)
@@ -235,6 +248,14 @@ func (r Router) validate() error {
 		if strings.TrimSpace(rule.Owner) == "" && strings.TrimSpace(rule.Repository) == "" && strings.TrimSpace(rule.PathPrefix) == "" {
 			return fmt.Errorf("repositories[%d]: owner, repository or path_prefix is required", i)
 		}
+	}
+	if r.Merge.MaxTablesShare <= 0 {
+		return fmt.Errorf("merge.max_tables_share must be positive")
+	}
+	switch r.Merge.LogMode {
+	case "decision", "silent", "debug":
+	default:
+		return fmt.Errorf("merge.log_mode must be one of: decision, silent, debug")
 	}
 	return nil
 }
