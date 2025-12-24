@@ -1,3 +1,4 @@
+// front/app-knowledge-console/postcss.config.mjs
 const config = {
   plugins: {
     "@tailwindcss/postcss": {},

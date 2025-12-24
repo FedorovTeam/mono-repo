@@ -1,3 +1,4 @@
+# front/app-knowledge-console/Dockerfile
 # syntax=docker.io/docker/dockerfile:1
 
 ######################################

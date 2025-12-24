@@ -101,7 +101,10 @@ spec:
           - --destination=harbor.tech.fedorov-team.tech/frontend/app-knowledge-console:latest
           - --cache=true
           - --cache-repo=harbor.tech.fedorov-team.tech/frontend/kaniko-cache
-          - --verbosity=debug
+          - --snapshotMode=redo
+          - --verbosity=info
+          - --cache-copy-layers=true
+          - --cache-ttl=168h
         env:
           - name: DOCKER_CONFIG
             value: /kaniko/.docker

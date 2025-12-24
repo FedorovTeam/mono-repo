@@ -1,3 +1,4 @@
+// front/app-knowledge-console/middleware.ts
 export { default as middleware } from "next-auth/middleware";
 
 export const config = {
