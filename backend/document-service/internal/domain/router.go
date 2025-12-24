@@ -16,8 +16,10 @@ const (
 )
 
 type MergeSettings struct {
-	MaxTablesShare float64
-	LogMode        MergeLogMode
+	MaxTablesShare      float64
+	SkipRatioThreshold  float64
+	SkipWhenDoclingZero bool
+	LogMode             MergeLogMode
 }
 
 // RepositoryRouterRule задаёт переопределения стратегии роутинга для конкретного репозитория.
@@ -131,6 +133,12 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 func NormalizeMergeSettings(settings MergeSettings) MergeSettings {
 	if settings.MaxTablesShare <= 0 {
 		settings.MaxTablesShare = 0.9
+	}
+	if settings.SkipRatioThreshold <= 0 {
+		settings.SkipRatioThreshold = settings.MaxTablesShare
+	}
+	if settings.SkipRatioThreshold <= 0 {
+		settings.SkipRatioThreshold = 0.9
 	}
 	switch settings.LogMode {
 	case MergeLogModeDecision, MergeLogModeSilent, MergeLogModeDebug:
