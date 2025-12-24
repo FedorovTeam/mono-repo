@@ -114,8 +114,10 @@ type Router struct {
 }
 
 type MergeSettings struct {
-	MaxTablesShare float64 `yaml:"max_tables_share"`
-	LogMode        string  `yaml:"log_mode"`
+	MaxTablesShare      float64 `yaml:"max_tables_share"`
+	SkipRatioThreshold  float64 `yaml:"skip_ratio_threshold"`
+	SkipWhenDoclingZero bool    `yaml:"skip_when_docling_zero"`
+	LogMode             string  `yaml:"log_mode"`
 }
 
 type RepositoryRouterRule struct {
@@ -230,6 +232,12 @@ func (r *Router) normalize() {
 	if r.Merge.MaxTablesShare <= 0 {
 		r.Merge.MaxTablesShare = 0.9
 	}
+	if r.Merge.SkipRatioThreshold <= 0 {
+		r.Merge.SkipRatioThreshold = r.Merge.MaxTablesShare
+	}
+	if r.Merge.SkipRatioThreshold <= 0 {
+		r.Merge.SkipRatioThreshold = 0.9
+	}
 	for i := range r.RepositoryRules {
 		r.RepositoryRules[i].PreprocessExtensions = normalizeExtensions(r.RepositoryRules[i].PreprocessExtensions)
 		r.RepositoryRules[i].TableExtractorExtensions = normalizeExtensions(r.RepositoryRules[i].TableExtractorExtensions)
@@ -249,8 +257,12 @@ func (r Router) validate() error {
 			return fmt.Errorf("repositories[%d]: owner, repository or path_prefix is required", i)
 		}
 	}
+
 	if r.Merge.MaxTablesShare <= 0 {
 		return fmt.Errorf("merge.max_tables_share must be positive")
+	}
+	if r.Merge.SkipRatioThreshold <= 0 {
+		return fmt.Errorf("merge.skip_ratio_threshold must be positive")
 	}
 	switch r.Merge.LogMode {
 	case "decision", "silent", "debug":

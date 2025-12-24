@@ -1452,6 +1452,75 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 	}
 }
 
+func TestHandleExtractTablesSkipsMergeWhenDoclingEmpty(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-merge-empty",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/input.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/output.md",
+		Versions:          []domain.DocumentVersion{{Version: 1}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	baseMarkdown := ""
+	tablesMarkdown := "## Таблицы\n\n<!-- tables:start -->\n| новая | таблица |\n<!-- tables:end -->"
+	tableExtractor := &tableExtractorStub{
+		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-merge-empty",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "artifacts-bucket", ObjectKey: "tables/doc-merge-empty/tables.md"},
+				},
+			},
+		},
+	}
+	storage := &stubStorageClient{
+		objects: map[string]map[string][]byte{
+			"md-bucket": {
+				"docs/output.md": []byte(baseMarkdown),
+			},
+			"artifacts-bucket": {
+				"tables/doc-merge-empty/tables.md": []byte(tablesMarkdown),
+			},
+		},
+	}
+	payload := (domain.ExtractTablesPayload{
+		TableQueueID:             "queue-merge-empty",
+		ArtifactsBucket:          "artifacts-bucket",
+		MarkdownBucket:           doc.MarkdownBucket,
+		MarkdownObjectKey:        doc.MarkdownObjectKey,
+		DoclingMarkdownBucket:    doc.MarkdownBucket,
+		DoclingMarkdownObjectKey: doc.MarkdownObjectKey,
+		TableMetadata:            domain.TableMetadata{TablesCount: 1},
+		TableCount:               1,
+	}).ToMap()
+	router := domain.NewStageRouter(domain.RouterRules{Merge: domain.MergeSettings{MaxTablesShare: 3, SkipRatioThreshold: 3, SkipWhenDoclingZero: true, LogMode: domain.MergeLogModeDebug}})
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, router)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v (bucket=%s key=%s content=%q)", err, storage.lastGet.bucket, storage.lastGet.key, storage.objects[storage.lastGet.bucket][storage.lastGet.key])
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+	if repo.doc.Status != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document converted status, got %s", repo.doc.Status)
+	}
+	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
+	if string(uploaded) != "" {
+		t.Fatalf("expected merged content to stay empty when docling markdown is empty, got %q", string(uploaded))
+	}
+	reason, ok := result.Event.Payload["tables_merge_skip_reason"].(string)
+	if !ok || reason == "" {
+		t.Fatalf("expected skip reason in event payload, got %+v", result.Event.Payload)
+	}
+	if !strings.Contains(reason, "docling markdown is empty") {
+		t.Fatalf("unexpected skip reason: %s", reason)
+	}
+}
+
 func TestHandleExtractTablesMergesTablesOnlyStrategyWithoutLosingText(t *testing.T) {
 	doc := &domain.Document{
 		ID:                 "doc-tables-only-merge",

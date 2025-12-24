@@ -1021,11 +1021,13 @@ func mergeMarkdownWithTablesWithOptions(baseMarkdown, tablesMarkdown string, opt
 	tablesLines := countLines(tablesContent)
 	wordRatio := share(tablesWords, baseWords)
 	lineRatio := share(tablesLines, baseLines)
+	threshold := settings.SkipRatioThreshold
+	ratioDetails := fmt.Sprintf("word_ratio=%.4f line_ratio=%.4f threshold=%.4f base_words=%d tables_words=%d base_lines=%d tables_lines=%d", wordRatio, lineRatio, threshold, baseWords, tablesWords, baseLines, tablesLines)
 
 	if settings.DebugLog() {
 		log.Printf(
-			"mergeMarkdownWithTables: doc_id=%s ratios word=%.4f line=%.4f threshold=%.4f base_words=%d tables_words=%d base_lines=%d tables_lines=%d meta_empty=%v",
-			strings.TrimSpace(opts.DocumentID), wordRatio, lineRatio, settings.MaxTablesShare, baseWords, tablesWords, baseLines, tablesLines, opts.TableMetadata.IsEmpty(),
+			"mergeMarkdownWithTables: doc_id=%s %s meta_empty=%v",
+			strings.TrimSpace(opts.DocumentID), ratioDetails, opts.TableMetadata.IsEmpty(),
 		)
 	}
 
@@ -1035,15 +1037,23 @@ func mergeMarkdownWithTablesWithOptions(baseMarkdown, tablesMarkdown string, opt
 	}
 
 	if opts.TableMetadata.IsEmpty() {
-		reason := fmt.Sprintf("skip_tables: table metadata is empty word_ratio=%.4f line_ratio=%.4f threshold=%.4f", wordRatio, lineRatio, settings.MaxTablesShare)
+		reason := fmt.Sprintf("skip_tables: table metadata is empty %s", ratioDetails)
 		if settings.ShouldLog() {
 			log.Printf("mergeMarkdownWithTables: doc_id=%s %s", strings.TrimSpace(opts.DocumentID), reason)
 		}
 		return mergeResult{Content: baseMarkdown, SkipReason: reason}, nil
 	}
 
-	if maxRatio > settings.MaxTablesShare {
-		reason := fmt.Sprintf("skip_tables: tables share %.4f exceeds threshold %.4f (word=%.4f line=%.4f base_words=%d tables_words=%d base_lines=%d tables_lines=%d)", maxRatio, settings.MaxTablesShare, wordRatio, lineRatio, baseWords, tablesWords, baseLines, tablesLines)
+	if settings.SkipWhenDoclingZero && baseWords == 0 && baseLines == 0 {
+		reason := fmt.Sprintf("skip_tables: docling markdown is empty %s", ratioDetails)
+		if settings.ShouldLog() {
+			log.Printf("mergeMarkdownWithTables: doc_id=%s %s", strings.TrimSpace(opts.DocumentID), reason)
+		}
+		return mergeResult{Content: baseMarkdown, SkipReason: reason}, nil
+	}
+
+	if maxRatio > threshold {
+		reason := fmt.Sprintf("skip_tables: tables share %.4f exceeds threshold %.4f (%s)", maxRatio, threshold, ratioDetails)
 		if settings.ShouldLog() {
 			log.Printf("mergeMarkdownWithTables: doc_id=%s %s", strings.TrimSpace(opts.DocumentID), reason)
 		}
