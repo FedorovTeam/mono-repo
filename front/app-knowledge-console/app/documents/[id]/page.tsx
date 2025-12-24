@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
@@ -99,7 +99,6 @@ export default function DocumentDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [reauthInProgress, setReauthInProgress] = useState(false);
   const [redirectingToSignIn, setRedirectingToSignIn] = useState(false);
-  const router = useRouter();
   const restoringSession = useSessionRestorationState();
   const showRestoringOverlay = restoringSession || reauthInProgress;
 
@@ -150,7 +149,6 @@ export default function DocumentDetailsPage() {
           'X-Correlation-ID': generateCorrelationId(),
         },
         body: JSON.stringify({ query, variables: { id: documentId } }),
-        router,
       });
 
       if (!res.ok) {
@@ -193,7 +191,7 @@ export default function DocumentDetailsPage() {
         setReauthInProgress(false);
       }
     }
-  }, [documentId, restoringSession, router]);
+  }, [documentId, restoringSession]);
 
   useEffect(() => {
     fetchDocument();
