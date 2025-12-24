@@ -281,12 +281,14 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
   }
 
   const now = Date.now();
+  const isExpired = normalizedToken.expiresAt <= now;
   const nextPlannedAttempt =
     typeof normalizedToken.nextRefreshAttempt === "number"
       ? normalizedToken.nextRefreshAttempt
       : normalizedToken.expiresAt - refreshLeewayMs;
+  const shouldDelayRefresh = !isExpired && now < nextPlannedAttempt;
 
-  if (now < nextPlannedAttempt) {
+  if (shouldDelayRefresh) {
     return normalizedToken;
   }
 
