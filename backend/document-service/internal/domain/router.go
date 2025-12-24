@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"log"
 	"path"
 	"sort"
 	"strings"
@@ -173,6 +174,15 @@ func (r *StageRouter) DefaultExtractTables(doc *Document) bool {
 	return strategy == ConversionStrategyTablesOnly || strategy == ConversionStrategyDoclingWithTables
 }
 
+// ForceTableExtractionEnabled возвращает флаг принудительного извлечения таблиц для PDF.
+func (r *StageRouter) ForceTableExtractionEnabled(doc *Document) bool {
+	if doc == nil {
+		return false
+	}
+	rules := r.effectiveRules(doc)
+	return rules.forceTableExtraction
+}
+
 // ShouldExtractTablesAfterConvert определяет, нужно ли запускать извлечение таблиц после конвертации Docling.
 func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTables bool, tableCount int, tablePages []int32, markdownTablesHint bool) bool {
 	if doc == nil {
@@ -192,7 +202,12 @@ func (r *StageRouter) ShouldExtractTablesAfterConvert(doc *Document, extractTabl
 	detectionSatisfied := detectedTables > 0 && detectedTables >= rules.tableDetectionMinCount
 
 	ext := documentExtension(doc)
-	if !canUseTableExtractor(ext, rules.tableExtractorExt) {
+	canUseExtractor := canUseTableExtractor(ext, rules.tableExtractorExt)
+	log.Printf(
+		"[router] doc_id=%s strategy=%s explicit_tables=%v detection_satisfied=%v markdown_tables_hint=%v can_use_table_extractor=%v table_count=%d table_pages=%v force_table_extraction_pdf=%v",
+		doc.ID, strategy, explicitTables, detectionSatisfied, markdownTablesHint, canUseExtractor, detectedTables, pages, rules.forceTableExtraction,
+	)
+	if !canUseExtractor {
 		return false
 	}
 

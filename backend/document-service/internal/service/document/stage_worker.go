@@ -292,6 +292,17 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 	if payload.CorrelationID == "" {
 		payload.CorrelationID = correlationFromDoc(doc)
 	}
+	log.Printf(
+		"[extract_tables] doc_id=%s strategy=%s extract_tables=%v table_count=%d table_pages=%v markdown_tables_hint=%v force_table_extraction_pdf=%v extension=%s",
+		doc.ID,
+		payload.ConversionStrategy,
+		payload.ExtractTables,
+		payload.TableCount,
+		payload.TablePages,
+		payload.HasMarkdownTablesHint(),
+		w.forceTableExtractionEnabled(doc),
+		documentExtension(doc),
+	)
 
 	if strings.TrimSpace(payload.OriginalBucket) == "" || strings.TrimSpace(payload.OriginalObjectKey) == "" {
 		return workersvc.JobResult{Payload: payload.ToMap()}, fmt.Errorf("table extraction original location is required")
@@ -446,6 +457,18 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 	if payload.DoclingMarkdownObjectKey == "" {
 		payload.DoclingMarkdownObjectKey = payload.MarkdownObjectKey
 	}
+	forceTableExtraction := w.forceTableExtractionEnabled(doc)
+	log.Printf(
+		"[convert] doc_id=%s strategy=%s extract_tables=%v table_count=%d table_pages=%v markdown_tables_hint=%v force_table_extraction_pdf=%v extension=%s",
+		doc.ID,
+		payload.ConversionStrategy,
+		payload.ExtractTables,
+		payload.TableCount,
+		payload.TablePages,
+		payload.HasMarkdownTablesHint(),
+		forceTableExtraction,
+		documentExtension(doc),
+	)
 	if payload.HasMarkdownTablesHint() {
 		payload.ExtractTables = true
 	}
@@ -831,6 +854,13 @@ func (w *StageWorker) shouldExtractAfterConvert(doc *domain.Document, payload do
 	return w.router.ShouldExtractTablesAfterConvert(&docCopy, payload.ExtractTables, tableCount, tablePages, payload.HasMarkdownTablesHint())
 }
 
+func (w *StageWorker) forceTableExtractionEnabled(doc *domain.Document) bool {
+	if doc == nil || w.router == nil {
+		return false
+	}
+	return w.router.ForceTableExtractionEnabled(doc)
+}
+
 func (w *StageWorker) jobContext(ctx context.Context, correlationID string) context.Context {
 	corr := strings.TrimSpace(correlationID)
 	if corr == "" {
@@ -913,6 +943,13 @@ func tablesMarkdownKey(prefix string) string {
 		return ""
 	}
 	return path.Join(cleanPrefix, "tables.md")
+}
+
+func documentExtension(doc *domain.Document) string {
+	if doc == nil {
+		return ""
+	}
+	return fileExtension(firstNonEmpty(doc.OriginalObjectKey, doc.Name))
 }
 
 func preprocessTargetKey(originalKey string) string {

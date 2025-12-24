@@ -177,6 +177,9 @@ type ExtractTablesPayload struct {
 	DoclingStatus            string
 	ConversionStrategy       ConversionStrategy
 	ExtractTables            bool
+	TableMetadata            TableMetadata
+	TableCount               int32
+	TablePages               []int32
 }
 
 // PublishPayload описывает данные для шага публикации в GitHub.
@@ -286,6 +289,15 @@ func (p ExtractTablesPayload) ToMap() map[string]any {
 		res["conversion_strategy"] = string(p.ConversionStrategy)
 	}
 	res["extract_tables"] = p.ExtractTables
+	if meta := p.TableMetadata.ToMap(); len(meta) > 0 {
+		res["table_metadata"] = meta
+	}
+	if p.TableCount > 0 {
+		res["table_count"] = p.TableCount
+	}
+	if len(p.TablePages) > 0 {
+		res["table_pages"] = mergePages(p.TablePages)
+	}
 	p.JobPayloadMetadata.applyTo(res)
 	return res
 }
@@ -409,11 +421,36 @@ func (p ConvertPayload) TableInfo() (int, []int32) {
 // HasMarkdownTablesHint пытается определить наличие таблиц в Markdown по payload.
 // Используется как fallback, когда Docling не вернул table_count/pages.
 func (p ConvertPayload) HasMarkdownTablesHint() bool {
-	if count, pages := p.TableInfo(); count > 0 || len(pages) > 0 {
+	count, pages := p.TableInfo()
+	return hasMarkdownTablesHint(count, pages, p.MarkdownObjectKey, p.DoclingMarkdownObjectKey)
+}
+
+// TableInfo возвращает агрегированные данные о таблицах из payload извлечения.
+func (p ExtractTablesPayload) TableInfo() (int, []int32) {
+	meta := p.TableMetadata
+	pages := mergePages(p.TablePages, meta.Pages)
+	count := int(p.TableCount)
+	if meta.TablesCount > int32(count) {
+		count = int(meta.TablesCount)
+	}
+	if count == 0 && len(pages) > 0 {
+		count = len(pages)
+	}
+	return count, pages
+}
+
+// HasMarkdownTablesHint пытается определить наличие таблиц в Markdown по payload извлечения.
+func (p ExtractTablesPayload) HasMarkdownTablesHint() bool {
+	count, pages := p.TableInfo()
+	return hasMarkdownTablesHint(count, pages, p.MarkdownObjectKey, p.DoclingMarkdownObjectKey)
+}
+
+func hasMarkdownTablesHint(count int, pages []int32, markdownKey, doclingKey string) bool {
+	if count > 0 || len(pages) > 0 {
 		return true
 	}
 
-	for _, key := range []string{p.MarkdownObjectKey, p.DoclingMarkdownObjectKey} {
+	for _, key := range []string{markdownKey, doclingKey} {
 		if strings.TrimSpace(key) == "" {
 			continue
 		}
@@ -509,6 +546,9 @@ func ExtractTablesPayloadFromMap(payload map[string]any) ExtractTablesPayload {
 		DoclingStatus:            stringFromMap(payload, "docling_status"),
 		ConversionStrategy:       ConversionStrategy(stringFromMap(payload, "conversion_strategy")),
 		ExtractTables:            boolFromMap(payload, "extract_tables"),
+		TableMetadata:            tableMetadataFromPayload(payload, "table_metadata"),
+		TableCount:               int32(intFromMap(payload, "table_count")),
+		TablePages:               mergePages(int32SliceFromMap(payload, "table_pages")),
 	}
 	if result.TableQueueID == "" {
 		result.TableQueueID = result.QueueID
