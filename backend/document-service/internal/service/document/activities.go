@@ -845,6 +845,14 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		return len(parts)
 	}
 
+	tableSignatures := func(blocks []tableBlock) []string {
+		signatures := make([]string, 0, len(blocks))
+		for _, block := range blocks {
+			signatures = append(signatures, block.signature)
+		}
+		return signatures
+	}
+
 	replaceTablesBySignature := func(md string, newTables []tableBlock) (string, bool) {
 		lines := strings.Split(md, "\n")
 		baseTables := findTables(md)
@@ -914,7 +922,8 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 	}
 
 	extractContent := func(md string) (string, bool) {
-		blocks, _ := markerBlocks(md)
+		blocks, ranges := markerBlocks(md)
+		log.Printf("mergeMarkdownWithTables: markerBlocks detected=%d ranges=%v", len(blocks), ranges)
 		if len(blocks) > 0 {
 			return strings.Join(blocks, "\n\n"), true
 		}
@@ -928,6 +937,7 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 	}
 
 	tablesContent, hasMarkers := extractContent(trimmedTables)
+	log.Printf("mergeMarkdownWithTables: tables markers found=%v", hasMarkers)
 	if !hasMarkers {
 		if tablesBlocks := findTables(trimmedTables); len(tablesBlocks) > 0 {
 			lines := strings.Split(trimmedTables, "\n")
@@ -944,7 +954,9 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		tablesBlock = fmt.Sprintf("%s\n%s\n%s", tablesStart, tablesContent, tablesEnd)
 	}
 
-	if _, baseRanges := markerBlocks(baseMarkdown); hasMarkers && len(baseRanges) > 0 {
+	baseBlocks, baseRanges := markerBlocks(baseMarkdown)
+	log.Printf("mergeMarkdownWithTables: base markerBlocks detected=%d ranges=%v", len(baseBlocks), baseRanges)
+	if hasMarkers && len(baseRanges) > 0 {
 		start := baseRanges[0][0]
 		end := baseRanges[len(baseRanges)-1][1]
 		merged := fmt.Sprintf("%s%s%s", baseMarkdown[:start], tablesContent, baseMarkdown[end:])
@@ -961,11 +973,15 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 	}
 
 	newTables := findTables(tablesContent)
+	log.Printf("mergeMarkdownWithTables: newTables found=%d signatures=%v", len(newTables), tableSignatures(newTables))
+	baseTables := findTables(baseMarkdown)
+	log.Printf("mergeMarkdownWithTables: baseTables found=%d signatures=%v", len(baseTables), tableSignatures(baseTables))
 	if mergedBySignature, replaced := replaceTablesBySignature(baseMarkdown, newTables); replaced {
+		log.Printf("mergeMarkdownWithTables: replaceTablesBySignature applied replaced=%v", replaced)
 		return deduplicateTables(mergedBySignature), nil
 	}
+	log.Printf("mergeMarkdownWithTables: replaceTablesBySignature applied replaced=%v", false)
 
-	baseTables := findTables(baseMarkdown)
 	if len(baseTables) > 0 && len(newTables) > 0 {
 		targetIdx := -1
 		newCols := columnCount(newTables[0])
@@ -981,6 +997,7 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		if targetIdx == -1 {
 			targetIdx = 0
 		}
+		log.Printf("mergeMarkdownWithTables: targetIdx=%d", targetIdx)
 		lines := strings.Split(baseMarkdown, "\n")
 		start := baseTables[targetIdx].start
 		end := baseTables[targetIdx].end
@@ -994,6 +1011,7 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 	}
 
 	fallbackNote := "<!-- tables:appended (no anchor found) -->"
+	log.Printf("mergeMarkdownWithTables: fallback append marker added")
 	return deduplicateTables(fmt.Sprintf("%s\n\n%s\n%s\n", strings.TrimSpace(baseMarkdown), fallbackNote, tablesBlock)), nil
 }
 
