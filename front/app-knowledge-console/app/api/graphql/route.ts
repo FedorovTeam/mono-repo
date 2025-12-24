@@ -5,6 +5,29 @@ import { generateCorrelationId } from "@/lib/correlation";
 
 const gatewayUrl = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL;
 
+const getTokenExpirationMs = (token: string | undefined | null) => {
+  if (!token) {
+    return null;
+  }
+
+  const [, payload] = token.split(".");
+
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decodedPayload = Buffer.from(normalizedPayload, "base64").toString("utf8");
+    const parsedPayload = JSON.parse(decodedPayload) as { exp?: number };
+
+    return typeof parsedPayload.exp === "number" ? parsedPayload.exp * 1000 : null;
+  } catch (error) {
+    console.warn("Не удалось распарсить exp из accessToken", error);
+    return null;
+  }
+};
+
 function parseRequestBody(request: NextRequest) {
   return request
     .json()
@@ -28,6 +51,18 @@ export async function POST(request: NextRequest) {
 
   if (!gatewayUrl) {
     return NextResponse.json({ error: "GATEWAY_URL не задан" }, { status: 500 });
+  }
+
+  const expiresAt =
+    typeof session.expiresAt === "number"
+      ? session.expiresAt
+      : getTokenExpirationMs(session.accessToken);
+
+  if (expiresAt && expiresAt <= Date.now()) {
+    return NextResponse.json(
+      { error: "Требуется повторный вход", code: "reauth_required" },
+      { status: 440 },
+    );
   }
 
   const correlationId = request.headers.get("x-correlation-id") ?? generateCorrelationId();
