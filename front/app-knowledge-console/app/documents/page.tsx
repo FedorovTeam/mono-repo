@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
@@ -93,7 +92,6 @@ export default function DocumentsPage() {
   const [limit, setLimit] = useState(20);
   const pollingIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const pollErrorAttempts = React.useRef<Map<string, number>>(new Map());
-  const router = useRouter();
   const restoringSession = useSessionRestorationState();
   const showRestoringOverlay = restoringSession || reauthInProgress;
 
@@ -151,7 +149,6 @@ export default function DocumentsPage() {
           query,
           variables: { pagination: { limit, offset } },
         }),
-        router,
       });
 
       if (!res.ok) {
@@ -195,7 +192,7 @@ export default function DocumentsPage() {
         setReauthInProgress(false);
       }
     }
-  }, [limit, page, restoringSession, router]);
+  }, [limit, page, restoringSession]);
 
   const pollDocument = useCallback(
     async (id: string) => {
@@ -230,7 +227,6 @@ export default function DocumentsPage() {
             'X-Correlation-ID': correlationId,
           },
           body: JSON.stringify({ query, variables: { id } }),
-          router,
         });
 
         if (!res.ok) {
@@ -268,7 +264,7 @@ export default function DocumentsPage() {
         console.error(err);
       }
     },
-    [router],
+    [],
   );
 
   useEffect(() => {
