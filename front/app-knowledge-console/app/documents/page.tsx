@@ -83,6 +83,8 @@ export default function DocumentsPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
   const [manualLoginRequired, setManualLoginRequired] = useState(false);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -90,6 +92,7 @@ export default function DocumentsPage() {
       setListError(null);
       setManualLoginRequired(false);
       const correlationId = generateCorrelationId();
+      const offset = (page - 1) * limit;
 
       const query = `
         query KnowledgeDocuments($pagination: Pagination) {
@@ -119,7 +122,7 @@ export default function DocumentsPage() {
         },
         body: JSON.stringify({
           query,
-          variables: { pagination: { limit: 20, offset: 0 } },
+          variables: { pagination: { limit, offset } },
         }),
       });
 
@@ -138,7 +141,8 @@ export default function DocumentsPage() {
         throw new Error('Пустой ответ knowledgeDocuments');
       }
 
-      setDocuments(payload.nodes);
+      const uniqueDocuments = Array.from(new Map(payload.nodes.map((doc) => [doc.id, doc])).values());
+      setDocuments(uniqueDocuments);
       setDocumentsTotal(payload.totalCount);
     } catch (err) {
       if (err instanceof SilentSignInError) {
@@ -155,7 +159,7 @@ export default function DocumentsPage() {
     } finally {
       setIsListLoading(false);
     }
-  }, []);
+  }, [limit, page]);
 
   const pollDocument = useCallback(
     async (id: string) => {
@@ -229,6 +233,16 @@ export default function DocumentsPage() {
     return () => clearInterval(interval);
   }, [documents, pollDocument]);
 
+  useEffect(() => {
+    if (typeof documentsTotal !== 'number' || documentsTotal === 0) {
+      return;
+    }
+    const maxPage = Math.max(1, Math.ceil(documentsTotal / limit));
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [documentsTotal, limit, page]);
+
   return (
     <main className="px-4 pb-12">
       <div className="mx-auto max-w-6xl space-y-4">
@@ -276,11 +290,11 @@ export default function DocumentsPage() {
             {isListLoading && <p className="text-sm text-slate-600">Загружаем список…</p>}
             {!isListLoading && documents.length === 0 && <p className="text-sm text-slate-600">Документы пока не загружались.</p>}
 
-            {documents.length > 0 && (
-              <>
-                <div className="hidden md:block">
-                  <DocumentsTable documents={documents} />
-                </div>
+          {documents.length > 0 && (
+            <>
+              <div className="hidden md:block">
+                <DocumentsTable documents={documents} />
+              </div>
                 <div className="grid gap-3 md:hidden">
                   {documents.map((doc) => (
                     <DocumentCard key={doc.id} document={doc} />
@@ -290,12 +304,122 @@ export default function DocumentsPage() {
             )}
           </div>
 
-          {typeof documentsTotal === 'number' && (
-            <p className="mt-4 text-xs text-slate-500">Всего документов: {documentsTotal}</p>
-          )}
+          <Pagination
+            documents={documents}
+            documentsTotal={documentsTotal}
+            isLoading={isListLoading}
+            limit={limit}
+            page={page}
+            onNext={() => setPage((prev) => prev + 1)}
+            onPrev={() => setPage((prev) => Math.max(1, prev - 1))}
+            onLimitChange={(value) => {
+              setPage(1);
+              setLimit(value);
+            }}
+            onRefresh={fetchDocuments}
+          />
         </div>
       </div>
     </main>
+  );
+}
+
+type PaginationProps = {
+  documents: KnowledgeDocument[];
+  documentsTotal: number | null;
+  isLoading: boolean;
+  limit: number;
+  page: number;
+  onNext: () => void;
+  onPrev: () => void;
+  onLimitChange: (value: number) => void;
+  onRefresh: () => void;
+};
+
+function Pagination({
+  documents,
+  documentsTotal,
+  isLoading,
+  limit,
+  page,
+  onNext,
+  onPrev,
+  onLimitChange,
+  onRefresh,
+}: PaginationProps) {
+  const totalPages = typeof documentsTotal === 'number' ? Math.max(1, Math.ceil(documentsTotal / limit)) : null;
+  const canGoPrev = page > 1 && !isLoading;
+  const canGoNext =
+    !isLoading && (typeof totalPages === 'number' ? page < totalPages : documents.length > 0 && documents.length >= limit);
+  const offset = (page - 1) * limit;
+  const startIndex = documents.length > 0 ? offset + 1 : 0;
+  const endIndex = documents.length > 0 ? offset + documents.length : 0;
+
+  return (
+    <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {typeof documentsTotal === 'number' ? (
+          <p className="text-xs text-slate-600">
+            Показаны {startIndex}–{endIndex} из {documentsTotal} (страница {page}
+            {typeof totalPages === 'number' ? ` из ${totalPages}` : ''})
+          </p>
+        ) : (
+          <p className="text-xs text-slate-600">Показано {documents.length}</p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-slate-600" htmlFor="documents-limit">
+            На странице
+            <select
+              id="documents-limit"
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+              value={limit}
+              onChange={(event) => onLimitChange(Number(event.target.value))}
+              disabled={isLoading}
+            >
+              {[10, 20, 50].map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onPrev}
+              disabled={!canGoPrev}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Назад
+            </button>
+            <span className="text-xs text-slate-600">Страница {page}</span>
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!canGoNext}
+              className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Далее
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isLoading}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {typeof documentsTotal === 'number' && (
+        <p className="text-xs text-slate-500">Всего документов: {documentsTotal}</p>
+      )}
+    </div>
   );
 }
 
