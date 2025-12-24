@@ -1,0 +1,4 @@
+force_table_extraction_pdf=true
+markdown_table_hints=false
+should_extract_tables=false
+fallback_appended=false
