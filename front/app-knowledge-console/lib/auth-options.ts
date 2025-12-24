@@ -411,6 +411,10 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       const extendedToken = token as ExtendedJWT;
 
+      if (extendedToken.reauthRequired) {
+        return null;
+      }
+
       session.accessToken = typeof extendedToken.accessToken === "string" ? extendedToken.accessToken : undefined;
       session.idToken = typeof extendedToken.idToken === "string" ? extendedToken.idToken : undefined;
       session.expiresAt = extendedToken.expiresAt;
