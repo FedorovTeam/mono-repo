@@ -1,0 +1,1 @@
+doc_id=docling-zero-ratio table_count=0 should_extract_tables=false skip_reason="skip_tables: table metadata is empty word_ratio=2.0000 line_ratio=1.2500 threshold=0.9000 base_words=20 tables_words=40 base_lines=3 tables_lines=5"

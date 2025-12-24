@@ -30,3 +30,7 @@
    ```
 
 Перед ручными тестами примените миграции и запустите сервер: `go run ./cmd/server --migrate && go run ./cmd/server`.
+
+## Ручные проверки PDF
+- **Документ без таблиц (Docling table_count=0, высокий ratio)**: используйте артефакты `backend/test/runs/docling-zero-ratio` или прогоните `Регламент - в ред. от 08.06.2023.pdf` через docling-transformer. В манифесте `table_count` должен оставаться нулём, а в `pipeline.log` — причина пропуска (`skip_tables: table metadata is empty ...`). При порогах `max_tables_share` и `skip_ratio_threshold` равных `0.9` таблицы не должны попадать в итоговый Markdown даже при большом объёме `tables.md`.
+- **Ил Тумэн 3617.pdf**: таблицы должны сохраниться. Ожидаемый результат — `backend/test/result/stenogramma-01.md`, в таблице присутствуют галочки в нужных колонках (например, строки 1, 22 и 27). Манифест `backend/test/runs/iltumen-3617/manifest.json` содержит `table_count: 70`, а `pipeline.log` фиксирует `tables_merged=true` и прохождение ratio-гейта при пороге не ниже `15`.
