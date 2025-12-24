@@ -179,6 +179,57 @@ type AuthentikTokenError = {
 const refreshLeewayMs = 2 * 60 * 1000;
 const refreshRetryBaseDelayMs = 5 * 1000;
 const refreshRetryMaxDelayMs = 5 * 60 * 1000;
+const defaultAccessTokenTtlMs = 10 * 60 * 1000;
+
+const getJwtExpiration = (token?: string) => {
+  if (typeof token !== "string") {
+    return null;
+  }
+
+  const [, payload] = token.split(".");
+
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    const decodedPayload = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+    const exp = decodedPayload?.exp;
+
+    return typeof exp === "number" ? exp * 1000 : null;
+  } catch (error) {
+    console.warn("[auth-options] Не удалось декодировать exp из JWT", error);
+    return null;
+  }
+};
+
+const resolveExpiresAt = ({
+  expiresAtSeconds,
+  expiresInSeconds,
+  accessToken,
+  idToken,
+}: {
+  expiresAtSeconds?: number | null;
+  expiresInSeconds?: number | null;
+  accessToken?: string | null;
+  idToken?: string | null;
+}) => {
+  if (Number.isFinite(expiresAtSeconds)) {
+    return (expiresAtSeconds as number) * 1000;
+  }
+
+  if (Number.isFinite(expiresInSeconds)) {
+    return Date.now() + (expiresInSeconds as number) * 1000;
+  }
+
+  const jwtExpiration = getJwtExpiration(accessToken ?? undefined) ?? getJwtExpiration(idToken ?? undefined);
+
+  if (jwtExpiration) {
+    return jwtExpiration;
+  }
+
+  return accessToken ? Date.now() + defaultAccessTokenTtlMs : null;
+};
 
 const clearSession = (token: ExtendedJWT) => {
   token.accessToken = undefined;
@@ -211,16 +262,32 @@ const scheduleRefreshRetry = (token: ExtendedJWT) => {
 };
 
 const refreshAccessToken = async (token: ExtendedJWT) => {
-  if (!token.refreshToken || !token.expiresAt || token.reauthRequired) {
+  if (token.reauthRequired) {
     return token;
+  }
+
+  const currentExpiresAt =
+    token.expiresAt ??
+    resolveExpiresAt({ accessToken: token.accessToken ?? null, idToken: token.idToken ?? null, expiresAtSeconds: null });
+
+  if (!currentExpiresAt) {
+    return markReauthRequired(token);
+  }
+
+  const normalizedToken: ExtendedJWT = { ...token, expiresAt: currentExpiresAt };
+
+  if (!normalizedToken.refreshToken) {
+    return markReauthRequired(normalizedToken);
   }
 
   const now = Date.now();
   const nextPlannedAttempt =
-    typeof token.nextRefreshAttempt === "number" ? token.nextRefreshAttempt : token.expiresAt - refreshLeewayMs;
+    typeof normalizedToken.nextRefreshAttempt === "number"
+      ? normalizedToken.nextRefreshAttempt
+      : normalizedToken.expiresAt - refreshLeewayMs;
 
   if (now < nextPlannedAttempt) {
-    return token;
+    return normalizedToken;
   }
 
   try {
@@ -246,12 +313,12 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
 
     if (!response.ok) {
       if (data?.error === "invalid_grant") {
-        return markReauthRequired(token);
+        return markReauthRequired(normalizedToken);
       }
 
       if (response.status >= 500) {
         console.error("Сетевой сбой или 5xx при обновлении токена Authentik", response.statusText);
-        return scheduleRefreshRetry(token);
+        return scheduleRefreshRetry(normalizedToken);
       }
 
       console.error("Ошибка при обновлении токена Authentik", {
@@ -260,20 +327,31 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
         error: data?.error,
       });
 
-      return scheduleRefreshRetry(token);
+      return scheduleRefreshRetry(normalizedToken);
     }
 
     if (!data?.access_token) {
       console.error("Ответ Authentik не содержит access_token", { status: response.status });
-      return scheduleRefreshRetry(token);
+      return scheduleRefreshRetry(normalizedToken);
+    }
+
+    const refreshedExpiresAt =
+      resolveExpiresAt({
+        expiresInSeconds: typeof data.expires_in === "number" ? data.expires_in : null,
+        accessToken: data.access_token,
+        idToken: data.id_token ?? normalizedToken.idToken ?? null,
+      }) ?? null;
+
+    if (!refreshedExpiresAt) {
+      return markReauthRequired(normalizedToken);
     }
 
     const updatedToken: ExtendedJWT = {
-      ...token,
+      ...normalizedToken,
       accessToken: data.access_token,
       idToken: data.id_token ?? token.idToken,
       refreshToken: data.refresh_token ?? token.refreshToken,
-      expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : token.expiresAt,
+      expiresAt: refreshedExpiresAt,
       refreshAttempts: 0,
       nextRefreshAttempt: undefined,
       reauthRequired: false,
@@ -282,7 +360,7 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
     return updatedToken;
   } catch (error) {
     console.error("Ошибка при обновлении токена Authentik", error);
-    return scheduleRefreshRetry(token);
+    return scheduleRefreshRetry(normalizedToken);
   }
 };
 
@@ -305,7 +383,12 @@ export const authOptions: NextAuthOptions = {
         extendedToken.accessToken = account.access_token;
         extendedToken.idToken = account.id_token;
         extendedToken.refreshToken = account.refresh_token;
-        extendedToken.expiresAt = account.expires_at ? account.expires_at * 1000 : undefined;
+        extendedToken.expiresAt =
+          resolveExpiresAt({
+            expiresAtSeconds: account.expires_at,
+            accessToken: account.access_token,
+            idToken: account.id_token,
+          }) ?? undefined;
         extendedToken.reauthRequired = false;
         extendedToken.refreshAttempts = 0;
         extendedToken.nextRefreshAttempt = undefined;
@@ -315,6 +398,10 @@ export const authOptions: NextAuthOptions = {
           hasAccessToken: Boolean(extendedToken.accessToken),
           reauthRequired: extendedToken.reauthRequired,
         });
+
+        if (!extendedToken.expiresAt) {
+          return markReauthRequired(extendedToken);
+        }
       }
 
       return await refreshAccessToken(extendedToken);
