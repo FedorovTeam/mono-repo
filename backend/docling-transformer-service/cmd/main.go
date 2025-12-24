@@ -111,6 +111,8 @@ func main() {
 		OCRLang:          cfg.Docling.OCRLang,
 		SkipOCROnTextPDF: cfg.Docling.SkipOCROnTextPDF,
 		Mode:             cfg.Docling.Mode,
+		ImageExportMode:  cfg.Docling.ImageExportMode,
+		IncludeImages:    cfg.Docling.IncludeImages,
 		TraceHttpRequest: cfg.Observability.LoggingEnabled,
 		Storage: converter.StorageConfig{
 			Endpoint:  cfg.Docling.Storage.Endpoint,

@@ -61,6 +61,8 @@ type DoclingConfig struct {
 	OCRLang               []string             `yaml:"ocr_lang"`
 	SkipOCROnTextPDF      *bool                `yaml:"skip_ocr_on_text_pdf"`
 	Mode                  string               `yaml:"mode"`
+	ImageExportMode       string               `yaml:"image_export_mode"`
+	IncludeImages         *bool                `yaml:"include_images"`
 	Storage               DoclingStorageConfig `yaml:"storage"`
 	StatusInitialInterval time.Duration        `yaml:"status_initial_interval"`
 	StatusBackoffFactor   float64              `yaml:"status_backoff_factor"`
