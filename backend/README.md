@@ -1,40 +1,104 @@
-Проблема:
-Сейчас консоль доступен из веба, все пользователи которые имеют ссылку могут загружать то что вздумается - это не бозопасно
+Ты — senior Go backend engineer. У нас есть сервис `document-service`, который конвертирует PDF → Markdown, опционально извлекает таблицы и пытается “склеить” таблицы с базовым markdown (`mergeMarkdownWithTables`). Сейчас система “не падает”, но **иногда молча теряет таблицы**, когда merge решает `skip_tables` из-за эвристик или отсутствия маркеров.
 
-Решение:
-Добавить авторизацию через сервис authentik
+### Контекст (по логам)
 
-Client id: L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF
-Client secret: lGhLYG9Usi845ndGd7R8yEVuauxMKZQYhbBVmcuaPAbewC9pUvQPH5uhSiuSGKWq8nYydBoUDNnbngr38nxiecE1qgeoO7e4nrh3carhwG89a3xoHXENDa1XIfh3sUfP
-Callback URL: https://console.fedorov-team.tech/auth/sso/authentik
-URI-s:
-URL-адрес конфигурации OpenID
-https://auth.tech.fedorov-team.tech/application/o/console/.well-known/openid-configuration
-Эмитент конфигурации OpenID
-https://auth.tech.fedorov-team.tech/application/o/console/
-URL-адрес авторизации
-https://auth.tech.fedorov-team.tech/application/o/authorize/
-URL-адрес токена
-https://auth.tech.fedorov-team.tech/application/o/token/
-URL-адрес информации о пользователе
-https://auth.tech.fedorov-team.tech/application/o/userinfo/
-URL-адрес выхода из системы
-https://auth.tech.fedorov-team.tech/application/o/console/end-session/
-URL-адрес JWKS
-https://auth.tech.fedorov-team.tech/application/o/console/jwks/
+Иногда таблицы извлекаются (`extract_tables=true`, `table_count>0`, `markdown_tables_hint=true`), но затем merge пишет:
 
-Как я это вижу:
-- Как пользователь открывает консоль, если пользователь не авторизован - показывается кнопка авторизоваться
-- При нажатии кнопку авторизации перенаправляет на authentik для авторизации
-- Если пользователь авторизован открывается консоль
+- `markerBlocks detected=0` / `tables markers found=false`
+- либо `skip_tables: tables share ... exceeds threshold ... (word_ratio=..., line_ratio=..., threshold=1.3000 ...)`
 
-На верху страницы в NavBar имеется кнопка выйти - с правого края
+  и в итоге таблицы **не попадают** в итоговый markdown/публикацию.
 
-Библиотеки для UI компонентов:
-- https://github.com/radix-ui/primitives
-- https://github.com/shadcn-ui/ui
-- tailwind
 
-как лучше реализовать авторизацию в console через authentik
-Как это лучше реализовать
-Спроектируй пожалуйста архитектуру
+### Цель
+
+Сделать конвертер **устойчивым к вариативности PDF** (шрифты, разрывы строк, кодировки, сканы, разные генераторы PDF) так, чтобы:
+
+1. сервис **не падал** (это уже ок),
+2. но главное — **не терял таблицы** даже при проблемах со склейкой,
+3. деградация выражалась максимум в “таблицы приложением/артефактом”, а не исчезновением.
+4. не заполнял весь документ таблицами, есло это текстовый документ такой как: backend/test/Регламент - в ред. от 08.06.2023.pdf
+
+### Требования (обязательные)
+
+1. **Непотеря данных:**
+
+   Если таблицы извлечены (`table_count > 0`), но merge решил не встраивать их (по любой причине: нет маркеров, ratio превышен и т.д.), то:
+
+    - таблицы должны быть сохранены и опубликованы **как fallback**:
+        - либо append в конец markdown под секцией `## Extracted tables (fallback)` (предпочтительно),
+        - либо отдельным артефактом рядом (`<doc_id>.tables.md` и/или `<doc_id>.tables.json`),
+        - либо оба варианта, если это проще.
+    - В логах должно быть явно видно: `fallback_tables=true` и `fallback_reason=<...>`.
+2. **Причины решений:**
+
+   Ввести явное перечисление причин для решения merge:
+
+    - `markers_missing`
+    - `ratio_exceeded`
+    - `tables_empty`
+    - `forced_appendix`
+    - `merged_inline`
+    - и т.п.
+
+      Чтобы по логам/метрикам можно было понять почему именно таблицы не встроились.
+
+3. **Настраиваемость эвристик через конфиг/ENV:**
+
+   Порог `threshold=1.3000` и/или логика ratio должна быть настраиваемой:
+
+    - `TABLE_MERGE_MAX_LINE_RATIO`
+    - `TABLE_MERGE_MAX_WORD_RATIO`
+    - `TABLE_MERGE_MODE = inline|appendix|artifact|auto`
+    - `TABLE_MERGE_REQUIRE_MARKERS = true|false`
+
+      Режим `auto`: inline если маркеры есть и эвристики ок, иначе appendix/artifact.
+
+4. **Улучшить устойчивость merge логики (без усложнения):**
+    - Если `markers_missing`, автоматически включать **appendix/artifact**, а не “просто пропуск”.
+    - Если `ratio_exceeded`, не “выбрасывать”, а fallback.
+    - Стараться избегать добавления мусора: если tables-output подозрительно “шумный”, всё равно сохранять его как отдельный артефакт, но не обязательно inline.
+5. **Идемпотентность и повторная обработка:**
+
+   В логах видно, что одни и те же `doc_id` обрабатываются много раз. Нужно:
+
+    - предотвратить параллельную обработку одного `doc_id` (лок/lease/guard),
+    - не перезатирать успешный результат более плохой попыткой,
+    - сделать поведение предсказуемым при retry (идемпотентно).
+6. **Метрики/наблюдаемость:**
+
+   Добавить счётчики/метрики (Prometheus или существующая система):
+
+    - `tables_extracted_total`
+    - `tables_merged_inline_total`
+    - `tables_fallback_appendix_total`
+    - `tables_fallback_artifact_total`
+    - `tables_skipped_total` (если вообще остаётся такой кейс, но лучше свести к 0)
+    - разметить по `reason` (лейбл).
+7. **Тесты:**
+    - Unit-тесты для `mergeMarkdownWithTables` (кейсы markers missing, ratio exceeded, норм merge).
+    - Мини-интеграционный тест пайплайна на синтетическом markdown + tables output: проверяем, что при skip → появляется fallback секция/файл.
+
+
+Вводные для тестов, примерный, что входит -> результат на выходе:
+- backend/test/Ил Тумэн 3617.pdf -> backend/test/result/Ил Тумэн 3617.md
+- backend/test/Регламент - в ред. от 08.06.2023.pdf -> backend/test/result/Регламент - в ред. от 08.06.2023.md
+- backend/test/Ил Тумэн Голосование - 22.10.2025 - 3619.pdf -> backend/test/result/Ил Тумэн Голосование - 22.10.2025 - 3619.md
+  Эти реузльтат корректной рабоыт сервиса
+
+
+### Ограничения
+
+- Не ломать публичные API сервиса.
+- Не добавлять тяжёлые зависимости.
+- Не включать OCR как обязательный шаг.
+- Производительность: не добавлять дорогие операции на каждый документ без необходимости.
+
+### Что нужно сделать в итоге (deliverables)
+
+1. PR/патч с изменениями в коде.
+2. Краткое описание изменения поведения (в README или internal docs).
+3. Примеры логов “до/после” для кейса `markers_missing` и `ratio_exceeded`.
+4. Тесты, проходящие в CI.
+
+Начни с анализа репозитория: найди точки, где принимается решение `skip_tables`, где сохраняется/публикуется markdown, и где можно прикрепить артефакт таблиц. Затем предложи план изменений и реализуй.
