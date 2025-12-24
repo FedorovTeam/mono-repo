@@ -38,6 +38,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    console.info("GraphQL proxy forwarding request с accessToken", {
+      correlationId,
+      hasAccessToken: Boolean(session.accessToken),
+    });
+
     const upstream = await fetch(gatewayUrl, {
       method: "POST",
       headers: {
