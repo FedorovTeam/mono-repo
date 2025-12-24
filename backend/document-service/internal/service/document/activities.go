@@ -782,6 +782,102 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 
 	trimmedTables := strings.TrimSpace(tablesMarkdown)
 
+	isTableLine := func(line string) bool {
+		trimmed := strings.TrimSpace(line)
+		return strings.HasPrefix(trimmed, "|")
+	}
+
+	tableSignature := func(header string) string {
+		trimmed := strings.Trim(header, "|")
+		if strings.TrimSpace(trimmed) == "" {
+			return ""
+		}
+		parts := strings.Split(trimmed, "|")
+		cols := make([]string, 0, len(parts))
+		for _, part := range parts {
+			cols = append(cols, strings.ToLower(strings.TrimSpace(part)))
+		}
+		if len(cols) == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%d:%s", len(cols), strings.Join(cols, "|"))
+	}
+
+	type tableBlock struct {
+		start, end int
+		lines      []string
+		signature  string
+	}
+
+	findTables := func(md string) []tableBlock {
+		lines := strings.Split(md, "\n")
+		blocks := make([]tableBlock, 0)
+		for i := 0; i < len(lines); i++ {
+			if !isTableLine(lines[i]) {
+				continue
+			}
+			start := i
+			j := i
+			for j < len(lines) && isTableLine(lines[j]) {
+				j++
+			}
+			blockLines := lines[start:j]
+			signature := tableSignature(blockLines[0])
+			if signature == "" {
+				i = j - 1
+				continue
+			}
+			blocks = append(blocks, tableBlock{start: start, end: j - 1, lines: blockLines, signature: signature})
+			i = j - 1
+		}
+		return blocks
+	}
+
+	replaceTablesBySignature := func(md string, newTables []tableBlock) (string, bool) {
+		lines := strings.Split(md, "\n")
+		baseTables := findTables(md)
+		if len(baseTables) == 0 || len(newTables) == 0 {
+			return md, false
+		}
+		used := make(map[int]struct{})
+		replaced := false
+		for idx := len(baseTables) - 1; idx >= 0; idx-- {
+			baseBlock := baseTables[idx]
+			match := -1
+			for newIdx, tbl := range newTables {
+				if tbl.signature == baseBlock.signature {
+					if _, ok := used[newIdx]; ok {
+						continue
+					}
+					match = newIdx
+					break
+				}
+			}
+			if match == -1 {
+				continue
+			}
+			used[match] = struct{}{}
+			replaced = true
+			lines = append(append(append([]string{}, lines[:baseBlock.start]...), newTables[match].lines...), lines[baseBlock.end+1:]...)
+		}
+		return strings.Join(lines, "\n"), replaced
+	}
+
+	deduplicateTables := func(md string) string {
+		lines := strings.Split(md, "\n")
+		tables := findTables(md)
+		seen := make(map[string]struct{})
+		for i := len(tables) - 1; i >= 0; i-- {
+			block := tables[i]
+			if _, ok := seen[block.signature]; ok {
+				lines = append(lines[:block.start], lines[block.end+1:]...)
+				continue
+			}
+			seen[block.signature] = struct{}{}
+		}
+		return strings.Join(lines, "\n")
+	}
+
 	extractContent := func(md string) (string, bool) {
 		start := strings.Index(md, tablesStart)
 		end := strings.Index(md, tablesEnd)
@@ -792,34 +888,13 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		return strings.TrimSpace(md), false
 	}
 
-	extractTablesOnly := func(md string) (string, bool) {
-		lines := strings.Split(md, "\n")
-		isTableLine := func(line string) bool {
-			trimmed := strings.TrimSpace(line)
-			return strings.HasPrefix(trimmed, "|")
-		}
-
-		firstTableLine := -1
-		lastTableLine := -1
-		for i, line := range lines {
-			if isTableLine(line) {
-				if firstTableLine == -1 {
-					firstTableLine = i
-				}
-				lastTableLine = i
-			}
-		}
-		if firstTableLine == -1 {
-			return "", false
-		}
-
-		return strings.TrimSpace(strings.Join(lines[firstTableLine:lastTableLine+1], "\n")), true
-	}
-
 	tablesContent, hasMarkers := extractContent(trimmedTables)
 	if !hasMarkers {
-		if tablesOnly, ok := extractTablesOnly(trimmedTables); ok {
-			tablesContent = tablesOnly
+		if tablesBlocks := findTables(trimmedTables); len(tablesBlocks) > 0 {
+			lines := strings.Split(trimmedTables, "\n")
+			start := tablesBlocks[0].start
+			end := tablesBlocks[len(tablesBlocks)-1].end
+			tablesContent = strings.TrimSpace(strings.Join(lines[start:end+1], "\n"))
 		} else {
 			return "", fmt.Errorf("tables block not found in artifact")
 		}
@@ -831,15 +906,21 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		if end := strings.Index(baseMarkdown, tablesEnd); end != -1 && end >= start {
 			prefix := baseMarkdown[:start+len(tablesStart)]
 			suffix := baseMarkdown[end:]
-			return fmt.Sprintf("%s\n\n%s\n%s", prefix, tablesContent, suffix), nil
+			merged := fmt.Sprintf("%s\n\n%s\n%s", prefix, tablesContent, suffix)
+			return deduplicateTables(merged), nil
 		}
+	}
+
+	newTables := findTables(tablesContent)
+	if mergedBySignature, replaced := replaceTablesBySignature(baseMarkdown, newTables); replaced {
+		return deduplicateTables(mergedBySignature), nil
 	}
 
 	if strings.TrimSpace(baseMarkdown) == "" {
 		return tablesBlock, nil
 	}
 
-	return fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), tablesBlock), nil
+	return deduplicateTables(fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), tablesBlock)), nil
 }
 
 func isTransformerFailureStatus(val string) bool {
