@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { SessionProvider, useSession } from "next-auth/react";
 
 import { performSilentSignIn, mapAuthError, SilentSignInError } from "@/lib/auth-flow";
@@ -10,6 +11,7 @@ const AUTO_SIGN_IN_COOLDOWN_MS = 60_000;
 
 function AutoSignInOnFocus() {
   const { status } = useSession();
+  const router = useRouter();
   const lastAttemptRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -49,7 +51,7 @@ function AutoSignInOnFocus() {
 
       lastAttemptRef.current = now;
 
-      void performSilentSignIn("AutoSignInOnFocus").catch((error) => {
+      void performSilentSignIn("AutoSignInOnFocus", { router }).catch((error) => {
         console.warn("Автоматический silent sign-in отклонён.", error);
 
         if (error instanceof SilentSignInError) {
@@ -80,7 +82,7 @@ function AutoSignInOnFocus() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [status]);
+  }, [router, status]);
 
   return null;
 }

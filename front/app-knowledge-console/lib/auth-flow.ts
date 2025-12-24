@@ -1,6 +1,9 @@
 'use client';
 
+import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { signIn } from 'next-auth/react';
+
+import { setRestoringSession } from './session-restoration-store';
 
 const interactionErrorCodes = [
   'interaction_required',
@@ -50,7 +53,22 @@ export const mapAuthError = (error?: string | null) => {
 let activeAttempt: Promise<void> | null = null;
 let failedAttempts = 0;
 
-const createSilentSignInAttempt = (context: string): Promise<void> => {
+const replaceCurrentLocation = (
+  router: AppRouterInstance | undefined,
+  targetUrl?: string | null,
+) => {
+  const destination = new URL(targetUrl ?? window.location.href, window.location.href);
+  const normalizedPath = `${destination.pathname}${destination.search}${destination.hash}`;
+
+  if (router) {
+    router.replace(normalizedPath);
+    return;
+  }
+
+  window.history.replaceState(window.history.state, '', normalizedPath);
+};
+
+const createSilentSignInAttempt = (context: string, router?: AppRouterInstance): Promise<void> => {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       console.error('[auth-flow] Таймаут silent sign-in — отмена попытки.', { context });
@@ -60,7 +78,7 @@ const createSilentSignInAttempt = (context: string): Promise<void> => {
     const clearTimer = () => clearTimeout(timeoutId);
 
     signIn('authentik', {
-      redirect: true,
+      redirect: false,
       prompt: 'none',
       callbackUrl: window.location.href,
     })
@@ -104,6 +122,7 @@ const createSilentSignInAttempt = (context: string): Promise<void> => {
         }
 
         console.info('[auth-flow] Silent sign-in выполнен успешно.', { context });
+        replaceCurrentLocation(router, signInResult?.url);
         resolve();
       })
       .catch((error) => {
@@ -114,17 +133,22 @@ const createSilentSignInAttempt = (context: string): Promise<void> => {
   });
 };
 
-export const performSilentSignIn = async (context: string): Promise<void> => {
+export const performSilentSignIn = async (
+  context: string,
+  { router }: { router?: AppRouterInstance } = {},
+): Promise<void> => {
   if (typeof window === 'undefined') {
     throw new SilentSignInError('Silent sign-in доступен только в браузере.');
   }
 
   if (activeAttempt) {
     console.info('[auth-flow] Обнаружена активная попытка silent sign-in, ожидаем.', { context });
+    setRestoringSession(true);
     return activeAttempt;
   }
 
   console.info('[auth-flow] Запускаем silent sign-in.', { context });
+  setRestoringSession(true);
 
   const attempt = (async () => {
     let attemptNumber = 0;
@@ -133,7 +157,7 @@ export const performSilentSignIn = async (context: string): Promise<void> => {
       attemptNumber += 1;
 
       try {
-        await createSilentSignInAttempt(context);
+        await createSilentSignInAttempt(context, router);
         failedAttempts = 0;
         return;
       } catch (error) {
@@ -177,6 +201,7 @@ export const performSilentSignIn = async (context: string): Promise<void> => {
     })
     .finally(() => {
       activeAttempt = null;
+      setRestoringSession(false);
     });
 
   activeAttempt = attempt;

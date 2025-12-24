@@ -1,18 +1,21 @@
 'use client';
 
+import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
+
 import { SilentSignInError, performSilentSignIn } from './auth-flow';
 
 export { SilentSignInError } from './auth-flow';
 
 type FetchWithAuthOptions = RequestInit & {
   retryOnUnauthorized?: boolean;
+  router?: AppRouterInstance;
 };
 
 export const fetchWithAuth = async (
   input: RequestInfo | URL,
   init: FetchWithAuthOptions = {},
 ): Promise<Response> => {
-  const { retryOnUnauthorized = true, ...fetchInit } = init;
+  const { retryOnUnauthorized = true, router, ...fetchInit } = init;
 
   const response = await fetch(input, fetchInit);
 
@@ -25,7 +28,7 @@ export const fetchWithAuth = async (
   }
 
   try {
-    await performSilentSignIn('fetchWithAuth');
+    await performSilentSignIn('fetchWithAuth', { router });
     console.info('Silent sign-in выполнен успешно, повторяем запрос.');
   } catch (error) {
     if (error instanceof SilentSignInError) {
