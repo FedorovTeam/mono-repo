@@ -68,6 +68,48 @@ func TestAdapterProducesArtifacts(t *testing.T) {
 	require.Contains(t, result.DebugFiles, "pdftotext.layout.txt")
 }
 
+func TestAdapterReportsDroppedTablesInManifest(t *testing.T) {
+	runner := &fakeRunner{
+		responses: map[string]CommandResult{
+			"pdfinfo":   {Stdout: []byte("Pages: 1")},
+			"pdftotext": {Stdout: []byte("Name   Votes\nОченьдлинноезначение 10\nВтороедлинноезначение 20\n\nA   B\n1   2")},
+			"pdftoppm":  {Stdout: []byte("")},
+		},
+	}
+
+	filters := TableFiltersConfig{Enabled: true, TwoColumnMedianLengthLimit: 5}
+	adapter := &Adapter{
+		cfg: Config{
+			PdfInfoPath:         defaultPdfinfo,
+			PdftotextPath:       defaultPdftotext,
+			PdftoppmPath:        defaultPdftoppm,
+			PdfInfoTimeout:      time.Second,
+			PdftotextTimeout:    time.Second,
+			PdftoppmTimeout:     time.Second,
+			MaxParallelCommands: 1,
+			Pages:               "all",
+			TempDir:             t.TempDir(),
+			Mode:                modeLayout,
+			Filters:             filters,
+		},
+		runner: runner,
+		parser: NewDefaultParser(filters),
+		now:    time.Now,
+	}
+
+	result, err := adapter.Extract(context.Background(), "/tmp/demo.pdf")
+	require.NoError(t, err)
+
+	var manifest Manifest
+	require.NoError(t, json.Unmarshal(result.Manifest, &manifest))
+	require.Equal(t, 1, manifest.TableCount)
+	require.True(t, manifest.FiltersEnabled)
+	require.Equal(t, filters.TwoColumnMedianLengthLimit, manifest.FilterThresholds.TwoColumnMedianLengthLimit)
+	require.Len(t, manifest.DroppedTables, 1)
+	require.Equal(t, "two_column_median", manifest.DroppedTables[0].Reason)
+	require.Contains(t, string(result.Markdown), "table_1")
+}
+
 func TestAdapterPropagatesCommandError(t *testing.T) {
 	runner := &fakeRunner{
 		responses: map[string]CommandResult{

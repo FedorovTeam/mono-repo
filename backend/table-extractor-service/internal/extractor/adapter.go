@@ -93,15 +93,18 @@ type ParsedTables struct {
 	HeaderText       string
 	Document         *voting.Document `json:"-"`
 	Stats            ParseStats       `json:"-"`
+	DroppedTables    []FilteredTable  `json:"-"`
 }
 
 type ParseStats struct {
 	SplitByGapLines         int
 	SplitByGapSamples       []string
 	FiltersEnabled          bool
+	FiltersApplied          bool
 	FilteredTables          int
 	FilteredTwoColumnMedian int
 	FilteredNoDelimiter     int
+	FilterThresholds        TableFiltersConfig
 }
 
 type RawTable struct {
@@ -120,18 +123,31 @@ type NormalizedTable struct {
 	Pages   []int               `json:"pages,omitempty"`
 }
 
+type FilteredTable struct {
+	Reason          string `json:"reason"`
+	Index           int    `json:"index"`
+	Page            int    `json:"page,omitempty"`
+	Pages           []int  `json:"pages,omitempty"`
+	MedianLength    int    `json:"median_length,omitempty"`
+	Rows            int    `json:"rows,omitempty"`
+	Words           int    `json:"words,omitempty"`
+	SplitByGapLines int    `json:"split_by_gap_lines,omitempty"`
+}
+
 type Manifest struct {
-	Source              string        `json:"source"`
-	GeneratedAt         time.Time     `json:"generated_at"`
-	DetectVotingTables  bool          `json:"detect_voting_tables"`
-	Pages               string        `json:"pages"`
-	TableCount          int           `json:"table_count"`
-	FiltersEnabled      bool          `json:"filters_enabled"`
-	FilteredTables      int           `json:"filtered_tables"`
-	FilteredTwoColumn   int           `json:"filtered_two_column"`
-	FilteredNoDelimiter int           `json:"filtered_no_delimiter"`
-	Processing          ProcessingLog `json:"processing"`
-	PDFInfo             PDFInfo       `json:"pdfinfo"`
+	Source              string             `json:"source"`
+	GeneratedAt         time.Time          `json:"generated_at"`
+	DetectVotingTables  bool               `json:"detect_voting_tables"`
+	Pages               string             `json:"pages"`
+	TableCount          int                `json:"table_count"`
+	FiltersEnabled      bool               `json:"filters_enabled"`
+	FilterThresholds    TableFiltersConfig `json:"filter_thresholds"`
+	FilteredTables      int                `json:"filtered_tables"`
+	FilteredTwoColumn   int                `json:"filtered_two_column"`
+	FilteredNoDelimiter int                `json:"filtered_no_delimiter"`
+	DroppedTables       []FilteredTable    `json:"dropped_tables,omitempty"`
+	Processing          ProcessingLog      `json:"processing"`
+	PDFInfo             PDFInfo            `json:"pdfinfo"`
 }
 
 type ProcessingLog struct {
@@ -393,12 +409,15 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 		)
 		return usecase.ExtractionResult{}, fmt.Errorf("parse tables: %w", err)
 	}
+	parsed = applyFilters(parsed, a.cfg.Filters, parseLogger)
 	manifest.Processing.ParseMs = durationMs(parseStart)
 	manifest.TableCount = len(parsed.NormalizedTables)
 	manifest.FiltersEnabled = parsed.Stats.FiltersEnabled
+	manifest.FilterThresholds = parsed.Stats.FilterThresholds
 	manifest.FilteredTables = parsed.Stats.FilteredTables
 	manifest.FilteredTwoColumn = parsed.Stats.FilteredTwoColumnMedian
 	manifest.FilteredNoDelimiter = parsed.Stats.FilteredNoDelimiter
+	manifest.DroppedTables = parsed.DroppedTables
 	parseLogger.Debug("tables parsed",
 		zap.Int("raw_tables", len(parsed.RawTables)),
 		zap.Int("normalized_tables", len(parsed.NormalizedTables)),

@@ -14,16 +14,10 @@ type DefaultParser struct {
 }
 
 type TableFiltersConfig struct {
-	Enabled                    bool
-	TwoColumnMedianLengthLimit int
-	MaxRowsWithoutDelimiters   int
-	MaxWordsWithoutDelimiters  int
-}
-
-type filterStats struct {
-	total           int
-	twoColumnMedian int
-	noDelimiters    int
+	Enabled                    bool `json:"enabled"`
+	TwoColumnMedianLengthLimit int  `json:"two_column_median_length_limit"`
+	MaxRowsWithoutDelimiters   int  `json:"max_rows_without_delimiters"`
+	MaxWordsWithoutDelimiters  int  `json:"max_words_without_delimiters"`
 }
 
 func NewDefaultParser(filters TableFiltersConfig) DefaultParser {
@@ -85,65 +79,30 @@ func (p DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 
 	rawTables = mergeAdjacentTables(rawTables)
 
-	filtersEnabled := p.filters.Enabled && (p.filters.TwoColumnMedianLengthLimit > 0 || p.filters.MaxRowsWithoutDelimiters > 0 || p.filters.MaxWordsWithoutDelimiters > 0)
 	rawBeforeFilter := len(rawTables)
-	filtered := make([]RawTable, 0, len(rawTables))
-	fStats := filterStats{}
-
-	for idx, t := range rawTables {
-		if filtersEnabled {
-			if dropped, median := shouldDropTwoColumn(t, p.filters.TwoColumnMedianLengthLimit); dropped {
-				fStats.total++
-				fStats.twoColumnMedian++
-				logger.Info("dropping table by median cell length", zap.Int("table_index", idx), zap.Int("page", t.Page),
-					zap.Int("median_length", median), zap.Int("limit", p.filters.TwoColumnMedianLengthLimit))
-				continue
-			}
-
-			if dropped, rowCount, wordCount := shouldDropNoDelimiter(t, p.filters.MaxRowsWithoutDelimiters, p.filters.MaxWordsWithoutDelimiters); dropped {
-				fStats.total++
-				fStats.noDelimiters++
-				logger.Info("dropping table without delimiters", zap.Int("table_index", idx), zap.Int("page", t.Page),
-					zap.Int("rows", rowCount), zap.Int("words", wordCount),
-					zap.Int("max_rows", p.filters.MaxRowsWithoutDelimiters),
-					zap.Int("max_words", p.filters.MaxWordsWithoutDelimiters),
-					zap.Int("split_by_gap_lines", t.splitByGapLines))
-				continue
-			}
-		}
-
-		filtered = append(filtered, t)
+	parsed := ParsedTables{
+		RawTables: rawTables,
+		Stats: ParseStats{
+			SplitByGapLines:   metrics.splitByGapLines,
+			SplitByGapSamples: metrics.samples(),
+		},
 	}
-
-	rawTables = filtered
-	normTables := normalizeTables(rawTables)
-
-	stats := ParseStats{
-		SplitByGapLines:         metrics.splitByGapLines,
-		SplitByGapSamples:       metrics.samples(),
-		FiltersEnabled:          filtersEnabled,
-		FilteredTables:          fStats.total,
-		FilteredTwoColumnMedian: fStats.twoColumnMedian,
-		FilteredNoDelimiter:     fStats.noDelimiters,
-	}
+	parsed = applyFilters(parsed, p.filters, logger)
 
 	logger.Debug("default parser stats",
-		zap.Int("raw_tables", len(rawTables)),
+		zap.Int("raw_tables", len(parsed.RawTables)),
 		zap.Int("raw_tables_before_filters", rawBeforeFilter),
-		zap.Int("normalized_tables", len(normTables)),
-		zap.Bool("filters_enabled", filtersEnabled),
-		zap.Int("filtered_tables", fStats.total),
-		zap.Int("filtered_two_column", fStats.twoColumnMedian),
-		zap.Int("filtered_no_delimiters", fStats.noDelimiters),
+		zap.Int("normalized_tables", len(parsed.NormalizedTables)),
+		zap.Bool("filters_enabled", parsed.Stats.FiltersEnabled),
+		zap.Bool("filters_applied", parsed.Stats.FiltersApplied),
+		zap.Int("filtered_tables", parsed.Stats.FilteredTables),
+		zap.Int("filtered_two_column", parsed.Stats.FilteredTwoColumnMedian),
+		zap.Int("filtered_no_delimiters", parsed.Stats.FilteredNoDelimiter),
 		zap.Int("split_by_gap_lines", metrics.splitByGapLines),
 		zap.Strings("split_by_gap_samples", metrics.samples()),
 	)
 
-	return ParsedTables{
-		RawTables:        rawTables,
-		NormalizedTables: normTables,
-		Stats:            stats,
-	}, nil
+	return parsed, nil
 }
 
 func mergeAdjacentTables(raw []RawTable) []RawTable {
@@ -211,6 +170,94 @@ func dropHeaderRows(rows [][]string, headers []string) [][]string {
 		filtered = append(filtered, row)
 	}
 	return filtered
+}
+
+func applyFilters(parsed ParsedTables, filters TableFiltersConfig, logger *zap.Logger) ParsedTables {
+	logger = resolveLogger(logger)
+	thresholdsEnabled := filters.TwoColumnMedianLengthLimit > 0 || filters.MaxRowsWithoutDelimiters > 0 || filters.MaxWordsWithoutDelimiters > 0
+	parsed.Stats.FilterThresholds = filters
+	parsed.Stats.FiltersEnabled = filters.Enabled && thresholdsEnabled
+
+	if parsed.Stats.FiltersApplied {
+		if len(parsed.NormalizedTables) == 0 {
+			parsed.NormalizedTables = normalizeTables(parsed.RawTables)
+		}
+		return parsed
+	}
+
+	parsed.Stats.FiltersApplied = true
+
+	if !parsed.Stats.FiltersEnabled {
+		if len(parsed.NormalizedTables) == 0 {
+			parsed.NormalizedTables = normalizeTables(parsed.RawTables)
+		}
+		return parsed
+	}
+
+	filteredRaw := make([]RawTable, 0, len(parsed.RawTables))
+	filteredNorm := make([]NormalizedTable, 0, len(parsed.NormalizedTables))
+	droppedTables := make([]FilteredTable, 0)
+
+	matchNormalized := len(parsed.NormalizedTables) == len(parsed.RawTables)
+
+	for idx, t := range parsed.RawTables {
+		if dropped, median := shouldDropTwoColumn(t, filters.TwoColumnMedianLengthLimit); dropped {
+			parsed.Stats.FilteredTables++
+			parsed.Stats.FilteredTwoColumnMedian++
+			droppedTables = append(droppedTables, FilteredTable{
+				Reason:       "two_column_median",
+				Index:        idx,
+				Page:         t.Page,
+				Pages:        append([]int(nil), t.Pages...),
+				MedianLength: median,
+			})
+			logger.Info("dropping table by median cell length", zap.Int("table_index", idx), zap.Int("page", t.Page),
+				zap.Int("median_length", median), zap.Int("limit", filters.TwoColumnMedianLengthLimit))
+			continue
+		}
+
+		if dropped, rowCount, wordCount := shouldDropNoDelimiter(t, filters.MaxRowsWithoutDelimiters, filters.MaxWordsWithoutDelimiters); dropped {
+			parsed.Stats.FilteredTables++
+			parsed.Stats.FilteredNoDelimiter++
+			droppedTables = append(droppedTables, FilteredTable{
+				Reason:          "no_delimiters",
+				Index:           idx,
+				Page:            t.Page,
+				Pages:           append([]int(nil), t.Pages...),
+				Rows:            rowCount,
+				Words:           wordCount,
+				SplitByGapLines: t.splitByGapLines,
+			})
+			logger.Info("dropping table without delimiters", zap.Int("table_index", idx), zap.Int("page", t.Page),
+				zap.Int("rows", rowCount), zap.Int("words", wordCount),
+				zap.Int("max_rows", filters.MaxRowsWithoutDelimiters),
+				zap.Int("max_words", filters.MaxWordsWithoutDelimiters),
+				zap.Int("split_by_gap_lines", t.splitByGapLines))
+			continue
+		}
+
+		filteredRaw = append(filteredRaw, t)
+		if matchNormalized {
+			filteredNorm = append(filteredNorm, parsed.NormalizedTables[idx])
+		}
+	}
+
+	parsed.RawTables = filteredRaw
+	parsed.DroppedTables = droppedTables
+
+	if len(filteredNorm) == 0 {
+		parsed.NormalizedTables = normalizeTables(filteredRaw)
+	} else {
+		parsed.NormalizedTables = filteredNorm
+	}
+
+	logger.Debug("table filters applied",
+		zap.Bool("filters_enabled", parsed.Stats.FiltersEnabled),
+		zap.Int("dropped_tables", parsed.Stats.FilteredTables),
+		zap.Int("remaining_tables", len(parsed.RawTables)),
+	)
+
+	return parsed
 }
 
 func appendUniqueInt(base []int, values ...int) []int {
