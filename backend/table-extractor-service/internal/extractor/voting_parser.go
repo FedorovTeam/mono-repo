@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/mono-repo/table-extractor-service/internal/voting"
 )
@@ -57,6 +58,7 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 	}
 	sort.Ints(pageNumbers)
 
+	maxRowNumber := 0
 	for _, num := range pageNumbers {
 		pageBBox := pageBBoxes[num]
 		imgBytes, ok := input.PagePNGs[num]
@@ -80,7 +82,7 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 			}
 		}
 
-		rowNumWords := voting.ExtractRowNumberWords(pageBBox, minYPt)
+		rowNumWords := filterRowNumbers(voting.ExtractRowNumberWords(pageBBox, minYPt), maxRowNumber)
 		for _, rn := range rowNumWords {
 			n := rn.Number
 			row := rows[n]
@@ -88,8 +90,9 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 				row = &voting.Row{Number: n, Marks: make(map[voting.ColumnKey]bool, len(cols))}
 				rows[n] = row
 			}
-			if row.Name == "" {
-				row.Name = voting.ExtractNameForRow(rn.Word, pageBBox.Words, nameXMaxPt)
+			candidate := sanitizeRowName(voting.ExtractNameForRow(rn.Word, pageBBox.Words, nameXMaxPt))
+			if candidate != "" && (row.Name == "" || len(candidate) > len(row.Name)) {
+				row.Name = candidate
 			}
 
 			yCenterPt := (rn.Word.YMin + rn.Word.YMax) / 2
@@ -97,7 +100,15 @@ func (p VotingTableParser) ParseTables(input ParseInput) (ParsedTables, error) {
 
 			marks := voting.DetectMarks(gray, yPx, cols, xScale, yScale, p.params)
 			for k, v := range marks {
-				row.Marks[k] = v
+				if v {
+					row.Marks[k] = true
+				}
+			}
+		}
+		if len(rowNumWords) > 0 {
+			last := rowNumWords[len(rowNumWords)-1].Number
+			if last > maxRowNumber {
+				maxRowNumber = last
 			}
 		}
 	}
@@ -148,6 +159,59 @@ func splitBBoxPages(xhtml string, startPage int) []bboxPage {
 		pages = append(pages, bboxPage{Number: num, HTML: raw})
 	}
 	return pages
+}
+
+func filterRowNumbers(words []voting.RowNumberWord, prevMax int) []voting.RowNumberWord {
+	filtered := make([]voting.RowNumberWord, 0, len(words))
+	for _, rn := range words {
+		if rn.Number <= 0 {
+			continue
+		}
+		filtered = append(filtered, rn)
+	}
+	if prevMax == 0 || len(filtered) == 0 {
+		return filtered
+	}
+
+	start := 0
+	for start < len(filtered) && filtered[start].Number < prevMax {
+		start++
+	}
+	if start < len(filtered) && filtered[start].Number == prevMax {
+		return filtered[start:]
+	}
+
+	for start < len(filtered) && filtered[start].Number < prevMax+1 {
+		start++
+	}
+	return filtered[start:]
+}
+
+var headerTokens = map[string]struct{}{
+	"ф.и.о.":       {},
+	"ф.и.о":        {},
+	"присутствует": {},
+	"за":           {},
+	"против":       {},
+	"воздержался":  {},
+	"не":           {},
+	"голосовал":    {},
+}
+
+func sanitizeRowName(name string) string {
+	parts := strings.Fields(name)
+	if len(parts) == 0 {
+		return ""
+	}
+	filtered := make([]string, 0, len(parts))
+	for _, p := range parts {
+		token := strings.Trim(strings.ToLower(p), "()")
+		if _, ok := headerTokens[token]; ok {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return strings.Join(filtered, " ")
 }
 
 func loadGrayFromBytes(data []byte) (*image.Gray, error) {
