@@ -1806,6 +1806,61 @@ func TestHandleExtractTablesSkipsHeaderTextFromTablesArtifact(t *testing.T) {
 	}
 }
 
+func TestMergeMarkdownWithTablesReplacesWithoutMarkersAndDeduplicates(t *testing.T) {
+	baseMarkdown := strings.TrimSpace(`
+# Docling
+
+Введение
+
+## Таблицы
+
+| Name | Value |
+| --- | --- |
+| Old | 1 |
+
+| Type | Count |
+| --- | --- |
+| Foo | 2 |
+
+| Name | Value |
+| --- | --- |
+| Duplicate | 3 |
+`)
+
+	tablesMarkdown := strings.TrimSpace(`
+<!-- tables:start -->
+| Name | Value |
+| --- | --- |
+| New | 42 |
+
+| Type | Count |
+| --- | --- |
+| Bar | 7 |
+<!-- tables:end -->
+`)
+
+	merged, err := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Count(merged, "| Name | Value |") != 1 {
+		t.Fatalf("expected single Name/Value table, got %d", strings.Count(merged, "| Name | Value |"))
+	}
+
+	if strings.Count(merged, "| Type | Count |") != 1 {
+		t.Fatalf("expected single Type/Count table, got %d", strings.Count(merged, "| Type | Count |"))
+	}
+
+	if strings.Contains(merged, "Old | 1") {
+		t.Fatalf("expected old table rows to be replaced, got %q", merged)
+	}
+
+	if !strings.Contains(merged, "New | 42") || !strings.Contains(merged, "Bar | 7") {
+		t.Fatalf("expected new table rows to be present, got %q", merged)
+	}
+}
+
 func waitUntil(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.After(time.Second)
