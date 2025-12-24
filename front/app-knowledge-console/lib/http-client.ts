@@ -12,6 +12,42 @@ type FetchWithAuthOptions = RequestInit & {
   router?: AppRouterInstance;
 };
 
+const RESTORE_WAIT_TIMEOUT_MS = 15_000;
+
+let restorationPromise: Promise<void> | null = null;
+
+const waitForRestoration = async (
+  context: string,
+  router?: AppRouterInstance,
+): Promise<void> => {
+  if (!restorationPromise) {
+    restorationPromise = performSilentSignIn(context, { router }).finally(() => {
+      restorationPromise = null;
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      console.error('[http-client] Таймаут ожидания восстановления сессии.', { context });
+      reject(
+        new SilentSignInError('Не удалось дождаться восстановления сессии.', {
+          interactionRequired: true,
+        }),
+      );
+    }, RESTORE_WAIT_TIMEOUT_MS);
+
+    restorationPromise
+      ?.then(() => {
+        clearTimeout(timeoutId);
+        resolve();
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+};
+
 export const fetchWithAuth = async (
   input: RequestInfo | URL,
   init: FetchWithAuthOptions = {},
@@ -29,7 +65,7 @@ export const fetchWithAuth = async (
   }
 
   try {
-    await performSilentSignIn('fetchWithAuth', { router });
+    await waitForRestoration('fetchWithAuth', router);
     console.info('Silent sign-in выполнен успешно, повторяем запрос.');
     const session = await getSession();
 
@@ -50,9 +86,12 @@ export const fetchWithAuth = async (
   const retryResponse = await fetch(input, fetchInit);
 
   if (retryResponse.status === 401) {
-    throw new SilentSignInError('Сессия недействительна. Войдите вручную.', {
-      interactionRequired: true,
-    });
+    throw new SilentSignInError(
+      'Сессия недействительна или восстановление не удалось. Войдите вручную.',
+      {
+        interactionRequired: true,
+      },
+    );
   }
 
   return retryResponse;
