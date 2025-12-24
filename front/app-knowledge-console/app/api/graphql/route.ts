@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
+import { getToken } from "next-auth/jwt";
 import { authOptions } from "@/lib/auth-options";
 import { generateCorrelationId } from "@/lib/correlation";
 
@@ -47,6 +48,15 @@ function parseRequestBody(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const token = await getToken({ req: request });
+
+  if (token?.reauthRequired) {
+    return NextResponse.json(
+      { error: "Требуется повторный вход", code: "reauth_required" },
+      { status: 440 },
+    );
+  }
+
   const session = await getServerSession(authOptions);
 
   const ensureActiveSession = async () => {
