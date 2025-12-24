@@ -1,0 +1,20 @@
+{
+  "source": "/workspace/mono-repo/backend/test/Регламент - в ред. от 08.06.2023.pdf",
+  "generated_at": "2025-12-24T04:51:30.649623299Z",
+  "detect_voting_tables": true,
+  "pages": "1-10",
+  "table_count": 29,
+  "processing": {
+    "pdfinfo_ms": 53,
+    "pdftotext_ms": 147,
+    "pdftoppm_ms": 6046,
+    "parse_ms": 12
+  },
+  "pdfinfo": {
+    "pages": 179,
+    "raw": "Creator:         Microsoft® Word LTSC\nProducer:        ABBYY FineReader PDF\nCreationDate:    Wed Oct 15 00:52:39 2025 UTC\nModDate:         Wed Oct 15 01:17:19 2025 UTC\nCustom Metadata: no\nMetadata Stream: yes\nTagged:          yes\nUserProperties:  no\nSuspects:        no\nForm:            none\nJavaScript:      no\nPages:           179\nEncrypted:       no\nPage size:       595.32 x 841.92 pts (A4)\nPage rot:        0\nFile size:       810927 bytes\nOptimized:       no\nPDF version:     1.7\n",
+    "producer": "ABBYY FineReader PDF",
+    "pdf_version": "1.7",
+    "creation_date": "Wed Oct 15 00:52:39 2025 UTC"
+  }
+}
