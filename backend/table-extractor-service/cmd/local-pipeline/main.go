@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -15,22 +19,25 @@ import (
 )
 
 func main() {
-	// Настройки маршрутизации таблиц: принудительно обрабатываем PDF и включаем table-extractor.
-	routerCfg := struct {
-		ForceTableExtractionPDF bool
-		TableExtractorEnabled   bool
-	}{
-		ForceTableExtractionPDF: true,
-		TableExtractorEnabled:   true,
-	}
+	var (
+		forceTableExtraction = flag.Bool("force-table-extraction", true, "симулировать ForceTableExtractionPDF=true")
+		markdownTableHints   = flag.Bool("markdown-table-hints", true, "указывать наличие markdown table hints")
+		outputName           = flag.String("output", "stenogramma-04", "папка в backend/test/runs для сохранения артефактов")
+		pages                = flag.String("pages", "1-10", "диапазон страниц для pdftotext/table-extractor")
+		inputPathFlag        = flag.String("input", filepath.Join("..", "test", "Регламент - в ред. от 08.06.2023.pdf"), "путь к PDF")
+	)
+	flag.Parse()
 
 	cwd, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("cannot get cwd: %v", err)
 	}
 
-	inputPath := filepath.Join(cwd, "..", "test", "Регламент - в ред. от 08.06.2023.pdf")
-	outputDir := filepath.Join(cwd, "..", "test", "runs", "stenogramma-04")
+	inputPath := *inputPathFlag
+	if !filepath.IsAbs(inputPath) {
+		inputPath = filepath.Join(cwd, inputPath)
+	}
+	outputDir := filepath.Join(cwd, "..", "test", "runs", *outputName)
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		log.Fatalf("cannot create output dir: %v", err)
@@ -38,53 +45,111 @@ func main() {
 
 	logger, _ := zap.NewDevelopment()
 	logger = logger.With(
-		zap.Bool("force_table_extraction_pdf", routerCfg.ForceTableExtractionPDF),
-		zap.Bool("table_extractor_enabled", routerCfg.TableExtractorEnabled),
+		zap.Bool("force_table_extraction_pdf", *forceTableExtraction),
+		zap.Bool("markdown_table_hints", *markdownTableHints),
 	)
 
-	adapter := extractor.NewAdapter(extractor.Config{
-		DetectVotingTables: true,
-		Mode:               "layout",
-		Pages:              "1-10",
-	}, logger)
-
 	ctx := context.Background()
-	logger.Info("stage store -> convert -> extract_tables -> merge: starting extract_tables", zap.String("pdf", inputPath))
-	result, err := adapter.Extract(ctx, inputPath)
-	if err != nil {
-		log.Fatalf("extraction failed: %v", err)
-	}
+	shouldExtract := *forceTableExtraction && *markdownTableHints
+	var baseMarkdown []byte
 
-	writeFile(outputDir, "tables.md", result.Markdown)
-	writeFile(outputDir, "tables.raw.json", result.RawJSON)
-	writeFile(outputDir, "tables.normalized.json", result.NormalizedJSON)
-	writeFile(outputDir, "manifest.json", result.Manifest)
+	if shouldExtract {
+		adapter := extractor.NewAdapter(extractor.Config{
+			DetectVotingTables: true,
+			Mode:               "layout",
+			Pages:              *pages,
+		}, logger)
 
-	if layout, ok := result.DebugFiles["pdftotext.layout.txt"]; ok {
-		writeFile(outputDir, "layout.txt", layout)
-	}
-	if bbox, ok := result.DebugFiles["pdftotext.bbox.html"]; ok {
-		writeFile(outputDir, "bbox.html", bbox)
-	}
-
-	baseMarkdown := string(result.DebugFiles["pdftotext.layout.txt"])
-	writeFile(outputDir, "base.md", []byte(baseMarkdown))
-
-	merged, err := mergeMarkdownWithTables(baseMarkdown, string(result.Markdown))
-	if err != nil {
-		log.Fatalf("merge failed: %v", err)
-	}
-	writeFile(outputDir, "merged.md", []byte(merged))
-
-	fallbackHit := strings.Contains(merged, "tables:appended")
-	logger.Info("merge completed", zap.Bool("fallback_appended", fallbackHit))
-	if fallbackHit {
-		if err := os.WriteFile(filepath.Join(outputDir, "pipeline.log"), []byte("extract_tables -> merge: fallback appended\n"), 0o644); err != nil {
-			log.Fatalf("cannot write pipeline log: %v", err)
+		logger.Info("stage store -> convert -> extract_tables -> merge: starting extract_tables", zap.String("pdf", inputPath))
+		result, extractErr := adapter.Extract(ctx, inputPath)
+		if extractErr != nil {
+			log.Fatalf("extraction failed: %v", extractErr)
 		}
+
+		writeFile(outputDir, "tables.md", result.Markdown)
+		writeFile(outputDir, "tables.raw.json", result.RawJSON)
+		writeFile(outputDir, "tables.normalized.json", result.NormalizedJSON)
+		writeFile(outputDir, "manifest.json", result.Manifest)
+
+		if layout, ok := result.DebugFiles["pdftotext.layout.txt"]; ok {
+			writeFile(outputDir, "layout.txt", layout)
+			baseMarkdown = append([]byte{}, layout...)
+		}
+		if bbox, ok := result.DebugFiles["pdftotext.bbox.html"]; ok {
+			writeFile(outputDir, "bbox.html", bbox)
+		}
+
+		if len(baseMarkdown) == 0 {
+			log.Fatalf("layout markdown is missing in extractor output")
+		}
+
+		merged, mergeErr := mergeMarkdownWithTables(string(baseMarkdown), string(result.Markdown))
+		if mergeErr != nil {
+			log.Fatalf("merge failed: %v", mergeErr)
+		}
+		writeFile(outputDir, "base.md", baseMarkdown)
+		writeFile(outputDir, "merged.md", []byte(merged))
+
+		fallbackHit := strings.Contains(merged, "tables:appended")
+		logDecision(outputDir, shouldExtract, *forceTableExtraction, *markdownTableHints, fallbackHit)
+		logger.Info("merge completed", zap.Bool("fallback_appended", fallbackHit))
+	} else {
+		logger.Info("skipping extract_tables due to router flags", zap.Bool("force_table_extraction_pdf", *forceTableExtraction), zap.Bool("markdown_table_hints", *markdownTableHints))
+		layout, layoutErr := extractLayoutMarkdown(ctx, inputPath, *pages)
+		if layoutErr != nil {
+			log.Fatalf("pdftotext layout failed: %v", layoutErr)
+		}
+		baseMarkdown = layout
+		writeFile(outputDir, "base.md", baseMarkdown)
+		writeFile(outputDir, "merged.md", baseMarkdown)
+		logDecision(outputDir, shouldExtract, *forceTableExtraction, *markdownTableHints, false)
 	}
 
 	logger.Info("artifacts saved", zap.String("dir", outputDir))
+}
+
+func logDecision(outputDir string, shouldExtract, forceExtraction, markdownHints, fallback bool) {
+	content := fmt.Sprintf("force_table_extraction_pdf=%v\nmarkdown_table_hints=%v\nshould_extract_tables=%v\nfallback_appended=%v\n", forceExtraction, markdownHints, shouldExtract, fallback)
+	if err := os.WriteFile(filepath.Join(outputDir, "pipeline.log"), []byte(content), 0o644); err != nil {
+		log.Fatalf("cannot write pipeline log: %v", err)
+	}
+}
+
+func extractLayoutMarkdown(ctx context.Context, pdfPath, pages string) ([]byte, error) {
+	args := []string{"-layout"}
+	start, end := parsePages(pages)
+	if start > 0 {
+		args = append(args, "-f", fmt.Sprint(start))
+	}
+	if end > 0 {
+		args = append(args, "-l", fmt.Sprint(end))
+	}
+	args = append(args, pdfPath, "-")
+
+	cmd := exec.CommandContext(ctx, "pdftotext", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("pdftotext: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
+}
+
+func parsePages(pages string) (int, int) {
+	parts := strings.Split(strings.TrimSpace(pages), "-")
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	start := parseInt(parts[0])
+	end := parseInt(parts[1])
+	return start, end
+}
+
+func parseInt(value string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(value))
+	return n
 }
 
 func writeFile(dir, name string, content []byte) {
