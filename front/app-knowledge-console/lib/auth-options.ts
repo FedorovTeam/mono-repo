@@ -274,7 +274,7 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
     return markReauthRequired(token);
   }
 
-  const normalizedToken: ExtendedJWT = { ...token, expiresAt: currentExpiresAt };
+  const normalizedToken: ExtendedJWT & { expiresAt: number } = { ...token, expiresAt: currentExpiresAt };
 
   if (!normalizedToken.refreshToken) {
     return markReauthRequired(normalizedToken);
@@ -293,7 +293,7 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
   try {
     const params = new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: token.refreshToken,
+      refresh_token: normalizedToken.refreshToken,
       client_id: authentikClientId ?? "",
       client_secret: authentikClientSecret ?? "",
       scope: "openid email profile",
