@@ -32,7 +32,7 @@ spec:
             - name: DOCLING_SERVE_ENG_KIND
               value: "local"
             - name: DOCLING_SERVE_ENG_LOC_NUM_WORKERS
-              value: "2"              # 2 параллельных задачи
+              value: "1"              # кол параллельных задачи
             - name: DOCLING_SERVE_ENG_LOC_SHARE_MODELS
               value: "true"           # делить модели между воркерам
             - name: DOCLING_NUM_THREADS
