@@ -17,6 +17,7 @@ function SignInContent() {
   const searchParams = useSearchParams();
   const { status } = useSession();
   const [isManualLoading, setIsManualLoading] = useState(false);
+  const [providerUnavailable, setProviderUnavailable] = useState(false);
 
   const callbackUrl = useMemo(() => {
     const requested = searchParams?.get("callbackUrl");
@@ -49,6 +50,31 @@ function SignInContent() {
   const canRetrySilently = !autoLoginDisabled && (!errorMessage || mappedError.retryable);
   const isAutoLoginAttempting = status === "loading" || (canRetrySilently && status !== "authenticated");
   const isLoading = isManualLoading || isAutoLoginAttempting;
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const fetchProviderStatus = async () => {
+      try {
+        const response = await fetch("/api/auth/provider-status", { cache: "no-store" });
+        if (!response.ok) return;
+
+        const data = (await response.json()) as { reachable?: boolean } | null;
+
+        if (!isCancelled && data?.reachable === false) {
+          setProviderUnavailable(true);
+        }
+      } catch (error) {
+        console.warn("Не удалось проверить статус Authentik", { error });
+      }
+    };
+
+    void fetchProviderStatus();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -153,8 +179,14 @@ function SignInContent() {
                       : "Пробуем выполнить автоматический вход…"
                   : mappedError.interactionRequired
                     ? "Бесшумный вход недоступен. Пожалуйста, авторизуйтесь вручную."
-                    : "Автоматический вход недоступен. Вы можете продолжить вручную."}
+                      : "Автоматический вход недоступен. Вы можете продолжить вручную."}
                 </div>
+
+                {providerUnavailable && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    Служба авторизации недоступна. Попробуйте позже или убедитесь, что VPN включён.
+                  </div>
+                )}
 
               {friendlyErrorMessage && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">

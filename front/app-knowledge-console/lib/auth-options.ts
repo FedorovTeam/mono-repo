@@ -3,6 +3,12 @@ import type { OAuthConfig } from "next-auth/providers/oauth";
 import type { JWT } from "next-auth/jwt";
 import https from "node:https";
 
+type AuthentikAvailability = {
+  status: "unknown" | "reachable" | "unreachable";
+  checkedAt: number | null;
+  error?: string;
+};
+
 const authentikIssuer = process.env.AUTHENTIK_ISSUER?.replace(/\/$/, "");
 const authentikClientId = process.env.AUTHENTIK_CLIENT_ID;
 const authentikClientSecret = process.env.AUTHENTIK_CLIENT_SECRET;
@@ -55,7 +61,7 @@ const authentikProvider: OAuthConfig<Record<string, unknown>> = {
   name: "Authentik",
   type: "oauth",
   issuer: authentikIssuer,
-  wellKnown: process.env.AUTHENTIK_WELL_KNOWN ?? `${authentikIssuer}/.well-known/openid-configuration`,
+  wellKnown: authentikDiscoveryUrl,
   jwks_endpoint: process.env.AUTHENTIK_JWKS_URL,
   clientId: authentikClientId,
   clientSecret: authentikClientSecret,
@@ -82,6 +88,70 @@ const authentikProvider: OAuthConfig<Record<string, unknown>> = {
     };
   },
 };
+
+const authentikAvailability: AuthentikAvailability = {
+  status: "unknown",
+  checkedAt: null,
+};
+
+const authentikDiscoveryUrl = (() => {
+  const url = process.env.AUTHENTIK_WELL_KNOWN ?? `${authentikIssuer}/.well-known/openid-configuration`;
+
+  try {
+    return new URL(url).toString();
+  } catch (error) {
+    console.warn("[auth-options] Некорректный URL discovery для Authentik", { url, error });
+    return url;
+  }
+})();
+
+const updateAvailability = (status: AuthentikAvailability["status"], error?: string) => {
+  authentikAvailability.status = status;
+  authentikAvailability.checkedAt = Date.now();
+  authentikAvailability.error = error;
+};
+
+const checkAuthentikAvailability = async () => {
+  if (!authentikDiscoveryUrl) {
+    updateAvailability("unreachable", "URL discovery для Authentik не задан");
+    return authentikAvailability;
+  }
+
+  const controller = new AbortController();
+  const timeoutMs = Math.max(authentikHttpTimeoutMs, 15000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(authentikDiscoveryUrl, {
+      method: "GET",
+      signal: controller.signal,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    updateAvailability("reachable");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    updateAvailability("unreachable", message);
+    console.warn("[auth-options] Провайдер Authentik недоступен", {
+      url: authentikDiscoveryUrl,
+      error: message,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  return authentikAvailability;
+};
+
+const authentikAvailabilityCheck = checkAuthentikAvailability();
+
+export const authentikDiscoveryEndpoint = authentikDiscoveryUrl;
+export const getAuthentikAvailability = () => authentikAvailability;
+export const waitForAuthentikAvailabilityCheck = () => authentikAvailabilityCheck;
 
 type ExtendedJWT = JWT & {
   accessToken?: string;
