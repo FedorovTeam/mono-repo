@@ -80,6 +80,7 @@ type ParseInput struct {
 	BBoxHTML   string
 	PagePNGs   map[int][]byte
 	StartPage  int
+	Logger     *zap.Logger
 }
 
 type ParsedTables struct {
@@ -87,6 +88,12 @@ type ParsedTables struct {
 	NormalizedTables []NormalizedTable
 	HeaderText       string
 	Document         *voting.Document `json:"-"`
+	Stats            ParseStats       `json:"-"`
+}
+
+type ParseStats struct {
+	SplitByGapLines   int
+	SplitByGapSamples []string
 }
 
 type RawTable struct {
@@ -236,6 +243,7 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	if a.cfg.DetectVotingTables {
 		pdftotextMode = modeBBox
 	}
+	logger.Debug("pdftotext mode selected", zap.String("pdftotext_mode", pdftotextMode))
 	pdftotextLogger := logger.With(
 		zap.String("step", "pdftotext"),
 		zap.String("mode", pdftotextMode),
@@ -327,12 +335,18 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 
 	parseStart := time.Now()
 	parseLogger := logger.With(zap.String("step", "parse_tables"))
-	parseLogger.Debug("parsing tables", zap.Int("start_page", startPage))
+	parseLogger.Debug("parsing tables",
+		zap.Int("start_page", startPage),
+		zap.Int("layout_text_len", len(layoutText)),
+		zap.Int("page_pngs", len(pagePNGs)),
+		zap.Bool("has_bbox_html", strings.TrimSpace(bboxHTML) != ""),
+	)
 	parseInput := ParseInput{
 		LayoutText: layoutText,
 		BBoxHTML:   bboxHTML,
 		PagePNGs:   pagePNGs,
 		StartPage:  startPage,
+		Logger:     parseLogger,
 	}
 	parser := a.parser
 	if a.cfg.DetectVotingTables {
@@ -361,7 +375,10 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	parseLogger.Debug("tables parsed",
 		zap.Int("raw_tables", len(parsed.RawTables)),
 		zap.Int("normalized_tables", len(parsed.NormalizedTables)),
+		zap.Int("normalized_columns", countNormalizedColumns(parsed.NormalizedTables)),
 		zap.Int("normalized_rows", countNormalizedRows(parsed.NormalizedTables)),
+		zap.Int("split_by_gap_lines", parsed.Stats.SplitByGapLines),
+		zap.Strings("split_by_gap_samples", parsed.Stats.SplitByGapSamples),
 		zap.Int64("duration_ms", manifest.Processing.ParseMs),
 	)
 
@@ -527,6 +544,14 @@ func countNormalizedRows(tables []NormalizedTable) int {
 	total := 0
 	for _, table := range tables {
 		total += len(table.Rows)
+	}
+	return total
+}
+
+func countNormalizedColumns(tables []NormalizedTable) int {
+	total := 0
+	for _, table := range tables {
+		total += len(table.Headers)
 	}
 	return total
 }
