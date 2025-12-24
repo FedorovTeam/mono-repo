@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { signIn } from 'next-auth/react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
@@ -97,6 +97,7 @@ export default function DocumentDetailsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [manualLoginRequired, setManualLoginRequired] = useState(false);
+  const router = useRouter();
 
   const fetchDocument = useCallback(async () => {
     if (!documentId) {
@@ -136,6 +137,7 @@ export default function DocumentDetailsPage() {
           'X-Correlation-ID': generateCorrelationId(),
         },
         body: JSON.stringify({ query, variables: { id: documentId } }),
+        router,
       });
 
       if (!res.ok) {
@@ -169,7 +171,7 @@ export default function DocumentDetailsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [documentId]);
+  }, [documentId, router]);
 
   useEffect(() => {
     fetchDocument();
