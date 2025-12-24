@@ -2,7 +2,9 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { SessionProvider, signIn, useSession } from "next-auth/react";
+import { SessionProvider, useSession } from "next-auth/react";
+
+import { performSilentSignIn } from "@/lib/auth-flow";
 
 const AUTO_SIGN_IN_COOLDOWN_MS = 60_000;
 
@@ -46,11 +48,8 @@ function AutoSignInOnFocus() {
 
       lastAttemptRef.current = now;
 
-      void signIn("authentik", {
-        callbackUrl: window.location.href,
-        redirect: true,
-        prompt: "none",
-      }).catch(() => {
+      void performSilentSignIn("AutoSignInOnFocus").catch((error) => {
+        console.warn("Автоматический silent sign-in отклонён.", error);
         sessionStorage.setItem("authAutoLoginDisabled", "true");
       });
     };
