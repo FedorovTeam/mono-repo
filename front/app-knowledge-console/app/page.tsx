@@ -2,9 +2,9 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signIn } from 'next-auth/react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
+import { handleAuthError } from '@/lib/handle-auth-error';
 import { useSessionRestorationState } from '@/lib/session-restoration-store';
 
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
@@ -74,8 +74,8 @@ export default function HomePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [manualLoginRequired, setManualLoginRequired] = useState(false);
   const [reauthInProgress, setReauthInProgress] = useState(false);
+  const [redirectingToSignIn, setRedirectingToSignIn] = useState(false);
   const restoringSession = useSessionRestorationState();
   const router = useRouter();
 
@@ -147,11 +147,7 @@ export default function HomePage() {
     }
 
     setReauthInProgress(false);
-
-    if (typeof window !== 'undefined' && !manualLoginRequired) {
-      sessionStorage.removeItem('authAutoLoginDisabled');
-    }
-  }, [manualLoginRequired, restoringSession]);
+  }, [restoringSession]);
 
   const updatePlenaryFields = (fields: Partial<PlenaryFields>) => {
     setPlenaryFields((prev) => ({ ...prev, ...fields }));
@@ -165,7 +161,7 @@ export default function HomePage() {
     e.preventDefault();
     setMessage(null);
     setValidationError(null);
-    setManualLoginRequired(false);
+    setRedirectingToSignIn(false);
 
     if (!file) {
       setMessage('Выберите файл');
@@ -267,12 +263,14 @@ export default function HomePage() {
       setMessage(`Файл загружен. Document ID: ${document.id}, статус: ${document.status}`);
     } catch (err: unknown) {
       console.error(err);
-      if (err instanceof SilentSignInError) {
-        if (err.interactionRequired) {
-          setManualLoginRequired(true);
+      const authHandled = handleAuthError(err, {
+        onInteractionStart: () => {
+          setRedirectingToSignIn(true);
           setStatus('error');
-          setMessage('Сессия истекла. Войдите вручную, чтобы продолжить загрузку.');
-        }
+          setMessage('Требуется авторизация, перенаправляем на страницу входа…');
+        },
+      });
+      if (authHandled || err instanceof SilentSignInError) {
         setReauthInProgress(false);
         return;
       }
@@ -294,6 +292,15 @@ export default function HomePage() {
                 aria-hidden
               />
               <span>Восстанавливаем сессию…</span>
+            </div>
+          )}
+          {redirectingToSignIn && (
+            <div className="mb-4 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span
+                className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-amber-600 border-r-transparent"
+                aria-hidden
+              />
+              <span>Требуется вход. Перенаправляем на страницу авторизации…</span>
             </div>
           )}
           <div className="flex flex-col gap-2">
@@ -435,21 +442,6 @@ export default function HomePage() {
               }`}
             >
               {message}
-            </div>
-          )}
-
-          {manualLoginRequired && (
-            <div className="mt-3 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => signIn('authentik', { callbackUrl: window.location.href })}
-                className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100"
-              >
-                Войти вручную
-              </button>
-              <p className="text-xs text-slate-600">
-                Silent sign-in потребовал взаимодействие. Нажмите, чтобы открыть форму входа.
-              </p>
             </div>
           )}
 

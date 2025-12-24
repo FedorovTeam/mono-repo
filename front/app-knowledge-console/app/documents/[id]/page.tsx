@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { signIn } from 'next-auth/react';
 import { useParams, useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
+import { handleAuthError } from '@/lib/handle-auth-error';
 import { useSessionRestorationState } from '@/lib/session-restoration-store';
 
 type KnowledgeDocumentStatus =
@@ -97,8 +97,8 @@ export default function DocumentDetailsPage() {
   const [document, setDocument] = useState<KnowledgeDocument | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [manualLoginRequired, setManualLoginRequired] = useState(false);
   const [reauthInProgress, setReauthInProgress] = useState(false);
+  const [redirectingToSignIn, setRedirectingToSignIn] = useState(false);
   const router = useRouter();
   const restoringSession = useSessionRestorationState();
   const showRestoringOverlay = restoringSession || reauthInProgress;
@@ -110,11 +110,7 @@ export default function DocumentDetailsPage() {
     }
 
     setReauthInProgress(false);
-
-    if (typeof window !== 'undefined' && !manualLoginRequired) {
-      sessionStorage.removeItem('authAutoLoginDisabled');
-    }
-  }, [manualLoginRequired, restoringSession]);
+  }, [restoringSession]);
 
   const fetchDocument = useCallback(async () => {
     if (!documentId) {
@@ -126,7 +122,7 @@ export default function DocumentDetailsPage() {
     try {
       setIsLoading(true);
       setError(null);
-      setManualLoginRequired(false);
+      setRedirectingToSignIn(false);
 
       const query = `
         query KnowledgeDocument($id: ID!) {
@@ -179,12 +175,14 @@ export default function DocumentDetailsPage() {
         setReauthInProgress(false);
       }
     } catch (err) {
-      if (err instanceof SilentSignInError) {
-        if (err.interactionRequired) {
-          setManualLoginRequired(true);
-          setError('Сессия истекла. Войдите вручную, чтобы продолжить.');
-          setReauthInProgress(false);
-        }
+      const authHandled = handleAuthError(err, {
+        onInteractionStart: () => {
+          setRedirectingToSignIn(true);
+          setError('Требуется авторизация, перенаправляем на страницу входа…');
+        },
+      });
+      if (authHandled || err instanceof SilentSignInError) {
+        setReauthInProgress(false);
         return;
       }
       console.error(err);
@@ -236,23 +234,20 @@ export default function DocumentDetailsPage() {
           </div>
         )}
 
-        {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
-        )}
-
-        {manualLoginRequired && (
-          <div className="flex flex-col gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-            <p>Silent sign-in потребовал взаимодействие. Войдите вручную, чтобы продолжить.</p>
-            <div>
-              <button
-                type="button"
-                onClick={() => signIn('authentik', { callbackUrl: window.location.href })}
-                className="inline-flex items-center justify-center rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100"
-              >
-                Войти вручную
-              </button>
+        {redirectingToSignIn && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <div className="flex items-center gap-3">
+              <span
+                className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-amber-600 border-r-transparent"
+                aria-hidden
+              />
+              <span>Требуется вход. Перенаправляем на страницу авторизации…</span>
             </div>
           </div>
+        )}
+
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
         )}
 
         <div className="grid gap-4 lg:grid-cols-3">
