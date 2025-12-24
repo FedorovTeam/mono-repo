@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 
-import { performSilentSignIn } from "@/lib/auth-flow";
+import { performSilentSignIn, mapAuthError, SilentSignInError } from "@/lib/auth-flow";
 
 const AUTO_SIGN_IN_COOLDOWN_MS = 60_000;
 
@@ -23,12 +23,13 @@ function AutoSignInOnFocus() {
     if (typeof window === "undefined") return;
     if (status !== "unauthenticated") return;
 
-    const loginRequiredInQuery =
-      new URLSearchParams(window.location.search).get("error") === "login_required";
+    const authErrorCode = new URLSearchParams(window.location.search).get("error");
+    const mappedError = mapAuthError(authErrorCode);
+    const isBlockingError = mappedError.interactionRequired || (!!authErrorCode && !mappedError.retryable);
     const isAutoLoginDisabled =
-      sessionStorage.getItem("authAutoLoginDisabled") === "true" || loginRequiredInQuery;
+      sessionStorage.getItem("authAutoLoginDisabled") === "true" || isBlockingError;
 
-    if (loginRequiredInQuery) {
+    if (isBlockingError) {
       sessionStorage.setItem("authAutoLoginDisabled", "true");
     }
 
@@ -50,6 +51,14 @@ function AutoSignInOnFocus() {
 
       void performSilentSignIn("AutoSignInOnFocus").catch((error) => {
         console.warn("Автоматический silent sign-in отклонён.", error);
+
+        if (error instanceof SilentSignInError) {
+          if (error.interactionRequired || !error.retryable) {
+            sessionStorage.setItem("authAutoLoginDisabled", "true");
+          }
+          return;
+        }
+
         sessionStorage.setItem("authAutoLoginDisabled", "true");
       });
     };
