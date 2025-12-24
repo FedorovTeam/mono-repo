@@ -435,15 +435,23 @@ type mergeTablesInput struct {
 	TargetBucket    string
 	TargetObjectKey string
 	CorrelationID   string
+	TableMetadata   domain.TableMetadata
+	MergeSettings   domain.MergeSettings
 }
 
-func (a *Activities) MergeTables(ctx context.Context, input mergeTablesInput) (string, error) {
+type mergeTablesResult struct {
+	ObjectKey    string
+	TablesMerged bool
+	SkipReason   string
+}
+
+func (a *Activities) MergeTables(ctx context.Context, input mergeTablesInput) (mergeTablesResult, error) {
 	ctx = a.withCorrelationID(ctx, input.CorrelationID)
 	if input.Doc == nil {
-		return "", fmt.Errorf("document is required for merge")
+		return mergeTablesResult{}, fmt.Errorf("document is required for merge")
 	}
 	if a.storage == nil {
-		return "", fmt.Errorf("storage client is not configured")
+		return mergeTablesResult{}, fmt.Errorf("storage client is not configured")
 	}
 	baseBucket := strings.TrimSpace(input.BaseBucket)
 	baseKey := strings.TrimSpace(input.BaseObjectKey)
@@ -453,7 +461,7 @@ func (a *Activities) MergeTables(ctx context.Context, input mergeTablesInput) (s
 	targetKey := strings.TrimSpace(input.TargetObjectKey)
 
 	if tablesBucket == "" || tablesKey == "" {
-		return "", fmt.Errorf("tables location is required for merge")
+		return mergeTablesResult{}, fmt.Errorf("tables location is required for merge")
 	}
 	if targetBucket == "" {
 		targetBucket = input.Doc.MarkdownBucket
@@ -462,41 +470,45 @@ func (a *Activities) MergeTables(ctx context.Context, input mergeTablesInput) (s
 		targetKey = resolvedMarkdownKey(input.Doc)
 	}
 	if targetBucket == "" || targetKey == "" {
-		return "", fmt.Errorf("target markdown location is required for merge")
+		return mergeTablesResult{}, fmt.Errorf("target markdown location is required for merge")
 	}
 
 	tablesResp, err := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: tablesBucket, ObjectKey: tablesKey})
 	if err != nil {
-		return "", fmt.Errorf("download tables markdown: %w", err)
+		return mergeTablesResult{}, fmt.Errorf("download tables markdown: %w", err)
 	}
 	baseContent := ""
 	if baseBucket != "" && baseKey != "" {
 		baseResp, baseErr := a.storage.GetObject(ctx, &storagev1.GetObjectRequest{Bucket: baseBucket, ObjectKey: baseKey})
 		if baseErr != nil {
-			return "", fmt.Errorf("download base markdown: %w", baseErr)
+			return mergeTablesResult{}, fmt.Errorf("download base markdown: %w", baseErr)
 		}
 		baseContent = string(baseResp.GetContent())
 	}
 
-	merged, err := mergeMarkdownWithTables(baseContent, string(tablesResp.GetContent()))
+	merged, err := mergeMarkdownWithTablesWithOptions(baseContent, string(tablesResp.GetContent()), mergeOptions{
+		TableMetadata: input.TableMetadata,
+		Settings:      input.MergeSettings,
+		DocumentID:    input.Doc.ID,
+	})
 	if err != nil {
-		return "", err
+		return mergeTablesResult{}, err
 	}
 	uploadResp, err := a.storage.UploadMarkdown(ctx, &storagev1.UploadMarkdownRequest{
 		OrgSlug:     input.Doc.Owner,
 		ProjectSlug: input.Doc.Repository,
 		DocumentId:  input.Doc.ID,
-		Content:     []byte(merged),
+		Content:     []byte(merged.Content),
 	})
 	if err != nil {
-		return "", fmt.Errorf("upload merged markdown: %w", err)
+		return mergeTablesResult{}, fmt.Errorf("upload merged markdown: %w", err)
 	}
 
 	uploadedKey := strings.TrimSpace(uploadResp.GetObjectKey())
 	if uploadedKey == "" {
 		uploadedKey = strings.TrimSpace(targetKey)
 	}
-	return uploadedKey, nil
+	return mergeTablesResult{ObjectKey: uploadedKey, TablesMerged: merged.TablesMerged, SkipReason: merged.SkipReason}, nil
 }
 
 func (a *Activities) MarkConverted(ctx context.Context, doc *domain.Document, markdownKey, sourceObjectKey, queueID string, version int32) error {
@@ -772,9 +784,30 @@ func correlationIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+type mergeOptions struct {
+	TableMetadata domain.TableMetadata
+	Settings      domain.MergeSettings
+	DocumentID    string
+}
+
+type mergeResult struct {
+	Content      string
+	TablesMerged bool
+	SkipReason   string
+}
+
 func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error) {
+	result, err := mergeMarkdownWithTablesWithOptions(baseMarkdown, tablesMarkdown, mergeOptions{})
+	if err != nil {
+		return "", err
+	}
+	return result.Content, nil
+}
+
+func mergeMarkdownWithTablesWithOptions(baseMarkdown, tablesMarkdown string, opts mergeOptions) (mergeResult, error) {
+	settings := domain.NormalizeMergeSettings(opts.Settings)
 	if strings.TrimSpace(tablesMarkdown) == "" {
-		return baseMarkdown, nil
+		return mergeResult{Content: baseMarkdown, SkipReason: "tables markdown is empty"}, nil
 	}
 	const (
 		tablesStart = "<!-- tables:start -->"
@@ -859,16 +892,13 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		if len(baseTables) == 0 || len(newTables) == 0 {
 			return md, false
 		}
-		used := make(map[int]struct{})
+		usedSig := make(map[string]struct{})
 		replaced := false
 		for idx := len(baseTables) - 1; idx >= 0; idx-- {
 			baseBlock := baseTables[idx]
 			match := -1
 			for newIdx, tbl := range newTables {
 				if tbl.signature == baseBlock.signature {
-					if _, ok := used[newIdx]; ok {
-						continue
-					}
 					match = newIdx
 					break
 				}
@@ -876,31 +906,40 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 			if match == -1 {
 				continue
 			}
-			used[match] = struct{}{}
+			if _, ok := usedSig[baseBlock.signature]; ok {
+				lines = append(lines[:baseBlock.start], lines[baseBlock.end+1:]...)
+				replaced = true
+				continue
+			}
+			usedSig[baseBlock.signature] = struct{}{}
+			lines = append(lines[:baseBlock.start], append(newTables[match].lines, lines[baseBlock.end+1:]...)...)
 			replaced = true
-			lines = append(append(append([]string{}, lines[:baseBlock.start]...), newTables[match].lines...), lines[baseBlock.end+1:]...)
+			log.Printf("mergeMarkdownWithTables: replaced table at index=%d signature=%s", idx, baseBlock.signature)
 		}
 		return strings.Join(lines, "\n"), replaced
 	}
 
 	deduplicateTables := func(md string) string {
+		seen := map[string]struct{}{}
 		lines := strings.Split(md, "\n")
-		tables := findTables(md)
-		seen := make(map[string]struct{})
-		for i := len(tables) - 1; i >= 0; i-- {
-			block := tables[i]
-			if _, ok := seen[block.signature]; ok {
-				lines = append(lines[:block.start], lines[block.end+1:]...)
-				continue
+		result := make([]string, 0, len(lines))
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "<!-- tables:appended") {
+				sig := strings.TrimSpace(trimmed)
+				if _, exists := seen[sig]; exists {
+					continue
+				}
+				seen[sig] = struct{}{}
 			}
-			seen[block.signature] = struct{}{}
+			result = append(result, line)
 		}
-		return strings.Join(lines, "\n")
+		return strings.Join(result, "\n")
 	}
 
 	markerBlocks := func(md string) ([]string, [][2]int) {
-		blocks := make([]string, 0)
-		ranges := make([][2]int, 0)
+		var blocks []string
+		var ranges [][2]int
 		pos := 0
 		for {
 			startLoc := markerStart.FindStringIndex(md[pos:])
@@ -923,7 +962,9 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 
 	extractContent := func(md string) (string, bool) {
 		blocks, ranges := markerBlocks(md)
-		log.Printf("mergeMarkdownWithTables: markerBlocks detected=%d ranges=%v", len(blocks), ranges)
+		if settings.DebugLog() {
+			log.Printf("mergeMarkdownWithTables: markerBlocks detected=%d ranges=%v", len(blocks), ranges)
+		}
 		if len(blocks) > 0 {
 			return strings.Join(blocks, "\n\n"), true
 		}
@@ -937,7 +978,9 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 	}
 
 	tablesContent, hasMarkers := extractContent(trimmedTables)
-	log.Printf("mergeMarkdownWithTables: tables markers found=%v", hasMarkers)
+	if settings.DebugLog() {
+		log.Printf("mergeMarkdownWithTables: tables markers found=%v", hasMarkers)
+	}
 	if !hasMarkers {
 		if tablesBlocks := findTables(trimmedTables); len(tablesBlocks) > 0 {
 			lines := strings.Split(trimmedTables, "\n")
@@ -945,8 +988,66 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 			end := tablesBlocks[len(tablesBlocks)-1].end
 			tablesContent = strings.TrimSpace(strings.Join(lines[start:end+1], "\n"))
 		} else {
-			return "", fmt.Errorf("tables block not found in artifact")
+			tablesContent = strings.TrimSpace(trimmedTables)
 		}
+	}
+
+	countWords := func(md string) int {
+		return len(strings.Fields(md))
+	}
+	countLines := func(md string) int {
+		lines := strings.Split(md, "\n")
+		count := 0
+		for _, line := range lines {
+			if strings.TrimSpace(line) != "" {
+				count++
+			}
+		}
+		return count
+	}
+	share := func(part, total int) float64 {
+		if total <= 0 {
+			if part > 0 {
+				return 1
+			}
+			return 0
+		}
+		return float64(part) / float64(total)
+	}
+
+	baseWords := countWords(baseMarkdown)
+	tablesWords := countWords(tablesContent)
+	baseLines := countLines(baseMarkdown)
+	tablesLines := countLines(tablesContent)
+	wordRatio := share(tablesWords, baseWords)
+	lineRatio := share(tablesLines, baseLines)
+
+	if settings.DebugLog() {
+		log.Printf(
+			"mergeMarkdownWithTables: doc_id=%s ratios word=%.4f line=%.4f threshold=%.4f base_words=%d tables_words=%d base_lines=%d tables_lines=%d meta_empty=%v",
+			strings.TrimSpace(opts.DocumentID), wordRatio, lineRatio, settings.MaxTablesShare, baseWords, tablesWords, baseLines, tablesLines, opts.TableMetadata.IsEmpty(),
+		)
+	}
+
+	maxRatio := wordRatio
+	if lineRatio > maxRatio {
+		maxRatio = lineRatio
+	}
+
+	if opts.TableMetadata.IsEmpty() {
+		reason := fmt.Sprintf("skip_tables: table metadata is empty word_ratio=%.4f line_ratio=%.4f threshold=%.4f", wordRatio, lineRatio, settings.MaxTablesShare)
+		if settings.ShouldLog() {
+			log.Printf("mergeMarkdownWithTables: doc_id=%s %s", strings.TrimSpace(opts.DocumentID), reason)
+		}
+		return mergeResult{Content: baseMarkdown, SkipReason: reason}, nil
+	}
+
+	if maxRatio > settings.MaxTablesShare {
+		reason := fmt.Sprintf("skip_tables: tables share %.4f exceeds threshold %.4f (word=%.4f line=%.4f base_words=%d tables_words=%d base_lines=%d tables_lines=%d)", maxRatio, settings.MaxTablesShare, wordRatio, lineRatio, baseWords, tablesWords, baseLines, tablesLines)
+		if settings.ShouldLog() {
+			log.Printf("mergeMarkdownWithTables: doc_id=%s %s", strings.TrimSpace(opts.DocumentID), reason)
+		}
+		return mergeResult{Content: baseMarkdown, SkipReason: reason}, nil
 	}
 
 	tablesBlock := tablesContent
@@ -955,12 +1056,14 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 	}
 
 	baseBlocks, baseRanges := markerBlocks(baseMarkdown)
-	log.Printf("mergeMarkdownWithTables: base markerBlocks detected=%d ranges=%v", len(baseBlocks), baseRanges)
+	if settings.DebugLog() {
+		log.Printf("mergeMarkdownWithTables: base markerBlocks detected=%d ranges=%v", len(baseBlocks), baseRanges)
+	}
 	if hasMarkers && len(baseRanges) > 0 {
 		start := baseRanges[0][0]
 		end := baseRanges[len(baseRanges)-1][1]
 		merged := fmt.Sprintf("%s%s%s", baseMarkdown[:start], tablesContent, baseMarkdown[end:])
-		return deduplicateTables(merged), nil
+		return mergeResult{Content: deduplicateTables(merged), TablesMerged: true}, nil
 	}
 
 	if start := strings.Index(baseMarkdown, tablesStart); start != -1 {
@@ -968,19 +1071,25 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 			prefix := baseMarkdown[:start+len(tablesStart)]
 			suffix := baseMarkdown[end:]
 			merged := fmt.Sprintf("%s\n\n%s\n%s", prefix, tablesContent, suffix)
-			return deduplicateTables(merged), nil
+			return mergeResult{Content: deduplicateTables(merged), TablesMerged: true}, nil
 		}
 	}
 
 	newTables := findTables(tablesContent)
-	log.Printf("mergeMarkdownWithTables: newTables found=%d signatures=%v", len(newTables), tableSignatures(newTables))
+	if settings.DebugLog() {
+		log.Printf("mergeMarkdownWithTables: newTables found=%d signatures=%v", len(newTables), tableSignatures(newTables))
+	}
 	baseTables := findTables(baseMarkdown)
-	log.Printf("mergeMarkdownWithTables: baseTables found=%d signatures=%v", len(baseTables), tableSignatures(baseTables))
+	if settings.DebugLog() {
+		log.Printf("mergeMarkdownWithTables: baseTables found=%d signatures=%v", len(baseTables), tableSignatures(baseTables))
+	}
 	if mergedBySignature, replaced := replaceTablesBySignature(baseMarkdown, newTables); replaced {
 		log.Printf("mergeMarkdownWithTables: replaceTablesBySignature applied replaced=%v", replaced)
-		return deduplicateTables(mergedBySignature), nil
+		return mergeResult{Content: deduplicateTables(mergedBySignature), TablesMerged: true}, nil
 	}
-	log.Printf("mergeMarkdownWithTables: replaceTablesBySignature applied replaced=%v", false)
+	if settings.DebugLog() {
+		log.Printf("mergeMarkdownWithTables: replaceTablesBySignature applied replaced=%v", false)
+	}
 
 	if len(baseTables) > 0 && len(newTables) > 0 {
 		targetIdx := -1
@@ -997,24 +1106,27 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		if targetIdx == -1 {
 			targetIdx = 0
 		}
-		log.Printf("mergeMarkdownWithTables: targetIdx=%d", targetIdx)
+		if settings.DebugLog() {
+			log.Printf("mergeMarkdownWithTables: targetIdx=%d", targetIdx)
+		}
 		lines := strings.Split(baseMarkdown, "\n")
 		start := baseTables[targetIdx].start
 		end := baseTables[targetIdx].end
 		mergedLines := append(append([]string{}, lines[:start]...), strings.Split(tablesBlock, "\n")...)
 		mergedLines = append(mergedLines, lines[end+1:]...)
-		return deduplicateTables(strings.Join(mergedLines, "\n")), nil
+		return mergeResult{Content: deduplicateTables(strings.Join(mergedLines, "\n")), TablesMerged: true}, nil
 	}
 
 	if strings.TrimSpace(baseMarkdown) == "" {
-		return tablesBlock, nil
+		return mergeResult{Content: tablesBlock, TablesMerged: true}, nil
 	}
 
 	fallbackNote := "<!-- tables:appended (no anchor found) -->"
-	log.Printf("mergeMarkdownWithTables: fallback append marker added")
-	return deduplicateTables(fmt.Sprintf("%s\n\n%s\n%s\n", strings.TrimSpace(baseMarkdown), fallbackNote, tablesBlock)), nil
+	if settings.DebugLog() {
+		log.Printf("mergeMarkdownWithTables: fallback append marker added")
+	}
+	return mergeResult{Content: deduplicateTables(fmt.Sprintf("%s\n\n%s\n%s\n", strings.TrimSpace(baseMarkdown), fallbackNote, tablesBlock)), TablesMerged: true}, nil
 }
-
 func isTransformerFailureStatus(val string) bool {
 	switch strings.ToLower(strings.TrimSpace(val)) {
 	case "failed", "failure", "error", "errored", strings.ToLower(string(domain.DocumentStatusFailed)):

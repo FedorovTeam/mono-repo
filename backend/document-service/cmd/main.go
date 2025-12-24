@@ -218,16 +218,20 @@ func main() {
 }
 
 func newStageRouter(cfg config.Router) *domain.StageRouter {
-	rules := domain.RouterRules{
-		PreprocessEnabled:        cfg.PreprocessEnabled,
-		PreprocessExtensions:     cfg.PreprocessExtensions,
-		TableExtractorEnabled:    cfg.TableExtractorEnabled,
-		TableExtractorExtensions: cfg.TableExtractorExtensions,
-		ArtifactsBucket:          cfg.ArtifactsBucket,
-		ArtifactsPrefixTemplate:  cfg.ArtifactsPrefixTemplate,
-		TableDetectionMinCount:   cfg.TableDetectionMinCount,
-		ForceTableExtractionPDF:  cfg.ForceTableExtractionPDF,
-	}
+        rules := domain.RouterRules{
+                PreprocessEnabled:        cfg.PreprocessEnabled,
+                PreprocessExtensions:     cfg.PreprocessExtensions,
+                TableExtractorEnabled:    cfg.TableExtractorEnabled,
+                TableExtractorExtensions: cfg.TableExtractorExtensions,
+                ArtifactsBucket:          cfg.ArtifactsBucket,
+                ArtifactsPrefixTemplate:  cfg.ArtifactsPrefixTemplate,
+                TableDetectionMinCount:   cfg.TableDetectionMinCount,
+                ForceTableExtractionPDF:  cfg.ForceTableExtractionPDF,
+                Merge: domain.MergeSettings{
+                        MaxTablesShare: cfg.Merge.MaxTablesShare,
+                        LogMode:        domain.MergeLogMode(cfg.Merge.LogMode),
+                },
+        }
 	for _, rule := range cfg.RepositoryRules {
 		rules.RepositoryRules = append(rules.RepositoryRules, domain.RepositoryRouterRule{
 			Owner:                    rule.Owner,

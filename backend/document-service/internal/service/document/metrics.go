@@ -10,12 +10,13 @@ import (
 )
 
 type workerMetrics struct {
-	queueGauge   metric.Int64ObservableGauge
-	batchHist    metric.Int64Histogram
-	durationHist metric.Float64Histogram
-	errorCount   metric.Int64Counter
-	retryCount   metric.Int64Counter
-	finalError   metric.Int64Counter
+	queueGauge    metric.Int64ObservableGauge
+	batchHist     metric.Int64Histogram
+	durationHist  metric.Float64Histogram
+	errorCount    metric.Int64Counter
+	retryCount    metric.Int64Counter
+	finalError    metric.Int64Counter
+	tablesSkipped metric.Int64Counter
 
 	mu        sync.Mutex
 	lastQueue int64
@@ -47,6 +48,7 @@ func newWorkerMetrics(name string) *workerMetrics {
 	m.errorCount, _ = meter.Int64Counter("document_service_" + name + "_errors_total")
 	m.retryCount, _ = meter.Int64Counter("document_service_" + name + "_retries_total")
 	m.finalError, _ = meter.Int64Counter("document_service_" + name + "_final_errors_total")
+	m.tablesSkipped, _ = meter.Int64Counter("document_service_" + name + "_tables_skipped_total")
 
 	return m
 }
@@ -91,4 +93,11 @@ func (m *workerMetrics) recordFinalError(ctx context.Context) {
 	}
 
 	m.finalError.Add(ctx, 1)
+}
+
+func (m *workerMetrics) recordTablesSkipped(ctx context.Context) {
+	if m == nil || m.tablesSkipped == nil {
+		return
+	}
+	m.tablesSkipped.Add(ctx, 1)
 }

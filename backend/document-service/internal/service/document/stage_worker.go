@@ -621,22 +621,31 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 		return workersvc.JobResult{Payload: payload.ToMap()}, err
 	}
 
-	mergedKey, mergeErr := w.activities.MergeTables(ctx, mergeTablesInput{
+	tableMetadata := payload.TableMetadata.Merge(domain.TableMetadata{TablesCount: payload.TableCount, Pages: payload.TablePages})
+
+	mergeResult, mergeErr := w.activities.MergeTables(ctx, mergeTablesInput{
 		Doc:             doc,
 		BaseBucket:      baseBucket,
 		BaseObjectKey:   baseKey,
-		TablesBucket:    firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, targetBucket),
+		TablesBucket:    firstNonEmpty(payload.ArtifactsBucket, payload.MarkdownBucket, targetBucket),
 		TablesObjectKey: tableMarkdownKey,
 		TargetBucket:    targetBucket,
 		TargetObjectKey: targetKey,
 		CorrelationID:   payload.CorrelationID,
+		TableMetadata:   tableMetadata,
+		MergeSettings:   w.mergeSettings(),
 	})
 	if mergeErr != nil {
 		payload.LastError = mergeErr.Error()
 		return workersvc.JobResult{Payload: payload.ToMap()}, mergeErr
 	}
-	finalMarkdownKey = mergedKey
-	payload.MarkdownObjectKey = mergedKey
+	finalMarkdownKey = mergeResult.ObjectKey
+	payload.MarkdownObjectKey = mergeResult.ObjectKey
+
+	if !mergeResult.TablesMerged && mergeResult.SkipReason != "" {
+		w.logMergeDecision(doc.ID, mergeResult.SkipReason)
+		w.metrics.recordTablesSkipped(ctx)
+	}
 
 	version := latestVersion(doc).Version + 1
 	if err := w.activities.MarkConverted(ctx, doc, finalMarkdownKey, payload.OriginalObjectKey, payload.TableQueueID, version); err != nil {
@@ -661,6 +670,9 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	}
 	if finalMarkdownKey != "" {
 		eventPayload["markdown_object_key"] = finalMarkdownKey
+	}
+	if mergeResult.SkipReason != "" {
+		eventPayload["tables_merge_skip_reason"] = mergeResult.SkipReason
 	}
 
 	return workersvc.JobResult{Payload: payload.ToMap(), Event: &domain.JobEvent{EventType: "completed", Payload: eventPayload}}, nil
@@ -859,6 +871,25 @@ func (w *StageWorker) forceTableExtractionEnabled(doc *domain.Document) bool {
 		return false
 	}
 	return w.router.ForceTableExtractionEnabled(doc)
+}
+
+func (w *StageWorker) mergeSettings() domain.MergeSettings {
+	if w.router == nil {
+		return domain.NormalizeMergeSettings(domain.MergeSettings{})
+	}
+	return w.router.MergeSettings()
+}
+
+func (w *StageWorker) logMergeDecision(docID, reason string) {
+	trimmedReason := strings.TrimSpace(reason)
+	if trimmedReason == "" {
+		return
+	}
+	if w.router != nil {
+		w.router.LogMergeDecision(docID, trimmedReason)
+		return
+	}
+	log.Printf("[merge] doc_id=%s %s", strings.TrimSpace(docID), trimmedReason)
 }
 
 func (w *StageWorker) jobContext(ctx context.Context, correlationID string) context.Context {

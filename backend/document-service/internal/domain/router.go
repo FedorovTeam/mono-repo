@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+type MergeLogMode string
+
+const (
+	MergeLogModeDecision MergeLogMode = "decision"
+	MergeLogModeSilent   MergeLogMode = "silent"
+	MergeLogModeDebug    MergeLogMode = "debug"
+)
+
+type MergeSettings struct {
+	MaxTablesShare float64
+	LogMode        MergeLogMode
+}
+
 // RepositoryRouterRule задаёт переопределения стратегии роутинга для конкретного репозитория.
 type RepositoryRouterRule struct {
 	Owner                    string
@@ -32,6 +45,7 @@ type RouterRules struct {
 	RepositoryRules          []RepositoryRouterRule
 	TableDetectionMinCount   int
 	ForceTableExtractionPDF  bool
+	Merge                    MergeSettings
 }
 
 type repositoryRule struct {
@@ -69,6 +83,7 @@ type StageRouter struct {
 	repoRules              []repositoryRule
 	tableDetectionMinCount int
 	forceTableExtraction   bool
+	mergeSettings          MergeSettings
 }
 
 // NewStageRouter создаёт StageRouter с нормализованными правилами.
@@ -82,6 +97,7 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 		artifactsPrefixTmpl:    strings.TrimSpace(rules.ArtifactsPrefixTemplate),
 		tableDetectionMinCount: rules.TableDetectionMinCount,
 		forceTableExtraction:   rules.ForceTableExtractionPDF,
+		mergeSettings:          NormalizeMergeSettings(rules.Merge),
 	}
 	if len(router.preprocessExt) == 0 {
 		router.preprocessExt = defaultPreprocessExtensions()
@@ -110,6 +126,45 @@ func NewStageRouter(rules RouterRules) *StageRouter {
 	}
 
 	return router
+}
+
+func NormalizeMergeSettings(settings MergeSettings) MergeSettings {
+	if settings.MaxTablesShare <= 0 {
+		settings.MaxTablesShare = 0.9
+	}
+	switch settings.LogMode {
+	case MergeLogModeDecision, MergeLogModeSilent, MergeLogModeDebug:
+	default:
+		settings.LogMode = MergeLogModeDecision
+	}
+	return settings
+}
+
+func (s MergeSettings) ShouldLog() bool {
+	return s.LogMode != MergeLogModeSilent
+}
+
+func (s MergeSettings) DebugLog() bool {
+	return s.LogMode == MergeLogModeDebug
+}
+
+// MergeSettings возвращает настройки для объединения таблиц в Markdown.
+func (r *StageRouter) MergeSettings() MergeSettings {
+	if r == nil {
+		return NormalizeMergeSettings(MergeSettings{})
+	}
+	return r.mergeSettings
+}
+
+// LogMergeDecision пишет информацию о причинах пропуска или включения таблиц.
+func (r *StageRouter) LogMergeDecision(docID, reason string) {
+	if r == nil {
+		return
+	}
+	if !r.mergeSettings.ShouldLog() {
+		return
+	}
+	log.Printf("[merge] doc_id=%s %s", strings.TrimSpace(docID), strings.TrimSpace(reason))
 }
 
 // NextStageAfterStore возвращает следующую стадию после сохранения оригинала.

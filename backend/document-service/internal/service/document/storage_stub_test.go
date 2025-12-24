@@ -14,6 +14,14 @@ type stubStorageClient struct {
 	err        error
 	objects    map[string]map[string][]byte
 	lastUpload *storagev1.UploadMarkdownRequest
+	lastGet    struct {
+		bucket string
+		key    string
+	}
+	gets []struct {
+		bucket string
+		key    string
+	}
 }
 
 func (s *stubStorageClient) UploadOriginal(ctx context.Context, in *storagev1.UploadOriginalRequest, opts ...grpc.CallOption) (*storagev1.UploadObjectResponse, error) {
@@ -39,6 +47,12 @@ func (s *stubStorageClient) GetObject(ctx context.Context, in *storagev1.GetObje
 	if s.err != nil {
 		return nil, s.err
 	}
+	s.lastGet.bucket = in.GetBucket()
+	s.lastGet.key = in.GetObjectKey()
+	s.gets = append(s.gets, struct {
+		bucket string
+		key    string
+	}{bucket: in.GetBucket(), key: in.GetObjectKey()})
 
 	content := []byte{}
 	if s.objects != nil {

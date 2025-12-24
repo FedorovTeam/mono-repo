@@ -3,13 +3,26 @@ package document
 import (
 	"strings"
 	"testing"
+
+	"backend-document-service/internal/domain"
 )
+
+func mergeMarkdownForActivities(baseMarkdown, tablesMarkdown string) (string, error) {
+	result, err := mergeMarkdownWithTablesWithOptions(baseMarkdown, tablesMarkdown, mergeOptions{
+		TableMetadata: domain.TableMetadata{TablesCount: 1},
+		Settings:      domain.MergeSettings{MaxTablesShare: 3, LogMode: domain.MergeLogModeSilent},
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Content, nil
+}
 
 func TestMergeMarkdownWithTablesPrefersMarkedBlocks(t *testing.T) {
 	base := "Введение\n\n<!-- tables:start -->\n| old | table |\n<!-- tables:end -->\n\nЗавершение"
 	tables := "<!-- tables:start -->\n| new | table |\n<!-- tables:end -->\n\n## Таблицы\n\n| legacy | table |"
 
-	merged, err := mergeMarkdownWithTables(base, tables)
+	merged, err := mergeMarkdownForActivities(base, tables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

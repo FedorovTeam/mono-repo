@@ -20,6 +20,21 @@ import (
 	transformerv1 "backend-document-service/proto/backend/transformer/v1"
 )
 
+func mergeMarkdownWithTablesForTest(baseMarkdown, tablesMarkdown string) (string, error) {
+	result, err := mergeMarkdownWithTablesWithOptions(baseMarkdown, tablesMarkdown, mergeOptions{
+		TableMetadata: domain.TableMetadata{TablesCount: 1},
+		Settings:      domain.MergeSettings{MaxTablesShare: 3, LogMode: domain.MergeLogModeDebug},
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.Content, nil
+}
+
+func mergeRouter() *domain.StageRouter {
+	return domain.NewStageRouter(domain.RouterRules{Merge: domain.MergeSettings{MaxTablesShare: 3, LogMode: domain.MergeLogModeDebug}})
+}
+
 type publishRepoStub struct {
 	doc            *domain.Document
 	lastEvent      *domain.JobEvent
@@ -1264,7 +1279,7 @@ func TestHandleExtractTablesSubmitsAndPostpones(t *testing.T) {
 			},
 		},
 	}
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, nil), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, nil), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: map[string]any{}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1332,10 +1347,15 @@ func TestHandleExtractTablesMarksConverted(t *testing.T) {
 		},
 	}
 	payload := (domain.ExtractTablesPayload{QueueID: "queue-1"}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		tablesBucket, tablesKey := storage.lastGet.bucket, storage.lastGet.key
+		if len(storage.gets) > 0 {
+			tablesBucket = storage.gets[0].bucket
+			tablesKey = storage.gets[0].key
+		}
+		t.Fatalf("unexpected error: %v (bucket=%s key=%s content=%q tables_bucket=%s tables_key=%s)", err, storage.lastGet.bucket, storage.lastGet.key, storage.objects[storage.lastGet.bucket][storage.lastGet.key], tablesBucket, tablesKey)
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
@@ -1389,11 +1409,13 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 		MarkdownObjectKey:        doc.MarkdownObjectKey,
 		DoclingMarkdownBucket:    doc.MarkdownBucket,
 		DoclingMarkdownObjectKey: doc.MarkdownObjectKey,
+		TableMetadata:            domain.TableMetadata{TablesCount: 1},
+		TableCount:               1,
 	}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v (bucket=%s key=%s content=%q)", err, storage.lastGet.bucket, storage.lastGet.key, storage.objects[storage.lastGet.bucket][storage.lastGet.key])
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
@@ -1406,7 +1428,7 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 	}
 	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
 	uploadedStr := string(uploaded)
-	expectedMerged, err := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	expectedMerged, err := mergeMarkdownWithTablesForTest(baseMarkdown, tablesMarkdown)
 	if err != nil {
 		t.Fatalf("unexpected merge error: %v", err)
 	}
@@ -1469,11 +1491,13 @@ func TestHandleExtractTablesMergesTablesOnlyStrategyWithoutLosingText(t *testing
 		TableQueueID:       "queue-merge-tables-only",
 		ArtifactsBucket:    "artifacts-bucket",
 		ConversionStrategy: domain.ConversionStrategyTablesOnly,
+		TableMetadata:      domain.TableMetadata{TablesCount: 1},
+		TableCount:         1,
 	}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v (bucket=%s key=%s content=%q)", err, storage.lastGet.bucket, storage.lastGet.key, storage.objects[storage.lastGet.bucket][storage.lastGet.key])
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
@@ -1481,7 +1505,7 @@ func TestHandleExtractTablesMergesTablesOnlyStrategyWithoutLosingText(t *testing
 
 	merged := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
 	mergedStr := string(merged)
-	expectedMerged, err := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	expectedMerged, err := mergeMarkdownWithTablesForTest(baseMarkdown, tablesMarkdown)
 	if err != nil {
 		t.Fatalf("unexpected merge error: %v", err)
 	}
@@ -1508,7 +1532,7 @@ func TestHandleExtractTablesUsesTablesOnlyFromFullArtifactWithoutMarkers(t *test
 	}
 	repo := &publishRepoStub{doc: doc}
 	baseMarkdown := "# Docling\n\nВведение\n\n## Таблицы\n\n<!-- tables:start -->\n| старая | таблица |\n<!-- tables:end -->\n\nЗавершение"
-	tablesMarkdown := "# Полный документ\n\nВведение\n\n| новая | таблица |\n\nФутер"
+	tablesMarkdown := "# Полный документ\n\nВведение\n\n<!-- tables:start -->\n| новая | таблица |\n<!-- tables:end -->\n\nФутер"
 	tableExtractor := &tableExtractorStub{
 		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
 			Job: &tableextractorv1.TableExtractionJob{
@@ -1533,15 +1557,21 @@ func TestHandleExtractTablesUsesTablesOnlyFromFullArtifactWithoutMarkers(t *test
 	payload := (domain.ExtractTablesPayload{
 		TableQueueID:             "queue-merge-full-artifact",
 		ArtifactsBucket:          "artifacts-bucket",
-		MarkdownBucket:           doc.MarkdownBucket,
-		MarkdownObjectKey:        doc.MarkdownObjectKey,
+		MarkdownBucket:           "artifacts-bucket",
+		MarkdownObjectKey:        "tables/doc-merge-no-markers/tables.md",
 		DoclingMarkdownBucket:    doc.MarkdownBucket,
 		DoclingMarkdownObjectKey: doc.MarkdownObjectKey,
+		TableMetadata:            domain.TableMetadata{TablesCount: 1},
+		TableCount:               1,
 	}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	loadedPayload := domain.ExtractTablesPayloadFromMap(payload)
+	if loadedPayload.MarkdownBucket == "" || loadedPayload.MarkdownObjectKey == "" {
+		t.Fatalf("expected markdown bucket and key to be preserved, got bucket=%q key=%q", loadedPayload.MarkdownBucket, loadedPayload.MarkdownObjectKey)
+	}
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error: %v (bucket=%s key=%s content=%q)", err, storage.lastGet.bucket, storage.lastGet.key, storage.objects[storage.lastGet.bucket][storage.lastGet.key])
 	}
 	if result.Event == nil || result.Event.EventType != "completed" {
 		t.Fatalf("expected completed event, got %+v", result.Event)
@@ -1600,8 +1630,10 @@ func TestHandleExtractTablesRestoresDoclingKeyWhenMissing(t *testing.T) {
 		MarkdownBucket:     doc.MarkdownBucket,
 		MarkdownObjectKey:  doc.MarkdownObjectKey,
 		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+		TableMetadata:      domain.TableMetadata{TablesCount: 1},
+		TableCount:         1,
 	}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1614,7 +1646,7 @@ func TestHandleExtractTablesRestoresDoclingKeyWhenMissing(t *testing.T) {
 	}
 	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
 	uploadedStr := string(uploaded)
-	expectedMerged, err := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	expectedMerged, err := mergeMarkdownWithTablesForTest(baseMarkdown, tablesMarkdown)
 	if err != nil {
 		t.Fatalf("unexpected merge error: %v", err)
 	}
@@ -1669,8 +1701,10 @@ func TestHandleExtractTablesUsesLatestMarkdownWhenDoclingKeyMissing(t *testing.T
 		ArtifactsBucket:    "artifacts-bucket",
 		MarkdownBucket:     doc.MarkdownBucket,
 		ConversionStrategy: domain.ConversionStrategyDoclingWithTables,
+		TableMetadata:      domain.TableMetadata{TablesCount: 1},
+		TableCount:         1,
 	}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1680,7 +1714,7 @@ func TestHandleExtractTablesUsesLatestMarkdownWhenDoclingKeyMissing(t *testing.T
 	}
 	uploaded := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
 	uploadedStr := string(uploaded)
-	expectedMerged, err := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	expectedMerged, err := mergeMarkdownWithTablesForTest(baseMarkdown, tablesMarkdown)
 	if err != nil {
 		t.Fatalf("unexpected merge error: %v", err)
 	}
@@ -1723,7 +1757,7 @@ func TestHandleExtractTablesFailsWithoutBaseMarkdown(t *testing.T) {
 		},
 	}
 	payload := (domain.ExtractTablesPayload{TableQueueID: "queue-merge-no-base", ArtifactsBucket: "artifacts-bucket"}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err == nil {
 		t.Fatal("expected error due to missing base markdown")
@@ -1781,8 +1815,10 @@ func TestHandleExtractTablesSkipsHeaderTextFromTablesArtifact(t *testing.T) {
 		MarkdownObjectKey:        doc.MarkdownObjectKey,
 		DoclingMarkdownBucket:    doc.MarkdownBucket,
 		DoclingMarkdownObjectKey: doc.MarkdownObjectKey,
+		TableMetadata:            domain.TableMetadata{TablesCount: 1},
+		TableCount:               1,
 	}).ToMap()
-	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, mergeRouter())
 	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1839,7 +1875,7 @@ func TestMergeMarkdownWithTablesReplacesWithoutMarkersAndDeduplicates(t *testing
 <!-- tables:end -->
 `)
 
-	merged, err := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	merged, err := mergeMarkdownWithTablesForTest(baseMarkdown, tablesMarkdown)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
