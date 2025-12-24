@@ -3,12 +3,16 @@ package extractor
 import (
 	"strconv"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // DefaultParser extracts simple columnar tables from pdftotext -layout output.
 type DefaultParser struct{}
 
 func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
+	logger := resolveLogger(input.Logger)
+	metrics := parseMetrics{}
 	lines := strings.Split(input.LayoutText, "\n")
 	current := make([]string, 0, len(lines))
 	var rawTables []RawTable
@@ -19,7 +23,7 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 	currentTablePage := page
 
 	flush := func() {
-		table := buildTable(current)
+		table := buildTable(current, &metrics)
 		if len(table.Headers) == 0 && len(table.Rows) == 0 {
 			current = current[:0]
 			return
@@ -88,9 +92,22 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 		normTables = append(normTables, norm)
 	}
 
+	stats := ParseStats{
+		SplitByGapLines:   metrics.splitByGapLines,
+		SplitByGapSamples: metrics.samples(),
+	}
+
+	logger.Debug("default parser stats",
+		zap.Int("raw_tables", len(rawTables)),
+		zap.Int("normalized_tables", len(normTables)),
+		zap.Int("split_by_gap_lines", metrics.splitByGapLines),
+		zap.Strings("split_by_gap_samples", metrics.samples()),
+	)
+
 	return ParsedTables{
 		RawTables:        rawTables,
 		NormalizedTables: normTables,
+		Stats:            stats,
 	}, nil
 }
 
@@ -238,10 +255,10 @@ func (DefaultParser) RenderMarkdown(tables ParsedTables) string {
 	return b.String()
 }
 
-func buildTable(lines []string) RawTable {
+func buildTable(lines []string, metrics *parseMetrics) RawTable {
 	var rows [][]string
 	for _, line := range lines {
-		cells := splitColumns(line)
+		cells := splitColumns(line, metrics)
 		if len(cells) == 0 {
 			continue
 		}
@@ -262,11 +279,14 @@ func buildTable(lines []string) RawTable {
 	return table
 }
 
-func splitColumns(line string) []string {
+func splitColumns(line string, metrics *parseMetrics) []string {
 	parts := strings.FieldsFunc(line, func(r rune) bool {
 		return r == '\t'
 	})
 	if len(parts) <= 1 {
+		if metrics != nil {
+			metrics.recordSplitByGap(line)
+		}
 		parts = splitByGap(line)
 	}
 	return parts
@@ -342,4 +362,36 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+type parseMetrics struct {
+	splitByGapLines   int
+	splitByGapSamples []string
+}
+
+const maxSplitByGapSamples = 5
+const maxSplitSampleLength = 200
+
+func (m *parseMetrics) recordSplitByGap(line string) {
+	m.splitByGapLines++
+	if len(m.splitByGapSamples) >= maxSplitByGapSamples {
+		return
+	}
+	sample := strings.TrimSpace(line)
+	if sample == "" {
+		sample = line
+	}
+	if len(sample) > maxSplitSampleLength {
+		sample = sample[:maxSplitSampleLength] + "…"
+	}
+	m.splitByGapSamples = append(m.splitByGapSamples, sample)
+}
+
+func (m *parseMetrics) samples() []string {
+	if len(m.splitByGapSamples) == 0 {
+		return nil
+	}
+	result := make([]string, len(m.splitByGapSamples))
+	copy(result, m.splitByGapSamples)
+	return result
 }
