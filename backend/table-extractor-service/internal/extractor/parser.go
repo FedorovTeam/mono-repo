@@ -12,6 +12,11 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 	lines := strings.Split(input.LayoutText, "\n")
 	current := make([]string, 0, len(lines))
 	var rawTables []RawTable
+	page := input.StartPage
+	if page == 0 {
+		page = 1
+	}
+	currentTablePage := page
 
 	flush := func() {
 		table := buildTable(current)
@@ -19,22 +24,40 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 			current = current[:0]
 			return
 		}
+		table.Page = currentTablePage
+		table.Pages = []int{currentTablePage}
 		rawTables = append(rawTables, table)
 		current = current[:0]
 	}
 
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			if len(current) > 0 {
-				flush()
+	for _, rawLine := range lines {
+		segments := strings.Split(rawLine, "\f")
+		for i, line := range segments {
+			if strings.TrimSpace(line) == "" {
+				if len(current) > 0 {
+					flush()
+				}
+			} else {
+				if len(current) == 0 {
+					currentTablePage = page
+				}
+				current = append(current, line)
 			}
-			continue
+
+			if i < len(segments)-1 {
+				if len(current) > 0 {
+					flush()
+				}
+				page++
+				currentTablePage = page
+			}
 		}
-		current = append(current, line)
 	}
 	if len(current) > 0 {
 		flush()
 	}
+
+	rawTables = mergeAdjacentTables(rawTables)
 
 	normTables := make([]NormalizedTable, 0, len(rawTables))
 	for idx, t := range rawTables {
@@ -49,6 +72,7 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 			Name:    makeTableName(idx),
 			Headers: headers,
 			Page:    t.Page,
+			Pages:   t.Pages,
 		}
 		for _, row := range t.Rows {
 			record := make(map[string]string, len(headers))
@@ -68,6 +92,110 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 		RawTables:        rawTables,
 		NormalizedTables: normTables,
 	}, nil
+}
+
+func mergeAdjacentTables(raw []RawTable) []RawTable {
+	if len(raw) == 0 {
+		return raw
+	}
+
+	merged := make([]RawTable, 0, len(raw))
+	for _, table := range raw {
+		table.Rows = dropHeaderRows(table.Rows, table.Headers)
+		if len(merged) == 0 {
+			merged = append(merged, table)
+			continue
+		}
+
+		prev := &merged[len(merged)-1]
+		if shouldMergeTables(*prev, table) {
+			prev.Rows = append(prev.Rows, table.Rows...)
+			prev.Pages = appendUniqueInt(prev.Pages, table.Pages...)
+			if prev.Page == 0 {
+				prev.Page = table.Page
+			}
+			continue
+		}
+
+		merged = append(merged, table)
+	}
+
+	return merged
+}
+
+func shouldMergeTables(prev, next RawTable) bool {
+	if !headersSimilar(prev.Headers, next.Headers) {
+		return false
+	}
+
+	prevLastPage := maxInt(prev.Pages)
+	nextFirstPage := minPositiveInt(next.Pages)
+	if prevLastPage == 0 || nextFirstPage == 0 {
+		return true
+	}
+
+	return nextFirstPage-prevLastPage <= 1 && nextFirstPage >= prevLastPage
+}
+
+func headersSimilar(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(strings.TrimSpace(a[i]), strings.TrimSpace(b[i])) {
+			return false
+		}
+	}
+	return true
+}
+
+func dropHeaderRows(rows [][]string, headers []string) [][]string {
+	filtered := rows[:0]
+	for _, row := range rows {
+		if headersSimilar(headers, row) {
+			continue
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered
+}
+
+func appendUniqueInt(base []int, values ...int) []int {
+	existing := make(map[int]struct{}, len(base))
+	for _, v := range base {
+		existing[v] = struct{}{}
+	}
+	for _, v := range values {
+		if _, ok := existing[v]; ok {
+			continue
+		}
+		existing[v] = struct{}{}
+		base = append(base, v)
+	}
+	return base
+}
+
+func maxInt(values []int) int {
+	max := 0
+	for _, v := range values {
+		if v > max {
+			max = v
+		}
+	}
+	return max
+}
+
+func minPositiveInt(values []int) int {
+	min := 0
+	for _, v := range values {
+		if v <= 0 {
+			continue
+		}
+		if min == 0 || v < min {
+			min = v
+		}
+	}
+	return min
 }
 
 func (DefaultParser) RenderMarkdown(tables ParsedTables) string {
