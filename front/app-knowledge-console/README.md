@@ -54,6 +54,7 @@ The computed path is shown as a preview and is sent to the GraphQL mutation; man
 - `NEXTAUTH_URL` – базовый URL приложения.
 - `NEXTAUTH_SECRET` – ключ для подписи сессий NextAuth.
 - `AUTHENTIK_ISSUER`, `AUTHENTIK_CLIENT_ID`, `AUTHENTIK_CLIENT_SECRET`, `AUTHENTIK_REDIRECT_URI`, `AUTHENTIK_JWKS_URL` – параметры OIDC-провайдера Authentik (для контура console: issuer `https://auth.tech.fedorov-team.tech/application/o/console/`, client id `L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF`, secret `lGhLYG9Usi845ndGd7R8yEVuauxMKZQYhbBVmcuaPAbewC9pUvQPH5uhSiuSGKWq8nYydBoUDNnbngr38nxiecE1qgeoO7e4nrh3carhwG89a3xoHXENDa1XIfh3sUfP`, redirect `https://console.fedorov-team.tech/api/auth/callback/authentik`, JWKS `https://auth.tech.fedorov-team.tech/application/o/console/jwks/`).
+- `AUTHENTIK_HTTP_TIMEOUT_MS` – таймаут HTTP-запросов к Authentik для discovery/token/userinfo (значение в мс, по умолчанию 12000). Для production рекомендуем 12000–15000 мс, для локальной разработки 10000–12000 мс, чтобы быстрее получать обратную связь при сбоях.
 - `GATEWAY_URL` – внутренняя точка GraphQL gateway, вызываемая прокси.
 - `NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL` – endpoint logout Authentik (для контура console: `https://auth.tech.fedorov-team.tech/application/o/console/end-session/`).
 - `NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT` – необязательно, редирект после logout (по умолчанию origin приложения; для контура console: `https://console.fedorov-team.tech`).
