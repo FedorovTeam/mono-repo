@@ -56,6 +56,17 @@ const authorizationParams: Record<string, string> = {
   ...(authentikRedirectUri ? { redirect_uri: authentikRedirectUri } : {}),
 };
 
+const authentikDiscoveryUrl = (() => {
+  const url = process.env.AUTHENTIK_WELL_KNOWN ?? `${authentikIssuer}/.well-known/openid-configuration`;
+
+  try {
+    return new URL(url).toString();
+  } catch (error) {
+    console.warn("[auth-options] Некорректный URL discovery для Authentik", { url, error });
+    return url;
+  }
+})();
+
 const authentikProvider: OAuthConfig<Record<string, unknown>> = {
   id: "authentik",
   name: "Authentik",
@@ -93,17 +104,6 @@ const authentikAvailability: AuthentikAvailability = {
   status: "unknown",
   checkedAt: null,
 };
-
-const authentikDiscoveryUrl = (() => {
-  const url = process.env.AUTHENTIK_WELL_KNOWN ?? `${authentikIssuer}/.well-known/openid-configuration`;
-
-  try {
-    return new URL(url).toString();
-  } catch (error) {
-    console.warn("[auth-options] Некорректный URL discovery для Authentik", { url, error });
-    return url;
-  }
-})();
 
 const updateAvailability = (status: AuthentikAvailability["status"], error?: string) => {
   authentikAvailability.status = status;
