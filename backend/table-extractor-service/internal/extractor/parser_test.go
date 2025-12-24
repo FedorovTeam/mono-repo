@@ -38,3 +38,37 @@ func TestDefaultParserMergesTablesAcrossPages(t *testing.T) {
 	require.Equal(t, "Charlie", norm.Rows[2]["Name"])
 	require.Equal(t, "2", norm.Rows[2]["Votes"])
 }
+
+func TestDefaultParserFiltersTwoColumnTablesByMedianLength(t *testing.T) {
+	parser := NewDefaultParser(TableFiltersConfig{Enabled: true, TwoColumnMedianLengthLimit: 4})
+	layout := "A  B\nVeryLongValueWithoutSpaces  AnotherLongValue\nShort  short\n"
+
+	tables, err := parser.ParseTables(ParseInput{LayoutText: layout, StartPage: 1})
+	require.NoError(t, err)
+	t.Logf("stats: %+v", tables.Stats)
+
+	if len(tables.RawTables) > 0 {
+		dropped, median := shouldDropTwoColumn(tables.RawTables[0], 4)
+		t.Logf("two-column drop=%v median=%d", dropped, median)
+	}
+
+	require.Empty(t, tables.RawTables)
+	require.Empty(t, tables.NormalizedTables)
+	require.True(t, tables.Stats.FiltersEnabled)
+	require.Equal(t, 1, tables.Stats.FilteredTables)
+	require.Equal(t, 1, tables.Stats.FilteredTwoColumnMedian)
+}
+
+func TestDefaultParserFiltersTablesWithoutDelimiters(t *testing.T) {
+	parser := NewDefaultParser(TableFiltersConfig{Enabled: true, MaxRowsWithoutDelimiters: 2, MaxWordsWithoutDelimiters: 0})
+	layout := "Col1 Col2\nRow1 Value1\nRow2 Value2\nRow3 Value3\n"
+
+	tables, err := parser.ParseTables(ParseInput{LayoutText: layout, StartPage: 1})
+	require.NoError(t, err)
+
+	require.Empty(t, tables.RawTables)
+	require.Empty(t, tables.NormalizedTables)
+	require.True(t, tables.Stats.FiltersEnabled)
+	require.Equal(t, 1, tables.Stats.FilteredTables)
+	require.Equal(t, 1, tables.Stats.FilteredNoDelimiter)
+}

@@ -80,6 +80,12 @@ func Build(ctx context.Context, configPath string) (*Container, error) {
 		DetectVotingTables:  cfg.Extractor.DetectVotingTables,
 		TempDir:             cfg.Extractor.TempDir,
 		Mode:                cfg.Extractor.Mode,
+		Filters: extractor.TableFiltersConfig{
+			Enabled:                    cfg.Extractor.Filters.Enabled,
+			TwoColumnMedianLengthLimit: cfg.Extractor.Filters.TwoColumnMedianLengthLimit,
+			MaxRowsWithoutDelimiters:   cfg.Extractor.Filters.MaxRowsWithoutDelimiters,
+			MaxWordsWithoutDelimiters:  cfg.Extractor.Filters.MaxWordsWithoutDelimiters,
+		},
 	}, logger)
 
 	deps := usecase.Dependencies{

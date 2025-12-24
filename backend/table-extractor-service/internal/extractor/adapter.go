@@ -27,6 +27,9 @@ const (
 	defaultPdftoppm        = "pdftoppm"
 	modeLayout             = "layout"
 	modeBBox               = "bbox"
+	defaultTwoColumnMedian = 160
+	defaultMaxGapRows      = 150
+	defaultMaxGapWords     = 2000
 )
 
 // Adapter orchestrates poppler utilities and converts their output into artifacts
@@ -52,6 +55,7 @@ type Config struct {
 	DetectVotingTables  bool
 	TempDir             string
 	Mode                string
+	Filters             TableFiltersConfig
 }
 
 // CommandRunner abstracts execution of external utilities and can be replaced by mocks in tests.
@@ -92,15 +96,20 @@ type ParsedTables struct {
 }
 
 type ParseStats struct {
-	SplitByGapLines   int
-	SplitByGapSamples []string
+	SplitByGapLines         int
+	SplitByGapSamples       []string
+	FiltersEnabled          bool
+	FilteredTables          int
+	FilteredTwoColumnMedian int
+	FilteredNoDelimiter     int
 }
 
 type RawTable struct {
-	Headers []string   `json:"headers"`
-	Rows    [][]string `json:"rows"`
-	Page    int        `json:"page,omitempty"`
-	Pages   []int      `json:"pages,omitempty"`
+	Headers         []string   `json:"headers"`
+	Rows            [][]string `json:"rows"`
+	Page            int        `json:"page,omitempty"`
+	Pages           []int      `json:"pages,omitempty"`
+	splitByGapLines int
 }
 
 type NormalizedTable struct {
@@ -112,13 +121,17 @@ type NormalizedTable struct {
 }
 
 type Manifest struct {
-	Source             string        `json:"source"`
-	GeneratedAt        time.Time     `json:"generated_at"`
-	DetectVotingTables bool          `json:"detect_voting_tables"`
-	Pages              string        `json:"pages"`
-	TableCount         int           `json:"table_count"`
-	Processing         ProcessingLog `json:"processing"`
-	PDFInfo            PDFInfo       `json:"pdfinfo"`
+	Source              string        `json:"source"`
+	GeneratedAt         time.Time     `json:"generated_at"`
+	DetectVotingTables  bool          `json:"detect_voting_tables"`
+	Pages               string        `json:"pages"`
+	TableCount          int           `json:"table_count"`
+	FiltersEnabled      bool          `json:"filters_enabled"`
+	FilteredTables      int           `json:"filtered_tables"`
+	FilteredTwoColumn   int           `json:"filtered_two_column"`
+	FilteredNoDelimiter int           `json:"filtered_no_delimiter"`
+	Processing          ProcessingLog `json:"processing"`
+	PDFInfo             PDFInfo       `json:"pdfinfo"`
 }
 
 type ProcessingLog struct {
@@ -168,11 +181,21 @@ func NewAdapter(cfg Config, logger *zap.Logger) *Adapter {
 		cfg.PdftoppmDPI = defaultPdftoppmDPI
 	}
 
+	if cfg.Filters.TwoColumnMedianLengthLimit <= 0 {
+		cfg.Filters.TwoColumnMedianLengthLimit = defaultTwoColumnMedian
+	}
+	if cfg.Filters.MaxRowsWithoutDelimiters <= 0 {
+		cfg.Filters.MaxRowsWithoutDelimiters = defaultMaxGapRows
+	}
+	if cfg.Filters.MaxWordsWithoutDelimiters <= 0 {
+		cfg.Filters.MaxWordsWithoutDelimiters = defaultMaxGapWords
+	}
+
 	logger = resolveLogger(logger)
 
 	runner := NewExternalCommandRunner(cfg.MaxParallelCommands, logger)
 
-	var parser TableParser = DefaultParser{}
+	var parser TableParser = NewDefaultParser(cfg.Filters)
 	if cfg.DetectVotingTables {
 		cfg.Mode = modeBBox
 		parser = NewVotingTableParser()
@@ -358,7 +381,7 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 			}
 			if !useVoting {
 				parseLogger.Info("voting headers not found, falling back to default parser")
-				parser = DefaultParser{}
+				parser = NewDefaultParser(a.cfg.Filters)
 			}
 		}
 	}
@@ -372,11 +395,19 @@ func (a *Adapter) Extract(ctx context.Context, pdfPath string) (usecase.Extracti
 	}
 	manifest.Processing.ParseMs = durationMs(parseStart)
 	manifest.TableCount = len(parsed.NormalizedTables)
+	manifest.FiltersEnabled = parsed.Stats.FiltersEnabled
+	manifest.FilteredTables = parsed.Stats.FilteredTables
+	manifest.FilteredTwoColumn = parsed.Stats.FilteredTwoColumnMedian
+	manifest.FilteredNoDelimiter = parsed.Stats.FilteredNoDelimiter
 	parseLogger.Debug("tables parsed",
 		zap.Int("raw_tables", len(parsed.RawTables)),
 		zap.Int("normalized_tables", len(parsed.NormalizedTables)),
 		zap.Int("normalized_columns", countNormalizedColumns(parsed.NormalizedTables)),
 		zap.Int("normalized_rows", countNormalizedRows(parsed.NormalizedTables)),
+		zap.Bool("filters_enabled", parsed.Stats.FiltersEnabled),
+		zap.Int("filtered_tables", parsed.Stats.FilteredTables),
+		zap.Int("filtered_two_column", parsed.Stats.FilteredTwoColumnMedian),
+		zap.Int("filtered_no_delimiters", parsed.Stats.FilteredNoDelimiter),
 		zap.Int("split_by_gap_lines", parsed.Stats.SplitByGapLines),
 		zap.Strings("split_by_gap_samples", parsed.Stats.SplitByGapSamples),
 		zap.Int64("duration_ms", manifest.Processing.ParseMs),
