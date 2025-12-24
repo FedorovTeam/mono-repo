@@ -60,9 +60,9 @@ router:
   table_detection_min_count: 1
   force_table_extraction_for_pdf: false
   merge:
-    max_tables_share: 0.9
+    max_tables_share: 1.3
     log_mode: debug
-    skip_ratio_threshold: 0.9
+    skip_ratio_threshold: 1.3
     skip_when_docling_zero: false
   repositories:
     - owner: "FedorovTeam"
