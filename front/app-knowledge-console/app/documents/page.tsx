@@ -52,6 +52,9 @@ const STATUS_STYLES: Record<KnowledgeDocumentStatus, string> = {
   FAILED: 'bg-red-50 text-red-800 border-red-300',
 };
 
+const POLLABLE_STATUSES: KnowledgeDocumentStatus[] = ['UPLOADED', 'STORED_ORIGINAL', 'CONVERTED_TO_MARKDOWN'];
+const MAX_POLL_ERRORS = 3;
+
 const formatUploadDate = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -85,12 +88,20 @@ export default function DocumentsPage() {
   const [manualLoginRequired, setManualLoginRequired] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
+  const pollingIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollErrorAttempts = React.useRef<Map<string, number>>(new Map());
+
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }, []);
 
   const fetchDocuments = useCallback(async () => {
     try {
       setIsListLoading(true);
       setListError(null);
-      setManualLoginRequired(false);
       const correlationId = generateCorrelationId();
       const offset = (page - 1) * limit;
 
@@ -144,6 +155,7 @@ export default function DocumentsPage() {
       const uniqueDocuments = Array.from(new Map(payload.nodes.map((doc) => [doc.id, doc])).values());
       setDocuments(uniqueDocuments);
       setDocumentsTotal(payload.totalCount);
+      setManualLoginRequired(false);
     } catch (err) {
       if (err instanceof SilentSignInError) {
         setManualLoginRequired(true);
@@ -163,6 +175,11 @@ export default function DocumentsPage() {
 
   const pollDocument = useCallback(
     async (id: string) => {
+      const errorCount = pollErrorAttempts.current.get(id) ?? 0;
+      if (errorCount >= MAX_POLL_ERRORS) {
+        return;
+      }
+
       try {
         const correlationId = generateCorrelationId();
         const query = `
@@ -205,11 +222,18 @@ export default function DocumentsPage() {
           return;
         }
 
+        pollErrorAttempts.current.delete(id);
         setDocuments((prev) => prev.map((item) => (item.id === doc.id ? { ...item, ...doc } : item)));
       } catch (err) {
         if (err instanceof SilentSignInError) {
           setManualLoginRequired(true);
           console.warn('Polling остановлен: требуется ручной вход');
+          return;
+        }
+        const nextAttempts = errorCount + 1;
+        pollErrorAttempts.current.set(id, nextAttempts);
+        if (nextAttempts >= MAX_POLL_ERRORS) {
+          console.error(`Polling документа ${id} остановлен после ${nextAttempts} неудачных попыток`);
           return;
         }
         console.error(err);
@@ -223,15 +247,28 @@ export default function DocumentsPage() {
   }, [fetchDocuments]);
 
   useEffect(() => {
-    const ids = new Set(documents.map((doc) => doc.id));
+    stopPolling();
+
+    if (manualLoginRequired) {
+      return undefined;
+    }
+
+    const ids = new Set(
+      documents
+        .filter((doc) => POLLABLE_STATUSES.includes(doc.status))
+        .map((doc) => doc.id),
+    );
+
     if (ids.size === 0) return undefined;
 
-    const interval = setInterval(() => {
+    pollingIntervalRef.current = setInterval(() => {
       ids.forEach((id) => pollDocument(id));
     }, 5000);
 
-    return () => clearInterval(interval);
-  }, [documents, pollDocument]);
+    return stopPolling;
+  }, [documents, manualLoginRequired, pollDocument, stopPolling]);
+
+  useEffect(() => stopPolling, [stopPolling]);
 
   useEffect(() => {
     if (typeof documentsTotal !== 'number' || documentsTotal === 0) {
