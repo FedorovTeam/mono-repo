@@ -6,6 +6,7 @@ import { signIn } from 'next-auth/react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
+import { useSessionRestorationState } from '@/lib/session-restoration-store';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -87,11 +88,14 @@ export default function DocumentsPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [isListLoading, setIsListLoading] = useState(false);
   const [manualLoginRequired, setManualLoginRequired] = useState(false);
+  const [reauthInProgress, setReauthInProgress] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const pollingIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const pollErrorAttempts = React.useRef<Map<string, number>>(new Map());
   const router = useRouter();
+  const restoringSession = useSessionRestorationState();
+  const showRestoringOverlay = restoringSession || reauthInProgress;
 
   const stopPolling = useCallback(() => {
     if (pollingIntervalRef.current) {
@@ -99,6 +103,19 @@ export default function DocumentsPage() {
       pollingIntervalRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (restoringSession) {
+      setReauthInProgress(true);
+      return;
+    }
+
+    setReauthInProgress(false);
+
+    if (typeof window !== 'undefined' && !manualLoginRequired) {
+      sessionStorage.removeItem('authAutoLoginDisabled');
+    }
+  }, [manualLoginRequired, restoringSession]);
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -159,13 +176,16 @@ export default function DocumentsPage() {
       setDocuments(uniqueDocuments);
       setDocumentsTotal(payload.totalCount);
       setManualLoginRequired(false);
+      if (!restoringSession) {
+        setReauthInProgress(false);
+      }
     } catch (err) {
       if (err instanceof SilentSignInError) {
-        setManualLoginRequired(true);
-        const friendlyMessage = err.interactionRequired
-          ? 'Сессия истекла. Войдите вручную, чтобы продолжить.'
-          : err.message;
-        setListError(friendlyMessage);
+        if (err.interactionRequired) {
+          setManualLoginRequired(true);
+          setListError('Сессия истекла. Войдите вручную, чтобы продолжить.');
+          setReauthInProgress(false);
+        }
         return;
       }
       const messageText = err instanceof Error ? err.message : 'Не удалось загрузить список документов';
@@ -173,8 +193,11 @@ export default function DocumentsPage() {
       setListError(messageText);
     } finally {
       setIsListLoading(false);
+      if (!restoringSession) {
+        setReauthInProgress(false);
+      }
     }
-  }, [limit, page, router]);
+  }, [limit, page, restoringSession, router]);
 
   const pollDocument = useCallback(
     async (id: string) => {
@@ -230,8 +253,10 @@ export default function DocumentsPage() {
         setDocuments((prev) => prev.map((item) => (item.id === doc.id ? { ...item, ...doc } : item)));
       } catch (err) {
         if (err instanceof SilentSignInError) {
-          setManualLoginRequired(true);
-          console.warn('Polling остановлен: требуется ручной вход');
+          if (err.interactionRequired) {
+            setManualLoginRequired(true);
+            console.warn('Polling остановлен: требуется ручной вход');
+          }
           return;
         }
         const nextAttempts = errorCount + 1;
@@ -295,6 +320,15 @@ export default function DocumentsPage() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          {showRestoringOverlay && (
+            <div className="mb-4 flex items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+              <span
+                className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-r-transparent"
+                aria-hidden
+              />
+              <span>Восстанавливаем сессию…</span>
+            </div>
+          )}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Документы</h2>
             {manualLoginRequired && (
