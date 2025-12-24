@@ -1,27 +1,11 @@
 'use client';
 
-import { signIn } from 'next-auth/react';
+import { SilentSignInError, performSilentSignIn } from './auth-flow';
+
+export { SilentSignInError } from './auth-flow';
 
 type FetchWithAuthOptions = RequestInit & {
   retryOnUnauthorized?: boolean;
-};
-
-const interactionErrorCodes = ['interaction_required', 'interactionrequiredautherror'];
-
-export class SilentSignInError extends Error {
-  interactionRequired: boolean;
-
-  constructor(message: string, interactionRequired = false) {
-    super(message);
-    this.name = 'SilentSignInError';
-    this.interactionRequired = interactionRequired;
-  }
-}
-
-const isInteractionRequired = (error?: string | null) => {
-  if (!error) return false;
-  const normalized = error.toLowerCase();
-  return interactionErrorCodes.some((code) => normalized.includes(code));
 };
 
 export const fetchWithAuth = async (
@@ -40,25 +24,8 @@ export const fetchWithAuth = async (
     return response;
   }
 
-  console.info('Получен 401, запускаем silent sign-in через Authentik');
-
   try {
-    const signInResult = await signIn('authentik', {
-      redirect: true,
-      prompt: 'none',
-      callbackUrl: window.location.href,
-    });
-
-    if (signInResult?.error) {
-      if (isInteractionRequired(signInResult.error)) {
-        console.warn('Authentik вернул interaction_required — требуется ручной вход.');
-        throw new SilentSignInError('Для продолжения войдите вручную.', true);
-      }
-
-      console.error('Ошибка silent sign-in Authentik:', signInResult.error);
-      throw new SilentSignInError('Не удалось автоматически восстановить сессию.');
-    }
-
+    await performSilentSignIn('fetchWithAuth');
     console.info('Silent sign-in выполнен успешно, повторяем запрос.');
   } catch (error) {
     if (error instanceof SilentSignInError) {
