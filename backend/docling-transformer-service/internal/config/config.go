@@ -220,6 +220,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("docling.ocr_engine is required")
 	}
 
+	switch c.Docling.ImageExportMode {
+	case "", "placeholder", "embedded", "referenced":
+	default:
+		return fmt.Errorf("docling.image_export_mode must be one of [placeholder embedded referenced]")
+	}
+
+	if c.Docling.IncludeImages == nil {
+		return fmt.Errorf("docling.include_images must be set")
+	}
+
 	if err := c.StatusBackoffPolicy().Validate(); err != nil {
 		return fmt.Errorf("docling status backoff: %w", err)
 	}
@@ -249,6 +259,15 @@ func (c *Config) applyDefaults() {
 
 	if c.Docling.OCRLang == nil && c.Docling.DefaultLanguage != "" {
 		c.Docling.OCRLang = []string{c.Docling.DefaultLanguage}
+	}
+
+	if c.Docling.ImageExportMode == "" {
+		c.Docling.ImageExportMode = "placeholder"
+	}
+
+	if c.Docling.IncludeImages == nil {
+		defaultIncludeImages := false
+		c.Docling.IncludeImages = &defaultIncludeImages
 	}
 
 	if c.Docling.Storage.Endpoint == "" && c.Docling.Storage.AccessKey == "" && c.Docling.Storage.SecretKey == "" && c.Docling.Storage.Bucket == "" {

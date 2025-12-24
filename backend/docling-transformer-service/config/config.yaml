@@ -31,6 +31,8 @@ docling:
   ocr_lang:
     - ru
   skip_ocr_on_text_pdf: false
+  image_export_mode: placeholder
+  include_images: false
   status_initial_interval: 15s
   status_backoff_factor: 2
   status_max_interval: 2m
