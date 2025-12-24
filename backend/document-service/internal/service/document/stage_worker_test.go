@@ -1282,8 +1282,9 @@ func TestHandleExtractTablesSubmitsAndPostpones(t *testing.T) {
 	if payload.ArtifactsBucket != "md-bucket" {
 		t.Fatalf("expected artifacts bucket, got %s", payload.ArtifactsBucket)
 	}
-	if payload.MarkdownObjectKey == "" {
-		t.Fatal("expected markdown object key to be filled")
+	expectedTablesKey := tablesMarkdownKey(tablesArtifactsPrefix(doc.MarkdownObjectKey))
+	if payload.MarkdownObjectKey != expectedTablesKey {
+		t.Fatalf("expected markdown object key to target tables, got %s", payload.MarkdownObjectKey)
 	}
 	if tableExtractor.lastSubmit == nil {
 		t.Fatal("expected extract tables request to be sent")
@@ -1291,7 +1292,7 @@ func TestHandleExtractTablesSubmitsAndPostpones(t *testing.T) {
 	if tableExtractor.lastSubmit.GetMarkdownBucket() != doc.MarkdownBucket {
 		t.Fatalf("expected markdown bucket in request, got %s", tableExtractor.lastSubmit.GetMarkdownBucket())
 	}
-	if tableExtractor.lastSubmit.GetMarkdownObjectKey() != doc.MarkdownObjectKey {
+	if tableExtractor.lastSubmit.GetMarkdownObjectKey() != expectedTablesKey {
 		t.Fatalf("expected markdown key in request, got %s", tableExtractor.lastSubmit.GetMarkdownObjectKey())
 	}
 	if prefix := strings.TrimSpace(tableExtractor.lastSubmit.GetArtifactsPrefix()); prefix == "" || prefix != tablesArtifactsPrefix(doc.MarkdownObjectKey) {
@@ -1423,6 +1424,69 @@ func TestHandleExtractTablesMergesDoclingMarkdownWithTables(t *testing.T) {
 	}
 	if repo.doc.MarkdownObjectKey != repo.lastVersion.MarkdownObjectKey {
 		t.Fatalf("expected document to store final markdown key, got %s vs %s", repo.doc.MarkdownObjectKey, repo.lastVersion.MarkdownObjectKey)
+	}
+}
+
+func TestHandleExtractTablesMergesTablesOnlyStrategyWithoutLosingText(t *testing.T) {
+	doc := &domain.Document{
+		ID:                 "doc-tables-only-merge",
+		Status:             domain.DocumentStatusStoredOriginal,
+		OriginalBucket:     "orig-bucket",
+		OriginalObjectKey:  "docs/input.pdf",
+		MarkdownBucket:     "md-bucket",
+		MarkdownObjectKey:  "docs/output.md",
+		ConversionStrategy: domain.ConversionStrategyTablesOnly,
+		Versions:           []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "docs/output.md"}},
+	}
+	repo := &publishRepoStub{doc: doc}
+	baseMarkdown := "# Intro\n\nОписание документа\n\n## Прочее\n\nТекст с данными"
+	tablesMarkdown := "## Таблицы\n\n<!-- tables:start -->\n| новая | таблица |\n<!-- tables:end -->"
+	tableExtractor := &tableExtractorStub{
+		pollResp: &tableextractorv1.GetTableExtractionJobResponse{
+			Job: &tableextractorv1.TableExtractionJob{
+				QueueId: "queue-merge-tables-only",
+				Status:  tableextractorv1.TableExtractionStatus_TABLE_EXTRACTION_STATUS_DONE,
+				Artifacts: &tableextractorv1.TableArtifacts{
+					Markdown: &tableextractorv1.ArtifactLocation{Bucket: "artifacts-bucket", ObjectKey: "tables/doc-tables-only-merge/tables.md"},
+				},
+			},
+		},
+	}
+	storage := &stubStorageClient{
+		objects: map[string]map[string][]byte{
+			"md-bucket": {
+				"docs/output.md": []byte(baseMarkdown),
+			},
+			"artifacts-bucket": {
+				"tables/doc-tables-only-merge/tables.md": []byte(tablesMarkdown),
+			},
+		},
+	}
+	payload := (domain.ExtractTablesPayload{
+		TableQueueID:       "queue-merge-tables-only",
+		ArtifactsBucket:    "artifacts-bucket",
+		ConversionStrategy: domain.ConversionStrategyTablesOnly,
+	}).ToMap()
+	worker := NewStageWorker(repo, NewActivities(repo, nil, nil, tableExtractor, nil, storage), domain.JobStageExtractTables, 1, time.Second, nil)
+	result, err := worker.handleJob(context.Background(), domain.ProcessingJob{DocumentID: doc.ID, Stage: domain.JobStageExtractTables, Payload: payload})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Event == nil || result.Event.EventType != "completed" {
+		t.Fatalf("expected completed event, got %+v", result.Event)
+	}
+
+	merged := storage.objects["markdown-bucket"][repo.lastVersion.MarkdownObjectKey]
+	mergedStr := string(merged)
+	expectedMerged := mergeMarkdownWithTables(baseMarkdown, tablesMarkdown)
+	if mergedStr != expectedMerged {
+		t.Fatalf("expected merged markdown to be uploaded, got %q", mergedStr)
+	}
+	if strings.Count(mergedStr, "Описание документа") != 1 {
+		t.Fatalf("expected description to remain once, got %d", strings.Count(mergedStr, "Описание документа"))
+	}
+	if strings.Count(mergedStr, "| новая | таблица |") != 1 {
+		t.Fatalf("expected tables to appear once, got %d", strings.Count(mergedStr, "| новая | таблица |"))
 	}
 }
 
