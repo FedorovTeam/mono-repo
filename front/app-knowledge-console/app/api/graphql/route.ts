@@ -28,6 +28,17 @@ const getTokenExpirationMs = (token: string | undefined | null) => {
   }
 };
 
+const resolveSessionExpiresAt = (session: {
+  expiresAt?: unknown;
+  accessToken?: string | null;
+}) => {
+  if (typeof session.expiresAt === "number") {
+    return session.expiresAt;
+  }
+
+  return getTokenExpirationMs(session.accessToken);
+};
+
 function parseRequestBody(request: NextRequest) {
   return request
     .json()
@@ -38,14 +49,30 @@ function parseRequestBody(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
 
-  if (session?.reauthRequired) {
+  const ensureActiveSession = async () => {
+    if (!session || !session.accessToken) {
+      return session;
+    }
+
+    const expiresAt = resolveSessionExpiresAt(session);
+
+    if (expiresAt !== null && expiresAt > Date.now()) {
+      return session;
+    }
+
+    return await getServerSession(authOptions);
+  };
+
+  const activeSession = await ensureActiveSession();
+
+  if (activeSession?.reauthRequired) {
     return NextResponse.json(
       { error: "Требуется повторный вход", code: "reauth_required" },
       { status: 440 },
     );
   }
 
-  if (!session || !session.accessToken) {
+  if (!activeSession || !activeSession.accessToken) {
     return NextResponse.json({ error: "Необходима активная сессия" }, { status: 401 });
   }
 
@@ -53,12 +80,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "GATEWAY_URL не задан" }, { status: 500 });
   }
 
-  const expiresAt =
-    typeof session.expiresAt === "number"
-      ? session.expiresAt
-      : getTokenExpirationMs(session.accessToken);
+  const expiresAt = resolveSessionExpiresAt(activeSession);
 
-  if (expiresAt && expiresAt <= Date.now()) {
+  if (expiresAt !== null && expiresAt <= Date.now()) {
     return NextResponse.json(
       { error: "Требуется повторный вход", code: "reauth_required" },
       { status: 440 },
@@ -75,14 +99,14 @@ export async function POST(request: NextRequest) {
   try {
     console.info("GraphQL proxy forwarding request с accessToken", {
       correlationId,
-      hasAccessToken: Boolean(session.accessToken),
+      hasAccessToken: Boolean(activeSession.accessToken),
     });
 
     const upstream = await fetch(gatewayUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${session.accessToken}`,
+        Authorization: `Bearer ${activeSession.accessToken}`,
         "X-Correlation-ID": correlationId,
       },
       cache: "no-store",
