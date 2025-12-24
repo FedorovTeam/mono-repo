@@ -73,6 +73,9 @@ type ExtendedJWT = JWT & {
   refreshToken?: string;
   expiresAt?: number;
   profile?: Record<string, unknown> | null;
+  refreshAttempts?: number;
+  nextRefreshAttempt?: number;
+  reauthRequired?: boolean;
 };
 
 type AuthentikTokenResponse = {
@@ -82,7 +85,14 @@ type AuthentikTokenResponse = {
   expires_in?: number;
 };
 
+type AuthentikTokenError = {
+  error?: string;
+  error_description?: string;
+};
+
 const refreshLeewayMs = 2 * 60 * 1000;
+const refreshRetryBaseDelayMs = 5 * 1000;
+const refreshRetryMaxDelayMs = 5 * 60 * 1000;
 
 const clearSession = (token: ExtendedJWT) => {
   token.accessToken = undefined;
@@ -93,12 +103,37 @@ const clearSession = (token: ExtendedJWT) => {
   return token;
 };
 
+const markReauthRequired = (token: ExtendedJWT) => {
+  const clearedToken = clearSession(token);
+
+  clearedToken.reauthRequired = true;
+  clearedToken.nextRefreshAttempt = undefined;
+  clearedToken.refreshAttempts = undefined;
+
+  return clearedToken;
+};
+
+const scheduleRefreshRetry = (token: ExtendedJWT) => {
+  const attempts = (token.refreshAttempts ?? 0) + 1;
+  const retryDelay = Math.min(refreshRetryMaxDelayMs, refreshRetryBaseDelayMs * 2 ** (attempts - 1));
+
+  return {
+    ...token,
+    refreshAttempts: attempts,
+    nextRefreshAttempt: Date.now() + retryDelay,
+  } satisfies ExtendedJWT;
+};
+
 const refreshAccessToken = async (token: ExtendedJWT) => {
-  if (!token.refreshToken || !token.expiresAt) {
+  if (!token.refreshToken || !token.expiresAt || token.reauthRequired) {
     return token;
   }
 
-  if (token.expiresAt - refreshLeewayMs > Date.now()) {
+  const now = Date.now();
+  const nextPlannedAttempt =
+    typeof token.nextRefreshAttempt === "number" ? token.nextRefreshAttempt : token.expiresAt - refreshLeewayMs;
+
+  if (now < nextPlannedAttempt) {
     return token;
   }
 
@@ -119,14 +154,32 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
       body: params.toString(),
     });
 
+    const data = (await response.json().catch(() => null)) as
+      | (AuthentikTokenResponse & AuthentikTokenError)
+      | null;
+
     if (!response.ok) {
-      throw new Error(`Failed to refresh token: ${response.statusText}`);
+      if (data?.error === "invalid_grant") {
+        return markReauthRequired(token);
+      }
+
+      if (response.status >= 500) {
+        console.error("Сетевой сбой или 5xx при обновлении токена Authentik", response.statusText);
+        return scheduleRefreshRetry(token);
+      }
+
+      console.error("Ошибка при обновлении токена Authentik", {
+        status: response.status,
+        statusText: response.statusText,
+        error: data?.error,
+      });
+
+      return scheduleRefreshRetry(token);
     }
 
-    const data = (await response.json()) as AuthentikTokenResponse;
-
-    if (!data.access_token) {
-      throw new Error("Authentik refresh response is missing access_token");
+    if (!data?.access_token) {
+      console.error("Ответ Authentik не содержит access_token", { status: response.status });
+      return scheduleRefreshRetry(token);
     }
 
     const updatedToken: ExtendedJWT = {
@@ -135,12 +188,15 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
       idToken: data.id_token ?? token.idToken,
       refreshToken: data.refresh_token ?? token.refreshToken,
       expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : token.expiresAt,
+      refreshAttempts: 0,
+      nextRefreshAttempt: undefined,
+      reauthRequired: false,
     };
 
     return updatedToken;
   } catch (error) {
     console.error("Ошибка при обновлении токена Authentik", error);
-    return clearSession(token);
+    return scheduleRefreshRetry(token);
   }
 };
 
@@ -175,6 +231,8 @@ export const authOptions: NextAuthOptions = {
       session.accessToken = typeof extendedToken.accessToken === "string" ? extendedToken.accessToken : undefined;
       session.idToken = typeof extendedToken.idToken === "string" ? extendedToken.idToken : undefined;
       session.expiresAt = extendedToken.expiresAt;
+      session.nextRefreshAttempt = extendedToken.nextRefreshAttempt;
+      session.reauthRequired = extendedToken.reauthRequired ?? false;
 
       if (session.user) {
         const profile =
