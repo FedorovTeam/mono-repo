@@ -317,28 +317,42 @@ export default function DocumentsPage() {
             </button>
           </div>
 
-          {listError && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {listError}
-            </div>
-          )}
-
           <div className="mt-4 space-y-4">
-            {isListLoading && <p className="text-sm text-slate-600">Загружаем список…</p>}
-            {!isListLoading && documents.length === 0 && <p className="text-sm text-slate-600">Документы пока не загружались.</p>}
+            <div className="hidden md:block">
+              <DocumentsTable
+                documents={documents}
+                error={listError}
+                isLoading={isListLoading}
+                onRetry={fetchDocuments}
+              />
+            </div>
 
-          {documents.length > 0 && (
-            <>
-              <div className="hidden md:block">
-                <DocumentsTable documents={documents} />
-              </div>
-                <div className="grid gap-3 md:hidden">
-                  {documents.map((doc) => (
-                    <DocumentCard key={doc.id} document={doc} />
-                  ))}
+            <div className="grid gap-3 md:hidden">
+              {isListLoading && documents.length === 0 && <DocumentsSkeleton />}
+
+              {listError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-red-800">{listError}</p>
+                    <button
+                      type="button"
+                      onClick={fetchDocuments}
+                      className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400 sm:w-auto"
+                    >
+                      Повторить
+                    </button>
+                  </div>
                 </div>
-              </>
-            )}
+              )}
+
+              {!listError && !isListLoading && documents.length === 0 && (
+                <p className="text-sm text-slate-600">Документы пока не загружались.</p>
+              )}
+
+              {documents.map((doc) => (
+                <DocumentCard key={doc.id} document={doc} />
+              ))}
+            </div>
           </div>
 
           <Pagination
@@ -460,7 +474,20 @@ function Pagination({
   );
 }
 
-function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
+function DocumentsTable({
+  documents,
+  isLoading,
+  error,
+  onRetry,
+}: {
+  documents: KnowledgeDocument[];
+  isLoading: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  const shouldShowSkeleton = isLoading && documents.length === 0;
+  const shouldShowNoData = !isLoading && !error && documents.length === 0;
+
   return (
     <Table>
       <TableHeader>
@@ -474,35 +501,111 @@ function DocumentsTable({ documents }: { documents: KnowledgeDocument[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {documents.map((document) => (
-          <TableRow key={document.id}>
-            <TableCell>
-              <p className="font-medium text-slate-900">{getDocumentName(document)}</p>
-              <p className="text-xs text-slate-700">
-                <span className="font-mono text-slate-700">{document.repository}</span> / ветка{' '}
-                <span className="font-mono text-slate-700">{document.branch}</span>
-              </p>
-              <p className="text-xs text-slate-600">Путь: {document.path}</p>
-              {document.jobId && (
-                <p className="text-xs text-slate-600">
-                  jobId: <span className="font-mono">{document.jobId}</span>
-                </p>
-              )}
-            </TableCell>
-            <TableCell>
-              <StatusBadge status={document.status} />
-              {document.status === 'FAILED' && document.error && (
-                <p className="mt-1 text-xs text-red-700">{document.error}</p>
-              )}
-            </TableCell>
-            <TableCell className="whitespace-nowrap text-slate-900">{formatUploadDate(document.createdAt)}</TableCell>
-            <TableCell className="text-right">
-              <OpenButton document={document} />
-            </TableCell>
-          </TableRow>
-        ))}
+        {shouldShowSkeleton ? (
+          Array.from({ length: 3 }).map((_, index) => (
+            <TableRow key={`skeleton-${index}`}>
+              <TableCell>
+                <div className="space-y-2">
+                  <div className="h-4 w-3/4 animate-pulse rounded bg-slate-100" />
+                  <div className="h-3 w-1/2 animate-pulse rounded bg-slate-100" />
+                  <div className="h-3 w-1/3 animate-pulse rounded bg-slate-100" />
+                </div>
+              </TableCell>
+              <TableCell>
+                <div className="h-6 w-24 animate-pulse rounded bg-slate-100" />
+              </TableCell>
+              <TableCell>
+                <div className="h-4 w-28 animate-pulse rounded bg-slate-100" />
+              </TableCell>
+              <TableCell className="text-right">
+                <div className="ml-auto h-9 w-20 animate-pulse rounded bg-slate-100" />
+              </TableCell>
+            </TableRow>
+          ))
+        ) : (
+          <>
+            {error && (
+              <TableRow>
+                <TableCell colSpan={4} className="py-4">
+                  <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+                    <p className="text-sm text-red-700">{error}</p>
+                    <button
+                      type="button"
+                      onClick={onRetry}
+                      className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400"
+                    >
+                      Повторить
+                    </button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
+
+            {documents.map((document) => (
+              <TableRow key={document.id}>
+                <TableCell>
+                  <p className="font-medium text-slate-900">{getDocumentName(document)}</p>
+                  <p className="text-xs text-slate-700">
+                    <span className="font-mono text-slate-700">{document.repository}</span> / ветка{' '}
+                    <span className="font-mono text-slate-700">{document.branch}</span>
+                  </p>
+                  <p className="text-xs text-slate-600">Путь: {document.path}</p>
+                  {document.jobId && (
+                    <p className="text-xs text-slate-600">
+                      jobId: <span className="font-mono">{document.jobId}</span>
+                    </p>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <StatusBadge status={document.status} />
+                  {document.status === 'FAILED' && document.error && (
+                    <p className="mt-1 text-xs text-red-700">{document.error}</p>
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-slate-900">{formatUploadDate(document.createdAt)}</TableCell>
+                <TableCell className="text-right">
+                  <OpenButton document={document} />
+                </TableCell>
+              </TableRow>
+            ))}
+
+            {shouldShowNoData && (
+              <TableRow>
+                <TableCell colSpan={4} className="py-6 text-center text-sm text-slate-600">
+                  Нет данных
+                </TableCell>
+              </TableRow>
+            )}
+          </>
+        )}
       </TableBody>
     </Table>
+  );
+}
+
+function DocumentsSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div
+          key={`document-skeleton-${index}`}
+          className="h-36 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+        >
+          <div className="flex h-full flex-col gap-3">
+            <div className="space-y-2">
+              <div className="h-4 w-1/2 animate-pulse rounded bg-slate-100" />
+              <div className="h-3 w-1/3 animate-pulse rounded bg-slate-100" />
+              <div className="h-3 w-1/4 animate-pulse rounded bg-slate-100" />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="h-6 w-24 animate-pulse rounded bg-slate-100" />
+              <div className="h-4 w-28 animate-pulse rounded bg-slate-100" />
+              <div className="ml-auto h-9 w-24 animate-pulse rounded bg-slate-100" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 
