@@ -836,6 +836,15 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		return blocks
 	}
 
+	columnCount := func(block tableBlock) int {
+		header := strings.Trim(block.lines[0], "|")
+		if header == "" {
+			return 0
+		}
+		parts := strings.Split(header, "|")
+		return len(parts)
+	}
+
 	replaceTablesBySignature := func(md string, newTables []tableBlock) (string, bool) {
 		lines := strings.Split(md, "\n")
 		baseTables := findTables(md)
@@ -956,11 +965,36 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		return deduplicateTables(mergedBySignature), nil
 	}
 
+	baseTables := findTables(baseMarkdown)
+	if len(baseTables) > 0 && len(newTables) > 0 {
+		targetIdx := -1
+		newCols := columnCount(newTables[0])
+		for idx, tbl := range baseTables {
+			if tbl.signature == newTables[0].signature {
+				targetIdx = idx
+				break
+			}
+			if targetIdx == -1 && newCols > 0 && columnCount(tbl) == newCols {
+				targetIdx = idx
+			}
+		}
+		if targetIdx == -1 {
+			targetIdx = 0
+		}
+		lines := strings.Split(baseMarkdown, "\n")
+		start := baseTables[targetIdx].start
+		end := baseTables[targetIdx].end
+		mergedLines := append(append([]string{}, lines[:start]...), strings.Split(tablesBlock, "\n")...)
+		mergedLines = append(mergedLines, lines[end+1:]...)
+		return deduplicateTables(strings.Join(mergedLines, "\n")), nil
+	}
+
 	if strings.TrimSpace(baseMarkdown) == "" {
 		return tablesBlock, nil
 	}
 
-	return deduplicateTables(fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), tablesBlock)), nil
+	fallbackNote := "<!-- tables:appended (no anchor found) -->"
+	return deduplicateTables(fmt.Sprintf("%s\n\n%s\n%s\n", strings.TrimSpace(baseMarkdown), fallbackNote, tablesBlock)), nil
 }
 
 func isTransformerFailureStatus(val string) bool {
