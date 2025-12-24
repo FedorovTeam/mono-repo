@@ -26,8 +26,9 @@ func TestValidateSuccess(t *testing.T) {
 			MaxFailedRetries:     3,
 		},
 		Docling: DoclingConfig{
-			Endpoint:  "http://docling",
-			OCREngine: "easyocr",
+			Endpoint:      "http://docling",
+			OCREngine:     "easyocr",
+			IncludeImages: boolPtr(false),
 		},
 		Minio: MinioConfig{
 			Endpoint:  "minio",
@@ -122,4 +123,8 @@ func TestStatusBackoffOverridesConfig(t *testing.T) {
 	if cfg.Docling.StatusInitialInterval != time.Second || cfg.Docling.StatusMaxInterval != 5*time.Second || cfg.Docling.StatusMaxAttempts != 2 || cfg.Docling.StatusBackoffFactor != 3 {
 		t.Fatalf("defaults must not override provided values: %+v", cfg.Docling)
 	}
+}
+
+func boolPtr(val bool) *bool {
+	return &val
 }

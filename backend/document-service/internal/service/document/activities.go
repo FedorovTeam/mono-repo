@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -781,6 +782,8 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 	)
 
 	trimmedTables := strings.TrimSpace(tablesMarkdown)
+	markerStart := regexp.MustCompile(`<!--\s*tables:start(?:\s*#\d+)?\s*-->`)
+	markerEnd := regexp.MustCompile(`<!--\s*tables:end(?:\s*#\d+)?\s*-->`)
 
 	isTableLine := func(line string) bool {
 		trimmed := strings.TrimSpace(line)
@@ -878,7 +881,34 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		return strings.Join(lines, "\n")
 	}
 
+	markerBlocks := func(md string) ([]string, [][2]int) {
+		blocks := make([]string, 0)
+		ranges := make([][2]int, 0)
+		pos := 0
+		for {
+			startLoc := markerStart.FindStringIndex(md[pos:])
+			if startLoc == nil {
+				break
+			}
+			startIdx := pos + startLoc[0]
+			startEnd := pos + startLoc[1]
+			endLoc := markerEnd.FindStringIndex(md[startEnd:])
+			if endLoc == nil {
+				break
+			}
+			endIdx := startEnd + endLoc[1]
+			blocks = append(blocks, strings.TrimSpace(md[startIdx:endIdx]))
+			ranges = append(ranges, [2]int{startIdx, endIdx})
+			pos = endIdx
+		}
+		return blocks, ranges
+	}
+
 	extractContent := func(md string) (string, bool) {
+		blocks, _ := markerBlocks(md)
+		if len(blocks) > 0 {
+			return strings.Join(blocks, "\n\n"), true
+		}
 		start := strings.Index(md, tablesStart)
 		end := strings.Index(md, tablesEnd)
 		if start != -1 && end != -1 && end >= start {
@@ -900,7 +930,17 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error
 		}
 	}
 
-	tablesBlock := fmt.Sprintf("%s\n%s\n%s", tablesStart, tablesContent, tablesEnd)
+	tablesBlock := tablesContent
+	if !hasMarkers {
+		tablesBlock = fmt.Sprintf("%s\n%s\n%s", tablesStart, tablesContent, tablesEnd)
+	}
+
+	if _, baseRanges := markerBlocks(baseMarkdown); hasMarkers && len(baseRanges) > 0 {
+		start := baseRanges[0][0]
+		end := baseRanges[len(baseRanges)-1][1]
+		merged := fmt.Sprintf("%s%s%s", baseMarkdown[:start], tablesContent, baseMarkdown[end:])
+		return deduplicateTables(merged), nil
+	}
 
 	if start := strings.Index(baseMarkdown, tablesStart); start != -1 {
 		if end := strings.Index(baseMarkdown, tablesEnd); end != -1 && end >= start {

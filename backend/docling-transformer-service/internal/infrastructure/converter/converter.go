@@ -1177,7 +1177,12 @@ func (c *DoclingConverter) buildConvertResult(resp convertDocumentResponse) (dom
 				zap.String("filename", doc.Filename),
 			)
 		}
-		return domain.ConvertResult{Content: []byte(fixed), MediaType: "text/markdown", Charset: charset, Tables: tableMeta}, nil
+		return domain.ConvertResult{
+			Content:   []byte(wrapTablesWithMarkers(fixed)),
+			MediaType: "text/markdown",
+			Charset:   charset,
+			Tables:    tableMeta,
+		}, nil
 	}
 
 	if html := strings.TrimSpace(firstNonEmpty(doc.HtmlContent)); html != "" {
@@ -1214,6 +1219,68 @@ func (c *DoclingConverter) selectMarkdown(doc exportDocumentResponse) string {
 		}
 	}
 	return ""
+}
+
+func wrapTablesWithMarkers(markdown string) string {
+	trimmed := strings.TrimSpace(markdown)
+	if trimmed == "" || strings.Contains(strings.ToLower(markdown), "<!-- tables:start") {
+		return markdown
+	}
+
+	lines := strings.Split(markdown, "\n")
+	result := make([]string, 0, len(lines)+4)
+	inCodeBlock := false
+	tableIndex := 0
+
+	isTableLine := func(line string) bool {
+		return strings.HasPrefix(strings.TrimSpace(line), "|")
+	}
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "```") || strings.HasPrefix(trimmedLine, "~~~") {
+			inCodeBlock = !inCodeBlock
+			result = append(result, line)
+			continue
+		}
+		if inCodeBlock {
+			result = append(result, line)
+			continue
+		}
+		if strings.HasPrefix(trimmedLine, "<!-- tables:start") || strings.HasPrefix(trimmedLine, "<!-- tables:end") {
+			result = append(result, line)
+			continue
+		}
+		if !isTableLine(line) {
+			result = append(result, line)
+			continue
+		}
+
+		start := i
+		end := i
+		for end < len(lines) && isTableLine(lines[end]) {
+			end++
+		}
+		block := lines[start:end]
+
+		tableIndex++
+		result = append(result, buildTableMarker("start", tableIndex))
+		result = append(result, block...)
+		result = append(result, buildTableMarker("end", tableIndex))
+
+		i = end - 1
+	}
+
+	return strings.Join(result, "\n")
+}
+
+func buildTableMarker(kind string, index int) string {
+	suffix := ""
+	if index > 1 {
+		suffix = fmt.Sprintf(" #%d", index)
+	}
+	return fmt.Sprintf("<!-- tables:%s%s -->", kind, suffix)
 }
 
 func extractTableMetadata(jsonContent any) *domain.TableMetadata {
