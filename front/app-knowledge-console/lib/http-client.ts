@@ -57,14 +57,11 @@ export const fetchWithAuth = async (
 
   const response = await fetch(input, fetchInit);
 
-  if (response.status === REAUTH_REQUIRED_STATUS) {
-    throw new SilentSignInError('Сессия очищена, требуется интерактивный вход.', {
-      interactionRequired: true,
-      code: 'reauth_required',
-    });
-  }
+  const shouldRetry =
+    (response.status === 401 || response.status === REAUTH_REQUIRED_STATUS) &&
+    retryOnUnauthorized;
 
-  if (response.status !== 401 || !retryOnUnauthorized) {
+  if (!shouldRetry) {
     return response;
   }
 
@@ -92,12 +89,20 @@ export const fetchWithAuth = async (
     }
 
     console.error('Сбой при silent sign-in Authentik:', error);
-    throw new SilentSignInError('Не удалось автоматически восстановить сессию.');
+    throw new SilentSignInError('Не удалось автоматически восстановить сессию.', {
+      interactionRequired: true,
+    });
   }
 
   const retryResponse = await fetch(input, fetchInit);
 
-  if (retryResponse.status === 401) {
+  if (retryResponse.status === REAUTH_REQUIRED_STATUS) {
+    console.warn(
+      '[http-client] Повторный статус 440 после восстановления сессии, требуется интерактивный вход.',
+    );
+  }
+
+  if (retryResponse.status === 401 || retryResponse.status === REAUTH_REQUIRED_STATUS) {
     throw new SilentSignInError(
       'Сессия недействительна или восстановление не удалось. Войдите вручную.',
       {
