@@ -4,6 +4,10 @@
   "detect_voting_tables": true,
   "pages": "1-2",
   "table_count": 1,
+  "filters_enabled": true,
+  "filtered_tables": 0,
+  "filtered_two_column": 0,
+  "filtered_no_delimiter": 0,
   "processing": {
     "pdfinfo_ms": 20,
     "pdftotext_ms": 15,

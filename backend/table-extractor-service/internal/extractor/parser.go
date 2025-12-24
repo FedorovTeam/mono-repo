@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -8,9 +9,28 @@ import (
 )
 
 // DefaultParser extracts simple columnar tables from pdftotext -layout output.
-type DefaultParser struct{}
+type DefaultParser struct {
+	filters TableFiltersConfig
+}
 
-func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
+type TableFiltersConfig struct {
+	Enabled                    bool
+	TwoColumnMedianLengthLimit int
+	MaxRowsWithoutDelimiters   int
+	MaxWordsWithoutDelimiters  int
+}
+
+type filterStats struct {
+	total           int
+	twoColumnMedian int
+	noDelimiters    int
+}
+
+func NewDefaultParser(filters TableFiltersConfig) DefaultParser {
+	return DefaultParser{filters: filters}
+}
+
+func (p DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 	logger := resolveLogger(input.Logger)
 	metrics := parseMetrics{}
 	lines := strings.Split(input.LayoutText, "\n")
@@ -23,11 +43,13 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 	currentTablePage := page
 
 	flush := func() {
+		splitBefore := metrics.splitByGapLines
 		table := buildTable(current, &metrics)
 		if len(table.Headers) == 0 && len(table.Rows) == 0 {
 			current = current[:0]
 			return
 		}
+		table.splitByGapLines = metrics.splitByGapLines - splitBefore
 		table.Page = currentTablePage
 		table.Pages = []int{currentTablePage}
 		rawTables = append(rawTables, table)
@@ -63,43 +85,56 @@ func (DefaultParser) ParseTables(input ParseInput) (ParsedTables, error) {
 
 	rawTables = mergeAdjacentTables(rawTables)
 
-	normTables := make([]NormalizedTable, 0, len(rawTables))
+	filtersEnabled := p.filters.Enabled && (p.filters.TwoColumnMedianLengthLimit > 0 || p.filters.MaxRowsWithoutDelimiters > 0 || p.filters.MaxWordsWithoutDelimiters > 0)
+	rawBeforeFilter := len(rawTables)
+	filtered := make([]RawTable, 0, len(rawTables))
+	fStats := filterStats{}
+
 	for idx, t := range rawTables {
-		headers := t.Headers
-		if len(headers) == 0 {
-			headers = make([]string, len(longestRow(t.Rows)))
-			for i := range headers {
-				headers[i] = columnName(i)
+		if filtersEnabled {
+			if dropped, median := shouldDropTwoColumn(t, p.filters.TwoColumnMedianLengthLimit); dropped {
+				fStats.total++
+				fStats.twoColumnMedian++
+				logger.Info("dropping table by median cell length", zap.Int("table_index", idx), zap.Int("page", t.Page),
+					zap.Int("median_length", median), zap.Int("limit", p.filters.TwoColumnMedianLengthLimit))
+				continue
+			}
+
+			if dropped, rowCount, wordCount := shouldDropNoDelimiter(t, p.filters.MaxRowsWithoutDelimiters, p.filters.MaxWordsWithoutDelimiters); dropped {
+				fStats.total++
+				fStats.noDelimiters++
+				logger.Info("dropping table without delimiters", zap.Int("table_index", idx), zap.Int("page", t.Page),
+					zap.Int("rows", rowCount), zap.Int("words", wordCount),
+					zap.Int("max_rows", p.filters.MaxRowsWithoutDelimiters),
+					zap.Int("max_words", p.filters.MaxWordsWithoutDelimiters),
+					zap.Int("split_by_gap_lines", t.splitByGapLines))
+				continue
 			}
 		}
-		norm := NormalizedTable{
-			Name:    makeTableName(idx),
-			Headers: headers,
-			Page:    t.Page,
-			Pages:   t.Pages,
-		}
-		for _, row := range t.Rows {
-			record := make(map[string]string, len(headers))
-			for i, h := range headers {
-				if i < len(row) {
-					record[h] = strings.TrimSpace(row[i])
-				} else {
-					record[h] = ""
-				}
-			}
-			norm.Rows = append(norm.Rows, record)
-		}
-		normTables = append(normTables, norm)
+
+		filtered = append(filtered, t)
 	}
 
+	rawTables = filtered
+	normTables := normalizeTables(rawTables)
+
 	stats := ParseStats{
-		SplitByGapLines:   metrics.splitByGapLines,
-		SplitByGapSamples: metrics.samples(),
+		SplitByGapLines:         metrics.splitByGapLines,
+		SplitByGapSamples:       metrics.samples(),
+		FiltersEnabled:          filtersEnabled,
+		FilteredTables:          fStats.total,
+		FilteredTwoColumnMedian: fStats.twoColumnMedian,
+		FilteredNoDelimiter:     fStats.noDelimiters,
 	}
 
 	logger.Debug("default parser stats",
 		zap.Int("raw_tables", len(rawTables)),
+		zap.Int("raw_tables_before_filters", rawBeforeFilter),
 		zap.Int("normalized_tables", len(normTables)),
+		zap.Bool("filters_enabled", filtersEnabled),
+		zap.Int("filtered_tables", fStats.total),
+		zap.Int("filtered_two_column", fStats.twoColumnMedian),
+		zap.Int("filtered_no_delimiters", fStats.noDelimiters),
 		zap.Int("split_by_gap_lines", metrics.splitByGapLines),
 		zap.Strings("split_by_gap_samples", metrics.samples()),
 	)
@@ -131,6 +166,7 @@ func mergeAdjacentTables(raw []RawTable) []RawTable {
 			if prev.Page == 0 {
 				prev.Page = table.Page
 			}
+			prev.splitByGapLines += table.splitByGapLines
 			continue
 		}
 
@@ -255,6 +291,39 @@ func (DefaultParser) RenderMarkdown(tables ParsedTables) string {
 	return b.String()
 }
 
+func normalizeTables(rawTables []RawTable) []NormalizedTable {
+	normTables := make([]NormalizedTable, 0, len(rawTables))
+	for idx, t := range rawTables {
+		headers := t.Headers
+		if len(headers) == 0 {
+			headers = make([]string, len(longestRow(t.Rows)))
+			for i := range headers {
+				headers[i] = columnName(i)
+			}
+		}
+		norm := NormalizedTable{
+			Name:    makeTableName(idx),
+			Headers: headers,
+			Page:    t.Page,
+			Pages:   t.Pages,
+		}
+		for _, row := range t.Rows {
+			record := make(map[string]string, len(headers))
+			for i, h := range headers {
+				if i < len(row) {
+					record[h] = strings.TrimSpace(row[i])
+				} else {
+					record[h] = ""
+				}
+			}
+			norm.Rows = append(norm.Rows, record)
+		}
+		normTables = append(normTables, norm)
+	}
+
+	return normTables
+}
+
 func buildTable(lines []string, metrics *parseMetrics) RawTable {
 	var rows [][]string
 	for _, line := range lines {
@@ -277,6 +346,51 @@ func buildTable(lines []string, metrics *parseMetrics) RawTable {
 		table.Headers = trimCells(rows[0])
 	}
 	return table
+}
+
+func shouldDropTwoColumn(table RawTable, limit int) (bool, int) {
+	if limit <= 0 {
+		return false, 0
+	}
+
+	columns := len(longestRow(append([][]string{table.Headers}, table.Rows...)))
+	if columns != 2 {
+		return false, 0
+	}
+
+	median := medianCellLength(table)
+	if median <= limit {
+		return false, median
+	}
+
+	return true, median
+}
+
+func shouldDropNoDelimiter(table RawTable, maxRows, maxWords int) (bool, int, int) {
+	if maxRows <= 0 && maxWords <= 0 {
+		return false, 0, 0
+	}
+
+	if table.splitByGapLines == 0 {
+		return false, 0, 0
+	}
+
+	rowCount := len(table.Rows)
+	if len(table.Headers) > 0 {
+		rowCount++
+	}
+
+	words := countTableWords(table)
+
+	if maxRows > 0 && rowCount > maxRows {
+		return true, rowCount, words
+	}
+
+	if maxWords > 0 && words > maxWords {
+		return true, rowCount, words
+	}
+
+	return false, rowCount, words
 }
 
 func splitColumns(line string, metrics *parseMetrics) []string {
@@ -350,6 +464,51 @@ func columnName(idx int) string {
 
 func makeTableName(idx int) string {
 	return "table_" + strconv.Itoa(idx+1)
+}
+
+func medianCellLength(table RawTable) int {
+	lengths := cellLengths(table)
+	if len(lengths) == 0 {
+		return 0
+	}
+
+	sort.Ints(lengths)
+	mid := len(lengths) / 2
+	if len(lengths)%2 == 0 {
+		return (lengths[mid-1] + lengths[mid]) / 2
+	}
+
+	return lengths[mid]
+}
+
+func countTableWords(table RawTable) int {
+	cells := collectTableCells(table)
+	total := 0
+	for _, cell := range cells {
+		total += len(strings.Fields(cell))
+	}
+
+	return total
+}
+
+func cellLengths(table RawTable) []int {
+	cells := collectTableCells(table)
+	lengths := make([]int, 0, len(cells))
+	for _, cell := range cells {
+		lengths = append(lengths, len(strings.TrimSpace(cell)))
+	}
+
+	return lengths
+}
+
+func collectTableCells(table RawTable) []string {
+	cells := make([]string, 0, len(table.Headers))
+	cells = append(cells, table.Headers...)
+	for _, row := range table.Rows {
+		cells = append(cells, row...)
+	}
+
+	return cells
 }
 
 func escapeMarkdown(s string) string {

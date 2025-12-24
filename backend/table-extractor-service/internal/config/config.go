@@ -60,18 +60,26 @@ type StorageConfig struct {
 }
 
 type ExtractorConfig struct {
-	Mode               string        `yaml:"mode"`
-	PdfInfoPath        string        `yaml:"pdfinfo_path"`
-	PdftotextPath      string        `yaml:"pdftotext_path"`
-	PdftoppmPath       string        `yaml:"pdftoppm_path"`
-	PdftoppmDPI        int           `yaml:"pdftoppm_dpi"`
-	DetectVotingTables bool          `yaml:"detect_voting_tables"`
-	Pages              string        `yaml:"pages"`
-	PdfInfoTimeout     time.Duration `yaml:"pdfinfo_timeout"`
-	PdftotextTimeout   time.Duration `yaml:"pdftotext_timeout"`
-	PdftoppmTimeout    time.Duration `yaml:"pdftoppm_timeout"`
-	MaxParallel        int           `yaml:"max_parallel_commands"`
-	TempDir            string        `yaml:"temp_dir"`
+	Mode               string                 `yaml:"mode"`
+	PdfInfoPath        string                 `yaml:"pdfinfo_path"`
+	PdftotextPath      string                 `yaml:"pdftotext_path"`
+	PdftoppmPath       string                 `yaml:"pdftoppm_path"`
+	PdftoppmDPI        int                    `yaml:"pdftoppm_dpi"`
+	DetectVotingTables bool                   `yaml:"detect_voting_tables"`
+	Pages              string                 `yaml:"pages"`
+	PdfInfoTimeout     time.Duration          `yaml:"pdfinfo_timeout"`
+	PdftotextTimeout   time.Duration          `yaml:"pdftotext_timeout"`
+	PdftoppmTimeout    time.Duration          `yaml:"pdftoppm_timeout"`
+	MaxParallel        int                    `yaml:"max_parallel_commands"`
+	TempDir            string                 `yaml:"temp_dir"`
+	Filters            ExtractorFiltersConfig `yaml:"filters"`
+}
+
+type ExtractorFiltersConfig struct {
+	Enabled                    bool `yaml:"enabled"`
+	TwoColumnMedianLengthLimit int  `yaml:"two_column_median_length_limit"`
+	MaxRowsWithoutDelimiters   int  `yaml:"max_rows_without_delimiters"`
+	MaxWordsWithoutDelimiters  int  `yaml:"max_words_without_delimiters"`
 }
 
 type ObservabilityConfig struct {
@@ -132,6 +140,12 @@ func defaultConfig() Config {
 			PdftotextTimeout:   20 * time.Second,
 			PdftoppmTimeout:    30 * time.Second,
 			MaxParallel:        2,
+			Filters: ExtractorFiltersConfig{
+				Enabled:                    true,
+				TwoColumnMedianLengthLimit: 160,
+				MaxRowsWithoutDelimiters:   150,
+				MaxWordsWithoutDelimiters:  2000,
+			},
 		},
 		Observability: ObservabilityConfig{
 			LoggingEnabled: true,

@@ -42,6 +42,11 @@ extractor:
   pdftoppm_dpi: 200
   max_parallel_commands: 1
   temp_dir: ""
+  filters:
+    enabled: true
+    two_column_median_length_limit: 160
+    max_rows_without_delimiters: 150
+    max_words_without_delimiters: 2000
 
 observability:
   logging_enabled: true
