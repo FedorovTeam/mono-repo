@@ -477,7 +477,10 @@ func (a *Activities) MergeTables(ctx context.Context, input mergeTablesInput) (s
 		baseContent = string(baseResp.GetContent())
 	}
 
-	merged := mergeMarkdownWithTables(baseContent, string(tablesResp.GetContent()))
+	merged, err := mergeMarkdownWithTables(baseContent, string(tablesResp.GetContent()))
+	if err != nil {
+		return "", err
+	}
 	uploadResp, err := a.storage.UploadMarkdown(ctx, &storagev1.UploadMarkdownRequest{
 		OrgSlug:     input.Doc.Owner,
 		ProjectSlug: input.Doc.Repository,
@@ -768,9 +771,9 @@ func correlationIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) string {
+func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) (string, error) {
 	if strings.TrimSpace(tablesMarkdown) == "" {
-		return baseMarkdown
+		return baseMarkdown, nil
 	}
 	const (
 		tablesStart = "<!-- tables:start -->"
@@ -789,22 +792,54 @@ func mergeMarkdownWithTables(baseMarkdown, tablesMarkdown string) string {
 		return strings.TrimSpace(md), false
 	}
 
-	tablesContent, _ := extractContent(trimmedTables)
+	extractTablesOnly := func(md string) (string, bool) {
+		lines := strings.Split(md, "\n")
+		isTableLine := func(line string) bool {
+			trimmed := strings.TrimSpace(line)
+			return strings.HasPrefix(trimmed, "|")
+		}
+
+		firstTableLine := -1
+		lastTableLine := -1
+		for i, line := range lines {
+			if isTableLine(line) {
+				if firstTableLine == -1 {
+					firstTableLine = i
+				}
+				lastTableLine = i
+			}
+		}
+		if firstTableLine == -1 {
+			return "", false
+		}
+
+		return strings.TrimSpace(strings.Join(lines[firstTableLine:lastTableLine+1], "\n")), true
+	}
+
+	tablesContent, hasMarkers := extractContent(trimmedTables)
+	if !hasMarkers {
+		if tablesOnly, ok := extractTablesOnly(trimmedTables); ok {
+			tablesContent = tablesOnly
+		} else {
+			return "", fmt.Errorf("tables block not found in artifact")
+		}
+	}
+
 	tablesBlock := fmt.Sprintf("%s\n%s\n%s", tablesStart, tablesContent, tablesEnd)
 
 	if start := strings.Index(baseMarkdown, tablesStart); start != -1 {
 		if end := strings.Index(baseMarkdown, tablesEnd); end != -1 && end >= start {
 			prefix := baseMarkdown[:start+len(tablesStart)]
 			suffix := baseMarkdown[end:]
-			return fmt.Sprintf("%s\n\n%s\n%s", prefix, tablesContent, suffix)
+			return fmt.Sprintf("%s\n\n%s\n%s", prefix, tablesContent, suffix), nil
 		}
 	}
 
 	if strings.TrimSpace(baseMarkdown) == "" {
-		return tablesBlock
+		return tablesBlock, nil
 	}
 
-	return fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), tablesBlock)
+	return fmt.Sprintf("%s\n\n## Таблицы\n\n%s\n", strings.TrimSpace(baseMarkdown), tablesBlock), nil
 }
 
 func isTransformerFailureStatus(val string) bool {

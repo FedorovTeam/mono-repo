@@ -262,10 +262,14 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 	payload.OriginalBucket = firstNonEmpty(payload.OriginalBucket, doc.OriginalBucket)
 	payload.OriginalObjectKey = firstNonEmpty(payload.OriginalObjectKey, doc.OriginalObjectKey)
 	payload.ArtifactsBucket = firstNonEmpty(payload.ArtifactsBucket, doc.MarkdownBucket)
+
+	baseMarkdownBucket := firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket)
+	baseMarkdownKey := firstNonEmpty(payload.DoclingMarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc), payload.MarkdownObjectKey)
+	payload.DoclingMarkdownBucket = baseMarkdownBucket
+	payload.DoclingMarkdownObjectKey = baseMarkdownKey
+
 	payload.MarkdownBucket = firstNonEmpty(payload.MarkdownBucket, payload.ArtifactsBucket, doc.MarkdownBucket)
-	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc))
-	payload.DoclingMarkdownBucket = firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket)
-	payload.DoclingMarkdownObjectKey = firstNonEmpty(payload.DoclingMarkdownObjectKey, payload.MarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc))
+	payload.MarkdownObjectKey = firstNonEmpty(payload.MarkdownObjectKey, resolvedMarkdownKey(doc))
 	if payload.ConversionStrategy == "" {
 		payload.ConversionStrategy = doc.ConversionStrategy
 	} else {
@@ -274,12 +278,17 @@ func (w *StageWorker) handleExtractTables(ctx context.Context, job domain.Proces
 	if !payload.ExtractTables {
 		payload.ExtractTables = doc.ExtractTables || payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables
 	}
-	prefix, prefixErr := resolveArtifactsPrefix(payload.ArtifactsPrefixTemplate, doc.ID, payload.TableQueueID, payload.ArtifactsPrefix, payload.MarkdownObjectKey)
+	prefixKey := firstNonEmpty(payload.DoclingMarkdownObjectKey, payload.MarkdownObjectKey)
+	prefix, prefixErr := resolveArtifactsPrefix(payload.ArtifactsPrefixTemplate, doc.ID, payload.TableQueueID, payload.ArtifactsPrefix, prefixKey)
 	if prefixErr != nil {
 		payload.LastError = prefixErr.Error()
 		return workersvc.JobResult{Payload: payload.ToMap()}, prefixErr
 	}
 	payload.ArtifactsPrefix = prefix
+	tablesKey := tablesMarkdownKey(prefix)
+	if tablesKey != "" && (payload.MarkdownObjectKey == "" || payload.MarkdownObjectKey == baseMarkdownKey || payload.MarkdownObjectKey == payload.DoclingMarkdownObjectKey) {
+		payload.MarkdownObjectKey = tablesKey
+	}
 	if payload.CorrelationID == "" {
 		payload.CorrelationID = correlationFromDoc(doc)
 	}

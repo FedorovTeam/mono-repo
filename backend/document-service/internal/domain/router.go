@@ -128,6 +128,9 @@ func (r *StageRouter) NextStageAfterStore(doc *Document) JobStage {
 	}
 
 	if wantsTables && rules.tableExtractorEnabled {
+		if strategy == ConversionStrategyTablesOnly {
+			return JobStageConvertToMarkdown
+		}
 		if canUseTableExtractor(ext, rules.tableExtractorExt) {
 			return JobStageExtractTables
 		}

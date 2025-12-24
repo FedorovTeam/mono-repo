@@ -58,9 +58,11 @@ func TestStageRouterFallsBackToPreprocessWhenTableExtractorDisabled(t *testing.T
 func TestStageRouterUsesTablesOnlyStrategy(t *testing.T) {
 	router := NewStageRouter(RouterRules{TableExtractorEnabled: true})
 	doc := &Document{OriginalObjectKey: "incoming/meeting.pdf", ConversionStrategy: ConversionStrategyTablesOnly}
-	if stage := router.NextStageAfterStore(doc); stage != JobStageExtractTables {
-		t.Fatalf("expected extract_tables for tables_only strategy, got %s", stage)
+	if stage := router.NextStageAfterStore(doc); stage != JobStageConvertToMarkdown {
+		t.Fatalf("expected convert_to_markdown for tables_only strategy, got %s", stage)
 	}
+
+	require.True(t, router.ShouldExtractTablesAfterConvert(doc, false, 0, nil, false))
 }
 
 func TestStageRouterUsesDoclingWithTablesStrategy(t *testing.T) {
