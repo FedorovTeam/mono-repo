@@ -1,59 +1,32 @@
 'use client';
 
-import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
-import { getSession } from 'next-auth/react';
-
 import { SilentSignInError, performSilentSignIn } from './auth-flow';
 
 export { SilentSignInError } from './auth-flow';
 
 type FetchWithAuthOptions = RequestInit & {
   retryOnUnauthorized?: boolean;
-  router?: AppRouterInstance;
 };
 
-const RESTORE_WAIT_TIMEOUT_MS = 15_000;
 const REAUTH_REQUIRED_STATUS = 440;
 
 let restorationPromise: Promise<void> | null = null;
 
-const waitForRestoration = async (
-  context: string,
-  router?: AppRouterInstance,
-): Promise<void> => {
+const waitForRestoration = async (context: string): Promise<void> => {
   if (!restorationPromise) {
-    restorationPromise = performSilentSignIn(context, { router }).finally(() => {
+    restorationPromise = performSilentSignIn(context).finally(() => {
       restorationPromise = null;
     });
   }
 
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      console.error('[http-client] Таймаут ожидания восстановления сессии.', { context });
-      reject(
-        new SilentSignInError('Не удалось дождаться восстановления сессии.', {
-          interactionRequired: true,
-        }),
-      );
-    }, RESTORE_WAIT_TIMEOUT_MS);
-
-    restorationPromise
-      ?.then(() => {
-        clearTimeout(timeoutId);
-        resolve();
-      })
-      .catch((error) => {
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-  });
+  return restorationPromise;
 };
 
 export const fetchWithAuth = async (
   input: RequestInfo | URL,
   init: FetchWithAuthOptions = {},
 ): Promise<Response> => {
-  const { retryOnUnauthorized = true, router, ...fetchInit } = init;
+  const { retryOnUnauthorized = true, ...fetchInit } = init;
 
   const response = await fetch(input, fetchInit);
 
@@ -70,19 +43,8 @@ export const fetchWithAuth = async (
   }
 
   try {
-    await waitForRestoration('fetchWithAuth', router);
-    console.info('Silent sign-in выполнен успешно, повторяем запрос.');
-
-    const refreshedSessionResponse = await fetch('/api/auth/session');
-    const session = (refreshedSessionResponse.ok
-      ? await refreshedSessionResponse.json()
-      : await getSession()) as Awaited<ReturnType<typeof getSession>>;
-
-    if (!session?.accessToken) {
-      throw new SilentSignInError('Сессия не была восстановлена.', {
-        interactionRequired: true,
-      });
-    }
+    await waitForRestoration('fetchWithAuth');
+    console.info('Silent sign-in выполнен успешно, повторяем запрос без ожидания.');
   } catch (error) {
     if (error instanceof SilentSignInError) {
       throw error;

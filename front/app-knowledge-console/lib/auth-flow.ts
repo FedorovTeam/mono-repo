@@ -1,7 +1,6 @@
 'use client';
 
-import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
-import { getSession, signIn } from 'next-auth/react';
+import { signIn } from 'next-auth/react';
 
 import { setRestoringSession } from './session-restoration-store';
 
@@ -11,9 +10,6 @@ const interactionErrorCodes = [
   'consent_required',
 ];
 const retryableErrorCodes = ['login_required', 'session_expired'];
-const SILENT_SIGN_IN_TIMEOUT_MS = 15_000;
-const SESSION_POLL_TIMEOUT_MS = 5_000;
-const SESSION_POLL_INTERVAL_MS = 300;
 const MAX_SILENT_SIGN_IN_FAILURES = 1;
 
 export class SilentSignInError extends Error {
@@ -55,55 +51,17 @@ export const mapAuthError = (error?: string | null) => {
 let activeAttempt: Promise<void> | null = null;
 let failedAttempts = 0;
 
-const replaceCurrentLocation = (
-  router: AppRouterInstance | undefined,
-  targetUrl?: string | null,
-) => {
+const replaceCurrentLocation = (targetUrl?: string | null) => {
   const destination = new URL(targetUrl ?? window.location.href, window.location.href);
   const normalizedPath = `${destination.pathname}${destination.search}${destination.hash}`;
 
-  if (router) {
-    router.replace(normalizedPath);
-    return;
-  }
-
-  window.history.replaceState(window.history.state, '', normalizedPath);
+  window.location.replace(normalizedPath);
 };
 
-const waitForSessionAccessToken = async (context: string) => {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < SESSION_POLL_TIMEOUT_MS) {
-    const session = await getSession();
-
-    if (session?.accessToken) {
-      return;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, SESSION_POLL_INTERVAL_MS));
-  }
-
-  console.error('[auth-flow] Не удалось дождаться обновлённой сессии после silent sign-in.', { context });
-  throw new SilentSignInError('Сессия не была обновлена.', {
-    retryable: true,
-  });
-};
-
-const createSilentSignInAttempt = (context: string, router?: AppRouterInstance): Promise<void> => {
+const createSilentSignInAttempt = (context: string): Promise<void> => {
   return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      console.error('[auth-flow] Таймаут silent sign-in — отмена попытки.', { context });
-      reject(
-        new SilentSignInError('Таймаут восстановления сессии.', {
-          retryable: true,
-        }),
-      );
-    }, SILENT_SIGN_IN_TIMEOUT_MS);
-
-    const clearTimer = () => clearTimeout(timeoutId);
-
     signIn('authentik', {
-      redirect: false,
+      redirect: true,
       prompt: 'none',
       callbackUrl: window.location.href,
     })
@@ -117,7 +75,6 @@ const createSilentSignInAttempt = (context: string, router?: AppRouterInstance):
           });
 
           if (mappedError.interactionRequired) {
-            clearTimer();
             reject(
               new SilentSignInError('Для продолжения войдите вручную.', {
                 interactionRequired: true,
@@ -128,7 +85,6 @@ const createSilentSignInAttempt = (context: string, router?: AppRouterInstance):
           }
 
           if (mappedError.retryable) {
-            clearTimer();
             reject(
               new SilentSignInError('Сессия требует повторного входа.', {
                 retryable: true,
@@ -138,7 +94,6 @@ const createSilentSignInAttempt = (context: string, router?: AppRouterInstance):
             return;
           }
 
-          clearTimer();
           reject(
             new SilentSignInError('Не удалось автоматически восстановить сессию.', {
               code: mappedError.code,
@@ -153,16 +108,15 @@ const createSilentSignInAttempt = (context: string, router?: AppRouterInstance):
           console.info('[auth-flow] Получен URL завершения silent sign-in, выполняем навигацию.', {
             context,
           });
-          window.location.replace(signInResult.url);
-        } else {
-          await waitForSessionAccessToken(context);
-          clearTimer();
-          replaceCurrentLocation(router, signInResult?.url);
+          replaceCurrentLocation(signInResult.url);
           resolve();
+          return;
         }
+
+        replaceCurrentLocation();
+        resolve();
       })
       .catch((error) => {
-        clearTimer();
         console.error('[auth-flow] Сбой silent sign-in Authentik.', { context, error });
         reject(new SilentSignInError('Не удалось автоматически восстановить сессию.'));
       });
@@ -171,7 +125,6 @@ const createSilentSignInAttempt = (context: string, router?: AppRouterInstance):
 
 export const performSilentSignIn = async (
   context: string,
-  { router }: { router?: AppRouterInstance } = {},
 ): Promise<void> => {
   if (typeof window === 'undefined') {
     throw new SilentSignInError('Silent sign-in доступен только в браузере.');
@@ -193,7 +146,7 @@ export const performSilentSignIn = async (
       attemptNumber += 1;
 
       try {
-        await createSilentSignInAttempt(context, router);
+        await createSilentSignInAttempt(context);
         failedAttempts = 0;
         return;
       } catch (error) {

@@ -60,3 +60,9 @@ The computed path is shown as a preview and is sent to the GraphQL mutation; man
 - `NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT` – необязательно, редирект после logout (по умолчанию origin приложения; для контура console: `https://console.fedorov-team.tech`).
 
 При очистке истёкших токенов серверный прокси возвращает статус `440` с кодом `reauth_required`, чтобы клиент мог сразу отправить пользователя на интерактивный вход вместо повторных silent sign-in.
+
+## Smoke-тест silent sign-in с активной SSO-сессией
+
+1. Залогиньтесь в Authentik в отдельной вкладке (SSO-сессия должна быть активна).
+2. Откройте консоль по прямому URL (в проде `https://console.fedorov-team.tech/`, в dev — локальный адрес).
+3. Убедитесь, что страница не зависает в ожидании токена: при наличии действующей SSO-сессии происходит мгновенный редирект туда-обратно и приложение открывается в авторизованном состоянии.
