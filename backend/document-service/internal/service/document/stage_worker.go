@@ -488,6 +488,11 @@ func (w *StageWorker) handleConvert(ctx context.Context, job domain.ProcessingJo
 }
 
 func (w *StageWorker) processTableExtractionResult(ctx context.Context, job domain.ProcessingJob, doc *domain.Document, payload domain.ExtractTablesPayload, result tableExtractionResult) (workersvc.JobResult, error) {
+	initialMarkdownBucket := payload.MarkdownBucket
+	initialMarkdownObjectKey := payload.MarkdownObjectKey
+	doclingBucket := firstNonEmpty(payload.DoclingMarkdownBucket, initialMarkdownBucket, doc.MarkdownBucket)
+	doclingObjectKey := firstNonEmpty(payload.DoclingMarkdownObjectKey, initialMarkdownObjectKey, doc.MarkdownObjectKey, resolvedMarkdownKey(doc))
+
 	payload.TableQueueID = firstNonEmpty(result.QueueID, payload.TableQueueID, payload.QueueID)
 	payload.QueueID = payload.TableQueueID
 	payload.Status = result.Status.String()
@@ -513,10 +518,8 @@ func (w *StageWorker) processTableExtractionResult(ctx context.Context, job doma
 	if payload.ConversionStrategy == domain.ConversionStrategyDoclingWithTables {
 		payload.ExtractTables = true
 	}
-	payload.DoclingMarkdownBucket = firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket, doc.MarkdownBucket)
-	if payload.DoclingMarkdownObjectKey == "" {
-		payload.DoclingMarkdownObjectKey = resolvedMarkdownKey(doc)
-	}
+	payload.DoclingMarkdownBucket = doclingBucket
+	payload.DoclingMarkdownObjectKey = firstNonEmpty(doclingObjectKey, resolvedMarkdownKey(doc))
 
 	if payload.TableQueueID == "" {
 		err := fmt.Errorf("table extraction queue_id is empty for document %s", job.DocumentID)
@@ -570,6 +573,13 @@ func (w *StageWorker) completeTableExtraction(ctx context.Context, doc *domain.D
 	baseBucket := strings.TrimSpace(firstNonEmpty(payload.DoclingMarkdownBucket, payload.MarkdownBucket))
 	baseKey := strings.TrimSpace(payload.DoclingMarkdownObjectKey)
 	hasBaseMarkdown := baseBucket != "" && baseKey != ""
+
+	conversionStrategy := domain.NormalizeConversionStrategy(string(payload.ConversionStrategy))
+	if conversionStrategy == domain.ConversionStrategyDoclingWithTables && !hasBaseMarkdown {
+		err := errors.New("docling markdown is required to merge tables for docling_with_tables strategy")
+		payload.LastError = err.Error()
+		return workersvc.JobResult{Payload: payload.ToMap()}, err
+	}
 	if targetBucket != "" && targetKey != "" && w.activities != nil && hasBaseMarkdown {
 		mergedKey, mergeErr := w.activities.MergeTables(ctx, mergeTablesInput{
 			Doc:             doc,
