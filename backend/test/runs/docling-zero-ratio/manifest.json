@@ -1,0 +1,10 @@
+{
+  "source": "docling-zero-ratio.pdf",
+  "generated_at": "2024-10-02T12:00:00Z",
+  "detect_voting_tables": false,
+  "table_count": 0,
+  "pages": "1",
+  "processing": {
+    "parse_ms": 10
+  }
+}

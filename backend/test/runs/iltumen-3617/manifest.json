@@ -1,0 +1,11 @@
+{
+  "source": "Ил Тумэн 3617.pdf",
+  "generated_at": "2025-01-15T06:10:00Z",
+  "detect_voting_tables": true,
+  "table_count": 70,
+  "pages": "1-3",
+  "processing": {
+    "pdfinfo_ms": 120,
+    "parse_ms": 28
+  }
+}
