@@ -183,6 +183,8 @@ type Config struct {
 	OCRLang          []string
 	SkipOCROnTextPDF *bool
 	Mode             string
+	ImageExportMode  string
+	IncludeImages    *bool
 	EngineKind       string
 	Storage          StorageConfig
 	TraceHttpRequest bool
@@ -322,10 +324,12 @@ type s3TargetRequest struct {
 }
 
 type doclingOptions struct {
-	ToFormats   []string `json:"to_formats,omitempty"`
-	FromFormats []string `json:"from_formats,omitempty"`
-	OCREngine   string   `json:"ocr_engine,omitempty"`
-	OCRLang     []string `json:"ocr_lang,omitempty"`
+	ToFormats       []string `json:"to_formats,omitempty"`
+	FromFormats     []string `json:"from_formats,omitempty"`
+	OCREngine       string   `json:"ocr_engine,omitempty"`
+	OCRLang         []string `json:"ocr_lang,omitempty"`
+	ImageExportMode string   `json:"image_export_mode,omitempty"`
+	IncludeImages   *bool    `json:"include_images,omitempty"`
 }
 
 // DoclingConverter вызывает HTTP-обёртку Docling, прокидывая correlation-id.
@@ -336,6 +340,8 @@ type DoclingConverter struct {
 	ocrEngine        string
 	ocrLang          []string
 	skipOCROnTextPDF bool
+	imageExportMode  string
+	includeImages    *bool
 	mode             string
 	storage          StorageConfig
 	client           *http.Client
@@ -396,6 +402,12 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger, opts ...Option) *Doclin
 		skipOCROnTextPDF = *cfg.SkipOCROnTextPDF
 	}
 
+	var includeImages *bool
+	if cfg.IncludeImages != nil {
+		value := *cfg.IncludeImages
+		includeImages = &value
+	}
+
 	defaultClient := &http.Client{Timeout: 60 * time.Second}
 
 	converter := &DoclingConverter{
@@ -411,6 +423,8 @@ func NewDoclingConverter(cfg Config, logger *zap.Logger, opts ...Option) *Doclin
 		ocrLang:          append([]string(nil), ocrLang...),
 		skipOCROnTextPDF: skipOCROnTextPDF,
 		engineKind:       strings.TrimSpace(cfg.EngineKind),
+		imageExportMode:  strings.TrimSpace(cfg.ImageExportMode),
+		includeImages:    includeImages,
 	}
 
 	for _, opt := range opts {
@@ -793,6 +807,18 @@ func (c *DoclingConverter) writeDoclingOptions(
 		}
 	}
 
+	if c.imageExportMode != "" {
+		if err := writer.WriteField("image_export_mode", c.imageExportMode); err != nil {
+			return fmt.Errorf("write image_export_mode: %w", err)
+		}
+	}
+
+	if c.includeImages != nil {
+		if err := writer.WriteField("include_images", strconv.FormatBool(*c.includeImages)); err != nil {
+			return fmt.Errorf("write include_images: %w", err)
+		}
+	}
+
 	if strings.EqualFold(fileExt, "pdf") {
 		_ = writer.WriteField("pdf_backend", "pypdfium2") // или dlparse_v4 / dlparse_v2
 	}
@@ -822,6 +848,15 @@ func (c *DoclingConverter) buildDoclingOptions(fileExt string, useOCR bool) docl
 
 	if fileExt != "" {
 		opts.FromFormats = []string{fileExt}
+	}
+
+	if c.imageExportMode != "" {
+		opts.ImageExportMode = c.imageExportMode
+	}
+
+	if c.includeImages != nil {
+		value := *c.includeImages
+		opts.IncludeImages = &value
 	}
 
 	return opts
