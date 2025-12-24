@@ -1,6 +1,7 @@
 import type { NextAuthOptions } from "next-auth";
 import type { OAuthConfig } from "next-auth/providers/oauth";
 import type { JWT } from "next-auth/jwt";
+import https from "node:https";
 
 const authentikIssuer = process.env.AUTHENTIK_ISSUER?.replace(/\/$/, "");
 const authentikClientId = process.env.AUTHENTIK_CLIENT_ID;
@@ -10,6 +11,17 @@ const authentikTokenUrl = process.env.AUTHENTIK_TOKEN_URL ?? (authentikIssuer ? 
 const authentikRedirectUri =
   process.env.AUTHENTIK_REDIRECT_URI ??
   (process.env.NEXTAUTH_URL ? `${process.env.NEXTAUTH_URL}/api/auth/callback/authentik` : undefined);
+const authentikHttpTimeoutMs = Math.max(
+  1000,
+  Number.isFinite(Number(process.env.AUTHENTIK_HTTP_TIMEOUT_MS))
+    ? Number(process.env.AUTHENTIK_HTTP_TIMEOUT_MS)
+    : 12000,
+);
+const authentikHttpAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  maxSockets: 50,
+});
 
 const requiredEnv = [
   ["AUTHENTIK_ISSUER", authentikIssuer],
@@ -50,6 +62,10 @@ const authentikProvider: OAuthConfig<Record<string, unknown>> = {
   authorization: { params: authorizationParams },
   idToken: true,
   checks: ["pkce", "state"],
+  httpOptions: {
+    timeout: authentikHttpTimeoutMs,
+    agent: authentikHttpAgent,
+  },
   profile(profile) {
     const profileData = profile as Record<string, unknown>;
     const profileName = profileData.name ?? profileData.preferred_username ?? profileData.email;
