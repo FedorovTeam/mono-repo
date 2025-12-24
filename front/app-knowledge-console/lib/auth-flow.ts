@@ -14,7 +14,7 @@ const retryableErrorCodes = ['login_required', 'session_expired'];
 const SILENT_SIGN_IN_TIMEOUT_MS = 15_000;
 const SESSION_POLL_TIMEOUT_MS = 5_000;
 const SESSION_POLL_INTERVAL_MS = 300;
-const MAX_SILENT_SIGN_IN_FAILURES = 3;
+const MAX_SILENT_SIGN_IN_FAILURES = 1;
 
 export class SilentSignInError extends Error {
   interactionRequired: boolean;
