@@ -13,6 +13,7 @@ type FetchWithAuthOptions = RequestInit & {
 };
 
 const RESTORE_WAIT_TIMEOUT_MS = 15_000;
+const REAUTH_REQUIRED_STATUS = 440;
 
 let restorationPromise: Promise<void> | null = null;
 
@@ -55,6 +56,13 @@ export const fetchWithAuth = async (
   const { retryOnUnauthorized = true, router, ...fetchInit } = init;
 
   const response = await fetch(input, fetchInit);
+
+  if (response.status === REAUTH_REQUIRED_STATUS) {
+    throw new SilentSignInError('Сессия очищена, требуется интерактивный вход.', {
+      interactionRequired: true,
+      code: 'reauth_required',
+    });
+  }
 
   if (response.status !== 401 || !retryOnUnauthorized) {
     return response;

@@ -57,3 +57,5 @@ The computed path is shown as a preview and is sent to the GraphQL mutation; man
 - `GATEWAY_URL` – внутренняя точка GraphQL gateway, вызываемая прокси.
 - `NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL` – endpoint logout Authentik (для контура console: `https://auth.tech.fedorov-team.tech/application/o/console/end-session/`).
 - `NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT` – необязательно, редирект после logout (по умолчанию origin приложения; для контура console: `https://console.fedorov-team.tech`).
+
+При очистке истёкших токенов серверный прокси возвращает статус `440` с кодом `reauth_required`, чтобы клиент мог сразу отправить пользователя на интерактивный вход вместо повторных silent sign-in.
