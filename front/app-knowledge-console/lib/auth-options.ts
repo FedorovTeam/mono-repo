@@ -220,7 +220,15 @@ export const authOptions: NextAuthOptions = {
         extendedToken.idToken = account.id_token;
         extendedToken.refreshToken = account.refresh_token;
         extendedToken.expiresAt = account.expires_at ? account.expires_at * 1000 : undefined;
+        extendedToken.reauthRequired = false;
+        extendedToken.refreshAttempts = 0;
+        extendedToken.nextRefreshAttempt = undefined;
         extendedToken.profile = profileData ?? extendedToken.profile ?? null;
+
+        console.info("Получены новые токены из Authentik, сбрасываем статус reauthRequired", {
+          hasAccessToken: Boolean(extendedToken.accessToken),
+          reauthRequired: extendedToken.reauthRequired,
+        });
       }
 
       return await refreshAccessToken(extendedToken);
