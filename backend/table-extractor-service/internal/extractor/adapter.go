@@ -93,6 +93,7 @@ type RawTable struct {
 	Headers []string   `json:"headers"`
 	Rows    [][]string `json:"rows"`
 	Page    int        `json:"page,omitempty"`
+	Pages   []int      `json:"pages,omitempty"`
 }
 
 type NormalizedTable struct {
@@ -100,6 +101,7 @@ type NormalizedTable struct {
 	Headers []string            `json:"headers"`
 	Rows    []map[string]string `json:"rows"`
 	Page    int                 `json:"page,omitempty"`
+	Pages   []int               `json:"pages,omitempty"`
 }
 
 type Manifest struct {
