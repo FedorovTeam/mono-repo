@@ -1,6 +1,7 @@
 'use client';
 
 import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
+import { getSession } from 'next-auth/react';
 
 import { SilentSignInError, performSilentSignIn } from './auth-flow';
 
@@ -30,6 +31,13 @@ export const fetchWithAuth = async (
   try {
     await performSilentSignIn('fetchWithAuth', { router });
     console.info('Silent sign-in выполнен успешно, повторяем запрос.');
+    const session = await getSession();
+
+    if (!session?.accessToken) {
+      throw new SilentSignInError('Сессия не была восстановлена.', {
+        interactionRequired: true,
+      });
+    }
   } catch (error) {
     if (error instanceof SilentSignInError) {
       throw error;
