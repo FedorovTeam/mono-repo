@@ -72,7 +72,11 @@ const createSilentSignInAttempt = (context: string, router?: AppRouterInstance):
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       console.error('[auth-flow] Таймаут silent sign-in — отмена попытки.', { context });
-      reject(new SilentSignInError('Таймаут восстановления сессии.', true));
+      reject(
+        new SilentSignInError('Таймаут восстановления сессии.', {
+          retryable: true,
+        }),
+      );
     }, SILENT_SIGN_IN_TIMEOUT_MS);
 
     const clearTimer = () => clearTimeout(timeoutId);

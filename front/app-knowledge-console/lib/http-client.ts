@@ -42,7 +42,9 @@ export const fetchWithAuth = async (
   const retryResponse = await fetch(input, fetchInit);
 
   if (retryResponse.status === 401) {
-    throw new SilentSignInError('Сессия недействительна. Войдите вручную.', true);
+    throw new SilentSignInError('Сессия недействительна. Войдите вручную.', {
+      interactionRequired: true,
+    });
   }
 
   return retryResponse;
