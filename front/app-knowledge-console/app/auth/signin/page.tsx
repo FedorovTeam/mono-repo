@@ -104,7 +104,7 @@ function SignInContent() {
 
     const attemptAutoLogin = async () => {
       try {
-        await signIn("authentik", { callbackUrl: window.location.href }, { prompt: "none" });
+        await signIn("authentik", { callbackUrl: window.location.href }, { prompt: "consent" });
       } catch (error) {
         logger.error("Авто-вход Authentik завершился ошибкой", { error, errorMessage });
         sessionStorage.setItem("authAutoLoginDisabled", "true");
