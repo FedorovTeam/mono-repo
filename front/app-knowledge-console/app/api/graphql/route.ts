@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { getToken } from "next-auth/jwt";
 import { authOptions } from "@/lib/auth-options";
 import { createAuthLogger } from "@/lib/auth-logger";
+import { createLogger } from "@/lib/logger";
 import { generateCorrelationId } from "@/lib/correlation";
 
 const gatewayUrl = process.env.GATEWAY_URL ?? process.env.NEXT_PUBLIC_GATEWAY_URL;
@@ -25,7 +26,10 @@ const getTokenExpirationMs = (token: string | undefined | null) => {
 
     return typeof parsedPayload.exp === "number" ? parsedPayload.exp * 1000 : null;
   } catch (error) {
-    console.warn("Не удалось распарсить exp из accessToken", error);
+    createLogger({ operation: "GraphQL proxy", target: gatewayUrl, scope: "api" }).warn(
+      "Не удалось распарсить exp из accessToken",
+      { error },
+    );
     return null;
   }
 };

@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
 import { handleAuthError } from '@/lib/handle-auth-error';
+import { createLogger } from '@/lib/logger';
 import { useSessionRestorationState } from '@/lib/session-restoration-store';
 
 type KnowledgeDocumentStatus =
@@ -112,6 +113,7 @@ export default function DocumentsPage() {
   }, [restoringSession]);
 
   const fetchDocuments = useCallback(async () => {
+    const logger = createLogger({ operation: 'documents list', target: '/api/graphql' });
     try {
       setIsListLoading(true);
       setListError(null);
@@ -184,7 +186,7 @@ export default function DocumentsPage() {
         return;
       }
       const messageText = err instanceof Error ? err.message : 'Не удалось загрузить список документов';
-      console.error(messageText);
+      logger.error('Не удалось загрузить список документов', { error: err });
       setListError(messageText);
     } finally {
       setIsListLoading(false);
@@ -196,6 +198,7 @@ export default function DocumentsPage() {
 
   const pollDocument = useCallback(
     async (id: string) => {
+      const logger = createLogger({ operation: 'document poll', target: '/api/graphql' });
       const errorCount = pollErrorAttempts.current.get(id) ?? 0;
       if (errorCount >= MAX_POLL_ERRORS) {
         return;
@@ -249,7 +252,10 @@ export default function DocumentsPage() {
         const authHandled = handleAuthError(err, {
           onInteractionStart: () => {
             setRedirectingToSignIn(true);
-            console.warn('Polling остановлен: требуется интерактивный вход');
+            logger.warn('Polling остановлен: требуется интерактивный вход', {
+              correlationId,
+              documentId: id,
+            });
           },
         });
         if (authHandled || err instanceof SilentSignInError) {
@@ -258,10 +264,19 @@ export default function DocumentsPage() {
         const nextAttempts = errorCount + 1;
         pollErrorAttempts.current.set(id, nextAttempts);
         if (nextAttempts >= MAX_POLL_ERRORS) {
-          console.error(`Polling документа ${id} остановлен после ${nextAttempts} неудачных попыток`);
+          logger.error('Polling остановлен после максимального количества неудач', {
+            correlationId,
+            attempts: nextAttempts,
+            documentId: id,
+          });
           return;
         }
-        console.error(err);
+        logger.error('Ошибка при polling документа', {
+          correlationId,
+          documentId: id,
+          error: err,
+          attempts: nextAttempts,
+        });
       }
     },
     [],

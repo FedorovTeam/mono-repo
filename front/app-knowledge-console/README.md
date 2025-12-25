@@ -58,13 +58,14 @@ The computed path is shown as a preview and is sent to the GraphQL mutation; man
 - `GATEWAY_URL` – внутренняя точка GraphQL gateway, вызываемая прокси.
 - `NEXT_PUBLIC_AUTHENTIK_LOGOUT_URL` – endpoint logout Authentik (для контура console: `https://auth.tech.fedorov-team.tech/application/o/console/end-session/`).
 - `NEXT_PUBLIC_AUTHENTIK_POST_LOGOUT_REDIRECT` – необязательно, редирект после logout (по умолчанию origin приложения; для контура console: `https://console.fedorov-team.tech`).
-- `AUTH_DEBUG_LOG` – включает подробные debug/trace-логи аутентификации и прокси (значение `true` включает вывод; по умолчанию переменная не задаётся и выводятся только ключевые info/warn/error-сообщения).
+- `APP_DEBUG_LOG` – включает подробные debug/trace-логи всего приложения (значение `true` включает вывод; по умолчанию переменная не задаётся и выводятся только ключевые info/warn/error-сообщения).
+- `AUTH_DEBUG_LOG` – совместимый переключатель для детализированных логов аутентификации и прокси (аналогично `APP_DEBUG_LOG`).
 
 Формат логов:
 
-- Сообщения выводятся с префиксом уровня (`[auth-info]`, `[auth-debug]`, `[auth-trace]` и т.д.).
-- В метаданных всегда присутствует `correlationId` (переданный из запроса или сгенерированный), `operation` (например, `silent sign-in`, `token refresh`, `GraphQL proxy`, `authentik availability`), `target` (endpoint Authentik или GraphQL gateway) и `user` (если известны `id`/`email`).
-- В silent sign-in и колбэках NextAuth фиксируются этапы обновления токенов, решения о reauth и результаты проверки доступности Authentik; в GraphQL proxy логируются имя операции/ключи переменных и статусы ответов без чувствительных данных.
+- Сообщения выводятся с префиксом области и уровня (`[app-info]`, `[auth-debug]`, `[api-trace]` и т.д.).
+- В метаданных всегда присутствует `correlationId` (переданный из запроса или сгенерированный), `operation` (например, `silent sign-in`, `token refresh`, `GraphQL proxy`, `documents list`, `document upload`), `target` (endpoint Authentik, GraphQL gateway или URL запроса) и `user` (если известны `id`/`email`).
+- Клиентские обработчики загрузки/просмотра документов, страницы входа, silent sign-in и колбэки NextAuth пишут структурированные логи без чувствительных данных: решения о reauth, проверки доступности Authentik, навигацию silent sign-in, статусы gateway и polling документа.
 
 При очистке истёкших токенов серверный прокси возвращает статус `440` с кодом `reauth_required`, чтобы клиент мог сразу отправить пользователя на интерактивный вход вместо повторных silent sign-in.
 
