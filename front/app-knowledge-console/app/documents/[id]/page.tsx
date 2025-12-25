@@ -7,6 +7,7 @@ import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
 import { handleAuthError } from '@/lib/handle-auth-error';
 import { useSessionRestorationState } from '@/lib/session-restoration-store';
+import { createLogger } from '@/lib/logger';
 
 type KnowledgeDocumentStatus =
   | 'UPLOADED'
@@ -112,6 +113,9 @@ export default function DocumentDetailsPage() {
   }, [restoringSession]);
 
   const fetchDocument = useCallback(async () => {
+    const logger = createLogger({ operation: 'document details', target: '/api/graphql' });
+    let correlationId: string | null = null;
+
     if (!documentId) {
       setError('Идентификатор документа не указан.');
       setIsLoading(false);
@@ -122,6 +126,7 @@ export default function DocumentDetailsPage() {
       setIsLoading(true);
       setError(null);
       setRedirectingToSignIn(false);
+      correlationId = generateCorrelationId();
 
       const query = `
         query KnowledgeDocument($id: ID!) {
@@ -146,7 +151,7 @@ export default function DocumentDetailsPage() {
         cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
-          'X-Correlation-ID': generateCorrelationId(),
+          'X-Correlation-ID': correlationId,
         },
         body: JSON.stringify({ query, variables: { id: documentId } }),
       });
@@ -183,7 +188,11 @@ export default function DocumentDetailsPage() {
         setReauthInProgress(false);
         return;
       }
-      console.error(err);
+      logger.error('Не удалось загрузить данные документа', {
+        correlationId: correlationId ?? undefined,
+        documentId,
+        error: err,
+      });
       setError('Не удалось загрузить данные документа. Попробуйте обновить страницу.');
     } finally {
       setIsLoading(false);

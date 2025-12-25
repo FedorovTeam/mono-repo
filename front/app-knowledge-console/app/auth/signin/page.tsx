@@ -6,6 +6,7 @@ import { signIn, useSession } from "next-auth/react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { mapAuthError } from "@/lib/auth-flow";
+import { createLogger } from "@/lib/logger";
 
 const BENEFITS = [
   "Доступ к загрузке и просмотру документов",
@@ -18,6 +19,7 @@ function SignInContent() {
   const { status } = useSession();
   const [isManualLoading, setIsManualLoading] = useState(false);
   const [providerUnavailable, setProviderUnavailable] = useState(false);
+  const logger = useMemo(() => createLogger({ operation: "auth sign-in", target: "/api/auth" }), []);
 
   const callbackUrl = useMemo(() => {
     const requested = searchParams?.get("callbackUrl");
@@ -65,7 +67,7 @@ function SignInContent() {
           setProviderUnavailable(true);
         }
       } catch (error) {
-        console.warn("Не удалось проверить статус Authentik", { error });
+        logger.warn("Не удалось проверить статус Authentik", { error });
       }
     };
 
@@ -74,7 +76,7 @@ function SignInContent() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [logger]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -104,13 +106,13 @@ function SignInContent() {
       try {
         await signIn("authentik", { callbackUrl, redirect: true, prompt: "none" });
       } catch (error) {
-        console.error("Авто-вход Authentik завершился ошибкой", { error, errorMessage });
+        logger.error("Авто-вход Authentik завершился ошибкой", { error, errorMessage });
         sessionStorage.setItem("authAutoLoginDisabled", "true");
       }
     };
 
     void attemptAutoLogin();
-  }, [callbackUrl, errorMessage, mappedError.retryable, status]);
+  }, [callbackUrl, errorMessage, logger, mappedError.retryable, status]);
 
   const friendlyErrorMessage = useMemo(() => {
     if (!errorMessage) return null;

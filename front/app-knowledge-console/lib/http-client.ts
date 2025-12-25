@@ -5,6 +5,7 @@ import {
   isSilentSignInNavigationInProgress,
   performSilentSignIn,
 } from './auth-flow';
+import { createLogger } from './logger';
 
 export { SilentSignInError } from './auth-flow';
 
@@ -31,6 +32,10 @@ export const fetchWithAuth = async (
   init: FetchWithAuthOptions = {},
 ): Promise<Response> => {
   const { retryOnUnauthorized = true, ...fetchInit } = init;
+  const logger = createLogger({
+    operation: 'fetchWithAuth',
+    target: typeof input === 'string' ? input : input instanceof URL ? input.toString() : undefined,
+  });
 
   const response = await fetch(input, fetchInit);
 
@@ -48,31 +53,33 @@ export const fetchWithAuth = async (
 
   try {
     await waitForRestoration('fetchWithAuth');
-    console.info('Silent sign-in выполнен успешно, повторяем запрос без ожидания.');
+    logger.info('Silent sign-in выполнен успешно, повторяем запрос без ожидания.', {
+      status: response.status,
+    });
   } catch (error) {
     if (error instanceof SilentSignInError) {
       throw error;
     }
 
-    console.error('Сбой при silent sign-in Authentik:', error);
+    logger.error('Сбой при silent sign-in Authentik', { error });
     throw new SilentSignInError('Не удалось автоматически восстановить сессию.', {
       interactionRequired: true,
     });
   }
 
   if (isSilentSignInNavigationInProgress()) {
-    console.info(
-      '[http-client] Навигация после silent sign-in активна, пропускаем повторный запрос.',
-    );
+    logger.info('Навигация после silent sign-in активна, пропускаем повторный запрос.', {
+      status: response.status,
+    });
     return response;
   }
 
   const retryResponse = await fetch(input, fetchInit);
 
   if (retryResponse.status === REAUTH_REQUIRED_STATUS) {
-    console.warn(
-      '[http-client] Повторный статус 440 после восстановления сессии, требуется интерактивный вход.',
-    );
+    logger.warn('Повторный статус 440 после восстановления сессии, требуется интерактивный вход.', {
+      status: retryResponse.status,
+    });
   }
 
   if (retryResponse.status === 401 || retryResponse.status === REAUTH_REQUIRED_STATUS) {

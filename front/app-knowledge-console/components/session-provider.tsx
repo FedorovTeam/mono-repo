@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 
 import { performSilentSignIn, mapAuthError, SilentSignInError } from "@/lib/auth-flow";
+import { createLogger } from "@/lib/logger";
 
 const AUTO_SIGN_IN_COOLDOWN_MS = 60_000;
 
@@ -50,7 +51,9 @@ function AutoSignInOnFocus() {
       lastAttemptRef.current = now;
 
       void performSilentSignIn("AutoSignInOnFocus").catch((error) => {
-        console.warn("Автоматический silent sign-in отклонён.", error);
+        createLogger({ operation: "auto sign-in" }).warn("Автоматический silent sign-in отклонён", {
+          error,
+        });
 
         if (error instanceof SilentSignInError) {
           if (error.interactionRequired || !error.retryable) {

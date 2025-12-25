@@ -2,6 +2,7 @@
 
 import { signIn } from 'next-auth/react';
 import { SilentSignInError } from './http-client';
+import { createLogger } from './logger';
 
 type HandleAuthErrorOptions = {
   onInteractionStart?: () => void;
@@ -21,6 +22,8 @@ export const handleAuthError = (error: unknown, options: HandleAuthErrorOptions 
     return false;
   }
 
+  const logger = createLogger({ operation: 'handleAuthError', target: '/api/auth/signin' });
+
   options.onInteractionStart?.();
 
   const callbackUrl =
@@ -34,7 +37,7 @@ export const handleAuthError = (error: unknown, options: HandleAuthErrorOptions 
   }
 
   redirectPromise.catch((signInError) => {
-    console.error('[handleAuthError] Ошибка при попытке входа через Authentik', signInError);
+    logger.error('Ошибка при попытке входа через Authentik', { error: signInError });
     fallbackRedirect(callbackUrl);
   });
 

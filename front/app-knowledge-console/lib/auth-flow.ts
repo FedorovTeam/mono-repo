@@ -2,6 +2,8 @@
 
 import { signIn } from 'next-auth/react';
 
+import { createAuthLogger, type Logger } from './auth-logger';
+import { generateCorrelationId } from './correlation';
 import { setRestoringSession } from './session-restoration-store';
 
 const interactionErrorCodes = [
@@ -58,8 +60,8 @@ const normalizePath = (targetUrl?: string | null) => {
   return `${destination.pathname}${destination.search}${destination.hash}`;
 };
 
-const waitForNavigationCompletion = async (targetPath: string): Promise<void> => {
-  console.info('[auth-flow] Ожидаем завершения навигации после silent sign-in.', { targetPath });
+const waitForNavigationCompletion = async (targetPath: string, logger: Logger): Promise<void> => {
+  logger.debug('Ожидаем завершения навигации после silent sign-in.', { targetPath });
 
   await new Promise<void>((resolve) => {
     let completed = false;
@@ -77,7 +79,7 @@ const waitForNavigationCompletion = async (targetPath: string): Promise<void> =>
     };
 
     const finish = (reason: string) => {
-      console.info('[auth-flow] Завершение ожидания навигации после silent sign-in.', {
+      logger.debug('Завершение ожидания навигации после silent sign-in.', {
         targetPath,
         reason,
       });
@@ -93,7 +95,7 @@ const waitForNavigationCompletion = async (targetPath: string): Promise<void> =>
     };
 
     const timeoutId = window.setTimeout(() => {
-      console.warn('[auth-flow] Навигация после silent sign-in не подтверждена вовремя.', {
+      logger.warn('Навигация после silent sign-in не подтверждена вовремя.', {
         targetPath,
       });
       finish('timeout');
@@ -105,12 +107,12 @@ const waitForNavigationCompletion = async (targetPath: string): Promise<void> =>
   });
 };
 
-const navigateAfterSilentSignIn = async (targetUrl?: string | null): Promise<void> => {
+const navigateAfterSilentSignIn = async (targetUrl: string | null | undefined, logger: Logger): Promise<void> => {
   const targetPath = normalizePath(targetUrl ?? window.location.href);
   const currentPath = normalizePath();
 
   if (targetPath === currentPath) {
-    console.info('[auth-flow] Целевой URL совпадает с текущим, навигация не требуется.', {
+    logger.info('Целевой URL совпадает с текущим, навигация не требуется.', {
       targetPath,
     });
     navigationInProgress = false;
@@ -118,14 +120,14 @@ const navigateAfterSilentSignIn = async (targetUrl?: string | null): Promise<voi
   }
 
   navigationInProgress = true;
-  console.info('[auth-flow] Выполняем навигацию после silent sign-in.', { targetPath });
-  const navigationPromise = waitForNavigationCompletion(targetPath);
+  logger.info('Выполняем навигацию после silent sign-in.', { targetPath });
+  const navigationPromise = waitForNavigationCompletion(targetPath, logger);
   window.location.replace(targetPath);
 
   await navigationPromise;
 };
 
-const createSilentSignInAttempt = (context: string): Promise<void> => {
+const createSilentSignInAttempt = (context: string, logger: Logger): Promise<void> => {
   return new Promise((resolve, reject) => {
     signIn('authentik', {
       redirect: true,
@@ -135,7 +137,7 @@ const createSilentSignInAttempt = (context: string): Promise<void> => {
       .then(async (signInResult) => {
         if (signInResult?.error) {
           const mappedError = mapAuthError(signInResult.error);
-          console.warn('[auth-flow] Ошибка silent sign-in Authentik.', {
+          logger.warn('Ошибка silent sign-in Authentik.', {
             context,
             error: signInResult.error,
             code: mappedError.code,
@@ -169,23 +171,23 @@ const createSilentSignInAttempt = (context: string): Promise<void> => {
           return;
         }
 
-        console.info('[auth-flow] Silent sign-in выполнен успешно.', { context });
+        logger.info('Silent sign-in выполнен успешно.', { context });
 
         if (signInResult?.url) {
-          console.info('[auth-flow] Получен URL завершения silent sign-in.', {
+          logger.debug('Получен URL завершения silent sign-in.', {
             context,
             url: signInResult.url,
           });
-          await navigateAfterSilentSignIn(signInResult.url);
+          await navigateAfterSilentSignIn(signInResult.url, logger);
           resolve();
           return;
         }
 
-        await navigateAfterSilentSignIn();
+        await navigateAfterSilentSignIn(null, logger);
         resolve();
       })
       .catch((error) => {
-        console.error('[auth-flow] Сбой silent sign-in Authentik.', { context, error });
+        logger.error('Сбой silent sign-in Authentik.', { context, error });
         reject(new SilentSignInError('Не удалось автоматически восстановить сессию.'));
       });
   });
@@ -198,13 +200,20 @@ export const performSilentSignIn = async (
     throw new SilentSignInError('Silent sign-in доступен только в браузере.');
   }
 
+  const correlationId = generateCorrelationId();
+  const logger = createAuthLogger({
+    correlationId,
+    operation: 'silent sign-in',
+    target: '/api/auth/signin/authentik',
+  });
+
   if (activeAttempt) {
-    console.info('[auth-flow] Обнаружена активная попытка silent sign-in, ожидаем.', { context });
+    logger.info('Обнаружена активная попытка silent sign-in, ожидаем.', { context });
     setRestoringSession(true);
     return activeAttempt;
   }
 
-  console.info('[auth-flow] Запускаем silent sign-in.', { context });
+  logger.info('Запускаем silent sign-in.', { context });
   setRestoringSession(true);
 
   const attempt = (async () => {
@@ -214,14 +223,14 @@ export const performSilentSignIn = async (
       attemptNumber += 1;
 
       try {
-        await createSilentSignInAttempt(context);
+        await createSilentSignInAttempt(context, logger);
         failedAttempts = 0;
         return;
       } catch (error) {
         failedAttempts += 1;
 
         if (error instanceof SilentSignInError) {
-          console.warn('[auth-flow] Попытка silent sign-in не удалась.', {
+          logger.warn('Попытка silent sign-in не удалась.', {
             context,
             attemptNumber,
             failedAttempts,
@@ -238,7 +247,7 @@ export const performSilentSignIn = async (
           if (error.retryable && failedAttempts < MAX_SILENT_SIGN_IN_FAILURES) {
             const attemptsLeft = MAX_SILENT_SIGN_IN_FAILURES - failedAttempts;
 
-            console.info('[auth-flow] Повторяем silent sign-in после возобновляемой ошибки.', {
+            logger.info('Повторяем silent sign-in после возобновляемой ошибки.', {
               context,
               attemptNumber,
               failedAttempts,
@@ -248,7 +257,7 @@ export const performSilentSignIn = async (
           }
 
           if (error.retryable) {
-            console.warn('[auth-flow] Достигнут лимит повторных попыток silent sign-in.', {
+            logger.warn('Достигнут лимит повторных попыток silent sign-in.', {
               context,
               attemptNumber,
               failedAttempts,

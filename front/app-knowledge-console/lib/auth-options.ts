@@ -3,6 +3,9 @@ import type { OAuthConfig } from "next-auth/providers/oauth";
 import type { JWT } from "next-auth/jwt";
 import https from "node:https";
 
+import { createAuthLogger } from "./auth-logger";
+import { generateCorrelationId } from "./correlation";
+
 type AuthentikAvailability = {
   status: "unknown" | "reachable" | "unreachable";
   checkedAt: number | null;
@@ -62,7 +65,9 @@ const authentikDiscoveryUrl = (() => {
   try {
     return new URL(url).toString();
   } catch (error) {
-    console.warn("[auth-options] Некорректный URL discovery для Authentik", { url, error });
+    createAuthLogger({
+      operation: "authentik availability",
+    }).warn("Некорректный URL discovery для Authentik", { url, error });
     return url;
   }
 })();
@@ -105,6 +110,11 @@ const authentikAvailability: AuthentikAvailability = {
   checkedAt: null,
 };
 
+const authentikAvailabilityLogger = createAuthLogger({
+  operation: "authentik availability",
+  target: authentikDiscoveryUrl,
+});
+
 const updateAvailability = (status: AuthentikAvailability["status"], error?: string) => {
   authentikAvailability.status = status;
   authentikAvailability.checkedAt = Date.now();
@@ -133,10 +143,14 @@ const checkAuthentikAvailability = async () => {
     }
 
     updateAvailability("reachable");
+    authentikAvailabilityLogger.debug("Проверка доступности Authentik успешно завершена", {
+      status: authentikAvailability.status,
+      checkedAt: authentikAvailability.checkedAt,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     updateAvailability("unreachable", message);
-    console.warn("[auth-options] Провайдер Authentik недоступен", {
+    authentikAvailabilityLogger.warn("Провайдер Authentik недоступен", {
       url: authentikDiscoveryUrl,
       error: message,
     });
@@ -162,6 +176,7 @@ type ExtendedJWT = JWT & {
   refreshAttempts?: number;
   nextRefreshAttempt?: number;
   reauthRequired?: boolean;
+  correlationId?: string;
 };
 
 type AuthentikTokenResponse = {
@@ -181,6 +196,30 @@ const refreshRetryBaseDelayMs = 5 * 1000;
 const refreshRetryMaxDelayMs = 5 * 60 * 1000;
 const defaultAccessTokenTtlMs = 10 * 60 * 1000;
 
+const createTokenLogger = (token: ExtendedJWT, operation: string) =>
+  createAuthLogger({
+    correlationId: token.correlationId ?? generateCorrelationId(),
+    operation,
+    user: resolveUserContext(token.profile),
+    target: authentikTokenUrl,
+  });
+
+const resolveUserContext = (profile?: Record<string, unknown> | null) => {
+  if (!profile) return undefined;
+
+  const userId =
+    typeof profile.sub === "string"
+      ? profile.sub
+      : typeof profile.email === "string"
+        ? profile.email
+        : undefined;
+
+  return {
+    id: userId,
+    email: typeof profile.email === "string" ? profile.email : undefined,
+  };
+};
+
 const getJwtExpiration = (token?: string) => {
   if (typeof token !== "string") {
     return null;
@@ -198,7 +237,7 @@ const getJwtExpiration = (token?: string) => {
 
     return typeof exp === "number" ? exp * 1000 : null;
   } catch (error) {
-    console.warn("[auth-options] Не удалось декодировать exp из JWT", error);
+    createAuthLogger({ operation: "token parsing" }).warn("Не удалось декодировать exp из JWT", error);
     return null;
   }
 };
@@ -262,7 +301,14 @@ const scheduleRefreshRetry = (token: ExtendedJWT) => {
 };
 
 const refreshAccessToken = async (token: ExtendedJWT) => {
+  const correlationId = token.correlationId ?? generateCorrelationId();
+  token.correlationId = correlationId;
+  const logger = createTokenLogger(token, "token refresh");
+
   if (token.reauthRequired) {
+    logger.debug("Пропускаем обновление: требуется повторная аутентификация", {
+      correlationId,
+    });
     return token;
   }
 
@@ -271,12 +317,14 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
     resolveExpiresAt({ accessToken: token.accessToken ?? null, idToken: token.idToken ?? null, expiresAtSeconds: null });
 
   if (!currentExpiresAt) {
+    logger.info("Не удалось определить срок жизни accessToken, требуется reauth", { correlationId });
     return markReauthRequired(token);
   }
 
   const normalizedToken: ExtendedJWT & { expiresAt: number } = { ...token, expiresAt: currentExpiresAt };
 
   if (!normalizedToken.refreshToken) {
+    logger.info("Отсутствует refreshToken, требуется reauth", { correlationId });
     return markReauthRequired(normalizedToken);
   }
 
@@ -289,6 +337,11 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
   const shouldDelayRefresh = !isExpired && now < nextPlannedAttempt;
 
   if (shouldDelayRefresh) {
+    logger.trace("Отложили обновление токена до планового времени", {
+      correlationId,
+      expiresAt: normalizedToken.expiresAt,
+      nextRefreshAttempt: normalizedToken.nextRefreshAttempt,
+    });
     return normalizedToken;
   }
 
@@ -315,15 +368,25 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
 
     if (!response.ok) {
       if (data?.error === "invalid_grant") {
+        logger.warn("Authentik вернул invalid_grant при обновлении токена", {
+          correlationId,
+          status: response.status,
+          statusText: response.statusText,
+        });
         return markReauthRequired(normalizedToken);
       }
 
       if (response.status >= 500) {
-        console.error("Сетевой сбой или 5xx при обновлении токена Authentik", response.statusText);
+        logger.error("Сетевой сбой или 5xx при обновлении токена Authentik", {
+          correlationId,
+          status: response.status,
+          statusText: response.statusText,
+        });
         return scheduleRefreshRetry(normalizedToken);
       }
 
-      console.error("Ошибка при обновлении токена Authentik", {
+      logger.error("Ошибка при обновлении токена Authentik", {
+        correlationId,
         status: response.status,
         statusText: response.statusText,
         error: data?.error,
@@ -333,7 +396,10 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
     }
 
     if (!data?.access_token) {
-      console.error("Ответ Authentik не содержит access_token", { status: response.status });
+      logger.error("Ответ Authentik не содержит access_token", {
+        correlationId,
+        status: response.status,
+      });
       return scheduleRefreshRetry(normalizedToken);
     }
 
@@ -345,6 +411,9 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
       }) ?? null;
 
     if (!refreshedExpiresAt) {
+      logger.warn("Не удалось вычислить срок действия нового accessToken", {
+        correlationId,
+      });
       return markReauthRequired(normalizedToken);
     }
 
@@ -359,9 +428,17 @@ const refreshAccessToken = async (token: ExtendedJWT) => {
       reauthRequired: false,
     };
 
+    logger.info("Успешно обновили токены Authentik", {
+      correlationId,
+      expiresAt: refreshedExpiresAt,
+    });
+
     return updatedToken;
   } catch (error) {
-    console.error("Ошибка при обновлении токена Authentik", error);
+    logger.error("Ошибка при обновлении токена Authentik", {
+      correlationId,
+      error,
+    });
     return scheduleRefreshRetry(normalizedToken);
   }
 };
@@ -380,6 +457,8 @@ export const authOptions: NextAuthOptions = {
       const extendedToken = token as ExtendedJWT;
       const profileData =
         profile && typeof profile === "object" ? (profile as Record<string, unknown>) : null;
+      extendedToken.correlationId = extendedToken.correlationId ?? generateCorrelationId();
+      const logger = createTokenLogger(extendedToken, "next-auth jwt callback");
 
       if (account) {
         extendedToken.accessToken = account.access_token;
@@ -396,20 +475,34 @@ export const authOptions: NextAuthOptions = {
         extendedToken.nextRefreshAttempt = undefined;
         extendedToken.profile = profileData ?? extendedToken.profile ?? null;
 
-        console.info("Получены новые токены из Authentik, сбрасываем статус reauthRequired", {
+        logger.info("Получены новые токены из Authentik, сбрасываем статус reauthRequired", {
+          correlationId: extendedToken.correlationId,
           hasAccessToken: Boolean(extendedToken.accessToken),
+          expiresAt: extendedToken.expiresAt,
           reauthRequired: extendedToken.reauthRequired,
         });
 
         if (!extendedToken.expiresAt) {
+          logger.warn("Отсутствует срок действия токена после логина, требуем reauth", {
+            correlationId: extendedToken.correlationId,
+          });
           return markReauthRequired(extendedToken);
         }
       }
+
+      logger.debug("Запускаем refreshAccessToken из jwt callback", {
+        correlationId: extendedToken.correlationId,
+        expiresAt: extendedToken.expiresAt,
+        refreshAttempts: extendedToken.refreshAttempts,
+        nextRefreshAttempt: extendedToken.nextRefreshAttempt,
+        reauthRequired: extendedToken.reauthRequired,
+      });
 
       return await refreshAccessToken(extendedToken);
     },
     async session({ session, token }) {
       const extendedToken = token as ExtendedJWT;
+      const logger = createTokenLogger(extendedToken, "next-auth session callback");
 
       if (extendedToken.reauthRequired) {
         session.reauthRequired = true;
@@ -417,6 +510,12 @@ export const authOptions: NextAuthOptions = {
         session.idToken = undefined;
         session.expiresAt = extendedToken.expiresAt;
         session.nextRefreshAttempt = extendedToken.nextRefreshAttempt;
+
+        logger.info("Помечаем сессию как требующую reauth", {
+          correlationId: extendedToken.correlationId,
+          expiresAt: extendedToken.expiresAt,
+          nextRefreshAttempt: extendedToken.nextRefreshAttempt,
+        });
 
         return session;
       }
@@ -436,6 +535,14 @@ export const authOptions: NextAuthOptions = {
         session.user.name = session.user.name ?? (typeof profileName === "string" ? profileName : undefined);
         session.user.email = session.user.email ?? (typeof profileEmail === "string" ? profileEmail : undefined);
       }
+
+      logger.debug("Обновили сессию на основе JWT", {
+        correlationId: extendedToken.correlationId,
+        expiresAt: session.expiresAt,
+        nextRefreshAttempt: session.nextRefreshAttempt,
+        reauthRequired: session.reauthRequired,
+        user: resolveUserContext(extendedToken.profile),
+      });
 
       return session;
     },

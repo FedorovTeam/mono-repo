@@ -5,6 +5,7 @@ import { generateCorrelationId } from '@/lib/correlation';
 import { SilentSignInError, fetchWithAuth } from '@/lib/http-client';
 import { handleAuthError } from '@/lib/handle-auth-error';
 import { useSessionRestorationState } from '@/lib/session-restoration-store';
+import { createLogger } from '@/lib/logger';
 
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -160,6 +161,7 @@ export default function HomePage() {
     setMessage(null);
     setValidationError(null);
     setRedirectingToSignIn(false);
+    const logger = createLogger({ operation: 'document upload', target: '/api/graphql' });
 
     if (!file) {
       setMessage('Выберите файл');
@@ -259,7 +261,7 @@ export default function HomePage() {
       setStatus('done');
       setMessage(`Файл загружен. Document ID: ${document.id}, статус: ${document.status}`);
     } catch (err: unknown) {
-      console.error(err);
+      logger.error('Не удалось загрузить документ', { error: err });
       const authHandled = handleAuthError(err, {
         onInteractionStart: () => {
           setRedirectingToSignIn(true);
