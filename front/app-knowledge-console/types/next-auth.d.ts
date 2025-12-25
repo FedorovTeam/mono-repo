@@ -1,3 +1,4 @@
+// front/app-knowledge-console/types/next-auth.d.ts
 import type { JWT as DefaultJWT } from "next-auth/jwt";
 
 declare module "next-auth" {

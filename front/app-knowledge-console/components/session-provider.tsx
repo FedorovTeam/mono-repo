@@ -1,10 +1,16 @@
+// front/app-knowledge-console/components/session-provider.tsx
 "use client";
 
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { SessionProvider, useSession } from "next-auth/react";
 
-import { performSilentSignIn, mapAuthError, SilentSignInError } from "@/lib/auth-flow";
+import {
+  performSilentSignIn,
+  mapAuthError,
+  SilentSignInError,
+  isSilentSignInNavigationInProgress
+} from "@/lib/auth-flow";
 import { createLogger } from "@/lib/logger";
 
 const AUTO_SIGN_IN_COOLDOWN_MS = 60_000;
@@ -23,6 +29,7 @@ function AutoSignInOnFocus() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (status !== "unauthenticated") return;
+    if (isSilentSignInNavigationInProgress()) return;
 
     const authErrorCode = new URLSearchParams(window.location.search).get("error");
     const mappedError = mapAuthError(authErrorCode);

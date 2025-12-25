@@ -1,3 +1,4 @@
+// front/app-knowledge-console/lib/auth-logger.ts
 import { createLogger, type Logger, type LoggerContext } from "./logger";
 
 export type { LogLevel, Logger, LoggerContext } from "./logger";

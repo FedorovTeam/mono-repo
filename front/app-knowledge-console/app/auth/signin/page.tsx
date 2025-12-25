@@ -104,7 +104,7 @@ function SignInContent() {
 
     const attemptAutoLogin = async () => {
       try {
-        await signIn("authentik", { callbackUrl, redirect: true, prompt: "none" });
+        await signIn("authentik", { callbackUrl: window.location.href }, { prompt: "none" });
       } catch (error) {
         logger.error("Авто-вход Authentik завершился ошибкой", { error, errorMessage });
         sessionStorage.setItem("authAutoLoginDisabled", "true");
@@ -134,7 +134,7 @@ function SignInContent() {
   const handleSignIn = () => {
     setIsManualLoading(true);
     sessionStorage.removeItem("authAutoLoginDisabled");
-    void signIn("authentik", { callbackUrl });
+    void signIn("authentik", { callbackUrl: "/" }, { prompt: "consent" });
   };
 
   return (

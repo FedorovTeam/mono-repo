@@ -1,3 +1,4 @@
+// front/app-knowledge-console/lib/auth-options.ts
 import type { NextAuthOptions } from "next-auth";
 import type { OAuthConfig } from "next-auth/providers/oauth";
 import type { JWT } from "next-auth/jwt";
@@ -55,7 +56,6 @@ if (!authentikTokenUrl) {
 
 const authorizationParams: Record<string, string> = {
   scope: "openid email profile offline_access",
-  prompt: "consent",
   ...(authentikRedirectUri ? { redirect_uri: authentikRedirectUri } : {}),
 };
 
@@ -482,8 +482,8 @@ export const authOptions: NextAuthOptions = {
 
       if (account) {
         extendedToken.accessToken = account.access_token;
-        extendedToken.idToken = account.id_token;
-        extendedToken.refreshToken = account.refresh_token;
+        extendedToken.idToken = account.id_token ?? extendedToken.idToken;
+        extendedToken.refreshToken = account.refresh_token ?? extendedToken.refreshToken;
         extendedToken.expiresAt =
           resolveExpiresAt({
             expiresAtSeconds: account.expires_at,

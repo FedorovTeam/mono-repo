@@ -1,3 +1,4 @@
+// front/app-knowledge-console/app/documents/[id]/page.tsx
 'use client';
 
 import Link from 'next/link';

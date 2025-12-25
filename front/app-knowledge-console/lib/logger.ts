@@ -1,3 +1,4 @@
+// front/app-knowledge-console/lib/logger.ts
 import { generateCorrelationId } from "./correlation";
 
 export type LogLevel = "info" | "debug" | "trace" | "warn" | "error";

@@ -1,3 +1,4 @@
+// front/app-knowledge-console/lib/auth-flow.ts
 'use client';
 
 import { signIn } from 'next-auth/react';
@@ -107,91 +108,63 @@ const waitForNavigationCompletion = async (targetPath: string, logger: Logger): 
   });
 };
 
-const navigateAfterSilentSignIn = async (targetUrl: string | null | undefined, logger: Logger): Promise<void> => {
-  const targetPath = normalizePath(targetUrl ?? window.location.href);
-  const currentPath = normalizePath();
+const createSilentSignInAttempt = async (context: string, logger: Logger): Promise<void> => {
+  // ВАЖНО: prompt передаём 3-м аргументом
+  const res = await signIn(
+      "authentik",
+      { redirect: false, callbackUrl: window.location.href },
+      { prompt: "none" },
+  );
 
-  if (targetPath === currentPath) {
-    logger.info('Целевой URL совпадает с текущим, навигация не требуется.', {
-      targetPath,
-    });
-    navigationInProgress = false;
-    return;
+  // redirect:false => NextAuth вернёт url, по которому НУЖНО перейти
+  if (!res) {
+    throw new SilentSignInError("signIn вернул пустой ответ.");
+  }
+
+  if (res.error) {
+    const mapped = mapAuthError(res.error);
+    logger.warn("Ошибка silent sign-in.", { context, error: res.error, code: mapped.code });
+
+    // login_required для prompt=none = нужен интерактивный вход (не ретраи)
+    if (mapped.code === "login_required") {
+      throw new SilentSignInError("Нужен интерактивный вход.", {
+        interactionRequired: true,
+        code: mapped.code,
+      });
+    }
+
+    if (mapped.interactionRequired) {
+      throw new SilentSignInError("Нужен интерактивный вход.", {
+        interactionRequired: true,
+        code: mapped.code,
+      });
+    }
+
+    if (mapped.retryable) {
+      throw new SilentSignInError("Сессия требует повторного входа.", {
+        retryable: true,
+        code: mapped.code,
+      });
+    }
+
+    throw new SilentSignInError("Silent sign-in не удался.", { code: mapped.code });
+  }
+
+  if (!res.url) {
+    throw new SilentSignInError("NextAuth не вернул URL для перехода.");
   }
 
   navigationInProgress = true;
-  logger.info('Выполняем навигацию после silent sign-in.', { targetPath });
-  const navigationPromise = waitForNavigationCompletion(targetPath, logger);
-  window.location.replace(targetPath);
+  logger.info("Переходим на Authentik для silent sign-in.", { context, url: res.url });
 
-  await navigationPromise;
+  // Чтобы fetchWithAuth не успевал ретраить запросы, ждём pagehide/beforeunload
+  const targetPath = normalizePath(res.url);
+  const navPromise = waitForNavigationCompletion(targetPath, logger);
+
+  window.location.replace(res.url);
+  await navPromise;
 };
 
-const createSilentSignInAttempt = (context: string, logger: Logger): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    signIn('authentik', {
-      redirect: true,
-      prompt: 'none',
-      callbackUrl: window.location.href,
-    })
-      .then(async (signInResult) => {
-        if (signInResult?.error) {
-          const mappedError = mapAuthError(signInResult.error);
-          logger.warn('Ошибка silent sign-in Authentik.', {
-            context,
-            error: signInResult.error,
-            code: mappedError.code,
-          });
-
-          if (mappedError.interactionRequired) {
-            reject(
-              new SilentSignInError('Для продолжения войдите вручную.', {
-                interactionRequired: true,
-                code: mappedError.code,
-              }),
-            );
-            return;
-          }
-
-          if (mappedError.retryable) {
-            reject(
-              new SilentSignInError('Сессия требует повторного входа.', {
-                retryable: true,
-                code: mappedError.code,
-              }),
-            );
-            return;
-          }
-
-          reject(
-            new SilentSignInError('Не удалось автоматически восстановить сессию.', {
-              code: mappedError.code,
-            }),
-          );
-          return;
-        }
-
-        logger.info('Silent sign-in выполнен успешно.', { context });
-
-        if (signInResult?.url) {
-          logger.debug('Получен URL завершения silent sign-in.', {
-            context,
-            url: signInResult.url,
-          });
-          await navigateAfterSilentSignIn(signInResult.url, logger);
-          resolve();
-          return;
-        }
-
-        await navigateAfterSilentSignIn(null, logger);
-        resolve();
-      })
-      .catch((error) => {
-        logger.error('Сбой silent sign-in Authentik.', { context, error });
-        reject(new SilentSignInError('Не удалось автоматически восстановить сессию.'));
-      });
-  });
-};
 
 export const performSilentSignIn = async (
   context: string,

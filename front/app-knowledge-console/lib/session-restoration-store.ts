@@ -1,3 +1,4 @@
+// front/app-knowledge-console/lib/session-restoration-store.ts
 'use client';
 
 import { useSyncExternalStore } from 'react';

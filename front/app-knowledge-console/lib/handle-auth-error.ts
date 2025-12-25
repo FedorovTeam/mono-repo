@@ -1,3 +1,4 @@
+// front/app-knowledge-console/lib/handle-auth-error.ts
 'use client';
 
 import { signIn } from 'next-auth/react';

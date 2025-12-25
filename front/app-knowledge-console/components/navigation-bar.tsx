@@ -1,3 +1,4 @@
+// front/app-knowledge-console/components/navigation-bar.tsx
 "use client";
 
 import * as NavigationMenu from "@radix-ui/react-navigation-menu";

@@ -1,3 +1,4 @@
+// front/app-knowledge-console/app/api/graphql/route.ts
 import { NextResponse, type NextRequest } from "next/server";
 import {getServerSession, Session} from "next-auth";
 import { getToken } from "next-auth/jwt";

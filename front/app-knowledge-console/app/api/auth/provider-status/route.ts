@@ -1,3 +1,4 @@
+// front/app-knowledge-console/app/api/auth/provider-status/route.ts
 import { NextResponse } from "next/server";
 
 import {
