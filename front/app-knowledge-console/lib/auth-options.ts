@@ -232,12 +232,16 @@ const getJwtExpiration = (token?: string) => {
   }
 
   try {
-    const decodedPayload = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+    const decodedPayload = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     const exp = decodedPayload?.exp;
 
     return typeof exp === "number" ? exp * 1000 : null;
   } catch (error) {
-    createAuthLogger({ operation: "token parsing" }).warn("Не удалось декодировать exp из JWT", error);
+    const message = error instanceof Error ? error.message : String(error);
+    createAuthLogger({ operation: "token parsing" }).warn("Не удалось декодировать exp из JWT", {
+      error: message,
+    });
+
     return null;
   }
 };
