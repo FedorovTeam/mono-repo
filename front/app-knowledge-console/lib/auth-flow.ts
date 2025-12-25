@@ -10,7 +10,7 @@ const interactionErrorCodes = [
   'consent_required',
 ];
 const retryableErrorCodes = ['login_required', 'session_expired'];
-const MAX_SILENT_SIGN_IN_FAILURES = 1;
+const MAX_SILENT_SIGN_IN_FAILURES = 2;
 
 export class SilentSignInError extends Error {
   interactionRequired: boolean;
@@ -157,6 +157,7 @@ export const performSilentSignIn = async (
             context,
             attemptNumber,
             failedAttempts,
+            maxAttempts: MAX_SILENT_SIGN_IN_FAILURES,
             code: error.code,
             interactionRequired: error.interactionRequired,
             retryable: error.retryable,
@@ -167,7 +168,25 @@ export const performSilentSignIn = async (
           }
 
           if (error.retryable && failedAttempts < MAX_SILENT_SIGN_IN_FAILURES) {
+            const attemptsLeft = MAX_SILENT_SIGN_IN_FAILURES - failedAttempts;
+
+            console.info('[auth-flow] Повторяем silent sign-in после возобновляемой ошибки.', {
+              context,
+              attemptNumber,
+              failedAttempts,
+              attemptsLeft,
+            });
             continue;
+          }
+
+          if (error.retryable) {
+            console.warn('[auth-flow] Достигнут лимит повторных попыток silent sign-in.', {
+              context,
+              attemptNumber,
+              failedAttempts,
+              maxAttempts: MAX_SILENT_SIGN_IN_FAILURES,
+              code: error.code,
+            });
           }
         }
 
