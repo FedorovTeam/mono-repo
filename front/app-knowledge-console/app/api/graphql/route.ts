@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
+import {getServerSession, Session} from "next-auth";
 import { getToken } from "next-auth/jwt";
 import { authOptions } from "@/lib/auth-options";
 import { createAuthLogger } from "@/lib/auth-logger";
@@ -52,12 +52,12 @@ function parseRequestBody(request: NextRequest) {
     .then((body) => body as unknown);
 }
 
-const resolveUserFromSession = (session: Awaited<ReturnType<typeof getServerSession>>) => {
-  const idCandidate = (session?.user as { id?: string } | undefined)?.id;
+const resolveUserFromSession = (session: Session | null) => {
+  const user = session?.user as { id?: string; email?: string } | undefined;
 
   return {
-    id: typeof idCandidate === "string" ? idCandidate : undefined,
-    email: typeof session?.user?.email === "string" ? session.user.email : undefined,
+    id: typeof user?.id === "string" ? user.id : undefined,
+    email: typeof user?.email === "string" ? user.email : undefined,
   };
 };
 
