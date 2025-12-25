@@ -50,12 +50,79 @@ export const mapAuthError = (error?: string | null) => {
 
 let activeAttempt: Promise<void> | null = null;
 let failedAttempts = 0;
+let navigationInProgress = false;
 
-const replaceCurrentLocation = (targetUrl?: string | null) => {
+const normalizePath = (targetUrl?: string | null) => {
   const destination = new URL(targetUrl ?? window.location.href, window.location.href);
-  const normalizedPath = `${destination.pathname}${destination.search}${destination.hash}`;
 
-  window.location.replace(normalizedPath);
+  return `${destination.pathname}${destination.search}${destination.hash}`;
+};
+
+const waitForNavigationCompletion = async (targetPath: string): Promise<void> => {
+  console.info('[auth-flow] Ожидаем завершения навигации после silent sign-in.', { targetPath });
+
+  await new Promise<void>((resolve) => {
+    let completed = false;
+
+    const cleanup = () => {
+      if (completed) return;
+
+      completed = true;
+      navigationInProgress = false;
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearTimeout(timeoutId);
+      resolve();
+    };
+
+    const finish = (reason: string) => {
+      console.info('[auth-flow] Завершение ожидания навигации после silent sign-in.', {
+        targetPath,
+        reason,
+      });
+      cleanup();
+    };
+
+    const handlePageHide = () => finish('pagehide');
+    const handleBeforeUnload = () => finish('beforeunload');
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        finish('visibilitychange');
+      }
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      console.warn('[auth-flow] Навигация после silent sign-in не подтверждена вовремя.', {
+        targetPath,
+      });
+      finish('timeout');
+    }, 5000);
+
+    window.addEventListener('pagehide', handlePageHide, { once: true });
+    window.addEventListener('beforeunload', handleBeforeUnload, { once: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  });
+};
+
+const navigateAfterSilentSignIn = async (targetUrl?: string | null): Promise<void> => {
+  const targetPath = normalizePath(targetUrl ?? window.location.href);
+  const currentPath = normalizePath();
+
+  if (targetPath === currentPath) {
+    console.info('[auth-flow] Целевой URL совпадает с текущим, навигация не требуется.', {
+      targetPath,
+    });
+    navigationInProgress = false;
+    return;
+  }
+
+  navigationInProgress = true;
+  console.info('[auth-flow] Выполняем навигацию после silent sign-in.', { targetPath });
+  const navigationPromise = waitForNavigationCompletion(targetPath);
+  window.location.replace(targetPath);
+
+  await navigationPromise;
 };
 
 const createSilentSignInAttempt = (context: string): Promise<void> => {
@@ -105,15 +172,16 @@ const createSilentSignInAttempt = (context: string): Promise<void> => {
         console.info('[auth-flow] Silent sign-in выполнен успешно.', { context });
 
         if (signInResult?.url) {
-          console.info('[auth-flow] Получен URL завершения silent sign-in, выполняем навигацию.', {
+          console.info('[auth-flow] Получен URL завершения silent sign-in.', {
             context,
+            url: signInResult.url,
           });
-          replaceCurrentLocation(signInResult.url);
+          await navigateAfterSilentSignIn(signInResult.url);
           resolve();
           return;
         }
 
-        replaceCurrentLocation();
+        await navigateAfterSilentSignIn();
         resolve();
       })
       .catch((error) => {
@@ -218,3 +286,4 @@ export const performSilentSignIn = async (
 };
 
 export const hasActiveSilentSignIn = () => activeAttempt !== null;
+export const isSilentSignInNavigationInProgress = () => navigationInProgress;
