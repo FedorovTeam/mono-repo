@@ -1,6 +1,10 @@
 'use client';
 
-import { SilentSignInError, performSilentSignIn } from './auth-flow';
+import {
+  SilentSignInError,
+  isSilentSignInNavigationInProgress,
+  performSilentSignIn,
+} from './auth-flow';
 
 export { SilentSignInError } from './auth-flow';
 
@@ -54,6 +58,13 @@ export const fetchWithAuth = async (
     throw new SilentSignInError('Не удалось автоматически восстановить сессию.', {
       interactionRequired: true,
     });
+  }
+
+  if (isSilentSignInNavigationInProgress()) {
+    console.info(
+      '[http-client] Навигация после silent sign-in активна, пропускаем повторный запрос.',
+    );
+    return response;
   }
 
   const retryResponse = await fetch(input, fetchInit);
