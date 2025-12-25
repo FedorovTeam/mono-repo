@@ -23,24 +23,15 @@ export const handleAuthError = (error: unknown, options: HandleAuthErrorOptions 
     return false;
   }
 
-  const logger = createLogger({ operation: 'handleAuthError', target: '/api/auth/signin' });
-
   options.onInteractionStart?.();
 
   const callbackUrl =
-    options.callbackUrl ?? (typeof window !== 'undefined' ? window.location.href : undefined);
+      options.callbackUrl ?? (typeof window !== 'undefined' ? window.location.href : undefined);
 
-  const redirectPromise = signIn('authentik', callbackUrl ? { callbackUrl } : undefined);
-
-  if (!redirectPromise) {
-    fallbackRedirect(callbackUrl);
+  if (typeof window !== 'undefined' && callbackUrl) {
+    window.location.href = `/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`;
     return true;
   }
-
-  redirectPromise.catch((signInError) => {
-    logger.error('Ошибка при попытке входа через Authentik', { error: signInError });
-    fallbackRedirect(callbackUrl);
-  });
 
   return true;
 };

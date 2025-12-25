@@ -11,6 +11,7 @@ const interactionErrorCodes = [
   'interaction_required',
   'interactionrequiredautherror',
   'consent_required',
+  'login_required',
 ];
 const retryableErrorCodes = ['login_required', 'session_expired'];
 const MAX_SILENT_SIGN_IN_FAILURES = 2;
