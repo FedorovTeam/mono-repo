@@ -58,7 +58,7 @@ export default function NavigationBar() {
     <NavigationMenu.Root className="fixed inset-x-0 top-0 z-50 border-b border-slate-200 bg-white/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         <span className="text-sm font-semibold tracking-tight text-slate-900">
-          Knowledge Console
+          <Link href={"/"} >Knowledge Console</Link>
         </span>
         <div className="flex items-center gap-3">
           <NavigationMenu.List className="flex items-center gap-2">
