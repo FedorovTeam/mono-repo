@@ -204,22 +204,23 @@ export default function DocumentsPage() {
         return;
       }
 
+      const correlationId = generateCorrelationId();
+
       try {
-        const correlationId = generateCorrelationId();
         const query = `
-          query KnowledgeDocument($id: ID!) {
-            knowledgeDocument(id: $id) {
-              id
-              status
-              path
-              repository
-              branch
-              jobId
-              error
-              fileName
-              createdAt
-            }
+        query KnowledgeDocument($id: ID!) {
+          knowledgeDocument(id: $id) {
+            id
+            status
+            path
+            repository
+            branch
+            jobId
+            error
+            fileName
+            createdAt
           }
+        }
         `;
 
         const res = await fetchWithAuth('/api/graphql', {
@@ -242,9 +243,7 @@ export default function DocumentsPage() {
         }
 
         const doc = json.data?.knowledgeDocument;
-        if (!doc) {
-          return;
-        }
+        if (!doc) return;
 
         pollErrorAttempts.current.delete(id);
         setDocuments((prev) => prev.map((item) => (item.id === doc.id ? { ...item, ...doc } : item)));
@@ -258,11 +257,14 @@ export default function DocumentsPage() {
             });
           },
         });
+
         if (authHandled || err instanceof SilentSignInError) {
           return;
         }
+
         const nextAttempts = errorCount + 1;
         pollErrorAttempts.current.set(id, nextAttempts);
+
         if (nextAttempts >= MAX_POLL_ERRORS) {
           logger.error('Polling остановлен после максимального количества неудач', {
             correlationId,
@@ -271,6 +273,7 @@ export default function DocumentsPage() {
           });
           return;
         }
+
         logger.error('Ошибка при polling документа', {
           correlationId,
           documentId: id,
@@ -278,6 +281,7 @@ export default function DocumentsPage() {
           attempts: nextAttempts,
         });
       }
+
     },
     [],
   );
