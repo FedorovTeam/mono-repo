@@ -220,19 +220,35 @@ const resolveUserContext = (profile?: Record<string, unknown> | null) => {
   };
 };
 
+const decodeBase64UrlToString = (input: string) => {
+  // base64url -> base64
+  let base64 = input.replace(/-/g, "+").replace(/_/g, "/");
+
+  // padding до кратности 4
+  const pad = base64.length % 4;
+  if (pad) base64 += "=".repeat(4 - pad);
+
+  // atob -> bytes -> utf8 string
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder("utf-8").decode(bytes);
+};
+
 const getJwtExpiration = (token?: string) => {
-  if (typeof token !== "string") {
+  if (typeof token !== "string" || token.trim() === "") {
     return null;
   }
 
-  const [, payload] = token.split(".");
+  const parts = token.split(".");
+  const payload = parts.length >= 2 ? parts[1] : null;
 
   if (!payload) {
     return null;
   }
 
   try {
-    const decodedPayload = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const decodedPayloadStr = decodeBase64UrlToString(payload);
+    const decodedPayload = JSON.parse(decodedPayloadStr) as { exp?: unknown };
     const exp = decodedPayload?.exp;
 
     return typeof exp === "number" ? exp * 1000 : null;
@@ -241,10 +257,10 @@ const getJwtExpiration = (token?: string) => {
     createAuthLogger({ operation: "token parsing" }).warn("Не удалось декодировать exp из JWT", {
       error: message,
     });
-
     return null;
   }
 };
+
 
 const resolveExpiresAt = ({
   expiresAtSeconds,
