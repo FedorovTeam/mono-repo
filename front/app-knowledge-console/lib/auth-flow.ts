@@ -8,13 +8,21 @@ import { generateCorrelationId } from './correlation';
 import { setRestoringSession } from './session-restoration-store';
 
 const interactionErrorCodes = [
-  'interaction_required',
-  'interactionrequiredautherror',
-  'consent_required',
-  'login_required',
+  "interaction_required",
+  "interactionrequiredautherror",
+  "consent_required",
+  "login_required",
+  "callback",
+  "oauthcallback",
+  "oauthcallbackerror",
+  "oauthcallbackerrorautherror",
 ];
-const retryableErrorCodes = ['login_required', 'session_expired'];
-const MAX_SILENT_SIGN_IN_FAILURES = 2;
+
+const retryableErrorCodes = [
+  "session_expired",
+];
+
+const MAX_SILENT_SIGN_IN_FAILURES = 1;
 
 export class SilentSignInError extends Error {
   interactionRequired: boolean;
