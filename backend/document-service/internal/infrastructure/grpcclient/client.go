@@ -25,6 +25,7 @@ func NewGRPCClient(addr string, cfg config.ServicesGRPC) (*grpc.ClientConn, erro
 			Timeout:             cfg.Keepalive.Timeout,
 			PermitWithoutStream: cfg.Keepalive.PermitWithoutStream,
 		}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(16*1024*1024)), // увеличивает до 16 МБ
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
 				BaseDelay:  cfg.Backoff.BaseDelay,

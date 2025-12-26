@@ -85,6 +85,9 @@ func main() {
 
 	observability.ConfigureProviders(observabilityCfg)
 	serverOptions := observability.GRPCServerOptions(observabilityCfg, correlationLoggingInterceptor())
+	serverOptions = append(serverOptions, grpc.MaxRecvMsgSize(16*1024*1024))
+	serverOptions = append(serverOptions, grpc.MaxSendMsgSize(16*1024*1024))
+
 	grpcServer := grpc.NewServer(serverOptions...)
 	storagev1.RegisterStorageServiceServer(grpcServer, grpcserver.New(minioAPI, keyGenerator, cfg.Minio.Buckets.KnowledgeDocx, cfg.Minio.Buckets.KnowledgeMD, storageService))
 
