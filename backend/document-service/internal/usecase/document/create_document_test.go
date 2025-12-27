@@ -25,7 +25,7 @@ func (r *repositoryStub) CreateDocument(_ context.Context, doc *domain.Document,
 func (*repositoryStub) GetDocument(context.Context, string) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }
-func (*repositoryStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) (*domain.DocumentList, error) {
+func (*repositoryStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus, *string) (*domain.DocumentList, error) {
 	return nil, errors.New("not implemented")
 }
 func (*repositoryStub) UpdateStatus(context.Context, string, domain.DocumentStatus, string, string, *domain.DocumentVersion) (*domain.Document, error) {
