@@ -9,7 +9,7 @@ import (
 type DocumentRepository interface {
 	CreateDocument(ctx context.Context, doc *Document, version *DocumentVersion, log *DocumentStatusLog) (*Document, error)
 	GetDocument(ctx context.Context, id string) (*Document, error)
-	ListDocuments(ctx context.Context, limit, offset int, status *DocumentStatus) ([]Document, error)
+	ListDocuments(ctx context.Context, limit, offset int, status *DocumentStatus) (*DocumentList, error)
 	UpdateStatus(ctx context.Context, id string, to DocumentStatus, reason, errorReason string, version *DocumentVersion) (*Document, error)
 	UpdateDocumentOptions(ctx context.Context, id string, strategy ConversionStrategy, extractTables *bool) (*Document, error)
 	LastNonFailedStatus(ctx context.Context, id string) (DocumentStatus, error)

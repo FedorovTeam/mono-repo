@@ -112,7 +112,7 @@ func (r *publishRepoStub) CreateDocument(context.Context, *domain.Document, *dom
 	return nil, nil
 }
 
-func (r *publishRepoStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) ([]domain.Document, error) {
+func (r *publishRepoStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) (*domain.DocumentList, error) {
 	return nil, nil
 }
 

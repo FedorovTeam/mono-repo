@@ -261,14 +261,25 @@ func (r *Repository) CountStatusLogsWithReasonPrefix(ctx context.Context, id str
 	return count, nil
 }
 
-func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) ([]domain.Document, error) {
-	base := `SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, conversion_strategy, extract_tables, created_at, updated_at FROM documents`
-	args := []any{}
-	if status != nil {
-		base += " WHERE status=$1"
-		args = append(args, string(*status))
+func buildDocumentsFilter(status *domain.DocumentStatus) (string, []any) {
+	if status == nil {
+		return "", nil
 	}
-	base += " ORDER BY created_at DESC"
+	return " WHERE status=$1", []any{string(*status)}
+}
+
+func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) (*domain.DocumentList, error) {
+	filterClause, filterArgs := buildDocumentsFilter(status)
+
+	countQuery := "SELECT count(*) FROM documents" + filterClause
+	var totalCount int64
+	if err := r.db.QueryRowContext(ctx, countQuery, filterArgs...).Scan(&totalCount); err != nil {
+		return nil, err
+	}
+
+	base := `SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, conversion_strategy, extract_tables, created_at, updated_at FROM documents`
+	args := append([]any{}, filterArgs...)
+	base += filterClause + " ORDER BY created_at DESC"
 	if limit > 0 {
 		args = append(args, limit)
 		base += " LIMIT $" + itoa(len(args))
@@ -284,7 +295,7 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 	}
 	defer rows.Close()
 
-	var result []domain.Document
+	var documents []domain.Document
 	for rows.Next() {
 		var doc domain.Document
 		if err := scanDocument(rows, &doc); err != nil {
@@ -293,9 +304,9 @@ func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, statu
 		if err := r.attachActiveJob(ctx, &doc); err != nil {
 			return nil, err
 		}
-		result = append(result, doc)
+		documents = append(documents, doc)
 	}
-	return result, nil
+	return &domain.DocumentList{Documents: documents, TotalCount: totalCount}, nil
 }
 
 func (r *Repository) UpdateStatus(ctx context.Context, id string, to domain.DocumentStatus, reason, errorReason string, version *domain.DocumentVersion) (*domain.Document, error) {

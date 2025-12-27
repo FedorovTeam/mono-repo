@@ -161,6 +161,8 @@ func TestListDocuments(t *testing.T) {
 	repo := New(db)
 	ctx := context.Background()
 
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT count(*) FROM documents")).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, conversion_strategy, extract_tables, created_at, updated_at FROM documents ORDER BY created_at DESC")).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "conversion_strategy", "extract_tables", "created_at", "updated_at"}).
 			AddRow("doc-1", "name", "", "", "", "", "", domain.DocumentStatusUploaded, "", "orig", "orig/key", "md", "md/key", "", false, "", false, time.Now(), time.Now()))
@@ -170,7 +172,35 @@ func TestListDocuments(t *testing.T) {
 
 	docs, err := repo.ListDocuments(ctx, 0, 0, nil)
 	require.NoError(t, err)
-	require.Len(t, docs, 1)
+	require.Len(t, docs.Documents, 1)
+	require.EqualValues(t, 1, docs.TotalCount)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListDocumentsWithPaginationReturnsTotalCount(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	repo := New(db)
+	ctx := context.Background()
+	status := domain.DocumentStatusUploaded
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT count(*) FROM documents WHERE status=$1")).
+		WithArgs(string(status)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, name, owner, repository, branch, base_branch, path, status, workflow_id, original_bucket, original_object_key, markdown_bucket, markdown_object_key, error_reason, create_pr, conversion_strategy, extract_tables, created_at, updated_at FROM documents WHERE status=$1 ORDER BY created_at DESC LIMIT $2")).
+		WithArgs(string(status), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "owner", "repository", "branch", "base_branch", "path", "status", "workflow_id", "original_bucket", "original_object_key", "markdown_bucket", "markdown_object_key", "error_reason", "create_pr", "conversion_strategy", "extract_tables", "created_at", "updated_at"}).
+			AddRow("doc-1", "name", "", "", "", "", "", domain.DocumentStatusUploaded, "", "orig", "orig/key", "md", "md/key", "", false, "", false, time.Now(), time.Now()))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT task_id, document_id, stage, status, attempts, next_run_at, payload, created_at, updated_at FROM processing_jobs WHERE document_id=$1 AND status IN ($2,$3) ORDER BY created_at DESC LIMIT 1")).
+		WithArgs("doc-1", domain.JobStatusPending, domain.JobStatusInProgress).
+		WillReturnError(sql.ErrNoRows)
+
+	docs, err := repo.ListDocuments(ctx, 1, 0, &status)
+	require.NoError(t, err)
+	require.Len(t, docs.Documents, 1)
+	require.EqualValues(t, 2, docs.TotalCount)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

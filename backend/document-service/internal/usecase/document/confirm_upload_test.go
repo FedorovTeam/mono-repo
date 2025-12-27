@@ -24,7 +24,7 @@ func (r *confirmUploadRepositoryStub) GetDocument(context.Context, string) (*dom
 	return r.doc, nil
 }
 
-func (r *confirmUploadRepositoryStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) ([]domain.Document, error) {
+func (r *confirmUploadRepositoryStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) (*domain.DocumentList, error) {
 	return nil, errors.New("not implemented")
 }
 

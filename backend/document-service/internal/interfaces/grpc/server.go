@@ -61,13 +61,13 @@ func (s *Server) GetDocument(ctx context.Context, req *documentv1.GetDocumentReq
 func (s *Server) ListDocuments(ctx context.Context, req *documentv1.ListDocumentsRequest) (*documentv1.ListDocumentsResponse, error) {
 	s.logWithCorrelation(ctx, "ListDocuments")
 	dto := fromListDocumentsRequest(req)
-	items, err := s.service.ListDocuments(ctx, dto.Limit, dto.Offset, dto.Status)
+	list, err := s.service.ListDocuments(ctx, dto.Limit, dto.Offset, dto.Status)
 	if err != nil {
 		return nil, err
 	}
-	res := &documentv1.ListDocumentsResponse{}
-	for i := range items {
-		copy := items[i]
+	res := &documentv1.ListDocumentsResponse{TotalCount: list.TotalCount}
+	for i := range list.Documents {
+		copy := list.Documents[i]
 		res.Documents = append(res.Documents, toProto(&copy))
 	}
 	return res, nil
