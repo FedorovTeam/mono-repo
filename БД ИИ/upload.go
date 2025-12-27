@@ -50,10 +50,26 @@ type uploadRequest struct {
 	Variables map[string]interface{} `json:"variables"`
 }
 
+// account:
+// Username: uploader
+// Secret: fgqjPDaqjB5F0epj3YVe90xlzXx4IB1ARExVHS8wg2Rmiil6kX57S1VFPQB2
+
+// provider client_id: L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF
+
+/*
+curl -sS -X POST 'https://auth.tech.fedorov-team.tech/application/o/token/' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'client_id=L6AmiswYzea2gAs5aGfzhLP9jlapG42ppPhtutoF' \
+  --data-urlencode 'username=uploader' \
+  --data-urlencode 'password=fgqjPDaqjB5F0epj3YVe90xlzXx4IB1ARExVHS8wg2Rmiil6kX57S1VFPQB2' \
+  --data-urlencode 'scope=openid profile email' | jq
+*/
+
 func main() {
 	endpoint := flag.String("endpoint", "https://gateway.tech.fedorov-team.tech/query", "GraphQL endpoint gateway-service (/query)")
-	token := flag.String("token", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0.KMUFsIDTnFmyG3nMiGM6H9FNFUROf3wh7SmqJp-QV30", "Заголовок Authorization: Bearer <...>")
-	apiKey := flag.String("apiKey", "", "Значение X-API-Key, если включено")
+	token := flag.String("token", "Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6IjhmOGUyZjc5ZTcyY2YyNzkxNjJhM2QxZDU2NzVlNTRkIiwidHlwIjoiSldUIn0.eyJpc3MiOiJodHRwczovL2F1dGgudGVjaC5mZWRvcm92LXRlYW0udGVjaC9hcHBsaWNhdGlvbi9vL2NvbnNvbGUvIiwic3ViIjoiNmJhMDlkYjcxMWJiODc3ZDE3NTYyM2ZjMDhkZGQzNGU1NzU3ODZiMDdjODI0NmIzNzVjMzY1OWE4ZGFhNGZiZiIsImF1ZCI6Ikw2QW1pc3dZemVhMmdBczVhR2Z6aExQOWpsYXBHNDJwcFBodHV0b0YiLCJleHAiOjE3NjY4MDgyOTUsImlhdCI6MTc2NjgwNzk5NSwiYXV0aF90aW1lIjoxNzY2ODA3OTk1LCJhY3IiOiJnb2F1dGhlbnRpay5pby9wcm92aWRlcnMvb2F1dGgyL2RlZmF1bHQiLCJlbWFpbCI6IiIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJuYW1lIjoidXBsb2FkZXIiLCJnaXZlbl9uYW1lIjoidXBsb2FkZXIiLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJ1cGxvYWRlciIsIm5pY2tuYW1lIjoidXBsb2FkZXIiLCJncm91cHMiOltdLCJhenAiOiJMNkFtaXN3WXplYTJnQXM1YUdmemhMUDlqbGFwRzQycHBQaHR1dG9GIiwidWlkIjoiam5NRGVDTzVXTUNkVGtaR2laR0hObjJxSnV5YkV3NzNET1Y1bWhKRCJ9.WZ5KsHejI3z3my_26kuYpQP5nMpcGBGfCZxFPWU7Vv670LVbdcGVc55hRaEDlAQJiIhW3gnKTU3m2LOS4VgZNGTfdtr6FCprHNXk4yN679JsrmAZX7PnZZaHG9prAZPTLyyRAtMzLC6CLsFYACTKD0kdGel9IhK44cFB54oHDbbptywonQ8HDw2Ko5new8mjJ1zhmwXXqSC928QeC2-T46eZjlsmn0MCEMvAAR9MdWmnFMw7Btv6ScKzmfQDY8LW2dRpCLydmrimSfDwmWqfjDCqN37dskZPcnxLvGt2Ttt39dMybv6qB1xSrJk0GX9FkK57VaM9kvKv1fyYlSFfG9PK1mvH2W1XobuuTezdbSYfknCQy1ul68XjA7lps_ObpcD1ggiu7qL-5BY_dzk_fnIRBtHgEJm5nxuaxo8bWz0EJ3SItDRPz7ZPx1c0hvHLBWLaWm1E8I7fKXiQ5LTNg75smEP9ldhwd6NY07pkuHfJu6vD6uvTUeojJdXPo-qW10xsTi6GsIPDMnXZJTFGF6irxnHnUHXvXxj2ZeJ6HLVw4qMCeMfxWI7me1n8afUseYhkekAChcC4YNXtNlv3PsPz_q3-7tcZIxiN-AB7sQe5oF1zPpAIkvv7W0r_BArA40rNevH7CowgdvE-Fapr12GLzw8ulV2qpcdyROTfB04", "Заголовок Authorization: Bearer <...>")
+	apiKey := flag.String("apiKey", "secret", "Значение X-API-Key, если включено")
 	repository := flag.String("repository", "docs", "Целевой репозиторий")
 	branch := flag.String("branch", "main", "Целевая ветка")
 	root := flag.String("root", ".", "Корневая папка с файлами для загрузки")
