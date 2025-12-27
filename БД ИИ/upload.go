@@ -51,8 +51,8 @@ type uploadRequest struct {
 }
 
 func main() {
-	endpoint := flag.String("endpoint", "", "GraphQL endpoint gateway-service (/query)")
-	token := flag.String("token", "", "Заголовок Authorization: Bearer <...>")
+	endpoint := flag.String("endpoint", "https://gateway.tech.fedorov-team.tech/query", "GraphQL endpoint gateway-service (/query)")
+	token := flag.String("token", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0.KMUFsIDTnFmyG3nMiGM6H9FNFUROf3wh7SmqJp-QV30", "Заголовок Authorization: Bearer <...>")
 	apiKey := flag.String("apiKey", "", "Значение X-API-Key, если включено")
 	repository := flag.String("repository", "docs", "Целевой репозиторий")
 	branch := flag.String("branch", "main", "Целевая ветка")
@@ -111,6 +111,9 @@ func collectFiles(root string) ([]string, error) {
 		if strings.HasSuffix(strings.ToLower(d.Name()), "~") {
 			return nil
 		}
+		if d.Name() == ".DS_Store" {
+			return nil
+		}
 		files = append(files, path)
 		return nil
 	})
@@ -120,10 +123,10 @@ func collectFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-func resolvePath(root, path string) string {
-	rel, err := filepath.Rel(root, path)
+func resolvePath(root, filePath string) string {
+	rel, err := filepath.Rel(root, filePath)
 	if err != nil {
-		rel = filepath.Base(path)
+		rel = filepath.Base(filePath)
 	}
 
 	sessionNumber := extractLeadingDigits(filepath.Dir(rel))
@@ -132,15 +135,15 @@ func resolvePath(root, path string) string {
 	}
 	sessionNumber = pad(sessionNumber, 2)
 
-	fileName := filepath.Base(path)
-	docType, docNumber := classifyDocument(fileName)
-	docNumber = pad(docNumber, 2)
+	origName := filepath.Base(filePath)
+
+	docType, _ := classifyDocument(origName)
 
 	switch docType {
 	case "voting":
-		return fmt.Sprintf("%s/plenary/%s/votings/question-%s.md", knowledgeRoot, sessionNumber, docNumber)
+		return filepath.ToSlash(fmt.Sprintf("%s/plenary/%s/votings/%s", knowledgeRoot, sessionNumber, origName))
 	default:
-		return fmt.Sprintf("%s/plenary/%s/transcripts/stenogramma-%s.md", knowledgeRoot, sessionNumber, docNumber)
+		return filepath.ToSlash(fmt.Sprintf("%s/plenary/%s/transcripts/%s", knowledgeRoot, sessionNumber, origName))
 	}
 }
 
@@ -154,7 +157,7 @@ func classifyDocument(name string) (string, string) {
 	lower := strings.ToLower(name)
 	digits := regexp.MustCompile(`(\d+)`).FindString(name)
 
-	if strings.Contains(lower, "протокол") || strings.Contains(lower, "voting") {
+	if strings.Contains(lower, "голос") || strings.Contains(lower, "voting") {
 		if digits != "" {
 			return "voting", digits
 		}
