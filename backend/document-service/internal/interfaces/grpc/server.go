@@ -61,7 +61,7 @@ func (s *Server) GetDocument(ctx context.Context, req *documentv1.GetDocumentReq
 func (s *Server) ListDocuments(ctx context.Context, req *documentv1.ListDocumentsRequest) (*documentv1.ListDocumentsResponse, error) {
 	s.logWithCorrelation(ctx, "ListDocuments")
 	dto := fromListDocumentsRequest(req)
-	list, err := s.service.ListDocuments(ctx, dto.Limit, dto.Offset, dto.Status)
+	list, err := s.service.ListDocuments(ctx, dto.Limit, dto.Offset, dto.Status, dto.Repository)
 	if err != nil {
 		return nil, err
 	}

@@ -44,6 +44,6 @@ func (uc *UseCase) GetDocument(ctx context.Context, id string) (*domain.Document
 	return uc.repo.GetDocument(ctx, id)
 }
 
-func (uc *UseCase) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) (*domain.DocumentList, error) {
-	return uc.repo.ListDocuments(ctx, limit, offset, status)
+func (uc *UseCase) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus, repository *string) (*domain.DocumentList, error) {
+	return uc.repo.ListDocuments(ctx, limit, offset, status, repository)
 }

@@ -69,7 +69,7 @@ func (r *UploadReconciler) reconcile(ctx context.Context) error {
 	offset := 0
 
 	for {
-		list, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &docStatus)
+		list, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &docStatus, nil)
 		if err != nil {
 			r.metrics.recordError(ctx)
 			return err

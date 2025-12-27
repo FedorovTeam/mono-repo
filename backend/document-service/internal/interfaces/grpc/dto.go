@@ -42,9 +42,10 @@ type confirmUploadDTO struct {
 }
 
 type listDocumentsDTO struct {
-	Limit  int
-	Offset int
-	Status *domain.DocumentStatus
+	Limit      int
+	Offset     int
+	Status     *domain.DocumentStatus
+	Repository *string
 }
 
 func fromCreateDocumentRequest(req *documentv1.CreateDocumentRequest) createDocumentDTO {
@@ -140,9 +141,14 @@ func fromListDocumentsRequest(req *documentv1.ListDocumentsRequest) listDocument
 		mapped := fromProtoStatus(req.GetStatusFilter())
 		status = &mapped
 	}
+	var repository *string
+	if repo := req.GetRepository(); repo != "" {
+		repository = &repo
+	}
 	return listDocumentsDTO{
-		Limit:  int(req.GetLimit()),
-		Offset: int(req.GetOffset()),
-		Status: status,
+		Limit:      int(req.GetLimit()),
+		Offset:     int(req.GetOffset()),
+		Status:     status,
+		Repository: repository,
 	}
 }

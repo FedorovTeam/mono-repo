@@ -261,15 +261,28 @@ func (r *Repository) CountStatusLogsWithReasonPrefix(ctx context.Context, id str
 	return count, nil
 }
 
-func buildDocumentsFilter(status *domain.DocumentStatus) (string, []any) {
-	if status == nil {
+func buildDocumentsFilter(status *domain.DocumentStatus, repository *string) (string, []any) {
+	var conditions []string
+	var args []any
+
+	if status != nil {
+		args = append(args, string(*status))
+		conditions = append(conditions, fmt.Sprintf("status=$%d", len(args)))
+	}
+	if repository != nil {
+		args = append(args, *repository)
+		conditions = append(conditions, fmt.Sprintf("repository=$%d", len(args)))
+	}
+
+	if len(conditions) == 0 {
 		return "", nil
 	}
-	return " WHERE status=$1", []any{string(*status)}
+
+	return " WHERE " + strings.Join(conditions, " AND "), args
 }
 
-func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) (*domain.DocumentList, error) {
-	filterClause, filterArgs := buildDocumentsFilter(status)
+func (r *Repository) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus, repository *string) (*domain.DocumentList, error) {
+	filterClause, filterArgs := buildDocumentsFilter(status, repository)
 
 	countQuery := "SELECT count(*) FROM documents" + filterClause
 	var totalCount int64

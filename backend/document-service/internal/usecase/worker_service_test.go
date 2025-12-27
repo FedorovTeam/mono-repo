@@ -35,7 +35,7 @@ func (r *fakeJobRepo) CreateDocument(context.Context, *domain.Document, *domain.
 func (r *fakeJobRepo) GetDocument(context.Context, string) (*domain.Document, error) {
 	return nil, errors.New("not implemented")
 }
-func (r *fakeJobRepo) ListDocuments(context.Context, int, int, *domain.DocumentStatus) (*domain.DocumentList, error) {
+func (r *fakeJobRepo) ListDocuments(context.Context, int, int, *domain.DocumentStatus, *string) (*domain.DocumentList, error) {
 	return nil, errors.New("not implemented")
 }
 func (r *fakeJobRepo) UpdateStatus(context.Context, string, domain.DocumentStatus, string, string, *domain.DocumentVersion) (*domain.Document, error) {

@@ -36,7 +36,7 @@ func (f *fakeRepo) GetDocument(ctx context.Context, id string) (*domain.Document
 	return nil, fmt.Errorf("document %s not found", id)
 }
 
-func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) (*domain.DocumentList, error) {
+func (f *fakeRepo) ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus, repository *string) (*domain.DocumentList, error) {
 	return nil, nil
 }
 
