@@ -12,7 +12,7 @@ type DocumentService interface {
 	ConfirmUpload(ctx context.Context, in ConfirmUploadInput) (*domain.Document, error)
 	UpdateStatus(ctx context.Context, in UpdateStatusInput) (*domain.Document, error)
 	GetDocument(ctx context.Context, id string) (*domain.Document, error)
-	ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) ([]domain.Document, error)
+	ListDocuments(ctx context.Context, limit, offset int, status *domain.DocumentStatus) (*domain.DocumentList, error)
 }
 
 var _ DocumentService = (*UseCase)(nil)

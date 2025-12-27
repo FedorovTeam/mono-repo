@@ -34,8 +34,8 @@ func (r *repoStub) CreateDocument(context.Context, *domain.Document, *domain.Doc
 
 func (r *repoStub) GetDocument(context.Context, string) (*domain.Document, error) { return r.doc, nil }
 
-func (r *repoStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) ([]domain.Document, error) {
-	return r.docs, nil
+func (r *repoStub) ListDocuments(context.Context, int, int, *domain.DocumentStatus) (*domain.DocumentList, error) {
+	return &domain.DocumentList{Documents: r.docs, TotalCount: int64(len(r.docs))}, nil
 }
 
 func (r *repoStub) UpdateStatus(context.Context, string, domain.DocumentStatus, string, string, *domain.DocumentVersion) (*domain.Document, error) {

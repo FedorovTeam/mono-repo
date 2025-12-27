@@ -32,6 +32,12 @@ type Document struct {
 	Versions           []DocumentVersion
 }
 
+// DocumentList описывает страницу документов с общим количеством записей.
+type DocumentList struct {
+	Documents  []Document
+	TotalCount int64
+}
+
 // DocumentVersion хранит ссылки на конкретную версию объекта в хранилище.
 type DocumentVersion struct {
 	ID                string

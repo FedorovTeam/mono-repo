@@ -69,18 +69,18 @@ func (r *UploadReconciler) reconcile(ctx context.Context) error {
 	offset := 0
 
 	for {
-		docs, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &docStatus)
+		list, err := r.repo.ListDocuments(ctx, r.batchSize, offset, &docStatus)
 		if err != nil {
 			r.metrics.recordError(ctx)
 			return err
 		}
-		r.metrics.observeBatch(ctx, len(docs))
-		if len(docs) == 0 {
+		r.metrics.observeBatch(ctx, len(list.Documents))
+		if len(list.Documents) == 0 {
 			r.metrics.observeBatch(ctx, 0)
 			return nil
 		}
 
-		for _, doc := range docs {
+		for _, doc := range list.Documents {
 			started := time.Now()
 			if doc.UpdatedAt.After(cutoff) {
 				continue
@@ -96,9 +96,9 @@ func (r *UploadReconciler) reconcile(ctx context.Context) error {
 			r.metrics.recordDuration(ctx, time.Since(started))
 		}
 
-		if len(docs) < r.batchSize {
+		if len(list.Documents) < r.batchSize {
 			return nil
 		}
-		offset += len(docs)
+		offset += len(list.Documents)
 	}
 }

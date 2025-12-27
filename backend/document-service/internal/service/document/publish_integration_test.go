@@ -91,7 +91,7 @@ func (r *integrationRepo) GetDocument(_ context.Context, id string) (*domain.Doc
 	return &domain.Document{ID: id, Status: domain.DocumentStatusConvertedToMarkdown, MarkdownBucket: "bucket", MarkdownObjectKey: "object-key", Versions: []domain.DocumentVersion{{Version: 1, MarkdownObjectKey: "object-key"}}}, nil
 }
 
-func (r *integrationRepo) ListDocuments(context.Context, int, int, *domain.DocumentStatus) ([]domain.Document, error) {
+func (r *integrationRepo) ListDocuments(context.Context, int, int, *domain.DocumentStatus) (*domain.DocumentList, error) {
 	return nil, nil
 }
 

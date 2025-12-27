@@ -81,6 +81,7 @@ message ListDocumentsRequest {
 
 message ListDocumentsResponse {
   repeated Document documents = 1;
+  int64 total_count = 2;
 }
 
 message UpdateDocumentStatusRequest {
