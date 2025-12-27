@@ -123,20 +123,20 @@ func (s *Server) Run(ctx context.Context) error {
 
 	webhookHandler := observability.HTTPHandler("storage-webhook", http.HandlerFunc(s.handleStorageNotification), s.otelProviders)
 
-	gqlMux := http.NewServeMux()
-	gqlMux.Handle("/query", instrumentedHandler)
-	gqlMux.Handle("/playground", playground.Handler("GraphQL playground", "/query"))
+	//gqlMux := http.NewServeMux()
+	//gqlMux.Handle("/query", instrumentedHandler)
+	//gqlMux.Handle("/playground", playground.Handler("GraphQL playground", "/query"))
 
-	protectedGraphQL := middleware.AuthenticationMiddleware(
-		s.oidcValidator,
-		s.cfg.Security.APIKey.Value,
-		s.cfg.Security.APIKey.EnabledOrDefault(),
-		s.logger,
-	)(gqlMux)
+	//protectedGraphQL := middleware.AuthenticationMiddleware(
+	//	s.oidcValidator,
+	//	s.cfg.Security.APIKey.Value,
+	//	s.cfg.Security.APIKey.EnabledOrDefault(),
+	//	s.logger,
+	//)(gqlMux)
 
 	mux := http.NewServeMux()
-	mux.Handle("/query", protectedGraphQL)
-	mux.Handle("/playground", protectedGraphQL)
+	mux.Handle("/query", instrumentedHandler)
+	mux.Handle("/playground", playground.Handler("GraphQL playground", "/query"))
 	mux.Handle("/internal/storage/uploaded", webhookHandler)
 
 	handlerWithMiddleware := middleware.CorrelationIDMiddleware(s.logger)(mux)
