@@ -35,7 +35,7 @@ docling:
   include_images: false
   status_initial_interval: 15s
   status_backoff_factor: 2
-  status_max_interval: 2m
+  status_max_interval: 1m
   status_max_attempts: 10
   max_job_lifetime: 2h
   storage:
