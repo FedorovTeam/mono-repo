@@ -27,7 +27,6 @@ type StageWorker struct {
 	activities  *Activities
 	stage       domain.JobStage
 	batchSize   int
-	maxBatches  int
 	metrics     *workerMetrics
 	service     *workersvc.WorkerService
 	retryDelay  time.Duration
@@ -42,12 +41,6 @@ func NewStageWorker(repo Repository, activities *Activities, stage domain.JobSta
 	if retryDelay <= 0 {
 		retryDelay = time.Minute
 	}
-
-	maxBatches := 0
-	if stage == domain.JobStageConvertToMarkdown {
-		batchSize = 1
-		maxBatches = 1
-	}
 	const defaultMaxAttempts = 5
 
 	service := workersvc.NewWorkerService(repo, repo, retryDelay)
@@ -58,7 +51,6 @@ func NewStageWorker(repo Repository, activities *Activities, stage domain.JobSta
 		activities:  activities,
 		stage:       stage,
 		batchSize:   batchSize,
-		maxBatches:  maxBatches,
 		metrics:     newWorkerMetrics(fmt.Sprintf("stage_%s", stage)),
 		service:     service,
 		retryDelay:  retryDelay,
@@ -76,10 +68,6 @@ func (w *StageWorker) Run(ctx context.Context, interval time.Duration) error {
 			w.metrics.recordError(ctx)
 		}
 		return result, err
-	}
-
-	if w.maxBatches == 1 {
-		return w.service.RunWithBatchLimit(ctx, w.stage, interval, w.batchSize, w.maxBatches, handler, w.metrics.observeBatch)
 	}
 
 	return w.service.Run(ctx, w.stage, interval, w.batchSize, handler, w.metrics.observeBatch)

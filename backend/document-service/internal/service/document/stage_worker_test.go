@@ -44,6 +44,7 @@ type publishRepoStub struct {
 	statusUpdates  []domain.DocumentStatus
 	lastError      string
 	lastVersion    *domain.DocumentVersion
+	acquireLimits  []int
 	lastUpdateArgs struct {
 		reason      string
 		errorReason string
@@ -63,6 +64,7 @@ func (r *publishRepoStub) AcquirePendingJobs(ctx context.Context, _ domain.JobSt
 	if now.IsZero() {
 		now = time.Now()
 	}
+	r.acquireLimits = append(r.acquireLimits, limit)
 
 	var result []domain.ProcessingJob
 	for _, job := range r.jobs {
@@ -1115,6 +1117,51 @@ func TestHandleConvertMarksFailureWithoutDocumentStatusChange(t *testing.T) {
 	}
 	if len(repo.statusUpdates) != 0 {
 		t.Fatalf("expected no document status updates, got %v", repo.statusUpdates)
+	}
+}
+
+func TestConvertWorkerUsesConfiguredBatchSize(t *testing.T) {
+	doc := &domain.Document{
+		ID:                "doc-batch",
+		Name:              "Doc.pdf",
+		Owner:             "owner",
+		Repository:        "repo",
+		Branch:            "main",
+		BaseBranch:        "main",
+		Path:              "docs/doc.md",
+		Status:            domain.DocumentStatusStoredOriginal,
+		OriginalBucket:    "orig-bucket",
+		OriginalObjectKey: "docs/doc.pdf",
+		MarkdownBucket:    "md-bucket",
+		MarkdownObjectKey: "docs/doc.md",
+		Versions:          []domain.DocumentVersion{{Version: 1, OriginalObjectKey: "docs/doc.pdf", MarkdownObjectKey: "docs/doc.md"}},
+	}
+
+	repo := &publishRepoStub{doc: doc, jobs: map[string]domain.ProcessingJob{
+		"job-batch-1": {TaskID: "job-batch-1", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending},
+		"job-batch-2": {TaskID: "job-batch-2", DocumentID: doc.ID, Stage: domain.JobStageConvertToMarkdown, Status: domain.JobStatusPending},
+	}}
+	transformer := &staticTransformer{resp: &transformerv1.ConvertDocumentToMarkdownResponse{MarkdownObjectKey: "docs/doc.md", QueueId: "queue-batch", Status: "done"}}
+	activities := NewActivities(repo, nil, transformer, nil, nil, nil)
+	worker := NewStageWorker(repo, activities, domain.JobStageConvertToMarkdown, 2, time.Second, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runErr := make(chan error, 1)
+	go func() { runErr <- worker.Run(ctx, 10*time.Millisecond) }()
+
+	waitUntil(t, func() bool {
+		return repo.jobs["job-batch-1"].Status == domain.JobStatusCompleted && repo.jobs["job-batch-2"].Status == domain.JobStatusCompleted
+	})
+	cancel()
+
+	if err := <-runErr; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("unexpected worker error: %v", err)
+	}
+	if len(repo.acquireLimits) == 0 || repo.acquireLimits[0] != 2 {
+		t.Fatalf("expected acquire limit to be 2, got %v", repo.acquireLimits)
+	}
+	if doc.Status != domain.DocumentStatusConvertedToMarkdown {
+		t.Fatalf("expected document status to be converted, got %s", doc.Status)
 	}
 }
 
