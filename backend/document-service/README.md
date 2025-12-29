@@ -61,6 +61,14 @@
 4. Запустите сервис: `go run ./cmd/main.go --config config/config.yaml`.
 5. Примеры grpcurl‑запросов — в `test.md`.
 
+## Восстановление зависших или упавших задач
+- Зависшие `in_progress` автоматически вернёт `ProcessingReconciler` после превышения `stage_interval + grace_period` (отмечает событие `recovered`), поэтому достаточно дождаться его цикла или временно уменьшить интервалы запуска. 【F:internal/service/document/processing_reconciler.go†L60-L172】【F:internal/infrastructure/postgres/repository.go†L706-L790】
+- Массовый перезапуск упавших задач без потери истории:
+  1. Сбросьте документы из `Failed`, чтобы им разрешили новые переходы: `UPDATE documents SET status='Uploaded', error_reason=NULL WHERE status='Failed';`.
+  2. Переведите упавшие задачи в `pending` с немедленным запуском и обнулёнными попытками: `UPDATE processing_jobs SET status='pending', attempts=0, next_run_at=now(), payload=payload - 'last_error' WHERE status='failed';`.
+  3. Убедитесь, что запущены `StageWorker` и `JobFollower`: они подхватят задачи и продолжат цепочку, записывая новые `job_events`.
+
+
 ## Структура каталога
 - `cmd/main.go` — точка входа, старт gRPC-сервера и всех воркеров.
 - `internal/` — доменные модели, use case, фоновые воркеры, инфраструктурные адаптеры.

@@ -43,8 +43,8 @@ job_follower:
   reschedule_after: 5m
 stage_worker:
   interval: 5s
-  batch_size: 5
-  convert_batch_size: 1
+  batch_size: 10
+  convert_batch_size: 10
   retry_delay: 1m
   preprocess_retry_delay: 15s
   grace_period: 15s
