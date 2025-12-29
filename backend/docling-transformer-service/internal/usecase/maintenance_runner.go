@@ -65,11 +65,11 @@ func (r *MaintenanceRunner) runOnce(ctx context.Context) {
 		r.logger.Info("queue status snapshot", zap.Int("pending", pending), zap.Int("processing", processing), zap.Int("docling_waiting", doclingWaiting))
 	}
 
-	if ready, expired, err := r.repo.ActivateWaiting(ctx, time.Now(), r.cfg.DoclingMaxLifetime); err != nil {
-		r.logger.Error("activate waiting tasks failed", zap.Error(err))
-	} else if ready > 0 || expired > 0 {
-		r.logger.Info("waiting tasks processed", zap.Int("activated", ready), zap.Int("expired", expired))
-	}
+	//if ready, expired, err := r.repo.ActivateWaiting(ctx, time.Now(), r.cfg.DoclingMaxLifetime); err != nil {
+	//	r.logger.Error("activate waiting tasks failed", zap.Error(err))
+	//} else if ready > 0 || expired > 0 {
+	//	r.logger.Info("waiting tasks processed", zap.Int("activated", ready), zap.Int("expired", expired))
+	//}
 
 	if r.cfg.ProcessingTimeout > 0 {
 		restored, failed, err := r.repo.RestoreStuckProcessing(ctx, r.cfg.ProcessingTimeout, r.cfg.MaxProcessingRetries, r.cfg.DoclingMaxAttempts)

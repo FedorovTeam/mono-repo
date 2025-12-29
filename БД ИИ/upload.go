@@ -474,6 +474,8 @@ func resolvePath(root, filePath, mdName string) string {
 	switch docType {
 	case "voting":
 		return filepath.ToSlash(fmt.Sprintf("%s/plenary/%s/votings/%s", knowledgeRoot, sessionNumber, mdName))
+	case "deputies":
+		return filepath.ToSlash(fmt.Sprintf("%s/bibliography/%s/deputies/%s", knowledgeRoot, sessionNumber, mdName))
 	default:
 		return filepath.ToSlash(fmt.Sprintf("%s/plenary/%s/transcripts/%s", knowledgeRoot, sessionNumber, mdName))
 	}
@@ -496,10 +498,7 @@ func classifyDocument(name string) (string, string) {
 	}
 
 	if strings.Contains(lower, "биографии") {
-		if digits != "" {
-			return "voting", digits
-		}
-		return "voting", "1"
+		return "deputies", "1"
 	}
 
 	if digits != "" {
